@@ -1,5 +1,4 @@
 const TABLES = ['holdings', 'transactions', 'dividends', 'cash_flows', 'net_worth_snapshots', 'real_estate'];
-const STRIP   = ['id', 'created_at', 'updated_at'];
 
 async function init() {
   const user = await requireAuth();
@@ -110,13 +109,7 @@ async function restoreBackup(input) {
       const rows = backup[table];
       if (!rows?.length) continue;
 
-      // Strip server-generated fields and fix user_id
-      const clean = rows.map(row => {
-        const r = { ...row };
-        STRIP.forEach(k => delete r[k]);
-        r.user_id = user.id;
-        return r;
-      });
+      const clean = rows.map(row => mapRow(table, row, user.id)).filter(Boolean);
 
       // Insert in batches of 500
       for (let i = 0; i < clean.length; i += 500) {
@@ -144,6 +137,95 @@ async function restoreBackup(input) {
     btn.disabled = false;
     btn.textContent = 'استعادة من نسخة احتياطية';
   }
+}
+
+// ── Field mapping per table ───────────────────────────────────
+function mapRow(table, row, userId) {
+  let r;
+  switch (table) {
+    case 'holdings':
+      r = {
+        ticker:        row.ticker,
+        name:          row.name,
+        sector:        row.sector,
+        shares:        row.shares,
+        avg_price:     row.avg_price,
+        target_weight: row.target_weight,
+      };
+      break;
+
+    case 'transactions':
+      r = {
+        date:       row.date,
+        ticker:     row.ticker,
+        name:       row.name,
+        type:       row.type,
+        shares:     row.shares,
+        price:      row.price,
+        commission: row.commission,
+        vat:        row.vat,
+        total:      row.total,
+      };
+      break;
+
+    case 'dividends':
+      r = {
+        date:   row.date,
+        ticker: row.ticker,
+        name:   row.name,
+        amount: row.amount,
+        month:  row.month,
+        year:   row.year,
+      };
+      break;
+
+    case 'cash_flows':
+      // Backup may use {date, amount} or the native {year, planned_amount, actual_amount}
+      if (row.year != null) {
+        r = {
+          year:           row.year,
+          planned_amount: row.planned_amount ?? 0,
+          actual_amount:  row.actual_amount  ?? 0,
+        };
+      } else {
+        r = {
+          year:           new Date(row.date).getFullYear(),
+          planned_amount: 0,
+          actual_amount:  row.amount ?? 0,
+        };
+      }
+      break;
+
+    case 'net_worth_snapshots':
+      r = {
+        date:        row.date,
+        total_value: row.total_value,
+        notes:       row.notes ?? null,
+      };
+      break;
+
+    case 'real_estate': {
+      const isSold = row.status === 'مباع' || row.status === 'sold';
+      r = {
+        name:           row.name,
+        type:           row.type,
+        purchase_value: row.purchase_value,
+        current_value:  isSold && row.sale_value != null ? row.sale_value : (row.current_value ?? row.purchase_value),
+        status:         row.status,
+        monthly_rental: row.monthly_rental != null
+                          ? row.monthly_rental
+                          : (row.annual_rental != null ? row.annual_rental / 12 : null),
+        purchase_date:  row.purchase_date ?? null,
+      };
+      break;
+    }
+
+    default:
+      return null;
+  }
+
+  r.user_id = userId;
+  return r;
 }
 
 // ── Helpers ───────────────────────────────────────────────────
