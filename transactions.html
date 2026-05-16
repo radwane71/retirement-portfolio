@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>سجل المعاملات - محفظتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>📈 محفظتي</h2>
+      <p>تتبع محفظة التقاعد</p>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html"    class="nav-link" id="nav-dashboard"><span class="icon">📊</span><span>لوحة التحكم</span></a>
+      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+      <a href="dividends.html"    class="nav-link" id="nav-dividends"><span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+      <a href="cashflows.html"    class="nav-link" id="nav-cashflows"><span class="icon">📈</span><span>التدفقات النقدية</span></a>
+      <a href="networth.html"     class="nav-link" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+      <a href="realestate.html"   class="nav-link" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>سجل المعاملات</h1>
+        <p>تسجيل عمليات الشراء والبيع — العمولة 0.15% (بحد أقصى 100 ر.س) + ضريبة 15%</p>
+      </div>
+    </div>
+
+    <!-- Add Transaction Form -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">إضافة معاملة جديدة</span>
+      </div>
+      <form id="tx-form" onsubmit="addTransaction(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>التاريخ *</label>
+            <input type="date" id="t-date" required>
+          </div>
+          <div class="form-group">
+            <label>رمز السهم *</label>
+            <input type="text" id="t-ticker" placeholder="2222" required>
+          </div>
+          <div class="form-group">
+            <label>اسم السهم *</label>
+            <input type="text" id="t-name" placeholder="أرامكو السعودية" required>
+          </div>
+          <div class="form-group">
+            <label>نوع العملية *</label>
+            <select id="t-type" required>
+              <option value="buy">شراء</option>
+              <option value="sell">بيع</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>عدد الأسهم *</label>
+            <input type="number" id="t-shares" step="0.0001" min="0.0001" placeholder="0" required>
+          </div>
+          <div class="form-group">
+            <label>سعر السهم (ر.س) *</label>
+            <input type="number" id="t-price" step="0.0001" min="0.0001" placeholder="0.00" required>
+          </div>
+          <div class="form-group">
+            <label>العمولة (ر.س)</label>
+            <input type="text" id="t-commission" readonly placeholder="محسوبة تلقائياً">
+          </div>
+          <div class="form-group">
+            <label>ضريبة القيمة المضافة (ر.س)</label>
+            <input type="text" id="t-vat" readonly placeholder="محسوبة تلقائياً">
+          </div>
+          <div class="form-group">
+            <label>الإجمالي (ر.س)</label>
+            <input type="text" id="t-total" readonly placeholder="محسوب تلقائياً">
+          </div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="reset" class="btn btn-secondary" onclick="document.getElementById('t-commission').value='';document.getElementById('t-vat').value='';document.getElementById('t-total').value=''">إعادة تعيين</button>
+          <button type="submit" class="btn btn-primary">تسجيل المعاملة</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Transactions Table -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">جميع المعاملات</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>الرمز</th>
+              <th>الاسم</th>
+              <th>النوع</th>
+              <th>الأسهم</th>
+              <th>السعر</th>
+              <th>العمولة</th>
+              <th>الضريبة</th>
+              <th>الإجمالي</th>
+              <th>حذف</th>
+            </tr>
+          </thead>
+          <tbody id="tx-tbody">
+            <tr><td colspan="10"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/transactions.js"></script>
+</body>
+</html>

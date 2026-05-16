@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>الأرباح الموزعة - محفظتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>📈 محفظتي</h2>
+      <p>تتبع محفظة التقاعد</p>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html"    class="nav-link" id="nav-dashboard"><span class="icon">📊</span><span>لوحة التحكم</span></a>
+      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+      <a href="dividends.html"    class="nav-link" id="nav-dividends"><span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+      <a href="cashflows.html"    class="nav-link" id="nav-cashflows"><span class="icon">📈</span><span>التدفقات النقدية</span></a>
+      <a href="networth.html"     class="nav-link" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+      <a href="realestate.html"   class="nav-link" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>الأرباح الموزعة</h1>
+        <p>تسجيل وتتبع الأرباح الموزعة لكل سهم</p>
+      </div>
+    </div>
+
+    <!-- Add Dividend Form -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">تسجيل أرباح جديدة</span>
+      </div>
+      <form id="div-form" onsubmit="addDividend(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>تاريخ الاستلام *</label>
+            <input type="date" id="d-date" required>
+          </div>
+          <div class="form-group">
+            <label>رمز السهم *</label>
+            <input type="text" id="d-ticker" placeholder="2222" required>
+          </div>
+          <div class="form-group">
+            <label>اسم السهم *</label>
+            <input type="text" id="d-name" placeholder="أرامكو السعودية" required>
+          </div>
+          <div class="form-group">
+            <label>المبلغ (ر.س) *</label>
+            <input type="number" id="d-amount" step="0.01" min="0.01" placeholder="0.00" required>
+          </div>
+          <div class="form-group">
+            <label>الشهر *</label>
+            <select id="d-month" required>
+              <option value="1">يناير</option>
+              <option value="2">فبراير</option>
+              <option value="3">مارس</option>
+              <option value="4">أبريل</option>
+              <option value="5">مايو</option>
+              <option value="6">يونيو</option>
+              <option value="7">يوليو</option>
+              <option value="8">أغسطس</option>
+              <option value="9">سبتمبر</option>
+              <option value="10">أكتوبر</option>
+              <option value="11">نوفمبر</option>
+              <option value="12">ديسمبر</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>السنة *</label>
+            <input type="number" id="d-year" min="2000" max="2100" required>
+          </div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="reset" class="btn btn-secondary">إعادة تعيين</button>
+          <button type="submit" class="btn btn-primary">تسجيل الأرباح</button>
+        </div>
+      </form>
+    </div>
+
+    <!-- Summary Grid -->
+    <div class="charts-grid">
+      <div class="card">
+        <div class="section-header">
+          <span class="section-title">الإجمالي السنوي</span>
+        </div>
+        <div id="yearly-summary">
+          <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-header">
+          <span class="section-title">الإجمالي لكل سهم</span>
+        </div>
+        <div id="holding-summary">
+          <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- All Dividends Table -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">جميع السجلات</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th>
+              <th>الرمز</th>
+              <th>الاسم</th>
+              <th>المبلغ</th>
+              <th>الشهر</th>
+              <th>السنة</th>
+              <th>حذف</th>
+            </tr>
+          </thead>
+          <tbody id="div-tbody">
+            <tr><td colspan="7"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/dividends.js"></script>
+</body>
+</html>

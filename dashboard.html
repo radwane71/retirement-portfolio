@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>لوحة التحكم - محفظتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>📈 محفظتي</h2>
+      <p>تتبع محفظة التقاعد</p>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html"    class="nav-link" id="nav-dashboard"><span class="icon">📊</span><span>لوحة التحكم</span></a>
+      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+      <a href="dividends.html"    class="nav-link" id="nav-dividends"><span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+      <a href="cashflows.html"    class="nav-link" id="nav-cashflows"><span class="icon">📈</span><span>التدفقات النقدية</span></a>
+      <a href="networth.html"     class="nav-link" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+      <a href="realestate.html"   class="nav-link" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>لوحة التحكم</h1>
+        <p>نظرة عامة على محفظتك الاستثمارية</p>
+      </div>
+      <button class="btn btn-primary" onclick="openModal()">+ إضافة سهم</button>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="label">إجمالي القيمة السوقية</div>
+        <div class="value num" id="stat-total-value">0.00 ر.س</div>
+        <div class="sub">القيمة بالأسعار الحالية</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">إجمالي التكلفة</div>
+        <div class="value num" id="stat-total-cost">0.00 ر.س</div>
+        <div class="sub">ما تم استثماره فعلياً</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">الربح / الخسارة غير المحقق</div>
+        <div class="value num" id="stat-pnl">0.00 ر.س</div>
+        <div class="sub" id="stat-pnl-pct">0.00%</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">أرباح الشهر الحالي</div>
+        <div class="value num text-accent" id="stat-monthly-div">0.00 ر.س</div>
+        <div class="sub" id="stat-div-label">—</div>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid">
+      <div class="card">
+        <div class="section-header"><span class="section-title">توزيع القطاعات</span></div>
+        <div class="chart-container"><canvas id="sectorChart"></canvas></div>
+      </div>
+      <div class="card">
+        <div class="section-header"><span class="section-title">وزن المحفظة — الحالي مقابل المستهدف</span></div>
+        <div class="chart-container"><canvas id="weightChart"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Holdings Table -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">الأسهم في المحفظة</span>
+        <button class="btn btn-primary btn-sm" onclick="openModal()">+ إضافة</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الرمز</th>
+              <th>الاسم</th>
+              <th>القطاع</th>
+              <th>الأسهم</th>
+              <th>متوسط السعر</th>
+              <th>السعر الحالي</th>
+              <th>التكلفة الإجمالية</th>
+              <th>القيمة الحالية</th>
+              <th>الربح / الخسارة</th>
+              <th>الوزن</th>
+              <th>المستهدف</th>
+              <th>إجراءات</th>
+            </tr>
+          </thead>
+          <tbody id="holdings-tbody">
+            <tr><td colspan="12"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Holding Modal -->
+  <div class="modal-overlay" id="holding-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="modal-title">إضافة سهم جديد</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <form id="holding-form" onsubmit="saveHolding(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>رمز السهم *</label>
+            <input type="text" id="h-ticker" placeholder="مثال: 2222" required>
+          </div>
+          <div class="form-group">
+            <label>اسم السهم *</label>
+            <input type="text" id="h-name" placeholder="أرامكو السعودية" required>
+          </div>
+          <div class="form-group">
+            <label>القطاع</label>
+            <input type="text" id="h-sector" placeholder="طاقة، بنوك، اتصالات...">
+          </div>
+          <div class="form-group">
+            <label>عدد الأسهم *</label>
+            <input type="number" id="h-shares" step="0.0001" min="0" placeholder="0" required>
+          </div>
+          <div class="form-group">
+            <label>متوسط سعر الشراء (ر.س) *</label>
+            <input type="number" id="h-avg-price" step="0.0001" min="0" placeholder="0.00" required>
+          </div>
+          <div class="form-group">
+            <label>السعر الحالي (ر.س) *</label>
+            <input type="number" id="h-cur-price" step="0.0001" min="0" placeholder="0.00" required>
+          </div>
+          <div class="form-group">
+            <label>الوزن المستهدف (%)</label>
+            <input type="number" id="h-target-wt" step="0.01" min="0" max="100" placeholder="0.00">
+          </div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+          <button type="submit" class="btn btn-primary">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/dashboard.js"></script>
+</body>
+</html>
