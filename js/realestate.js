@@ -1,8 +1,14 @@
 let properties = [];
 let editingId  = null;
 
-const STATUS_LABELS = { owned: 'مملوك', rented: 'مؤجر', sold: 'مباع' };
-const TYPE_OPTIONS  = ['شقة سكنية','فيلا','أرض','مكتب تجاري','محل تجاري','مستودع','أخرى'];
+const STATUS_LBL = { owned: 'مملوك', rented: 'مؤجر', sold: 'مباع' };
+
+function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
+  return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
+    `data-table="${table}" data-id="${esc(rowId)}" data-field="${field}" ` +
+    `data-type="${type}" data-raw="${esc(raw)}"` +
+    (selectKey ? ` data-select="${selectKey}"` : '');
+}
 
 async function init() {
   const user = await requireAuth();
@@ -15,62 +21,70 @@ async function init() {
 }
 
 async function loadProperties() {
-  const { data, error } = await supabaseClient
-    .from('real_estate').select('*').order('purchase_date', { ascending: false });
+  const { data, error } = await supabaseClient.from('real_estate').select('*').order('purchase_date', { ascending: false });
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   properties = data || [];
 }
 
 function renderStats() {
-  const owned   = properties.filter(p => p.status !== 'sold');
-  const totalPurchase = owned.reduce((s, p) => s + parseFloat(p.purchase_value || 0), 0);
-  const totalCurrent  = owned.reduce((s, p) => s + parseFloat(p.current_value  || 0), 0);
-  const totalRental   = properties.filter(p => p.status === 'rented')
-                                  .reduce((s, p) => s + parseFloat(p.monthly_rental || 0), 0);
-  const totalPnL      = totalCurrent - totalPurchase;
+  const active       = properties.filter(p => p.status !== 'sold');
+  const totalPurch   = active.reduce((s, p) => s + +p.purchase_value, 0);
+  const totalCurrent = active.reduce((s, p) => s + +p.current_value, 0);
+  const totalRental  = properties.filter(p => p.status === 'rented').reduce((s, p) => s + +p.monthly_rental, 0);
+  const pnl          = totalCurrent - totalPurch;
 
-  document.getElementById('re-total-value').textContent   = formatSAR(totalCurrent);
-  document.getElementById('re-total-cost').textContent    = formatSAR(totalPurchase);
-  document.getElementById('re-total-rental').textContent  = formatSAR(totalRental);
-  const pnlEl = document.getElementById('re-pnl');
-  pnlEl.textContent = formatSAR(totalPnL, true);
-  pnlEl.className = 'value num ' + (totalPnL >= 0 ? 'text-success' : 'text-danger');
+  const el = id => document.getElementById(id);
+  if (el('re-total-value'))  el('re-total-value').textContent  = formatSAR(totalCurrent);
+  if (el('re-total-cost'))   el('re-total-cost').textContent   = formatSAR(totalPurch);
+  if (el('re-total-rental')) el('re-total-rental').textContent = formatSAR(totalRental);
+  const pnlEl = el('re-pnl');
+  if (pnlEl) { pnlEl.textContent = formatSAR(pnl, true); pnlEl.className = 'value num ' + (pnl >= 0 ? 'text-success' : 'text-danger'); }
 }
 
 function renderTable() {
   const tbody = document.getElementById('re-tbody');
+  if (!tbody) return;
+
   if (!properties.length) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="icon">🏠</div><p>لا توجد عقارات مسجلة بعد</p></div></td></tr>`;
+    enableInlineEditing(tbody, onReSaved);
     return;
   }
 
   tbody.innerHTML = properties.map(p => {
-    const pnl    = parseFloat(p.current_value) - parseFloat(p.purchase_value);
+    const pnl    = +p.current_value - +p.purchase_value;
     const pnlCls = pnl >= 0 ? 'text-success' : 'text-danger';
-
     return `<tr>
-      <td><strong>${p.name}</strong></td>
-      <td>${p.type}</td>
-      <td class="num">${formatSAR(p.purchase_value)}</td>
-      <td class="num">${formatSAR(p.current_value)}</td>
+      <td ${ed('real_estate',p.id,'name','text',p.name,'bold')}>${esc(p.name)}</td>
+      <td ${ed('real_estate',p.id,'type','text',p.type,'small text-muted')}>${esc(p.type)}</td>
+      <td ${ed('real_estate',p.id,'purchase_value','number',p.purchase_value,'num')}>${formatSAR(p.purchase_value)}</td>
+      <td ${ed('real_estate',p.id,'current_value', 'number',p.current_value, 'num')}>${formatSAR(p.current_value)}</td>
       <td class="num ${pnlCls}">${formatSAR(pnl, true)}</td>
-      <td><span class="badge badge-${p.status}">${STATUS_LABELS[p.status] || p.status}</span></td>
-      <td class="num ${p.status === 'rented' ? 'text-success' : 'text-muted'}">${p.status === 'rented' ? formatSAR(p.monthly_rental) : '—'}</td>
-      <td>${formatDate(p.purchase_date)}</td>
+      <td ${ed('real_estate',p.id,'status','text',p.status,'','status')}><span class="badge badge-${p.status}">${STATUS_LBL[p.status]||p.status}</span></td>
+      <td ${ed('real_estate',p.id,'monthly_rental','number',p.monthly_rental||0,'num')} class="${p.status==='rented'?'text-success':''}">${p.status==='rented'?formatSAR(p.monthly_rental):'—'}</td>
+      <td ${ed('real_estate',p.id,'purchase_date','date',p.purchase_date||'')}>${p.purchase_date ? formatDate(p.purchase_date) : '—'}</td>
       <td>
         <div class="flex gap-2">
-          <button class="btn btn-secondary btn-sm" onclick="openModal('${p.id}')">تعديل</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteProperty('${p.id}')">حذف</button>
+          <button class="btn btn-secondary btn-sm" onclick="openModal('${esc(p.id)}')">تعديل</button>
+          <button class="btn btn-danger btn-sm"    onclick="deleteProp('${esc(p.id)}')">حذف</button>
         </div>
       </td>
     </tr>`;
   }).join('');
+
+  enableInlineEditing(tbody, onReSaved);
+}
+
+async function onReSaved(id, field, val) {
+  const p = properties.find(x => x.id === id);
+  if (p) p[field] = val;
+  renderStats();
+  renderTable();
 }
 
 function openModal(id = null) {
   editingId = id;
   document.getElementById('re-modal-title').textContent = id ? 'تعديل العقار' : 'إضافة عقار جديد';
-
   if (id) {
     const p = properties.find(x => x.id === id);
     if (!p) return;
@@ -85,7 +99,6 @@ function openModal(id = null) {
     document.getElementById('re-modal-form').reset();
     document.getElementById('m-purchase-date').value = todayISO();
   }
-
   document.getElementById('re-modal').style.display = 'flex';
 }
 
@@ -97,38 +110,32 @@ function closeModal() {
 async function saveProperty(e) {
   e.preventDefault();
   const { data: { user } } = await supabaseClient.auth.getUser();
-
   const payload = {
     user_id:        user.id,
     name:           document.getElementById('m-name').value.trim(),
     type:           document.getElementById('m-type').value,
-    purchase_value: parseFloat(document.getElementById('m-purchase-val').value)  || 0,
-    current_value:  parseFloat(document.getElementById('m-current-val').value)   || 0,
+    purchase_value: +document.getElementById('m-purchase-val').value || 0,
+    current_value:  +document.getElementById('m-current-val').value  || 0,
     status:         document.getElementById('m-status').value,
-    monthly_rental: parseFloat(document.getElementById('m-rental').value)         || 0,
+    monthly_rental: +document.getElementById('m-rental').value       || 0,
     purchase_date:  document.getElementById('m-purchase-date').value || null
   };
-
   let error;
-  if (editingId) {
-    ({ error } = await supabaseClient.from('real_estate').update(payload).eq('id', editingId));
-  } else {
-    ({ error } = await supabaseClient.from('real_estate').insert([payload]));
-  }
-
+  if (editingId) ({ error } = await supabaseClient.from('real_estate').update(payload).eq('id', editingId));
+  else           ({ error } = await supabaseClient.from('real_estate').insert([payload]));
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast(editingId ? 'تم تحديث العقار بنجاح' : 'تمت إضافة العقار بنجاح', 'success');
+  showToast(editingId ? 'تم التحديث' : 'تمت الإضافة', 'success');
   closeModal();
   await loadProperties();
   renderStats();
   renderTable();
 }
 
-async function deleteProperty(id) {
+async function deleteProp(id) {
   if (!confirm('هل أنت متأكد من حذف هذا العقار؟')) return;
   const { error } = await supabaseClient.from('real_estate').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast('تم الحذف بنجاح', 'success');
+  showToast('تم الحذف', 'success');
   await loadProperties();
   renderStats();
   renderTable();

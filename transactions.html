@@ -17,12 +17,13 @@
       <p>تتبع محفظة التقاعد</p>
     </div>
     <nav class="sidebar-nav">
-      <a href="dashboard.html"    class="nav-link" id="nav-dashboard"><span class="icon">📊</span><span>لوحة التحكم</span></a>
+      <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
       <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
-      <a href="dividends.html"    class="nav-link" id="nav-dividends"><span class="icon">💰</span><span>الأرباح الموزعة</span></a>
-      <a href="cashflows.html"    class="nav-link" id="nav-cashflows"><span class="icon">📈</span><span>التدفقات النقدية</span></a>
-      <a href="networth.html"     class="nav-link" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
-      <a href="realestate.html"   class="nav-link" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="dividends.html"    class="nav-link" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+      <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+      <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
+      <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -33,73 +34,27 @@
     <div class="page-header">
       <div class="page-header-text">
         <h1>سجل المعاملات</h1>
-        <p>تسجيل عمليات الشراء والبيع — العمولة 0.15% (بحد أقصى 100 ر.س) + ضريبة 15%</p>
+        <p>العمولة 0.15% (بحد أقصى 100 ر.س) + ضريبة قيمة مضافة 15% — محسوبة تلقائياً</p>
       </div>
     </div>
 
-    <!-- Add Transaction Form -->
+    <!-- ── Bulk entry ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">إضافة معاملة جديدة</span>
+        <span class="section-title">إدخال مجمّع</span>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="clearStaging()">مسح الكل</button>
+          <button class="btn btn-primary  btn-sm" onclick="addStagingRow()">+ إضافة صف</button>
+          <button class="btn btn-success  btn-sm" id="btn-save-all" onclick="saveAllStaging()">حفظ الكل (0)</button>
+        </div>
       </div>
-      <form id="tx-form" onsubmit="addTransaction(event)">
-        <div class="form-grid">
-          <div class="form-group">
-            <label>التاريخ *</label>
-            <input type="date" id="t-date" required>
-          </div>
-          <div class="form-group">
-            <label>رمز السهم *</label>
-            <input type="text" id="t-ticker" placeholder="2222" required>
-          </div>
-          <div class="form-group">
-            <label>اسم السهم *</label>
-            <input type="text" id="t-name" placeholder="أرامكو السعودية" required>
-          </div>
-          <div class="form-group">
-            <label>نوع العملية *</label>
-            <select id="t-type" required>
-              <option value="buy">شراء</option>
-              <option value="sell">بيع</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>عدد الأسهم *</label>
-            <input type="number" id="t-shares" step="0.0001" min="0.0001" placeholder="0" required>
-          </div>
-          <div class="form-group">
-            <label>سعر السهم (ر.س) *</label>
-            <input type="number" id="t-price" step="0.0001" min="0.0001" placeholder="0.00" required>
-          </div>
-          <div class="form-group">
-            <label>العمولة (ر.س)</label>
-            <input type="text" id="t-commission" readonly placeholder="محسوبة تلقائياً">
-          </div>
-          <div class="form-group">
-            <label>ضريبة القيمة المضافة (ر.س)</label>
-            <input type="text" id="t-vat" readonly placeholder="محسوبة تلقائياً">
-          </div>
-          <div class="form-group">
-            <label>الإجمالي (ر.س)</label>
-            <input type="text" id="t-total" readonly placeholder="محسوب تلقائياً">
-          </div>
-        </div>
-        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
-          <button type="reset" class="btn btn-secondary" onclick="document.getElementById('t-commission').value='';document.getElementById('t-vat').value='';document.getElementById('t-total').value=''">إعادة تعيين</button>
-          <button type="submit" class="btn btn-primary">تسجيل المعاملة</button>
-        </div>
-      </form>
-    </div>
+      <p class="small text-muted mb-4">أضف أكثر من معاملة في آنٍ واحد قبل الحفظ. يمكن إدخال تواريخ تاريخية بحرية.</p>
 
-    <!-- Transactions Table -->
-    <div class="card">
-      <div class="section-header">
-        <span class="section-title">جميع المعاملات</span>
-      </div>
-      <div class="table-wrapper">
+      <div class="staging-wrap">
         <table>
           <thead>
             <tr>
+              <th>#</th>
               <th>التاريخ</th>
               <th>الرمز</th>
               <th>الاسم</th>
@@ -107,13 +62,64 @@
               <th>الأسهم</th>
               <th>السعر</th>
               <th>العمولة</th>
-              <th>الضريبة</th>
               <th>الإجمالي</th>
-              <th>حذف</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="staging-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Quick single-entry form ── -->
+    <details class="card" style="cursor:pointer">
+      <summary style="font-weight:700;font-size:0.95rem;list-style:none;display:flex;justify-content:space-between;align-items:center">
+        <span>إضافة معاملة واحدة بسرعة</span>
+        <span class="small text-muted">▼</span>
+      </summary>
+      <div style="margin-top:16px">
+        <form id="tx-form" onsubmit="addSingleTransaction(event)">
+          <div class="form-grid">
+            <div class="form-group"><label>التاريخ *</label><input type="date" id="t-date" required></div>
+            <div class="form-group"><label>رمز السهم *</label><input type="text" id="t-ticker" placeholder="2222" required></div>
+            <div class="form-group"><label>اسم السهم *</label><input type="text" id="t-name" placeholder="أرامكو السعودية" required></div>
+            <div class="form-group">
+              <label>نوع العملية *</label>
+              <select id="t-type" required>
+                <option value="buy">شراء</option>
+                <option value="sell">بيع</option>
+              </select>
+            </div>
+            <div class="form-group"><label>عدد الأسهم *</label><input type="number" id="t-shares" step="any" placeholder="0" required></div>
+            <div class="form-group"><label>السعر (ر.س) *</label><input type="number" id="t-price" step="any" placeholder="0.00" required></div>
+            <div class="form-group"><label>العمولة (ر.س)</label><input type="text" id="t-commission" readonly placeholder="تلقائي"></div>
+            <div class="form-group"><label>الضريبة (ر.س)</label><input type="text" id="t-vat" readonly placeholder="تلقائي"></div>
+            <div class="form-group"><label>الإجمالي (ر.س)</label><input type="text" id="t-total" readonly placeholder="تلقائي"></div>
+          </div>
+          <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+            <button type="reset" class="btn btn-secondary">إعادة تعيين</button>
+            <button type="submit" class="btn btn-primary">تسجيل</button>
+          </div>
+        </form>
+      </div>
+    </details>
+
+    <!-- ── Transaction log ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">سجل جميع المعاملات</span>
+      </div>
+      <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها — تُحسب العمولة تلقائياً عند تعديل الأسهم أو السعر أو النوع</p>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>التاريخ</th><th>الرمز</th><th>الاسم</th><th>النوع</th>
+              <th>الأسهم</th><th>السعر</th><th>العمولة</th><th>الضريبة</th><th>الإجمالي</th><th></th>
             </tr>
           </thead>
           <tbody id="tx-tbody">
-            <tr><td colspan="10"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div></td></tr>
+            <tr><td colspan="10"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
         </table>
       </div>

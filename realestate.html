@@ -17,12 +17,13 @@
       <p>تتبع محفظة التقاعد</p>
     </div>
     <nav class="sidebar-nav">
-      <a href="dashboard.html"    class="nav-link" id="nav-dashboard"><span class="icon">📊</span><span>لوحة التحكم</span></a>
+      <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
       <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
-      <a href="dividends.html"    class="nav-link" id="nav-dividends"><span class="icon">💰</span><span>الأرباح الموزعة</span></a>
-      <a href="cashflows.html"    class="nav-link" id="nav-cashflows"><span class="icon">📈</span><span>التدفقات النقدية</span></a>
-      <a href="networth.html"     class="nav-link" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
-      <a href="realestate.html"   class="nav-link" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="dividends.html"    class="nav-link" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+      <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+      <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
+      <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -33,7 +34,7 @@
     <div class="page-header">
       <div class="page-header-text">
         <h1>العقارات</h1>
-        <p>إدارة وتتبع الأصول العقارية</p>
+        <p>إدارة وتتبع الأصول العقارية — انقر على أي خلية لتعديلها مباشرة</p>
       </div>
       <button class="btn btn-primary" onclick="openModal()">+ إضافة عقار</button>
     </div>
@@ -42,56 +43,50 @@
     <div class="stats-grid">
       <div class="stat-card">
         <div class="label">إجمالي القيمة الحالية</div>
-        <div class="value num text-accent" id="re-total-value">0.00 ر.س</div>
-        <div class="sub">العقارات المملوكة والمؤجرة</div>
+        <div class="value num text-accent" id="re-total-value">—</div>
+        <div class="sub">المملوكة والمؤجرة</div>
       </div>
       <div class="stat-card">
         <div class="label">إجمالي تكلفة الشراء</div>
-        <div class="value num" id="re-total-cost">0.00 ر.س</div>
+        <div class="value num" id="re-total-cost">—</div>
         <div class="sub">ما تم دفعه عند الشراء</div>
       </div>
       <div class="stat-card">
         <div class="label">الربح / الخسارة الإجمالي</div>
-        <div class="value num" id="re-pnl">0.00 ر.س</div>
+        <div class="value num" id="re-pnl">—</div>
         <div class="sub">فرق القيمة الحالية عن الشراء</div>
       </div>
       <div class="stat-card">
         <div class="label">الدخل الإيجاري الشهري</div>
-        <div class="value num text-success" id="re-total-rental">0.00 ر.س</div>
+        <div class="value num text-success" id="re-total-rental">—</div>
         <div class="sub">من العقارات المؤجرة فقط</div>
       </div>
     </div>
 
-    <!-- Properties Table -->
+    <!-- Properties table -->
     <div class="card">
       <div class="section-header">
         <span class="section-title">جميع العقارات</span>
         <button class="btn btn-primary btn-sm" onclick="openModal()">+ إضافة</button>
       </div>
+      <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها — الحالة والنوع قابلة للتعديل المباشر</p>
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
-              <th>الاسم</th>
-              <th>النوع</th>
-              <th>قيمة الشراء</th>
-              <th>القيمة الحالية</th>
-              <th>الربح / الخسارة</th>
-              <th>الحالة</th>
-              <th>الإيجار الشهري</th>
-              <th>تاريخ الشراء</th>
-              <th>إجراءات</th>
+              <th>الاسم</th><th>النوع</th><th>قيمة الشراء</th><th>القيمة الحالية</th>
+              <th>الربح/الخسارة</th><th>الحالة</th><th>الإيجار الشهري</th><th>تاريخ الشراء</th><th></th>
             </tr>
           </thead>
           <tbody id="re-tbody">
-            <tr><td colspan="9"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل...</p></div></td></tr>
+            <tr><td colspan="9"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
         </table>
       </div>
     </div>
   </main>
 
-  <!-- Property Modal -->
+  <!-- Add/Edit Modal -->
   <div class="modal-overlay" id="re-modal" style="display:none">
     <div class="modal">
       <div class="modal-header">
@@ -100,31 +95,17 @@
       </div>
       <form id="re-modal-form" onsubmit="saveProperty(event)">
         <div class="form-grid">
-          <div class="form-group">
-            <label>اسم العقار *</label>
-            <input type="text" id="m-name" placeholder="فيلا الرياض" required>
-          </div>
+          <div class="form-group"><label>اسم العقار *</label><input type="text" id="m-name" placeholder="فيلا الرياض" required></div>
           <div class="form-group">
             <label>النوع *</label>
             <select id="m-type" required>
               <option value="">اختر النوع</option>
-              <option>شقة سكنية</option>
-              <option>فيلا</option>
-              <option>أرض</option>
-              <option>مكتب تجاري</option>
-              <option>محل تجاري</option>
-              <option>مستودع</option>
-              <option>أخرى</option>
+              <option>شقة سكنية</option><option>فيلا</option><option>أرض</option>
+              <option>مكتب تجاري</option><option>محل تجاري</option><option>مستودع</option><option>أخرى</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>قيمة الشراء (ر.س) *</label>
-            <input type="number" id="m-purchase-val" step="0.01" min="0" placeholder="0.00" required>
-          </div>
-          <div class="form-group">
-            <label>القيمة الحالية (ر.س) *</label>
-            <input type="number" id="m-current-val" step="0.01" min="0" placeholder="0.00" required>
-          </div>
+          <div class="form-group"><label>قيمة الشراء (ر.س) *</label><input type="number" id="m-purchase-val" step="0.01" placeholder="0.00" required></div>
+          <div class="form-group"><label>القيمة الحالية (ر.س) *</label><input type="number" id="m-current-val" step="0.01" placeholder="0.00" required></div>
           <div class="form-group">
             <label>الحالة *</label>
             <select id="m-status" required>
@@ -133,14 +114,8 @@
               <option value="sold">مباع</option>
             </select>
           </div>
-          <div class="form-group">
-            <label>الإيجار الشهري (ر.س)</label>
-            <input type="number" id="m-rental" step="0.01" min="0" placeholder="0.00">
-          </div>
-          <div class="form-group">
-            <label>تاريخ الشراء</label>
-            <input type="date" id="m-purchase-date">
-          </div>
+          <div class="form-group"><label>الإيجار الشهري (ر.س)</label><input type="number" id="m-rental" step="0.01" placeholder="0.00"></div>
+          <div class="form-group"><label>تاريخ الشراء</label><input type="date" id="m-purchase-date"></div>
         </div>
         <div class="mt-4 flex gap-3" style="justify-content:flex-end">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">إلغاء</button>

@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>الإعدادات - محفظتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2>📈 محفظتي</h2>
+      <p>تتبع محفظة التقاعد</p>
+    </div>
+    <nav class="sidebar-nav">
+      <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+      <a href="dividends.html"    class="nav-link" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+      <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+      <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
+      <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>الإعدادات</h1>
+        <p>إدارة البيانات والنسخ الاحتياطية</p>
+      </div>
+    </div>
+
+    <!-- Backup & Restore -->
+    <div class="card mb-6">
+      <div class="section-header mb-4">
+        <span class="section-title">النسخ الاحتياطي والاستعادة</span>
+      </div>
+
+      <div class="settings-grid">
+
+        <!-- Export -->
+        <div class="backup-card">
+          <div class="bc-icon">📤</div>
+          <h3>تصدير نسخة احتياطية</h3>
+          <p>
+            يصدّر جميع بياناتك (الأسهم، المعاملات، الأرباح، التدفقات، صافي الثروة، العقارات)
+            في ملف JSON واحد يمكنك حفظه بأمان.
+          </p>
+          <p class="small text-muted">
+            اسم الملف: <code style="color:var(--accent)">portfolio_backup_YYYY-MM-DD.json</code>
+          </p>
+          <button class="btn btn-primary" id="btn-export" onclick="exportBackup()">
+            تصدير النسخة الاحتياطية
+          </button>
+          <div class="backup-status" id="export-status"></div>
+        </div>
+
+        <!-- Restore -->
+        <div class="backup-card">
+          <div class="bc-icon">📥</div>
+          <h3>استعادة من نسخة احتياطية</h3>
+          <p>
+            استعد بياناتك من ملف نسخة احتياطية سبق تصديره.
+            <strong class="text-danger">تحذير:</strong> ستُحذف جميع بياناتك الحالية
+            ويتم استبدالها ببيانات الملف المختار.
+          </p>
+          <p class="small text-muted">
+            يُقرأ رقم الإصدار من الملف للتحقق من التوافق قبل الاستعادة.
+          </p>
+          <button class="btn btn-danger" id="btn-restore" onclick="triggerRestore()">
+            استعادة من نسخة احتياطية
+          </button>
+          <input type="file" id="restore-file" accept=".json" style="display:none"
+                 onchange="restoreBackup(this)">
+          <div class="backup-status" id="restore-status"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Data overview -->
+    <div class="card mb-6">
+      <div class="section-header mb-4">
+        <span class="section-title">تفاصيل الجداول</span>
+      </div>
+      <p class="small text-muted mb-4">الجداول المشمولة في النسخ الاحتياطي والاستعادة:</p>
+      <table class="info-table">
+        <tbody>
+          <tr><td>holdings</td><td>الأسهم في المحفظة (الكميات، الأسعار، القطاعات)</td></tr>
+          <tr><td>transactions</td><td>سجل عمليات الشراء والبيع</td></tr>
+          <tr><td>dividends</td><td>الأرباح الموزعة المستلمة</td></tr>
+          <tr><td>cash_flows</td><td>التدفقات النقدية السنوية المخططة والفعلية</td></tr>
+          <tr><td>net_worth_snapshots</td><td>لقطات صافي الثروة عبر الزمن</td></tr>
+          <tr><td>real_estate</td><td>الأصول العقارية</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Account info -->
+    <div class="card">
+      <div class="section-header mb-4">
+        <span class="section-title">الحساب</span>
+      </div>
+      <div id="account-info">
+        <div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div>
+      </div>
+      <div class="mt-4">
+        <button class="btn btn-danger" onclick="if(confirm('تسجيل الخروج؟')) logout()">
+          🚪 تسجيل الخروج
+        </button>
+      </div>
+    </div>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/settings.js"></script>
+  <script>
+    // Show account info
+    (async () => {
+      const { data: { user } } = await supabaseClient.auth.getUser();
+      if (!user) return;
+      document.getElementById('account-info').innerHTML = `
+        <table class="info-table">
+          <tr><td>البريد الإلكتروني</td><td>${user.email}</td></tr>
+          <tr><td>معرّف المستخدم</td><td class="small text-muted">${user.id}</td></tr>
+          <tr><td>تاريخ إنشاء الحساب</td><td>${new Date(user.created_at).toLocaleDateString('ar-SA',{year:'numeric',month:'long',day:'numeric'})}</td></tr>
+        </table>`;
+    })();
+  </script>
+</body>
+</html>

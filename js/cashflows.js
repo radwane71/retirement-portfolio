@@ -1,6 +1,12 @@
 let cashflows = [];
 let editingId  = null;
 
+function ed(table, rowId, field, type, raw, extraCls = '') {
+  return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
+    `data-table="${table}" data-id="${esc(rowId)}" data-field="${field}" ` +
+    `data-type="${type}" data-raw="${esc(raw)}"`;
+}
+
 async function init() {
   const user = await requireAuth();
   if (!user) return;
@@ -11,108 +17,85 @@ async function init() {
 }
 
 async function loadCashflows() {
-  const { data, error } = await supabaseClient
-    .from('cash_flows').select('*').order('year', { ascending: false });
+  const { data, error } = await supabaseClient.from('cash_flows').select('*').order('year', { ascending: false });
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   cashflows = data || [];
 }
 
 function renderTable() {
-  const totalPlanned = cashflows.reduce((s, c) => s + parseFloat(c.planned_amount || 0), 0);
-  const totalActual  = cashflows.reduce((s, c) => s + parseFloat(c.actual_amount  || 0), 0);
+  const totalPlanned = cashflows.reduce((s, c) => s + +c.planned_amount, 0);
+  const totalActual  = cashflows.reduce((s, c) => s + +c.actual_amount,  0);
 
-  document.getElementById('total-planned').textContent = formatSAR(totalPlanned);
-  document.getElementById('total-actual').textContent  = formatSAR(totalActual);
+  const el = id => document.getElementById(id);
+  if (el('total-planned')) el('total-planned').textContent = formatSAR(totalPlanned);
+  if (el('total-actual'))  el('total-actual').textContent  = formatSAR(totalActual);
 
-  const pct = totalPlanned > 0 ? Math.min((totalActual / totalPlanned) * 100, 100) : 0;
-  document.getElementById('overall-progress-fill').style.width = pct + '%';
-  document.getElementById('overall-pct').textContent = pct.toFixed(1) + '%';
+  const pct = totalPlanned > 0 ? Math.min(totalActual / totalPlanned * 100, 100) : 0;
+  if (el('overall-pct'))           el('overall-pct').textContent = pct.toFixed(1) + '%';
+  if (el('overall-progress-fill')) el('overall-progress-fill').style.width = pct + '%';
 
-  const tbody = document.getElementById('cf-tbody');
+  const tbody = el('cf-tbody');
+  if (!tbody) return;
+
   if (!cashflows.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="icon">📈</div><p>لا توجد بيانات، ابدأ بإضافة سنة</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="icon">📈</div><p>لا توجد بيانات — ابدأ بإضافة سنة</p></div></td></tr>`;
+    enableInlineEditing(tbody, onCfSaved);
     return;
   }
 
   tbody.innerHTML = cashflows.map(c => {
-    const planned = parseFloat(c.planned_amount || 0);
-    const actual  = parseFloat(c.actual_amount  || 0);
+    const planned = +c.planned_amount, actual = +c.actual_amount;
     const diff    = actual - planned;
-    const pct     = planned > 0 ? Math.min((actual / planned) * 100, 100) : 0;
-    const diffCls = diff >= 0 ? 'text-success' : 'text-danger';
+    const pct     = planned > 0 ? Math.min(actual / planned * 100, 100) : 0;
+    const dCls    = diff >= 0 ? 'text-success' : 'text-danger';
 
     return `<tr>
-      <td><strong>${c.year}</strong></td>
-      <td class="num">${formatSAR(planned)}</td>
-      <td class="num">${formatSAR(actual)}</td>
-      <td class="num ${diffCls}">${formatSAR(diff, true)}</td>
+      <td ${ed('cash_flows',c.id,'year','number',c.year,'bold')}>${c.year}</td>
+      <td ${ed('cash_flows',c.id,'planned_amount','number',c.planned_amount,'num')}>${formatSAR(planned)}</td>
+      <td ${ed('cash_flows',c.id,'actual_amount', 'number',c.actual_amount, 'num text-success')}>${formatSAR(actual)}</td>
+      <td class="num ${dCls}">${formatSAR(diff, true)}</td>
       <td>
         <div class="progress-bar" style="min-width:100px">
-          <div class="progress-fill" style="width:${pct}%;background:${pct>=100?'var(--success)':'var(--accent)'}"></div>
+          <div class="progress-fill" style="width:${pct.toFixed(0)}%;background:${pct>=100?'var(--success)':'var(--accent)'}"></div>
         </div>
         <span class="small text-muted">${pct.toFixed(1)}%</span>
       </td>
-      <td>
-        <div class="flex gap-2">
-          <button class="btn btn-secondary btn-sm" onclick="openModal('${c.id}')">تعديل</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteCashflow('${c.id}')">حذف</button>
-        </div>
-      </td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteCf('${esc(c.id)}')">حذف</button></td>
     </tr>`;
   }).join('');
+
+  enableInlineEditing(tbody, onCfSaved);
 }
 
-function openModal(id = null) {
-  editingId = id;
-  document.getElementById('modal-title').textContent = id ? 'تعديل السنة' : 'إضافة سنة جديدة';
-  if (id) {
-    const c = cashflows.find(x => x.id === id);
-    if (!c) return;
-    document.getElementById('m-year').value    = c.year;
-    document.getElementById('m-planned').value = c.planned_amount;
-    document.getElementById('m-actual').value  = c.actual_amount;
-  } else {
-    document.getElementById('cf-modal-form').reset();
-    document.getElementById('m-year').value = new Date().getFullYear();
-  }
-  document.getElementById('cf-modal').style.display = 'flex';
+async function onCfSaved(id, field, val) {
+  const c = cashflows.find(x => x.id === id);
+  if (c) c[field] = val;
+  renderTable();
 }
 
-function closeModal() {
-  document.getElementById('cf-modal').style.display = 'none';
-  editingId = null;
-}
-
-async function saveCashflow(e) {
+async function addCashflow(e) {
   e.preventDefault();
   const { data: { user } } = await supabaseClient.auth.getUser();
-
   const payload = {
     user_id:        user.id,
-    year:           parseInt(document.getElementById('m-year').value),
-    planned_amount: parseFloat(document.getElementById('m-planned').value) || 0,
-    actual_amount:  parseFloat(document.getElementById('m-actual').value)  || 0
+    year:           +document.getElementById('cf-year').value,
+    planned_amount: +document.getElementById('cf-planned').value || 0,
+    actual_amount:  +document.getElementById('cf-actual').value  || 0
   };
-
-  let error;
-  if (editingId) {
-    ({ error } = await supabaseClient.from('cash_flows').update(payload).eq('id', editingId));
-  } else {
-    ({ error } = await supabaseClient.from('cash_flows').insert([payload]));
-  }
-
-  if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast(editingId ? 'تم التحديث بنجاح' : 'تمت الإضافة بنجاح', 'success');
-  closeModal();
+  const { error } = await supabaseClient.from('cash_flows').insert([payload]);
+  if (error) { showToast('خطأ: ' + error.message + (error.code === '23505' ? ' — السنة موجودة مسبقاً' : ''), 'error'); return; }
+  showToast('تمت الإضافة', 'success');
+  document.getElementById('cf-form').reset();
+  document.getElementById('cf-year').value = new Date().getFullYear();
   await loadCashflows();
   renderTable();
 }
 
-async function deleteCashflow(id) {
-  if (!confirm('هل أنت متأكد من حذف هذا السجل؟')) return;
+async function deleteCf(id) {
+  if (!confirm('هل أنت متأكد من الحذف؟')) return;
   const { error } = await supabaseClient.from('cash_flows').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast('تم الحذف بنجاح', 'success');
+  showToast('تم الحذف', 'success');
   await loadCashflows();
   renderTable();
 }

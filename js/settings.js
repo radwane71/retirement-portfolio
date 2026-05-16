@@ -1,0 +1,158 @@
+const TABLES = ['holdings', 'transactions', 'dividends', 'cash_flows', 'net_worth_snapshots', 'real_estate'];
+const STRIP   = ['id', 'created_at', 'updated_at'];
+
+async function init() {
+  const user = await requireAuth();
+  if (!user) return;
+  setActiveNav('nav-settings');
+}
+
+// ── Export ────────────────────────────────────────────────────
+async function exportBackup() {
+  const btn = document.getElementById('btn-export');
+  btn.disabled = true;
+  btn.textContent = 'جارٍ التصدير…';
+  setStatus('export-status', 'info', 'يتم جلب البيانات…');
+
+  try {
+    const backup = { version: 1, exported_at: new Date().toISOString() };
+
+    for (const table of TABLES) {
+      const { data, error } = await supabaseClient.from(table).select('*');
+      if (error) throw new Error(`خطأ في جدول ${table}: ${error.message}`);
+      backup[table] = data || [];
+    }
+
+    const json     = JSON.stringify(backup, null, 2);
+    const blob     = new Blob([json], { type: 'application/json' });
+    const url      = URL.createObjectURL(blob);
+    const a        = document.createElement('a');
+    a.href         = url;
+    a.download     = `portfolio_backup_${todayISO()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    const totalRows = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
+    setStatus('export-status', 'success', `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جداول`);
+    showToast('تم تصدير النسخة الاحتياطية بنجاح', 'success');
+  } catch (err) {
+    setStatus('export-status', 'error', '✗ ' + err.message);
+    showToast('فشل التصدير: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'تصدير النسخة الاحتياطية';
+  }
+}
+
+// ── Restore ───────────────────────────────────────────────────
+function triggerRestore() {
+  document.getElementById('restore-file').value = '';
+  document.getElementById('restore-file').click();
+}
+
+async function restoreBackup(input) {
+  if (!input.files?.length) return;
+  const file = input.files[0];
+
+  // Parse file
+  let backup;
+  try {
+    backup = JSON.parse(await file.text());
+  } catch {
+    showToast('الملف غير صالح — يجب أن يكون JSON', 'error');
+    setStatus('restore-status', 'error', '✗ الملف غير صالح');
+    return;
+  }
+
+  // Validate structure
+  if (!backup.version || !TABLES.some(t => t in backup)) {
+    showToast('هذا الملف لا يبدو نسخة احتياطية صالحة', 'error');
+    setStatus('restore-status', 'error', '✗ تنسيق غير صالح');
+    return;
+  }
+
+  // Count records
+  const totalRows = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
+  const exportedAt = backup.exported_at ? new Date(backup.exported_at).toLocaleString('ar-SA') : 'غير محدد';
+
+  // Confirmation dialog
+  const confirmed = confirm(
+    `استعادة النسخة الاحتياطية\n\n` +
+    `• الإصدار: ${backup.version}\n` +
+    `• تاريخ التصدير: ${exportedAt}\n` +
+    `• عدد السجلات: ${totalRows}\n\n` +
+    `تحذير: سيتم حذف جميع بياناتك الحالية واستبدالها ببيانات هذه النسخة الاحتياطية.\n\n` +
+    `هل أنت متأكد من الاستعادة؟`
+  );
+  if (!confirmed) { setStatus('restore-status', 'info', 'تم الإلغاء'); return; }
+
+  const btn = document.getElementById('btn-restore');
+  btn.disabled = true;
+  btn.textContent = 'جارٍ الاستعادة…';
+  setStatus('restore-status', 'info', 'يتم حذف البيانات الحالية…');
+
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+
+    // 1. Delete all existing user data (order matters for FK safety)
+    for (const table of TABLES) {
+      const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+      if (error) throw new Error(`خطأ في حذف ${table}: ${error.message}`);
+    }
+
+    setStatus('restore-status', 'info', 'يتم إدراج البيانات المستعادة…');
+
+    // 2. Re-insert from backup
+    let inserted = 0;
+    for (const table of TABLES) {
+      const rows = backup[table];
+      if (!rows?.length) continue;
+
+      // Strip server-generated fields and fix user_id
+      const clean = rows.map(row => {
+        const r = { ...row };
+        STRIP.forEach(k => delete r[k]);
+        r.user_id = user.id;
+        return r;
+      });
+
+      // Insert in batches of 500
+      for (let i = 0; i < clean.length; i += 500) {
+        const batch = clean.slice(i, i + 500);
+        const { error } = await supabaseClient.from(table).insert(batch);
+        if (error) throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
+        inserted += batch.length;
+      }
+    }
+
+    setStatus('restore-status', 'success', `✓ تمت الاستعادة بنجاح — تم استعادة ${inserted} سجل`);
+    showToast('تمت الاستعادة بنجاح — يُرجى تحديث الصفحة', 'success');
+
+    // Offer to reload
+    setTimeout(() => {
+      if (confirm('تمت الاستعادة. هل تريد الانتقال إلى لوحة التحكم؟')) {
+        window.location.href = 'dashboard.html';
+      }
+    }, 800);
+
+  } catch (err) {
+    setStatus('restore-status', 'error', '✗ ' + err.message);
+    showToast('فشلت الاستعادة: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'استعادة من نسخة احتياطية';
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────
+function setStatus(elId, type, msg) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.textContent = msg;
+  el.className = `backup-status status-${type}`;
+  el.style.display = 'block';
+}
+
+init();
