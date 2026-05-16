@@ -774,3 +774,26 @@ td.editable:hover::after {
 .info-table td { padding: 8px 12px; border-bottom: 1px solid var(--border); }
 .info-table td:first-child { color: var(--text-2); width: 40%; }
 .info-table tr:last-child td { border-bottom: none; }
+
+/* ===================== TICKER WARNING ===================== */
+.ticker-warning {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: rgba(240, 180, 41, 0.08);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-top: 10px;
+  font-size: 0.875rem;
+  color: var(--accent);
+}
+
+.btn-warning {
+  background: var(--accent);
+  color: #0d1117;
+  border: none;
+  font-weight: 700;
+}
+.btn-warning:hover { background: #d49f20; }

@@ -1,4 +1,6 @@
-const TABLES = ['holdings', 'transactions', 'dividends', 'cash_flows', 'net_worth_snapshots', 'real_estate'];
+const TABLES      = ['holdings', 'transactions', 'dividends', 'cash_flows', 'net_worth_snapshots', 'real_estate'];
+const BATCH_SIZES = { transactions: 50 };  // smaller batch to avoid timeout on large sets
+const DEFAULT_BATCH = 500;
 
 async function init() {
   const user = await requireAuth();
@@ -111,9 +113,10 @@ async function restoreBackup(input) {
 
       const clean = rows.map(row => mapRow(table, row, user.id)).filter(Boolean);
 
-      // Insert in batches of 500
-      for (let i = 0; i < clean.length; i += 500) {
-        const batch = clean.slice(i, i + 500);
+      const batchSize = BATCH_SIZES[table] || DEFAULT_BATCH;
+      for (let i = 0; i < clean.length; i += batchSize) {
+        setStatus('restore-status', 'info', `يتم إدراج ${table}… (${Math.min(i + batchSize, clean.length)}/${clean.length})`);
+        const batch = clean.slice(i, i + batchSize);
         const { error } = await supabaseClient.from(table).insert(batch);
         if (error) throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
         inserted += batch.length;

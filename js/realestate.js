@@ -1,5 +1,6 @@
 let properties = [];
 let editingId  = null;
+let _userId    = null;
 
 const STATUS_LBL = { owned: 'مملوك', rented: 'مؤجر', sold: 'مباع' };
 
@@ -13,6 +14,7 @@ function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
 async function init() {
   const user = await requireAuth();
   if (!user) return;
+  _userId = user.id;
   setActiveNav('nav-realestate');
   document.getElementById('re-purchase-date').value = todayISO();
   await loadProperties();
@@ -21,7 +23,11 @@ async function init() {
 }
 
 async function loadProperties() {
-  const { data, error } = await supabaseClient.from('real_estate').select('*').order('purchase_date', { ascending: false });
+  const { data, error } = await supabaseClient
+    .from('real_estate')
+    .select('*')
+    .eq('user_id', _userId)
+    .order('purchase_date', { ascending: false });
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   properties = data || [];
 }

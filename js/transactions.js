@@ -18,6 +18,74 @@ function setupSingleForm() {
   document.getElementById('t-date').value = todayISO();
   ['t-shares', 't-price'].forEach(id => document.getElementById(id).addEventListener('input', updateSingleCalc));
   document.getElementById('t-type').addEventListener('change', updateSingleCalc);
+  document.getElementById('t-ticker').addEventListener('blur', onSingleTickerBlur);
+}
+
+function onSingleTickerBlur() {
+  const tickerEl = document.getElementById('t-ticker');
+  const ticker   = tickerEl.value.trim().toUpperCase();
+  tickerEl.value = ticker;
+  if (!ticker) { hideTickerWarning(); return; }
+
+  const entry    = SECTOR_DB[ticker];
+  const nameEl   = document.getElementById('t-name');
+  if (entry) {
+    if (!nameEl.value.trim()) nameEl.value = entry.name;
+    hideTickerWarning();
+  } else {
+    showTickerWarning();
+  }
+}
+
+function showTickerWarning() {
+  const el = document.getElementById('ticker-warning');
+  if (el) el.style.display = 'flex';
+}
+
+function hideTickerWarning() {
+  const el = document.getElementById('ticker-warning');
+  if (el) el.style.display = 'none';
+}
+
+function confirmUnknownTicker() {
+  const nameEl = document.getElementById('t-name');
+  if (!nameEl.value.trim()) nameEl.value = 'سهم غير معرف';
+  hideTickerWarning();
+}
+
+function cancelUnknownTicker() {
+  document.getElementById('t-ticker').value = '';
+  hideTickerWarning();
+}
+
+function stagingTickerBlur(id, input) {
+  const ticker = input.value.trim().toUpperCase();
+  input.value  = ticker;
+  updateStaging(id, 'ticker', ticker);
+  if (!ticker) return;
+
+  const entry    = SECTOR_DB[ticker];
+  const tr       = document.querySelector(`tr[data-sid="${id}"]`);
+  const nameInput = tr?.querySelector('.s-name');
+  const row      = stagingRows.find(r => r._id === id);
+
+  if (entry) {
+    if (!row?.name) {
+      if (nameInput) nameInput.value = entry.name;
+      updateStaging(id, 'name', entry.name);
+    }
+  } else {
+    const ok = confirm(`الرمز "${ticker}" غير معرف — هل تريد المتابعة؟`);
+    if (ok) {
+      if (!row?.name) {
+        if (nameInput) nameInput.value = 'سهم غير معرف';
+        updateStaging(id, 'name', 'سهم غير معرف');
+      }
+    } else {
+      input.value = '';
+      updateStaging(id, 'ticker', '');
+    }
+  }
 }
 
 function updateSingleCalc() {
@@ -123,7 +191,7 @@ function renderStaging() {
     <tr data-sid="${r._id}">
       <td class="text-muted small">${i + 1}</td>
       <td><input class="inline-input s-date"   type="date"   value="${r.date}"   oninput="updateStaging(${r._id},'date',this.value)"></td>
-      <td><input class="inline-input s-ticker" type="text"   value="${esc(r.ticker)}" placeholder="رمز"   oninput="updateStaging(${r._id},'ticker',this.value.toUpperCase())" style="min-width:60px"></td>
+      <td><input class="inline-input s-ticker" type="text"   value="${esc(r.ticker)}" placeholder="رمز"   oninput="updateStaging(${r._id},'ticker',this.value.toUpperCase())" onblur="stagingTickerBlur(${r._id},this)" style="min-width:60px"></td>
       <td><input class="inline-input s-name"   type="text"   value="${esc(r.name)}"   placeholder="الاسم" oninput="updateStaging(${r._id},'name',this.value)"   style="min-width:110px"></td>
       <td>
         <select class="inline-input" onchange="updateStaging(${r._id},'type',this.value)">
@@ -189,7 +257,7 @@ async function updateHolding(userId, tx) {
       const newAvgPrice = (existing.shares * existing.avg_price + tx.shares * tx.price) / newShares;
       await supabaseClient.from('holdings').update({ shares: newShares, avg_price: +newAvgPrice.toFixed(4) }).eq('id', existing.id);
     } else {
-      await supabaseClient.from('holdings').insert([{ user_id: userId, ticker: tx.ticker, name: tx.name, sector: '', shares: tx.shares, avg_price: tx.price, current_price: tx.price, target_weight: 0 }]);
+      await supabaseClient.from('holdings').insert([{ user_id: userId, ticker: tx.ticker, name: tx.name, sector: SECTOR_DB[tx.ticker]?.sector || '', shares: tx.shares, avg_price: tx.price, current_price: tx.price, target_weight: 0 }]);
     }
   } else if (existing) {
     const newShares = Math.max(0, existing.shares - tx.shares);

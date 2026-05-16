@@ -100,7 +100,7 @@ function renderStats() {
 function renderCharts() {
   // Sector allocation
   const sectorMap = {};
-  holdings.forEach(h => { const k = h.sector || 'أخرى'; sectorMap[k] = (sectorMap[k] || 0) + h.shares * h.current_price; });
+  holdings.forEach(h => { const k = SECTOR_DB[h.ticker]?.sector || 'أخرى'; sectorMap[k] = (sectorMap[k] || 0) + h.shares * h.current_price; });
   const sLabels = Object.keys(sectorMap), sData = sLabels.map(k => sectorMap[k]);
 
   if (sectorChart) sectorChart.destroy();
@@ -161,7 +161,7 @@ function renderTable() {
     return `<tr>
       <td ${ed('holdings',h.id,'ticker','text',h.ticker)}><strong class="text-accent">${esc(h.ticker)}</strong></td>
       <td ${ed('holdings',h.id,'name','text',h.name)}>${esc(h.name)}</td>
-      <td ${ed('holdings',h.id,'sector','text',h.sector||'','text-muted small')}>${esc(h.sector||'—')}</td>
+      <td ${ed('holdings',h.id,'sector','text',h.sector||'','text-muted small')}>${esc(SECTOR_DB[h.ticker]?.sector || h.sector || '—')}</td>
       <td ${ed('holdings',h.id,'shares','number',h.shares)}>${formatNum(h.shares,4)}</td>
       <td ${ed('holdings',h.id,'avg_price','number',h.avg_price)}>${formatSAR(h.avg_price)}</td>
       <td ${ed('holdings',h.id,'current_price','number',h.current_price)}>${formatSAR(h.current_price)}</td>

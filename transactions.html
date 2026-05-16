@@ -96,6 +96,11 @@
             <div class="form-group"><label>الضريبة (ر.س)</label><input type="text" id="t-vat" readonly placeholder="تلقائي"></div>
             <div class="form-group"><label>الإجمالي (ر.س)</label><input type="text" id="t-total" readonly placeholder="تلقائي"></div>
           </div>
+          <div id="ticker-warning" class="ticker-warning" style="display:none">
+            <span>هذا الرمز غير معرف — هل تريد المتابعة؟</span>
+            <button type="button" class="btn btn-warning btn-sm" onclick="confirmUnknownTicker()">متابعة</button>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="cancelUnknownTicker()">إلغاء</button>
+          </div>
           <div class="mt-4 flex gap-3" style="justify-content:flex-end">
             <button type="reset" class="btn btn-secondary">إعادة تعيين</button>
             <button type="submit" class="btn btn-primary">تسجيل</button>
