@@ -16,7 +16,6 @@ async function init() {
   if (!user) return;
   _userId = user.id;
   setActiveNav('nav-realestate');
-  document.getElementById('re-purchase-date').value = todayISO();
   await loadProperties();
   renderStats();
   renderTable();

@@ -1,4 +1,4 @@
-const TABLES      = ['holdings', 'transactions', 'dividends', 'cash_flows', 'net_worth_snapshots', 'real_estate'];
+const TABLES      = ['holdings', 'transactions', 'dividends', 'cashflow_entries', 'net_worth_snapshots', 'nw_assets', 'nw_liabilities', 'real_estate'];
 const BATCH_SIZES = { transactions: 50 };  // smaller batch to avoid timeout on large sets
 const DEFAULT_BATCH = 500;
 
@@ -182,21 +182,23 @@ function mapRow(table, row, userId) {
       };
       break;
 
-    case 'cash_flows':
-      // Backup may use {date, amount} or the native {year, planned_amount, actual_amount}
-      if (row.year != null) {
-        r = {
-          year:           row.year,
-          planned_amount: row.planned_amount ?? 0,
-          actual_amount:  row.actual_amount  ?? 0,
-        };
-      } else {
-        r = {
-          year:           new Date(row.date).getFullYear(),
-          planned_amount: 0,
-          actual_amount:  row.amount ?? 0,
-        };
-      }
+    case 'cashflow_entries':
+      r = {
+        date:   row.date,
+        type:   row.type,
+        amount: row.amount,
+        notes:  row.notes ?? ''
+      };
+      break;
+
+    case 'nw_assets':
+    case 'nw_liabilities':
+      r = {
+        category: row.category,
+        name:     row.name,
+        value:    row.value,
+        notes:    row.notes ?? ''
+      };
       break;
 
     case 'net_worth_snapshots':
@@ -229,6 +231,83 @@ function mapRow(table, row, userId) {
 
   r.user_id = userId;
   return r;
+}
+
+// ── Reset All Data ────────────────────────────────────────────
+async function resetAllData() {
+  const confirmed = confirm(
+    '⚠️ تصفير جميع البيانات\n\n' +
+    'سيتم حذف كل بياناتك نهائياً:\n' +
+    '• الأسهم والمعاملات\n• الأرباح الموزعة\n• التدفقات النقدية\n' +
+    '• صافي الثروة والأصول والالتزامات\n• العقارات\n\n' +
+    'حسابك يبقى موجوداً — البيانات فقط تُمسح.\n\n' +
+    'هل أنت متأكد؟'
+  );
+  if (!confirmed) return;
+
+  const confirmed2 = confirm('تأكيد أخير: سيتم مسح كل البيانات بلا رجعة. متأكد؟');
+  if (!confirmed2) return;
+
+  const btn = document.getElementById('btn-reset');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ المسح…'; }
+  setStatus('reset-status', 'info', 'يتم مسح البيانات…');
+
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    for (const table of TABLES) {
+      const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+      if (error) throw new Error(`خطأ في مسح ${table}: ${error.message}`);
+    }
+    setStatus('reset-status', 'success', '✓ تم مسح جميع البيانات بنجاح');
+    showToast('تم التصفير — جميع بياناتك مُمسحة', 'success');
+    setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
+  } catch (err) {
+    setStatus('reset-status', 'error', '✗ ' + err.message);
+    showToast('فشل المسح: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '🗑️ تصفير جميع البيانات'; }
+  }
+}
+
+// ── Delete Account ────────────────────────────────────────────
+async function deleteAccount() {
+  const confirmed = confirm(
+    '⛔ حذف الحساب نهائياً\n\n' +
+    'سيتم حذف:\n• جميع بياناتك\n• حسابك بالكامل\n\n' +
+    'لا يمكن التراجع عن هذا الإجراء.\n\n' +
+    'هل أنت متأكد؟'
+  );
+  if (!confirmed) return;
+
+  const emailInput = document.getElementById('del-email-confirm')?.value?.trim();
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (emailInput !== user.email) {
+    showToast('البريد الإلكتروني غير مطابق', 'error');
+    setStatus('del-account-status', 'error', '✗ البريد الإلكتروني الذي أدخلته لا يطابق حسابك');
+    return;
+  }
+
+  const btn = document.getElementById('btn-delete-account');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحذف…'; }
+  setStatus('del-account-status', 'info', 'يتم مسح البيانات وحذف الحساب…');
+
+  try {
+    // 1. مسح كل البيانات أولاً
+    for (const table of TABLES) {
+      await supabaseClient.from(table).delete().eq('user_id', user.id);
+    }
+
+    // 2. حذف الحساب عبر دالة قاعدة البيانات
+    const { error } = await supabaseClient.rpc('delete_own_account');
+    if (error) throw new Error(error.message);
+
+    showToast('تم حذف حسابك بنجاح', 'success');
+    await supabaseClient.auth.signOut();
+    setTimeout(() => { window.location.href = 'index.html'; }, 1200);
+  } catch (err) {
+    setStatus('del-account-status', 'error', '✗ ' + err.message);
+    showToast('فشل الحذف: ' + err.message, 'error');
+    if (btn) { btn.disabled = false; btn.textContent = '⛔ حذف حسابي نهائياً'; }
+  }
 }
 
 // ── Helpers ───────────────────────────────────────────────────

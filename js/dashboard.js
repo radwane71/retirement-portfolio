@@ -34,7 +34,7 @@ async function loadAllData() {
     supabaseClient.from('holdings').select('*').order('ticker'),
     supabaseClient.from('transactions').select('type, total'),
     supabaseClient.from('dividends').select('amount, year'),
-    supabaseClient.from('cash_flows').select('planned_amount, actual_amount').eq('year', yr).maybeSingle(),
+    supabaseClient.from('cashflow_entries').select('type, amount, date'),
     supabaseClient.from('net_worth_snapshots').select('total_value, date').order('date', { ascending: false }).limit(1),
     supabaseClient.from('real_estate').select('current_value, status')
   ]);
@@ -43,20 +43,23 @@ async function loadAllData() {
 
   const txRows  = rTx.data  || [];
   const divRows = rDiv.data || [];
-  const cfRow   = rCf.data  || null;
+  const cfRows  = rCf.data  || [];
   const nwRows  = rNw.data  || [];
   const reRows  = rRe.data  || [];
 
+  const totalBuys  = txRows.filter(t => t.type === 'buy').reduce((s, t) => s + +t.total, 0);
+  const totalSells = txRows.filter(t => t.type === 'sell').reduce((s, t) => s + +t.total, 0);
+
   window._ds = {
     yr,
-    totalInvested: txRows.filter(t => t.type === 'buy').reduce((s, t) => s + +t.total, 0),
+    totalInvested: totalBuys - totalSells,  // صافي رأس المال المنشغل = شراء − بيع
     totalDivAll:   divRows.reduce((s, d) => s + +d.amount, 0),
     yearDiv:       divRows.filter(d => d.year === yr).reduce((s, d) => s + +d.amount, 0),
     latestNW:      nwRows[0] ? +nwRows[0].total_value : null,
     latestNWDate:  nwRows[0] ? nwRows[0].date : null,
     reTotal:       reRows.filter(p => p.status !== 'sold').reduce((s, p) => s + +p.current_value, 0),
-    cashActual:    cfRow ? +cfRow.actual_amount  : 0,
-    cashPlanned:   cfRow ? +cfRow.planned_amount : 0
+    cashDeposited: cfRows.filter(e => e.type === 'deposit'    && new Date(e.date).getFullYear() === yr).reduce((s,e) => s + +e.amount, 0),
+    cashWithdrawn: cfRows.filter(e => e.type === 'withdrawal' && new Date(e.date).getFullYear() === yr).reduce((s,e) => s + +e.amount, 0)
   };
 }
 
@@ -88,19 +91,19 @@ function renderStats() {
   setText('stat-year-div',    formatSAR(s.yearDiv     || 0));
   setText('stat-year-label',  'أرباح ' + (s.yr || new Date().getFullYear()));
   setText('stat-realestate',  formatSAR(s.reTotal || 0));
-  setText('stat-cash-actual', formatSAR(s.cashActual || 0));
-
-  const cfPct = s.cashPlanned > 0 ? Math.min(s.cashActual / s.cashPlanned * 100, 100) : 0;
-  setText('stat-cash-sub', `خطة ${s.yr || ''}: ${formatSAR(s.cashPlanned || 0)}`);
+  const cashNet = (s.cashDeposited || 0) - (s.cashWithdrawn || 0);
+  const cashEl = g('stat-cash-actual');
+  if (cashEl) { cashEl.textContent = formatSAR(cashNet, true); cashEl.className = 'value num ' + (cashNet >= 0 ? 'text-success' : 'text-danger'); }
+  setText('stat-cash-sub', `إيداع ${formatSAR(s.cashDeposited||0)} / سحب ${formatSAR(s.cashWithdrawn||0)}`);
   const fill = g('stat-cash-fill');
-  if (fill) { fill.style.width = cfPct.toFixed(0) + '%'; fill.style.background = cfPct >= 100 ? 'var(--success)' : 'var(--accent)'; }
+  if (fill) { fill.style.width = s.cashDeposited > 0 ? '100%' : '0%'; fill.style.background = 'var(--accent)'; }
 }
 
 // ── Charts ────────────────────────────────────────────────────
 function renderCharts() {
   // Sector allocation
   const sectorMap = {};
-  holdings.forEach(h => { const k = SECTOR_DB[h.ticker]?.sector || 'أخرى'; sectorMap[k] = (sectorMap[k] || 0) + h.shares * h.current_price; });
+  holdings.forEach(h => { const k = h.sector || 'أخرى'; sectorMap[k] = (sectorMap[k] || 0) + h.shares * h.current_price; });
   const sLabels = Object.keys(sectorMap), sData = sLabels.map(k => sectorMap[k]);
 
   if (sectorChart) sectorChart.destroy();
@@ -161,7 +164,7 @@ function renderTable() {
     return `<tr>
       <td ${ed('holdings',h.id,'ticker','text',h.ticker)}><strong class="text-accent">${esc(h.ticker)}</strong></td>
       <td ${ed('holdings',h.id,'name','text',h.name)}>${esc(h.name)}</td>
-      <td ${ed('holdings',h.id,'sector','text',h.sector||'','text-muted small')}>${esc(SECTOR_DB[h.ticker]?.sector || h.sector || '—')}</td>
+      <td ${ed('holdings',h.id,'sector','text',h.sector||'','text-muted small')}>${esc(h.sector || '—')}</td>
       <td ${ed('holdings',h.id,'shares','number',h.shares)}>${formatNum(h.shares,4)}</td>
       <td ${ed('holdings',h.id,'avg_price','number',h.avg_price)}>${formatSAR(h.avg_price)}</td>
       <td ${ed('holdings',h.id,'current_price','number',h.current_price)}>${formatSAR(h.current_price)}</td>
@@ -234,6 +237,98 @@ async function saveHolding(e) {
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast(editingId ? 'تم التحديث' : 'تمت الإضافة', 'success');
   closeModal();
+  await reloadHoldings();
+  renderStats(); renderCharts(); renderTable();
+}
+
+// ── Sync holdings from transactions ──────────────────────────
+async function syncHoldingsFromTx() {
+  const btn = document.getElementById('btn-sync-tx');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ المزامنة…'; }
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { data: txAll, error: txErr } = await supabaseClient
+    .from('transactions')
+    .select('ticker, name, type, shares, price, total')
+    .order('date', { ascending: true });
+
+  if (txErr || !txAll) {
+    showToast('خطأ في جلب المعاملات', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'مزامنة من المعاملات'; }
+    return;
+  }
+
+  // احسب الأسهم ومتوسط السعر لكل رمز
+  // الخوارزمية مستقلة عن الترتيب: نجمع الشراء والبيع بشكل منفصل
+  const map = {};  // ticker → { name, buyShares, buyCost, sellShares }
+  txAll.forEach(tx => {
+    if (!map[tx.ticker]) map[tx.ticker] = { name: tx.name, buyShares: 0, buyCost: 0, sellShares: 0 };
+    const m = map[tx.ticker];
+    if (tx.type === 'buy') {
+      m.buyShares += +tx.shares;
+      m.buyCost   += +tx.shares * +tx.price;  // التكلفة الفعلية بدون عمولة (متوسط الوزن)
+    } else if (tx.type === 'grant') {
+      m.buyShares += +tx.shares;              // منحة: تزيد الأسهم لكن لا تكلفة
+    } else if (tx.type === 'sell') {
+      m.sellShares += +tx.shares;
+    }
+  });
+
+  // حوّل إلى: netShares و avgPrice
+  for (const [ticker, m] of Object.entries(map)) {
+    m.shares   = m.buyShares - m.sellShares;
+    m.avgPrice = m.buyShares > 0 ? m.buyCost / m.buyShares : 0;
+  }
+
+  // اجلب الـ holdings الحالية + user_stocks للقطاعات
+  const [{ data: existingH }, { data: userStocksDB }] = await Promise.all([
+    supabaseClient.from('holdings').select('*'),
+    supabaseClient.from('user_stocks').select('ticker, sector')
+  ]);
+  const existMap = {};
+  (existingH || []).forEach(h => { existMap[h.ticker] = h; });
+  const sectorMap = {};
+  (userStocksDB || []).forEach(s => { sectorMap[s.ticker] = s.sector || ''; });
+
+  let upserted = 0;
+  for (const [ticker, calc] of Object.entries(map)) {
+    if (calc.shares <= 0) {
+      // السهم صفر → احذفه إذا موجود
+      if (existMap[ticker]) {
+        await supabaseClient.from('holdings').delete().eq('id', existMap[ticker].id);
+      }
+      continue;
+    }
+    const avgPrice = calc.avgPrice || 0;
+    const existing = existMap[ticker];
+    if (existing) {
+      // حدّث الأسهم والمتوسط — وإذا القطاع فارغ اجلبه من user_stocks
+      const updatePayload = {
+        shares:    +calc.shares.toFixed(4),
+        avg_price: +avgPrice.toFixed(4)
+      };
+      if (!existing.sector && sectorMap[ticker]) {
+        updatePayload.sector = sectorMap[ticker];
+      }
+      await supabaseClient.from('holdings').update(updatePayload).eq('id', existing.id);
+    } else {
+      // سهم جديد — اجلب القطاع من user_stocks إذا موجود
+      await supabaseClient.from('holdings').insert([{
+        user_id:       user.id,
+        ticker,
+        name:          calc.name,
+        sector:        sectorMap[ticker] || '',
+        shares:        +calc.shares.toFixed(4),
+        avg_price:     +avgPrice.toFixed(4),
+        current_price: 0,
+        target_weight: 0
+      }]);
+    }
+    upserted++;
+  }
+
+  showToast(`✓ تمت المزامنة — ${upserted} سهم`, 'success');
+  if (btn) { btn.disabled = false; btn.textContent = 'مزامنة من المعاملات'; }
   await reloadHoldings();
   renderStats(); renderCharts(); renderTable();
 }

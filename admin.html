@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>لوحة الإدارة — ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Admin Layout ── */
+    .admin-wrap { display: flex; min-height: 100vh; }
+
+    .admin-sidebar {
+      position: fixed; right: 0; top: 0;
+      width: 240px; height: 100vh;
+      background: var(--bg-2);
+      border-left: 1px solid var(--border);
+      display: flex; flex-direction: column;
+      z-index: 100; overflow-y: auto;
+    }
+    .admin-sidebar-logo { padding: 20px 16px; border-bottom: 1px solid var(--border); }
+    .admin-sidebar-logo h2 { font-size: 1rem; font-weight: 700; color: var(--danger); }
+    .admin-sidebar-logo p  { font-size: 0.75rem; color: var(--text-2); margin-top: 2px; }
+
+    .admin-nav { padding: 12px 0; flex: 1; }
+    .admin-nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 16px; cursor: pointer;
+      font-size: 0.88rem; color: var(--text-2);
+      border-right: 3px solid transparent;
+      transition: all 0.15s;
+    }
+    .admin-nav-item:hover { background: var(--bg-3); color: var(--text); }
+    .admin-nav-item.active { background: var(--bg-3); color: var(--text); border-right-color: var(--danger); }
+    .admin-nav-item .icon { font-size: 1rem; width: 20px; }
+
+    .admin-main { margin-right: 240px; padding: 24px 28px 48px; flex: 1; }
+
+    /* ── Modules ── */
+    .module { display: none; }
+    .module.active { display: block; }
+
+    .module-header { margin-bottom: 20px; }
+    .module-header h1 { font-size: 1.4rem; font-weight: 700; }
+    .module-header p  { font-size: 0.88rem; color: var(--text-2); margin-top: 4px; }
+
+    /* ── Status Badges ── */
+    .badge {
+      display: inline-block; padding: 2px 10px; border-radius: 20px;
+      font-size: 0.78rem; font-weight: 600;
+    }
+    .badge-active   { background: var(--success-dim); color: var(--success); }
+    .badge-suspended{ background: rgba(240,180,41,0.15); color: var(--accent); }
+    .badge-banned   { background: var(--danger-dim); color: var(--danger); }
+    .badge-deleted  { background: var(--bg-3); color: var(--text-2); }
+    .badge-pending  { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .badge-open     { background: rgba(59,130,246,0.15); color: #3b82f6; }
+    .badge-resolved { background: var(--success-dim); color: var(--success); }
+
+    /* ── Action buttons in tables ── */
+    .act-btn {
+      padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--bg-3); color: var(--text-2); font-size: 0.78rem;
+      cursor: pointer; font-family: inherit; transition: all 0.15s;
+    }
+    .act-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .act-btn.danger:hover { border-color: var(--danger); color: var(--danger); }
+
+    /* ── Metric cards ── */
+    .metrics-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+    .metric-card {
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: 16px 18px;
+    }
+    .metric-card .m-label { font-size: 0.78rem; color: var(--text-2); margin-bottom: 6px; }
+    .metric-card .m-value { font-size: 1.6rem; font-weight: 700; }
+    .metric-card .m-sub   { font-size: 0.75rem; color: var(--text-2); margin-top: 4px; }
+
+    /* ── Filter bar ── */
+    .filter-bar { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; align-items: center; }
+    .filter-bar input, .filter-bar select {
+      padding: 8px 12px; background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); font-family: inherit; font-size: 0.88rem;
+    }
+    .filter-bar input:focus, .filter-bar select:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Ticket form ── */
+    .broadcast-box {
+      background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius-lg);
+      padding: 20px; margin-bottom: 20px;
+    }
+    .broadcast-box h3 { font-size: 0.95rem; font-weight: 700; margin-bottom: 14px; }
+    .broadcast-box textarea {
+      width: 100%; min-height: 100px; padding: 10px 12px;
+      background: var(--bg-3); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text); font-family: inherit;
+      font-size: 0.9rem; resize: vertical;
+    }
+    .broadcast-box textarea:focus { outline: none; border-color: var(--accent); }
+
+    /* ── Immutable log tag ── */
+    .immutable-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--danger-dim); color: var(--danger);
+      border: 1px solid rgba(248,81,73,0.3); border-radius: 6px;
+      padding: 3px 10px; font-size: 0.75rem; font-weight: 600;
+    }
+
+    /* ── Empty / loading states ── */
+    .tbl-empty { text-align: center; padding: 32px; color: var(--text-2); font-size: 0.9rem; }
+
+    /* ── Warning callout ── */
+    .callout {
+      padding: 12px 16px; border-radius: var(--radius);
+      font-size: 0.85rem; margin-bottom: 16px;
+    }
+    .callout-warn  { background: rgba(240,180,41,0.1); border: 1px solid rgba(240,180,41,0.3); color: var(--accent); }
+    .callout-info  { background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.3); color: #3b82f6; }
+    .callout-danger{ background: var(--danger-dim); border: 1px solid rgba(248,81,73,0.3); color: var(--danger); }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside class="admin-sidebar">
+    <div class="admin-sidebar-logo">
+      <h2>🛡️ لوحة الإدارة</h2>
+      <p>ثروة — محرك التشغيل والرقابة</p>
+    </div>
+    <nav class="admin-nav">
+      <div class="admin-nav-item active" onclick="showModule('identity')"   id="nav-identity">
+        <span class="icon">👤</span><span>الهوية والتحقق</span>
+      </div>
+      <div class="admin-nav-item" onclick="showModule('compliance')"  id="nav-compliance">
+        <span class="icon">⚖️</span><span>الامتثال والخصوصية</span>
+      </div>
+      <div class="admin-nav-item" onclick="showModule('analytics')"  id="nav-analytics">
+        <span class="icon">📊</span><span>المؤشرات التشغيلية</span>
+      </div>
+      <div class="admin-nav-item" onclick="showModule('support')"    id="nav-support">
+        <span class="icon">🎧</span><span>الدعم والاتصالات</span>
+      </div>
+      <div class="admin-nav-item" onclick="showModule('security')"   id="nav-security">
+        <span class="icon">🔐</span><span>الأمن وسجلات التدقيق</span>
+      </div>
+      <div class="admin-nav-item" onclick="showModule('maintenance')" id="nav-maintenance">
+        <span class="icon">🔧</span><span>صيانة الموقع</span>
+      </div>
+    </nav>
+    <div style="padding:16px;border-top:1px solid var(--border)">
+      <div style="font-size:0.75rem;color:var(--text-2);margin-bottom:8px" id="admin-email-badge">—</div>
+      <a href="dashboard.html" class="act-btn" style="display:block;text-align:center;margin-bottom:8px;text-decoration:none">← الموقع الرئيسي</a>
+      <button class="act-btn danger" style="width:100%" onclick="adminLogout()">تسجيل الخروج</button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="admin-main">
+
+    <!-- ════════════════════════════════════════════════
+         1. الهوية والتحقق
+    ════════════════════════════════════════════════ -->
+    <section class="module active" id="module-identity">
+      <div class="module-header">
+        <h1>👤 إدارة الهوية والتحقق</h1>
+        <p>جدول المستخدمين الكامل، حالات الحسابات، ومؤشر التحويل</p>
+      </div>
+
+      <div class="metrics-row" id="identity-metrics">
+        <div class="metric-card"><div class="m-label">إجمالي المسجلين</div><div class="m-value" id="m-total">—</div></div>
+        <div class="metric-card"><div class="m-label">حسابات نشطة (مؤكدة)</div><div class="m-value text-success" id="m-confirmed">—</div></div>
+        <div class="metric-card"><div class="m-label">معلقون / محظورون</div><div class="m-value" style="color:var(--accent)" id="m-suspended">—</div></div>
+        <div class="metric-card"><div class="m-label">معدل التحويل</div><div class="m-value text-accent" id="m-conversion">—</div><div class="m-sub">مسجل → مؤكد</div></div>
+      </div>
+
+      <div class="callout callout-warn" id="sync-callout" style="display:none">
+        ⚠️ لا يوجد مستخدمون في قاعدة البيانات. اضغط <strong>مزامنة</strong> لجلب المستخدمين من Supabase Auth.
+      </div>
+
+      <div class="filter-bar">
+        <input type="text" id="user-search" placeholder="بحث بالبريد الإلكتروني…" oninput="filterUsers()">
+        <select id="user-status-filter" onchange="filterUsers()">
+          <option value="">جميع الحالات</option>
+          <option value="active">نشط</option>
+          <option value="suspended">معلق</option>
+          <option value="banned">محظور</option>
+          <option value="deleted">محذوف</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="loadUsers()">تحديث</button>
+        <button class="btn btn-primary    btn-sm" onclick="syncUsers()">مزامنة المستخدمين</button>
+      </div>
+
+      <div class="card">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>البريد الإلكتروني</th>
+                <th>تاريخ التسجيل</th>
+                <th>آخر ظهور</th>
+                <th>الحالة</th>
+                <th>الإجراءات</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <tr><td colspan="5" class="tbl-empty">⏳ جارٍ التحميل…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════
+         2. الامتثال والخصوصية
+    ════════════════════════════════════════════════ -->
+    <section class="module" id="module-compliance">
+      <div class="module-header">
+        <h1>⚖️ الامتثال والخصوصية (PDPL)</h1>
+        <p>سجل الموافقة القانونية، طلبات الحذف، وتصدير البيانات</p>
+      </div>
+
+      <!-- Consent Ledger -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <span class="section-title">📋 سجل الموافقة القانونية</span>
+          <span class="immutable-tag">🔒 غير قابل للتعديل</span>
+        </div>
+        <p class="small text-muted mb-4" style="margin-top:-8px">كل مستخدم سجل موافقته على شروط الاستخدام وسياسة الخصوصية</p>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr><th>البريد الإلكتروني</th><th>توقيت الموافقة</th><th>عنوان IP</th><th>إصدار الشروط</th></tr>
+            </thead>
+            <tbody id="consent-tbody">
+              <tr><td colspan="4" class="tbl-empty">⏳ جارٍ التحميل…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Erasure Requests -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <span class="section-title">🗑️ طلبات الحذف الكلي (حق المسح)</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadErasureRequests()">تحديث</button>
+        </div>
+        <div class="callout callout-warn">
+          تنفيذ الحذف يزيل جميع بيانات المستخدم من قاعدة البيانات نهائياً — هذا الإجراء لا يمكن التراجع عنه
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr><th>المستخدم</th><th>تاريخ الطلب</th><th>الحالة</th><th>الإجراء</th></tr>
+            </thead>
+            <tbody id="erasure-tbody">
+              <tr><td colspan="4" class="tbl-empty">لا توجد طلبات معلقة</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Data Export Requests -->
+      <div class="card">
+        <div class="section-header">
+          <span class="section-title">📤 طلبات تصدير البيانات</span>
+        </div>
+        <p class="small text-muted mb-4" style="margin-top:-8px">المستخدمون الذين طلبوا نسخة من بياناتهم</p>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr><th>المستخدم</th><th>تاريخ الطلب</th><th>الحالة</th><th>الإجراء</th></tr>
+            </thead>
+            <tbody id="export-req-tbody">
+              <tr><td colspan="4" class="tbl-empty">لا توجد طلبات</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════
+         3. المؤشرات التشغيلية
+    ════════════════════════════════════════════════ -->
+    <section class="module" id="module-analytics">
+      <div class="module-header">
+        <h1>📊 المؤشرات التشغيلية</h1>
+        <p>أرقام تجميعية مغفلة — لا تتضمن أي بيانات مالية فردية</p>
+      </div>
+
+      <div class="callout callout-info" style="margin-bottom:20px">
+        جميع الأرقام هنا إحصائية ومجهّلة — لا يمكن ربطها بمحفظة أي مستخدم بشكل فردي
+      </div>
+
+      <!-- Growth Metrics -->
+      <div class="metrics-row">
+        <div class="metric-card">
+          <div class="m-label">نشطون اليوم (DAU)</div>
+          <div class="m-value text-accent" id="m-dau">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="m-label">نشطون هذا الأسبوع (WAU)</div>
+          <div class="m-value" id="m-wau">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="m-label">نشطون هذا الشهر (MAU)</div>
+          <div class="m-value" id="m-mau">—</div>
+        </div>
+        <div class="metric-card">
+          <div class="m-label">إجمالي المستخدمين</div>
+          <div class="m-value" id="m-total-2">—</div>
+        </div>
+      </div>
+
+      <!-- Usage Stats -->
+      <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);margin-bottom:20px">
+        <div class="stat-card">
+          <div class="label">متوسط الأسهم / مستخدم</div>
+          <div class="value num" id="m-avg-holdings">—</div>
+          <div class="sub">في جدول holdings</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">متوسط المعاملات / مستخدم</div>
+          <div class="value num" id="m-avg-tx">—</div>
+          <div class="sub">في جدول transactions</div>
+        </div>
+        <div class="stat-card">
+          <div class="label">نسبة عقارات / أسهم</div>
+          <div class="value num text-accent" id="m-re-ratio">—</div>
+          <div class="sub">مستخدمون لديهم عقارات</div>
+        </div>
+      </div>
+
+      <!-- Table Row Counts -->
+      <div class="card">
+        <div class="section-header"><span class="section-title">حجم الجداول الحالي</span></div>
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>الجدول</th><th>عدد السجلات</th><th>الوصف</th></tr></thead>
+            <tbody id="table-sizes-tbody">
+              <tr><td colspan="3" class="tbl-empty">⏳</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Cloud Resources -->
+      <div class="card" style="margin-top:20px">
+        <div class="section-header"><span class="section-title">🌩️ موارد Supabase</span></div>
+        <div class="callout callout-info">
+          لمراقبة Vercel Bandwidth وCloudflare R2 التفصيلية — راجع لوحات تحكم هذه الخدمات مباشرة
+        </div>
+        <div class="stats-grid" style="grid-template-columns:repeat(3,1fr)">
+          <div class="stat-card">
+            <div class="label">حجم قاعدة البيانات</div>
+            <div class="value num" id="m-db-size">—</div>
+            <div class="sub">الحد المجاني: 500MB</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">المستخدمون المسجلون</div>
+            <div class="value num" id="m-auth-users">—</div>
+            <div class="sub">Supabase Auth</div>
+          </div>
+          <div class="stat-card">
+            <div class="label">حالة الخطة</div>
+            <div class="value" style="font-size:1rem" id="m-plan">Free Tier</div>
+            <div class="sub">Supabase</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════
+         4. الدعم والاتصالات
+    ════════════════════════════════════════════════ -->
+    <section class="module" id="module-support">
+      <div class="module-header">
+        <h1>🎧 الدعم الفني وإدارة الاتصالات</h1>
+        <p>تذاكر الدعم، والتنبيهات الإدارية للمستخدمين</p>
+      </div>
+
+      <!-- Broadcast -->
+      <div class="broadcast-box">
+        <h3>📢 إرسال تنبيه إداري للمستخدمين</h3>
+        <div class="callout callout-danger" style="margin-bottom:12px">
+          ممنوع منعاً باتاً: أي محتوى يتعلق بالأسواق المالية أو يشجع على الاستثمار
+        </div>
+        <div class="form-grid" style="margin-bottom:12px">
+          <div class="form-group">
+            <label>الموضوع</label>
+            <input type="text" id="broadcast-subject" placeholder="مثال: تحديث تقني في الموقع">
+          </div>
+          <div class="form-group">
+            <label>المستهدف</label>
+            <select id="broadcast-target">
+              <option value="all">جميع المستخدمين</option>
+              <option value="single">مستخدم واحد</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group" style="margin-bottom:12px">
+          <label>نص الرسالة</label>
+          <textarea id="broadcast-body" placeholder="اكتب نص الرسالة هنا…"></textarea>
+        </div>
+        <button class="btn btn-primary" onclick="sendBroadcast()">إرسال التنبيه</button>
+        <div id="broadcast-status" style="margin-top:10px;font-size:0.85rem"></div>
+      </div>
+
+      <!-- Tickets -->
+      <div class="card">
+        <div class="section-header">
+          <span class="section-title">🎫 تذاكر الدعم الفني</span>
+          <div class="flex gap-2">
+            <select id="ticket-filter" onchange="filterTickets()">
+              <option value="">جميع التذاكر</option>
+              <option value="open">مفتوحة</option>
+              <option value="in_progress">قيد المعالجة</option>
+              <option value="resolved">محلولة</option>
+            </select>
+            <button class="btn btn-secondary btn-sm" onclick="loadTickets()">تحديث</button>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>المستخدم</th>
+                <th>الموضوع</th>
+                <th>المتصفح</th>
+                <th>التاريخ</th>
+                <th>الحالة</th>
+                <th>الإجراء</th>
+              </tr>
+            </thead>
+            <tbody id="tickets-tbody">
+              <tr><td colspan="6" class="tbl-empty">لا توجد تذاكر</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════
+         5. الأمن وسجلات التدقيق
+    ════════════════════════════════════════════════ -->
+    <section class="module" id="module-security">
+      <div class="module-header">
+        <h1>🔐 الأمن المتقدم وسجلات التدقيق</h1>
+        <p>سجل تدقيق الإدارة غير القابل للتعديل، ومحاولات الاختراق</p>
+      </div>
+
+      <!-- Brute Force Monitor -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <span class="section-title">⚠️ محاولات الدخول المشبوهة</span>
+          <button class="btn btn-secondary btn-sm" onclick="loadFailedLogins()">تحديث</button>
+        </div>
+        <p class="small text-muted mb-4" style="margin-top:-8px">محاولات تسجيل دخول فاشلة متكررة — تجاوز 5 محاولات يُصنّف كهجوم</p>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr><th>البريد الإلكتروني</th><th>عنوان IP</th><th>عدد المحاولات</th><th>آخر محاولة</th><th>الإجراء</th></tr>
+            </thead>
+            <tbody id="failed-logins-tbody">
+              <tr><td colspan="5" class="tbl-empty">⏳ جارٍ التحميل…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Admin Audit Log -->
+      <div class="card">
+        <div class="section-header">
+          <span class="section-title">📜 سجل تدقيق العمليات الإدارية</span>
+          <span class="immutable-tag">🔒 غير قابل للحذف أو التعديل</span>
+        </div>
+        <div class="filter-bar">
+          <select id="audit-action-filter" onchange="filterAuditLogs()">
+            <option value="">جميع الإجراءات</option>
+            <option value="SUSPEND_USER">تعليق مستخدم</option>
+            <option value="BAN_USER">حظر مستخدم</option>
+            <option value="RESTORE_USER">استعادة مستخدم</option>
+            <option value="EXECUTE_ERASURE">تنفيذ حذف</option>
+            <option value="SEND_BROADCAST">إرسال تنبيه</option>
+            <option value="RESOLVE_TICKET">حل تذكرة</option>
+          </select>
+          <button class="btn btn-secondary btn-sm" onclick="loadAuditLogs()">تحديث</button>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>نوع الإجراء</th>
+                <th>المستخدم المستهدف</th>
+                <th>التفاصيل</th>
+                <th>IP المدير</th>
+                <th>التوقيت (KSA)</th>
+              </tr>
+            </thead>
+            <tbody id="audit-tbody">
+              <tr><td colspan="5" class="tbl-empty">⏳ جارٍ التحميل…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ════════════════════════════════════════════════
+         6. صيانة الموقع
+    ════════════════════════════════════════════════ -->
+    <section class="module" id="module-maintenance">
+      <div class="module-header">
+        <h1>🔧 إدارة الموقع والصيانة</h1>
+        <p>تحكم في حالة الموقع وتوجيه المستخدمين</p>
+      </div>
+
+      <!-- Maintenance Toggle -->
+      <div class="card" style="margin-bottom:20px">
+        <div class="section-header">
+          <span class="section-title">وضع الصيانة</span>
+          <span id="maintenance-status-badge" class="badge badge-active">مفعّل — الموقع يعمل</span>
+        </div>
+        <div class="callout callout-warn" style="margin-bottom:16px">
+          عند تفعيل الصيانة، سيُوجَّه جميع المستخدمين إلى صفحة الصيانة — المدير يستطيع الدخول دائماً
+        </div>
+        <div class="form-group" style="max-width:480px;margin-bottom:16px">
+          <label>رسالة الصيانة (اختياري)</label>
+          <input type="text" id="maintenance-msg" placeholder="مثال: نعمل على تحديث الموقع، سنعود خلال ساعة"
+                 style="width:100%;padding:10px 12px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit">
+        </div>
+        <div class="flex gap-3">
+          <button class="btn btn-danger"   id="btn-enable-maintenance"  onclick="setMaintenance(true)">تفعيل الصيانة</button>
+          <button class="btn btn-success"  id="btn-disable-maintenance" onclick="setMaintenance(false)">إلغاء الصيانة</button>
+        </div>
+        <div id="maintenance-feedback" style="margin-top:12px;font-size:0.85rem"></div>
+      </div>
+
+      <!-- Site Stats -->
+      <div class="card">
+        <div class="section-header"><span class="section-title">📡 إحصائيات الزوار (آخر 30 يوماً)</span></div>
+        <div class="metrics-row" style="grid-template-columns:repeat(3,1fr)">
+          <div class="metric-card"><div class="m-label">زاروا اليوم</div><div class="m-value text-accent" id="v-today">—</div></div>
+          <div class="metric-card"><div class="m-label">هذا الأسبوع</div><div class="m-value" id="v-week">—</div></div>
+          <div class="metric-card"><div class="m-label">هذا الشهر</div><div class="m-value" id="v-month">—</div></div>
+        </div>
+        <div class="table-wrapper" style="margin-top:16px">
+          <table>
+            <thead><tr><th>البريد الإلكتروني</th><th>آخر ظهور</th><th>الحالة</th></tr></thead>
+            <tbody id="recent-visitors-tbody">
+              <tr><td colspan="3" class="tbl-empty">⏳ جارٍ التحميل…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

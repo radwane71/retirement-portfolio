@@ -13,8 +13,8 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>📈 محفظتي</h2>
-      <p>تتبع محفظة التقاعد</p>
+      <h2>💎 ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
@@ -23,7 +23,10 @@
       <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
       <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
       <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
       <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -34,18 +37,49 @@
     <div class="page-header">
       <div class="page-header-text">
         <h1>الإعدادات</h1>
-        <p>إدارة البيانات والنسخ الاحتياطية</p>
+        <p>تخصيص المظهر، إدارة البيانات، وإعدادات الحساب</p>
       </div>
     </div>
 
-    <!-- Backup & Restore -->
+    <!-- ── Appearance ── -->
     <div class="card mb-6">
       <div class="section-header mb-4">
-        <span class="section-title">النسخ الاحتياطي والاستعادة</span>
+        <span class="section-title">🎨 المظهر والعرض</span>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <h4>الوضع الفاتح / الداكن</h4>
+          <p>التبديل بين المظهر الداكن والفاتح — يُحفظ تلقائياً</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="theme-toggle" onchange="toggleTheme(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <h4>حجم الخط</h4>
+          <p>استخدم أزرار A− / A+ الظاهرة في أسفل الشاشة لتغيير حجم الخط — يُحفظ تلقائياً</p>
+        </div>
+        <div class="flex gap-2 align-items-center">
+          <button class="btn btn-secondary btn-sm" onclick="zoomOut()">A−</button>
+          <span id="settings-zoom-lbl" class="small text-muted" style="min-width:36px;text-align:center">—</span>
+          <button class="btn btn-secondary btn-sm" onclick="zoomIn()">A+</button>
+          <button class="btn btn-secondary btn-sm" onclick="resetZoom()">إعادة</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ── Backup & Restore ── -->
+    <div class="card mb-6">
+      <div class="section-header mb-4">
+        <span class="section-title">💾 النسخ الاحتياطي والاستعادة</span>
       </div>
 
       <div class="settings-grid">
-
         <!-- Export -->
         <div class="backup-card">
           <div class="bc-icon">📤</div>
@@ -72,9 +106,6 @@
             <strong class="text-danger">تحذير:</strong> ستُحذف جميع بياناتك الحالية
             ويتم استبدالها ببيانات الملف المختار.
           </p>
-          <p class="small text-muted">
-            يُقرأ رقم الإصدار من الملف للتحقق من التوافق قبل الاستعادة.
-          </p>
           <button class="btn btn-danger" id="btn-restore" onclick="triggerRestore()">
             استعادة من نسخة احتياطية
           </button>
@@ -82,42 +113,76 @@
                  onchange="restoreBackup(this)">
           <div class="backup-status" id="restore-status"></div>
         </div>
-
       </div>
-    </div>
 
-    <!-- Data overview -->
-    <div class="card mb-6">
-      <div class="section-header mb-4">
-        <span class="section-title">تفاصيل الجداول</span>
-      </div>
-      <p class="small text-muted mb-4">الجداول المشمولة في النسخ الاحتياطي والاستعادة:</p>
+      <p class="small text-muted mb-4">الجداول المشمولة في النسخ الاحتياطي:</p>
       <table class="info-table">
         <tbody>
-          <tr><td>holdings</td><td>الأسهم في المحفظة (الكميات، الأسعار، القطاعات)</td></tr>
-          <tr><td>transactions</td><td>سجل عمليات الشراء والبيع</td></tr>
-          <tr><td>dividends</td><td>الأرباح الموزعة المستلمة</td></tr>
-          <tr><td>cash_flows</td><td>التدفقات النقدية السنوية المخططة والفعلية</td></tr>
-          <tr><td>net_worth_snapshots</td><td>لقطات صافي الثروة عبر الزمن</td></tr>
+          <tr><td>holdings</td><td>الأسهم في المحفظة</td></tr>
+          <tr><td>transactions</td><td>سجل المعاملات</td></tr>
+          <tr><td>dividends</td><td>الأرباح الموزعة</td></tr>
+          <tr><td>cashflow_entries</td><td>التدفقات النقدية (إيداعات / سحوبات)</td></tr>
+          <tr><td>net_worth_snapshots</td><td>لقطات صافي الثروة</td></tr>
+          <tr><td>nw_assets</td><td>الأصول (حسابات، صكوك، مركبات…)</td></tr>
+          <tr><td>nw_liabilities</td><td>الالتزامات (قروض، بطاقات…)</td></tr>
           <tr><td>real_estate</td><td>الأصول العقارية</td></tr>
         </tbody>
       </table>
     </div>
 
-    <!-- Account info -->
-    <div class="card">
+    <!-- ── Account ── -->
+    <div class="card mb-6">
       <div class="section-header mb-4">
-        <span class="section-title">الحساب</span>
+        <span class="section-title">👤 الحساب</span>
       </div>
       <div id="account-info">
         <div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div>
       </div>
-      <div class="mt-4">
-        <button class="btn btn-danger" onclick="if(confirm('تسجيل الخروج؟')) logout()">
+      <div class="mt-4 flex gap-3">
+        <button class="btn btn-secondary" onclick="if(confirm('تسجيل الخروج؟')) logout()">
           🚪 تسجيل الخروج
         </button>
       </div>
     </div>
+
+    <!-- ── Reset All Data ── -->
+    <div class="card mb-6">
+      <div class="section-header mb-4">
+        <span class="section-title">🗑️ تصفير البيانات</span>
+      </div>
+      <p class="small text-muted mb-4">
+        يمسح جميع بياناتك (أسهم، معاملات، أرباح، تدفقات، عقارات، صافي الثروة)
+        <strong>مع إبقاء حسابك</strong>. مفيد لو أردت البدء من جديد.
+      </p>
+      <div id="reset-status" class="backup-status mb-4" style="display:none"></div>
+      <button class="btn btn-danger" id="btn-reset" onclick="resetAllData()">
+        🗑️ تصفير جميع البيانات
+      </button>
+    </div>
+
+    <!-- ── Delete Account ── -->
+    <div class="card" style="border-color:var(--danger)">
+      <div class="section-header mb-4">
+        <span class="section-title" style="color:var(--danger)">⛔ حذف الحساب نهائياً</span>
+      </div>
+      <p class="small text-muted mb-4">
+        يحذف حسابك وجميع بياناتك بشكل فوري ونهائي — <strong class="text-danger">لا يمكن التراجع</strong>.
+        أدخل بريدك الإلكتروني للتأكيد.
+      </p>
+      <div id="del-account-status" class="backup-status mb-4" style="display:none"></div>
+      <div class="form-group mb-4" style="max-width:360px">
+        <label>أدخل بريدك الإلكتروني تأكيداً *</label>
+        <input type="email" id="del-email-confirm" placeholder="example@email.com">
+      </div>
+      <button class="btn btn-danger" id="btn-delete-account" onclick="deleteAccount()">
+        ⛔ حذف حسابي نهائياً
+      </button>
+    </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+    </footer>
   </main>
 
   <div class="toast" id="toast"></div>
@@ -128,17 +193,46 @@
   <script src="js/utils.js"></script>
   <script src="js/settings.js"></script>
   <script>
-    // Show account info
     (async () => {
       const { data: { user } } = await supabaseClient.auth.getUser();
       if (!user) return;
+
+      // Account info
       document.getElementById('account-info').innerHTML = `
         <table class="info-table">
           <tr><td>البريد الإلكتروني</td><td>${user.email}</td></tr>
           <tr><td>معرّف المستخدم</td><td class="small text-muted">${user.id}</td></tr>
           <tr><td>تاريخ إنشاء الحساب</td><td>${new Date(user.created_at).toLocaleDateString('ar-SA',{year:'numeric',month:'long',day:'numeric'})}</td></tr>
         </table>`;
+
+      // Theme toggle state
+      const themeToggle = document.getElementById('theme-toggle');
+      if (themeToggle) {
+        themeToggle.checked = localStorage.getItem('tharwa-theme') === 'light';
+      }
+
+      // Zoom label
+      updateZoomLabel();
     })();
+
+    function updateZoomLabel() {
+      const lbl = document.getElementById('settings-zoom-lbl');
+      if (lbl && window.getZoomPct) lbl.textContent = window.getZoomPct() + '%';
+    }
+
+    const _origZoomIn  = window.zoomIn;
+    const _origZoomOut = window.zoomOut;
+    window.zoomIn  = function() { _origZoomIn?.();  updateZoomLabel(); document.querySelector('.zoom-label') && (document.querySelector('.zoom-label').textContent = window.getZoomPct() + '%'); };
+    window.zoomOut = function() { _origZoomOut?.(); updateZoomLabel(); document.querySelector('.zoom-label') && (document.querySelector('.zoom-label').textContent = window.getZoomPct() + '%'); };
+
+    function resetZoom() {
+      const ZOOM_DEF = 15;
+      document.documentElement.style.fontSize = ZOOM_DEF + 'px';
+      localStorage.setItem('tharwa-zoom', ZOOM_DEF);
+      updateZoomLabel();
+      const wl = document.querySelector('.zoom-label');
+      if (wl) wl.textContent = '100%';
+    }
   </script>
 </body>
 </html>

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
@@ -13,8 +13,8 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>📈 محفظتي</h2>
-      <p>تتبع محفظة التقاعد</p>
+      <h2>💎 ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
@@ -23,7 +23,10 @@
       <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
       <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
       <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
       <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -45,7 +48,7 @@
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" onclick="clearStaging()">مسح الكل</button>
           <button class="btn btn-primary  btn-sm" onclick="addStagingRow()">+ إضافة صف</button>
-          <button class="btn btn-success  btn-sm" id="btn-save-all" onclick="saveAllStaging()">حفظ الكل (0)</button>
+          <button class="btn btn-success  btn-sm" id="btn-save-all" onclick="saveAllStaging()">إضافة معاملات (0)</button>
         </div>
       </div>
       <p class="small text-muted mb-4">أضف أكثر من معاملة في آنٍ واحد قبل الحفظ. يمكن إدخال تواريخ تاريخية بحرية.</p>
@@ -81,13 +84,14 @@
         <form id="tx-form" onsubmit="addSingleTransaction(event)">
           <div class="form-grid">
             <div class="form-group"><label>التاريخ *</label><input type="date" id="t-date" required></div>
-            <div class="form-group"><label>رمز السهم *</label><input type="text" id="t-ticker" placeholder="2222" required></div>
+            <div class="form-group"><label>رمز السهم *</label><input type="text" id="t-ticker" placeholder="2222" required oninput="onSingleTickerInput()"></div>
             <div class="form-group"><label>اسم السهم *</label><input type="text" id="t-name" placeholder="أرامكو السعودية" required></div>
             <div class="form-group">
               <label>نوع العملية *</label>
               <select id="t-type" required>
                 <option value="buy">شراء</option>
                 <option value="sell">بيع</option>
+                <option value="grant">أسهم منحة</option>
               </select>
             </div>
             <div class="form-group"><label>عدد الأسهم *</label><input type="number" id="t-shares" step="any" placeholder="0" required></div>
@@ -119,8 +123,16 @@
         <table>
           <thead>
             <tr>
-              <th>التاريخ</th><th>الرمز</th><th>الاسم</th><th>النوع</th>
-              <th>الأسهم</th><th>السعر</th><th>العمولة</th><th>الضريبة</th><th>الإجمالي</th><th></th>
+              <th id="th-date"       class="sortable" onclick="sortTable('date')">التاريخ <span class="sort-arrow">↕</span></th>
+              <th id="th-ticker"     class="sortable" onclick="sortTable('ticker')">الرمز <span class="sort-arrow">↕</span></th>
+              <th id="th-name"       class="sortable" onclick="sortTable('name')">الاسم <span class="sort-arrow">↕</span></th>
+              <th id="th-type"       class="sortable" onclick="sortTable('type')">النوع <span class="sort-arrow">↕</span></th>
+              <th id="th-shares"     class="sortable" onclick="sortTable('shares')">الأسهم <span class="sort-arrow">↕</span></th>
+              <th id="th-price"      class="sortable" onclick="sortTable('price')">السعر <span class="sort-arrow">↕</span></th>
+              <th id="th-commission" class="sortable" onclick="sortTable('commission')">العمولة <span class="sort-arrow">↕</span></th>
+              <th id="th-vat">الضريبة</th>
+              <th id="th-total"      class="sortable" onclick="sortTable('total')">الإجمالي <span class="sort-arrow">↕</span></th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="tx-tbody">
@@ -129,7 +141,43 @@
         </table>
       </div>
     </div>
+    <footer class="site-footer">
+    ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+    أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+  </footer>
   </main>
+
+  <!-- Edit Modal -->
+  <div id="edit-modal" class="modal-overlay" style="display:none" onclick="closeEditModal(event)">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 style="margin:0;font-size:1rem">تعديل المعاملة</h3>
+        <button onclick="document.getElementById('edit-modal').style.display='none'" class="modal-close">✕</button>
+      </div>
+      <div class="form-grid" style="margin-top:16px">
+        <div class="form-group"><label>التاريخ</label><input type="date" id="edit-date"></div>
+        <div class="form-group"><label>رمز السهم</label><input type="text" id="edit-ticker" oninput="onEditTickerInput()"></div>
+        <div class="form-group"><label>الاسم</label><input type="text" id="edit-name"></div>
+        <div class="form-group">
+          <label>النوع</label>
+          <select id="edit-type" onchange="updateEditCalc()">
+            <option value="buy">شراء</option>
+            <option value="sell">بيع</option>
+            <option value="grant">أسهم منحة</option>
+          </select>
+        </div>
+        <div class="form-group"><label>عدد الأسهم</label><input type="number" step="any" id="edit-shares" oninput="updateEditCalc()"></div>
+        <div class="form-group"><label>السعر (ر.س)</label><input type="number" step="any" id="edit-price" oninput="updateEditCalc()"></div>
+        <div class="form-group"><label>العمولة</label><input type="text" id="edit-commission" readonly placeholder="تلقائي"></div>
+        <div class="form-group"><label>الضريبة</label><input type="text" id="edit-vat" readonly placeholder="تلقائي"></div>
+        <div class="form-group"><label>الإجمالي</label><input type="text" id="edit-total" readonly placeholder="تلقائي"></div>
+      </div>
+      <div class="flex gap-3 mt-4" style="justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="document.getElementById('edit-modal').style.display='none'">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveEditModal()">حفظ التعديلات</button>
+      </div>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
 
@@ -137,6 +185,9 @@
   <script src="js/supabase.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/utils.js"></script>
+  <script src="js/tickerdb.js"></script>
   <script src="js/transactions.js"></script>
 </body>
 </html>
+
+

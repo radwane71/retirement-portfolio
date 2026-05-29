@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
@@ -13,8 +13,8 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>📈 محفظتي</h2>
-      <p>تتبع محفظة التقاعد</p>
+      <h2>💎 ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
@@ -23,7 +23,10 @@
       <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
       <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
       <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
       <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -47,9 +50,9 @@
         <div class="sub">الأسهم × السعر الحالي</div>
       </div>
       <div class="stat-card">
-        <div class="label">إجمالي ما تم استثماره</div>
+        <div class="label">صافي رأس المال المنشغل</div>
         <div class="value num" id="stat-invested">—</div>
-        <div class="sub">من سجل المعاملات (شراء)</div>
+        <div class="sub">إجمالي شراء − إجمالي بيع</div>
       </div>
       <div class="stat-card">
         <div class="label">الربح / الخسارة غير المحقق</div>
@@ -81,7 +84,7 @@
         <div class="sub">المملوكة والمؤجرة</div>
       </div>
       <div class="stat-card">
-        <div class="label">الحقن النقدي هذا العام</div>
+        <div class="label">صافي التدفق النقدي هذا العام</div>
         <div class="value num" id="stat-cash-actual">—</div>
         <div class="sub" id="stat-cash-sub">—</div>
         <div class="progress-bar mt-2">
@@ -106,7 +109,10 @@
     <div class="card">
       <div class="section-header">
         <span class="section-title">الأسهم في المحفظة</span>
-        <button class="btn btn-primary btn-sm" onclick="openModal()">+ إضافة</button>
+        <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" id="btn-sync-tx" onclick="syncHoldingsFromTx()" title="يعيد حساب الأسهم والمتوسط من سجل المعاملات — يحافظ على القطاع والهدف والسعر الحالي">⟳ مزامنة من المعاملات</button>
+          <button class="btn btn-primary btn-sm" onclick="openModal()">+ إضافة</button>
+        </div>
       </div>
       <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
@@ -124,6 +130,10 @@
         </table>
       </div>
     </div>
+    <footer class="site-footer">
+    ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+    أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+  </footer>
   </main>
 
   <!-- Holding Modal -->
@@ -161,3 +171,5 @@
   <script src="js/dashboard.js"></script>
 </body>
 </html>
+
+

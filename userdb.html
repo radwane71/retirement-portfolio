@@ -3,19 +3,15 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>التدفقات النقدية - محفظتي</title>
+  <title>قاعدة بيانات أسهمي - ثروة</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
-
   <aside class="sidebar">
-    <div class="sidebar-logo">
-      <h2>💎 ثروة</h2>
-      <p>مفكرة حسابية شخصية</p>
-    </div>
+    <div class="sidebar-logo"><h2>💎 ثروة</h2><p>مفكرة حسابية شخصية</p></div>
     <nav class="sidebar-nav">
       <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
       <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
@@ -36,78 +32,66 @@
   <main class="main">
     <div class="page-header">
       <div class="page-header-text">
-        <h1>التدفقات النقدية</h1>
-        <p>تتبع الإيداعات والسحوبات من المحفظة — كل عملية تُسجَّل بشكل منفصل</p>
+        <h1>🗂️ قاعدة بيانات أسهمي</h1>
+        <p>سجّل الأسهم التي تريد متابعتها بالرمز والاسم والقطاع — تُستخدم في باقي الصفحات</p>
       </div>
     </div>
 
-    <!-- Summary cards -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="label">إجمالي الإيداعات</div>
-        <div class="value num text-success" id="cf-total-dep">—</div>
-        <div class="sub">جميع العمليات</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">إجمالي السحوبات</div>
-        <div class="value num text-danger" id="cf-total-with">—</div>
-        <div class="sub">جميع العمليات</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">صافي التدفق</div>
-        <div class="value num" id="cf-net">—</div>
-        <div class="sub">الإيداعات − السحوبات</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">هذا العام</div>
-        <div class="value num text-accent" id="cf-this-year">—</div>
-        <div class="sub" id="cf-this-year-lbl">—</div>
-      </div>
-    </div>
-
-    <!-- Add entry form -->
+    <!-- إضافة سهم -->
     <div class="card">
-      <div class="section-header"><span class="section-title">تسجيل حركة نقدية</span></div>
-      <form id="cf-form" onsubmit="addEntry(event)">
+      <div class="section-header">
+        <span class="section-title">إضافة سهم جديد</span>
+      </div>
+
+      <!-- تنبيه التعارض -->
+      <div id="ticker-conflict" style="display:none" class="ticker-warning">
+        <span id="ticker-conflict-msg"></span>
+        <button type="button" class="btn btn-warning btn-sm" onclick="confirmConflict()">متابعة بياناتي</button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="useOfficialData()">استخدم البيانات الرسمية</button>
+      </div>
+
+      <form id="add-form" onsubmit="addStock(event)">
         <div class="form-grid">
-          <div class="form-group"><label>التاريخ *</label><input type="date" id="cf-date" required></div>
           <div class="form-group">
-            <label>النوع *</label>
-            <select id="cf-type" required>
-              <option value="deposit">إيداع في المحفظة</option>
-              <option value="withdrawal">سحب من المحفظة</option>
+            <label>رمز السهم *</label>
+            <input type="text" id="s-ticker" placeholder="مثال: 2222" required oninput="onTickerInput()">
+          </div>
+          <div class="form-group">
+            <label>اسم السهم *</label>
+            <input type="text" id="s-name" placeholder="مثال: أرامكو السعودية" required>
+          </div>
+          <div class="form-group">
+            <label>القطاع *</label>
+            <select id="s-sector" required>
+              <option value="">— اختر القطاع —</option>
             </select>
           </div>
-          <div class="form-group"><label>المبلغ (ر.س) *</label><input type="number" id="cf-amount" step="0.01" min="0.01" placeholder="0.00" required></div>
-          <div class="form-group"><label>ملاحظات</label><input type="text" id="cf-notes" placeholder="وصف اختياري…"></div>
         </div>
         <div class="mt-4 flex gap-3" style="justify-content:flex-end">
           <button type="reset" class="btn btn-secondary" onclick="resetForm()">إعادة تعيين</button>
-          <button type="submit" class="btn btn-primary">تسجيل</button>
+          <button type="submit" class="btn btn-primary" id="add-btn">إضافة السهم</button>
         </div>
       </form>
     </div>
 
-    <!-- Year filter + table -->
+    <!-- قائمة الأسهم -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">سجل الحركات</span>
-        <div class="flex gap-2 align-items-center">
-          <label class="small text-muted">تصفية بالسنة:</label>
-          <select id="cf-year-filter" onchange="filterYear()" style="padding:5px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.85rem">
-            <option value="">كل السنوات</option>
-          </select>
-        </div>
+        <span class="section-title">أسهمي المسجلة</span>
+        <span id="stocks-count" class="small text-muted"></span>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
-              <th>التاريخ</th><th>النوع</th><th>المبلغ</th><th>ملاحظات</th><th></th>
+              <th>الرمز</th>
+              <th>الاسم</th>
+              <th>القطاع</th>
+              <th>في المحفظة</th>
+              <th></th>
             </tr>
           </thead>
-          <tbody id="cf-tbody">
+          <tbody id="stocks-tbody">
             <tr><td colspan="5"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
         </table>
@@ -116,7 +100,7 @@
 
     <footer class="site-footer">
       ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
-      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية
     </footer>
   </main>
 
@@ -126,6 +110,7 @@
   <script src="js/supabase.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/utils.js"></script>
-  <script src="js/cashflows.js"></script>
+  <script src="js/tickerdb.js"></script>
+  <script src="js/userdb.js"></script>
 </body>
 </html>

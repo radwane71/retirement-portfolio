@@ -13,8 +13,8 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>📈 محفظتي</h2>
-      <p>تتبع محفظة التقاعد</p>
+      <h2>💎 ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
       <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
@@ -23,7 +23,10 @@
       <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
       <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
       <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
+      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
       <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -34,38 +37,119 @@
     <div class="page-header">
       <div class="page-header-text">
         <h1>صافي الثروة</h1>
-        <p>تتبع نمو الثروة الإجمالية عبر الزمن — انقر على أي خلية لتعديلها</p>
+        <p>الأصول − الالتزامات = صافي الثروة — الأسهم والعقارات مسحوبة تلقائياً</p>
+      </div>
+      <button class="btn btn-primary" onclick="saveSnapshot()">📸 حفظ لقطة الآن</button>
+    </div>
+
+    <!-- Net worth summary bar -->
+    <div class="nw-total-bar">
+      <div class="nw-item">
+        <div class="lbl">إجمالي الأصول</div>
+        <div class="val text-success" id="nw-total-assets">—</div>
+      </div>
+      <div class="nw-eq">−</div>
+      <div class="nw-item">
+        <div class="lbl">إجمالي الالتزامات</div>
+        <div class="val text-danger" id="nw-total-liab">—</div>
+      </div>
+      <div class="nw-eq">=</div>
+      <div class="nw-item">
+        <div class="lbl">صافي الثروة</div>
+        <div class="val text-accent num bold" id="nw-net" style="font-size:1.65rem">—</div>
       </div>
     </div>
 
-    <!-- Add snapshot form -->
-    <div class="card">
-      <div class="section-header"><span class="section-title">إضافة لقطة جديدة</span></div>
-      <form id="nw-form" onsubmit="addSnapshot(event)">
-        <div class="form-grid">
-          <div class="form-group"><label>التاريخ *</label><input type="date" id="nw-date" required></div>
-          <div class="form-group"><label>صافي الثروة الإجمالي (ر.س) *</label><input type="number" id="nw-value" step="0.01" placeholder="0.00" required></div>
-          <div class="form-group" style="grid-column:span 2">
-            <label>ملاحظات</label>
-            <input type="text" id="nw-notes" placeholder="أي ملاحظات اختيارية…">
+    <!-- Assets & Liabilities grids -->
+    <div class="nw-assets-grid">
+
+      <!-- ASSETS -->
+      <div>
+        <div class="nw-section-label nw-assets-label">✅ الأصول</div>
+
+        <!-- Auto-pulled: stocks -->
+        <div class="card" style="margin-bottom:12px">
+          <div class="section-header">
+            <span class="section-title small">📈 الأسهم <span class="small text-muted">(تلقائي)</span></span>
+            <span class="num text-success bold" id="auto-stocks">—</span>
+          </div>
+          <p class="small text-muted">قيمة الأسهم = عدد الأسهم × السعر الحالي من صفحة لوحة التحكم</p>
+        </div>
+
+        <!-- Auto-pulled: real estate -->
+        <div class="card" style="margin-bottom:12px">
+          <div class="section-header">
+            <span class="section-title small">🏠 العقارات <span class="small text-muted">(تلقائي)</span></span>
+            <span class="num text-success bold" id="auto-realestate">—</span>
+          </div>
+          <p class="small text-muted">قيمة العقارات الحالية من صفحة العقارات (المملوكة والمؤجرة فقط)</p>
+        </div>
+
+        <!-- Manual assets table -->
+        <div class="card">
+          <div class="section-header">
+            <span class="section-title small">➕ أصول أخرى</span>
+            <button class="btn btn-primary btn-sm" onclick="openAssetModal()">+ إضافة</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead><tr><th>التصنيف</th><th>الاسم</th><th>القيمة</th><th></th></tr></thead>
+              <tbody id="assets-tbody">
+                <tr><td colspan="4"><div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div></td></tr>
+              </tbody>
+              <tfoot>
+                <tr style="border-top:2px solid var(--border)">
+                  <td colspan="2"><strong class="small">إجمالي الأصول الأخرى</strong></td>
+                  <td class="num bold text-success" id="assets-subtotal">—</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
           </div>
         </div>
-        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
-          <button type="reset" class="btn btn-secondary">إعادة تعيين</button>
-          <button type="submit" class="btn btn-primary">حفظ اللقطة</button>
+      </div>
+
+      <!-- LIABILITIES -->
+      <div>
+        <div class="nw-section-label nw-liab-label">🔴 الالتزامات</div>
+
+        <div class="card">
+          <div class="section-header">
+            <span class="section-title small">➕ الالتزامات</span>
+            <button class="btn btn-primary btn-sm" onclick="openLiabModal()">+ إضافة</button>
+          </div>
+          <div class="table-wrapper">
+            <table>
+              <thead><tr><th>التصنيف</th><th>الاسم</th><th>المبلغ</th><th></th></tr></thead>
+              <tbody id="liab-tbody">
+                <tr><td colspan="4"><div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div></td></tr>
+              </tbody>
+              <tfoot>
+                <tr style="border-top:2px solid var(--border)">
+                  <td colspan="2"><strong class="small">إجمالي الالتزامات</strong></td>
+                  <td class="num bold text-danger" id="liab-subtotal">—</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         </div>
-      </form>
+      </div>
     </div>
 
-    <!-- Chart -->
+    <!-- Historical chart + snapshots -->
     <div class="card">
-      <div class="section-header"><span class="section-title">مسار صافي الثروة</span></div>
-      <div class="chart-container" style="height:320px"><canvas id="nwChart"></canvas></div>
+      <div class="section-header">
+        <span class="section-title">📉 مسار صافي الثروة عبر الزمن</span>
+        <span class="small text-muted">اضغط "حفظ لقطة الآن" لإضافة نقطة جديدة</span>
+      </div>
+      <div class="chart-container" style="height:300px"><canvas id="nwChart"></canvas></div>
     </div>
 
-    <!-- Snapshots table -->
     <div class="card">
-      <div class="section-header"><span class="section-title">جميع اللقطات</span></div>
+      <div class="section-header">
+        <span class="section-title">اللقطات التاريخية</span>
+      </div>
       <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
         <table>
@@ -78,7 +162,72 @@
         </table>
       </div>
     </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+    </footer>
   </main>
+
+  <!-- Asset Modal -->
+  <div class="modal-overlay" id="asset-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="asset-modal-title">إضافة أصل</span>
+        <button class="modal-close" onclick="closeAssetModal()">✕</button>
+      </div>
+      <form id="asset-form" onsubmit="saveAsset(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>التصنيف *</label>
+            <select id="a-category" required>
+              <option value="bank">حساب بنكي / نقدي</option>
+              <option value="sukuk">صكوك / سندات</option>
+              <option value="vehicle">مركبة</option>
+              <option value="other">أخرى</option>
+            </select>
+          </div>
+          <div class="form-group"><label>الاسم *</label><input type="text" id="a-name" placeholder="مثال: حساب بنك الراجحي" required></div>
+          <div class="form-group"><label>القيمة (ر.س) *</label><input type="number" id="a-value" step="0.01" min="0" placeholder="0.00" required></div>
+          <div class="form-group" style="grid-column:span 2"><label>ملاحظات</label><input type="text" id="a-notes" placeholder="اختياري"></div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="button" class="btn btn-secondary" onclick="closeAssetModal()">إلغاء</button>
+          <button type="submit" class="btn btn-primary">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Liability Modal -->
+  <div class="modal-overlay" id="liab-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="liab-modal-title">إضافة التزام</span>
+        <button class="modal-close" onclick="closeLiabModal()">✕</button>
+      </div>
+      <form id="liab-form" onsubmit="saveLiab(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>التصنيف *</label>
+            <select id="l-category" required>
+              <option value="credit_card">بطاقة ائتمان</option>
+              <option value="loan">قرض</option>
+              <option value="mortgage">رهن عقاري</option>
+              <option value="other">أخرى</option>
+            </select>
+          </div>
+          <div class="form-group"><label>الاسم *</label><input type="text" id="l-name" placeholder="مثال: قرض السيارة" required></div>
+          <div class="form-group"><label>المبلغ المتبقي (ر.س) *</label><input type="number" id="l-value" step="0.01" min="0" placeholder="0.00" required></div>
+          <div class="form-group" style="grid-column:span 2"><label>ملاحظات</label><input type="text" id="l-notes" placeholder="اختياري"></div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="button" class="btn btn-secondary" onclick="closeLiabModal()">إلغاء</button>
+          <button type="submit" class="btn btn-primary">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
 
   <div class="toast" id="toast"></div>
 

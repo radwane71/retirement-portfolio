@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ثروة — تحت الصيانة</title>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Tajawal', sans-serif;
+      background: #0d1117; color: #e6edf3;
+      display: flex; align-items: center; justify-content: center;
+      min-height: 100vh; flex-direction: column; gap: 20px;
+      text-align: center; padding: 24px;
+    }
+    .icon { font-size: 4rem; margin-bottom: 8px; }
+    h1 { font-size: 1.8rem; font-weight: 700; }
+    p  { color: #8b949e; font-size: 1rem; line-height: 1.7; max-width: 420px; }
+    .admin-link {
+      margin-top: 32px;
+      font-size: 0.8rem;
+      color: #30363d;
+      cursor: pointer;
+      user-select: none;
+    }
+    .admin-link:hover { color: #8b949e; }
+    .admin-form { display:none; flex-direction:column; gap:12px; width:100%; max-width:320px; margin-top:8px; }
+    .admin-form input {
+      padding: 10px 14px; border-radius: 8px;
+      border: 1px solid #30363d; background: #161b22;
+      color: #e6edf3; font-family: inherit; font-size: 0.9rem;
+    }
+    .admin-form input:focus { outline: none; border-color: #f0b429; }
+    .admin-form button {
+      padding: 10px; border-radius: 8px; border: none;
+      background: #f0b429; color: #0d1117;
+      font-family: inherit; font-weight: 700; cursor: pointer;
+    }
+    #err { color: #f85149; font-size: 0.85rem; display:none; }
+  </style>
+</head>
+<body>
+  <div class="icon">🔧</div>
+  <h1>الموقع تحت الصيانة</h1>
+  <p>نعمل على تحسين المنصة وسنعود قريباً.<br>نعتذر عن أي إزعاج.</p>
+
+  <div class="admin-link" onclick="toggleAdminForm()">دخول الإدارة</div>
+
+  <form class="admin-form" id="admin-form" onsubmit="adminLogin(event)">
+    <input type="email"    id="m-email"    placeholder="البريد الإلكتروني" required>
+    <input type="password" id="m-password" placeholder="كلمة المرور"       required>
+    <div id="err"></div>
+    <button type="submit" id="m-btn">دخول</button>
+  </form>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script>
+    function toggleAdminForm() {
+      const f = document.getElementById('admin-form');
+      f.style.display = f.style.display === 'flex' ? 'none' : 'flex';
+    }
+
+    async function adminLogin(e) {
+      e.preventDefault();
+      const email    = document.getElementById('m-email').value.trim();
+      const password = document.getElementById('m-password').value;
+      const btn      = document.getElementById('m-btn');
+      const errEl    = document.getElementById('err');
+      errEl.style.display = 'none';
+      btn.textContent = 'جارٍ التحقق…'; btn.disabled = true;
+
+      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+      btn.textContent = 'دخول'; btn.disabled = false;
+
+      if (error) { errEl.textContent = 'بيانات غير صحيحة'; errEl.style.display = 'block'; return; }
+
+      const user = data.user;
+      if (!user?.user_metadata?.is_admin) {
+        errEl.textContent = 'هذه الصفحة للمدير فقط';
+        errEl.style.display = 'block';
+        await supabaseClient.auth.signOut();
+        return;
+      }
+      window.location.href = 'dashboard.html';
+    }
+  </script>
+</body>
+</html>
