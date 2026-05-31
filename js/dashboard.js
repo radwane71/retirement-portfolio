@@ -105,11 +105,24 @@ async function refreshPrices(silent = false) {
     if (error) throw error;
 
     if (json?.updated > 0) {
-      await loadAllData();
+      // تحديث فوري للأسعار في الـ holdings المحلي
+      if (json.prices) {
+        holdings.forEach(h => {
+          if (json.prices[h.ticker] != null) {
+            h.current_price = json.prices[h.ticker];
+          }
+        });
+      }
+      // رسم فوري بالأسعار الجديدة
       renderStats(); renderCharts(); renderTable();
       renderPriceZonesCard(); renderBreakEvenCard();
       renderAllocationChart(); renderRetirementCard();
       if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
+      // مزامنة خلفية مع Supabase
+      loadAllData().then(() => {
+        renderStats(); renderTable(); renderPriceZonesCard();
+        renderBreakEvenCard(); renderAllocationChart(); renderRetirementCard();
+      });
     } else {
       if (btn) btn.textContent = json?.message ? `⚠️ ${json.message}` : '⚠️ لم يتحدث';
     }
