@@ -141,11 +141,14 @@ function renderTable() {
 
   tbody.innerHTML = userStocks.map(s => {
     const inPortfolio = holdings.includes(s.ticker);
+    const badgeHtml   = inPortfolio
+      ? `<span class="badge badge-active">✓ في المحفظة</span>`
+      : `<span class="badge" style="background:rgba(100,100,100,0.15);color:var(--text-muted)">خارج المحفظة</span>`;
     return `<tr>
       <td><strong class="text-accent">${esc(s.ticker)}</strong></td>
       <td style="cursor:pointer" title="انقر للتعديل" onclick="editStock('${esc(s.id)}','name','${esc(s.name)}')">${esc(s.name)}</td>
       <td style="cursor:pointer" title="انقر للتعديل" onclick="editStockSector('${esc(s.id)}','${esc(s.sector)}')">${esc(s.sector)}</td>
-      <td>${inPortfolio ? '<span class="badge badge-active">نعم</span>' : '<span class="badge badge-deleted">—</span>'}</td>
+      <td>${badgeHtml}</td>
       <td><button class="btn btn-danger btn-sm" onclick="deleteStock('${esc(s.id)}','${esc(s.ticker)}')">حذف</button></td>
     </tr>`;
   }).join('');
@@ -176,6 +179,16 @@ async function saveSectorEdit(id) {
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم تعديل القطاع ✓', 'success');
   await loadAll();
+}
+
+// ── تصدير CSV ─────────────────────────────────────────────────
+function exportUserStocksCSV() {
+  if (!userStocks.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+  exportCSV(`قاعدة_أسهمي_${todayISO()}.csv`,
+    ['الرمز', 'الاسم', 'القطاع'],
+    userStocks.map(s => [s.ticker, s.name, s.sector || ''])
+  );
+  showToast(`✓ تم تصدير ${userStocks.length} سهم`, 'success');
 }
 
 init();

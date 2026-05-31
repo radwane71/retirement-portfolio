@@ -267,7 +267,7 @@ async function loadAnalytics() {
   if (total > 0) {
     const hCount  = counts[0].count || 0;
     const txCount = counts[1].count || 0;
-    const reCount = counts[5].count || 0;
+    const reCount = counts[7].count || 0;
     setText('m-avg-holdings', (hCount  / total).toFixed(1));
     setText('m-avg-tx',       (txCount / total).toFixed(1));
     setText('m-re-ratio',     Math.round(reCount / total * 100) + '%');

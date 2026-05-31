@@ -43,11 +43,51 @@ function hideTickerWarning() {
   if (el) el.style.display = 'none';
 }
 
+// يُستدعى عند الضغط على "متابعة" في تحذير الرمز غير المعروف
+function confirmUnknownTicker() {
+  hideTickerWarning();
+  // أكمل الإرسال برمج غير رسمي — المستخدم أكد
+  const form = document.getElementById('tx-form');
+  if (form) form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+}
+
+// يُستدعى عند الضغط على "إلغاء" في تحذير الرمز غير المعروف
+function cancelUnknownTicker() {
+  hideTickerWarning();
+  document.getElementById('t-ticker')?.focus();
+}
+
+function onTypeChange(type) {
+  const priceInput = document.getElementById('t-price');
+  const priceLabel = document.getElementById('t-price-label');
+  if (!priceInput) return;
+  if (type === 'grant') {
+    priceInput.required    = false;
+    priceInput.value       = '0';
+    priceInput.readOnly    = true;
+    priceInput.style.opacity = '0.5';
+    if (priceLabel) priceLabel.textContent = 'السعر (ر.س) — منحة مجانية';
+    // صفّر الحقول الأخرى
+    ['t-commission','t-vat','t-total'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.value = '0';
+    });
+  } else {
+    priceInput.required    = true;
+    priceInput.readOnly    = false;
+    priceInput.style.opacity = '';
+    if (priceInput.value === '0') priceInput.value = '';
+    if (priceLabel) priceLabel.textContent = 'السعر (ر.س) *';
+    updateSingleCalc();
+  }
+}
+
 function updateSingleCalc() {
   const shares = +document.getElementById('t-shares').value;
   const price  = +document.getElementById('t-price').value;
   const type   = document.getElementById('t-type').value;
-  if (!shares || !price) {
+  const isGrant = type === 'grant';
+  if (!shares || (!price && !isGrant)) {
     ['t-commission','t-vat','t-total'].forEach(id => document.getElementById(id).value = '');
     return;
   }
@@ -61,12 +101,20 @@ function updateSingleCalc() {
 
 async function addSingleTransaction(e) {
   e.preventDefault();
-  const { data: { user } } = await supabaseClient.auth.getUser();
   const shares = +document.getElementById('t-shares').value;
   const price  = +document.getElementById('t-price').value;
   const type   = document.getElementById('t-type').value;
+  const ticker = document.getElementById('t-ticker').value.trim().toUpperCase();
+  const name   = document.getElementById('t-name').value.trim();
+
+  if (!ticker)                          { showToast('أدخل رمز السهم', 'error'); return; }
+  if (!name)                            { showToast('أدخل اسم السهم', 'error'); return; }
+  if (shares <= 0)                      { showToast('عدد الأسهم يجب أن يكون أكبر من صفر', 'error'); return; }
+  if (type !== 'grant' && price <= 0)   { showToast('سعر السهم يجب أن يكون أكبر من صفر', 'error'); return; }
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
   const c = type === 'grant'
-    ? { commission: 0, vat: 0, totalBuy: shares * price }
+    ? { commission: 0, vat: 0, totalBuy: 0, totalSell: 0 }
     : calcCommission(shares, price);
   const payload = {
     user_id: user.id,
@@ -75,7 +123,7 @@ async function addSingleTransaction(e) {
     name:    document.getElementById('t-name').value.trim(),
     type, shares, price,
     commission: c.commission, vat: c.vat,
-    total: type === 'sell' ? c.totalSell : c.totalBuy
+    total: type === 'grant' ? 0 : (type === 'sell' ? c.totalSell : c.totalBuy)
   };
   const { error } = await supabaseClient.from('transactions').insert([payload]);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
@@ -139,10 +187,11 @@ function stagingTickerInput(id, input) {
 }
 
 function recalcStaging(r) {
-  const sh = parseFloat(r.shares), pr = parseFloat(r.price);
-  if (sh > 0 && pr > 0) {
-    if (r.type === 'grant') {
-      r.commission = 0; r.vat = 0; r.total = sh * pr;
+  const sh = parseFloat(r.shares), pr = parseFloat(r.price) || 0;
+  const isGrant = r.type === 'grant';
+  if (sh > 0 && (pr > 0 || isGrant)) {
+    if (isGrant) {
+      r.commission = 0; r.vat = 0; r.total = 0;  // منحة: مجانية تماماً
     } else {
       const c = calcCommission(sh, pr);
       r.commission = c.commission; r.vat = c.vat;
@@ -192,6 +241,7 @@ async function saveAllStaging() {
   if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحفظ…'; }
 
   let saved = 0;
+  const failedRows = [];
   for (const r of stagingRows) {
     recalcStaging(r);
     const payload = {
@@ -202,10 +252,15 @@ async function saveAllStaging() {
     };
     const { error } = await supabaseClient.from('transactions').insert([payload]);
     if (!error) { await updateHolding(user.id, payload); saved++; }
+    else { failedRows.push(r.ticker + ' (' + r.date + '): ' + error.message); }
   }
 
   if (btn) btn.disabled = false;
-  showToast(`تم إضافة ${saved} من ${stagingRows.length} معاملة`, saved === stagingRows.length ? 'success' : 'error');
+  if (failedRows.length) {
+    showToast(`تم إضافة ${saved} من ${stagingRows.length} — فشل: ${failedRows.join(' | ')}`, 'error');
+  } else {
+    showToast(`تم إضافة ${saved} معاملة بنجاح`, 'success');
+  }
 
   if (saved > 0) {
     stagingRows = [];
@@ -219,7 +274,7 @@ async function saveAllStaging() {
 
 // ── DB helpers ────────────────────────────────────────────────
 async function loadTransactions() {
-  const { data, error } = await supabaseClient.from('transactions').select('*').order('date', { ascending: false });
+  const { data, error } = await supabaseClient.from('transactions').select('*').eq('is_archived', false).order('date', { ascending: false });
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   transactions = data || [];
 }
@@ -239,8 +294,11 @@ async function updateHolding(userId, tx) {
       await supabaseClient.from('holdings').insert([{
         user_id: userId, ticker: tx.ticker, name: tx.name, sector: '',
         shares: tx.shares, avg_price: tx.type === 'grant' ? 0 : tx.price,
-        current_price: tx.price, target_weight: 0
+        current_price: tx.type === 'grant' ? 0 : tx.price, target_weight: 0
       }]);
+      if (tx.type === 'grant') {
+        showToast('تمت إضافة المنحة — يرجى تحديث السعر الحالي للسهم ' + tx.ticker + ' في المحفظة', 'info');
+      }
     }
   } else if (tx.type === 'sell' && existing) {
     const newShares = Math.max(0, existing.shares - tx.shares);
@@ -295,8 +353,79 @@ function sortArrow(field) {
   return `<span class="sort-arrow active">${sortDir === 'asc' ? '↑' : '↓'}</span>`;
 }
 
+// ── Transaction Summary Stats ─────────────────────────────────
+function renderTxStats() {
+  const el = document.getElementById('tx-stats');
+  if (!el) return;
+
+  const buys   = transactions.filter(t => t.type === 'buy');
+  const sells  = transactions.filter(t => t.type === 'sell');
+  const grants = transactions.filter(t => t.type === 'grant');
+
+  // حساب متوسط تكلفة الشراء لكل رمز (ترتيب تاريخي)
+  const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+  const buyMap = {};
+  sorted.forEach(t => {
+    if (t.type === 'buy') {
+      if (!buyMap[t.ticker]) buyMap[t.ticker] = { cost: 0, shares: 0 };
+      buyMap[t.ticker].cost   += +t.shares * +t.price;
+      buyMap[t.ticker].shares += +t.shares;
+    }
+  });
+
+  let profitSells = 0, profitAmount = 0;
+  let lossSells   = 0, lossAmount   = 0;
+  sells.forEach(t => {
+    const avgCost = buyMap[t.ticker]?.shares > 0
+      ? buyMap[t.ticker].cost / buyMap[t.ticker].shares : 0;
+    const pnl = (+t.price - avgCost) * +t.shares;
+    if (pnl >= 0) { profitSells++;  profitAmount += pnl; }
+    else          { lossSells++;    lossAmount   += Math.abs(pnl); }
+  });
+
+  const totalBuyAmt  = buys.reduce((s, t)  => s + +t.total, 0);
+  const totalSellAmt = sells.reduce((s, t) => s + +t.total, 0);
+
+  el.innerHTML = `
+    <div class="tx-stat-item">
+      <div class="tx-stat-val">${transactions.length}</div>
+      <div class="tx-stat-lbl">إجمالي العمليات</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-accent">${buys.length}</div>
+      <div class="tx-stat-lbl">عمليات شراء</div>
+      <div class="tx-stat-sub">${formatSAR(totalBuyAmt)}</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-success">${sells.length}</div>
+      <div class="tx-stat-lbl">عمليات بيع</div>
+      <div class="tx-stat-sub">${formatSAR(totalSellAmt)}</div>
+    </div>
+    ${grants.length ? `
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val" style="color:var(--text-muted)">${grants.length}</div>
+      <div class="tx-stat-lbl">منح أسهم</div>
+    </div>` : ''}
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-success">↑ ${profitSells}</div>
+      <div class="tx-stat-lbl">صفقات رابحة</div>
+      <div class="tx-stat-sub text-success">+${formatSAR(profitAmount)}</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-danger">↓ ${lossSells}</div>
+      <div class="tx-stat-lbl">صفقات خاسرة</div>
+      <div class="tx-stat-sub text-danger">−${formatSAR(lossAmount)}</div>
+    </div>`;
+}
+
 // ── Render transaction log ────────────────────────────────────
 function renderTable() {
+  renderTxStats();
   const tbody = document.getElementById('tx-tbody');
   if (!tbody) return;
 
@@ -317,7 +446,7 @@ function renderTable() {
       <td ${ed('transactions',t.id,'ticker','text',t.ticker,'text-accent bold')}>${esc(t.ticker)}</td>
       <td ${ed('transactions',t.id,'name','text',t.name)}>${esc(t.name)}</td>
       <td ${ed('transactions',t.id,'type','text',t.type,'','txtype')}><span class="badge badge-${t.type}">${typeLabel[t.type]||t.type}</span></td>
-      <td ${ed('transactions',t.id,'shares','number',t.shares,'num')}>${formatNum(t.shares,4)}</td>
+      <td ${ed('transactions',t.id,'shares','number',t.shares,'num')}>${formatShares(t.shares)}</td>
       <td ${ed('transactions',t.id,'price','number',t.price,'num')}>${formatSAR(t.price)}</td>
       <td class="num text-muted">${formatSAR(t.commission)}</td>
       <td class="num text-muted">${formatSAR(t.vat)}</td>
@@ -325,7 +454,7 @@ function renderTable() {
       <td>
         <div class="flex gap-1">
           <button class="btn btn-secondary btn-sm" onclick="openEditModal('${esc(t.id)}')">تعديل</button>
-          <button class="btn btn-danger btn-sm"    onclick="deleteTx('${esc(t.id)}')">حذف</button>
+          <button class="btn btn-danger btn-sm"    onclick="archiveTx('${esc(t.id)}')">أرشفة</button>
         </div>
       </td>
     </tr>`;
@@ -334,7 +463,8 @@ function renderTable() {
   // Update sort indicators
   ['date','ticker','name','type','shares','price','commission','vat','total'].forEach(f => {
     const th = document.getElementById('th-' + f);
-    if (th) th.querySelector('.sort-arrow').outerHTML = sortArrow(f);
+    const arrow = th?.querySelector('.sort-arrow');
+    if (arrow) arrow.outerHTML = sortArrow(f);
   });
 
   enableInlineEditing(tbody, onTxSaved);
@@ -353,24 +483,29 @@ async function onTxSaved(id, field, newVal) {
   row[field] = newVal;
   if (['shares', 'price', 'type'].includes(field)) {
     const isGrant = row.type === 'grant';
+    // منحة: السعر يُصبح 0 تلقائياً
+    if (isGrant && field === 'type') {
+      row.price = 0;
+      await supabaseClient.from('transactions').update({ price: 0 }).eq('id', id);
+    }
     const c     = isGrant ? { commission: 0, vat: 0 } : calcCommission(row.shares, row.price);
-    const total = isGrant ? row.shares * row.price
-                          : (row.type === 'sell' ? c.totalSell : c.totalBuy);
+    const total = isGrant ? 0 : (row.type === 'sell' ? c.totalSell : c.totalBuy);
     await supabaseClient.from('transactions').update({ commission: c.commission, vat: c.vat, total }).eq('id', id);
     row.commission = c.commission; row.vat = c.vat; row.total = total;
+    showToast('⚠️ تغيير نوع/كمية المعاملة لا يُحدِّث المحفظة تلقائياً — استخدم "مزامنة من المعاملات" في لوحة التحكم', 'info');
   }
   renderTable();
 }
 
-async function deleteTx(id) {
-  if (!confirm('هل أنت متأكد من حذف هذه المعاملة؟')) return;
+async function archiveTx(id) {
+  if (!confirm('أرشفة هذه المعاملة؟ ستُخفى من الحسابات والمحفظة لكنها تبقى في قاعدة البيانات كسجل تاريخي.')) return;
   const tx = transactions.find(t => t.id === id);
   if (!tx) return;
   const { data: { user } } = await supabaseClient.auth.getUser();
-  const { error } = await supabaseClient.from('transactions').delete().eq('id', id);
+  const { error } = await supabaseClient.from('transactions').update({ is_archived: true }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   await reverseHolding(user.id, tx);
-  showToast('تم الحذف وتحديث المحفظة', 'success');
+  showToast('تمت الأرشفة وتحديث المحفظة', 'success');
   await loadTransactions();
   renderTable();
 }
@@ -381,14 +516,32 @@ function openEditModal(id) {
   if (!t) return;
   _editId = id;
 
-  document.getElementById('edit-date').value   = t.date || '';
+  document.getElementById('edit-date').value   = t.date   || '';
   document.getElementById('edit-ticker').value = t.ticker || '';
-  document.getElementById('edit-name').value   = t.name || '';
-  document.getElementById('edit-type').value   = t.type || 'buy';
+  document.getElementById('edit-name').value   = t.name   || '';
+  document.getElementById('edit-type').value   = t.type   || 'buy';
   document.getElementById('edit-shares').value = t.shares || '';
-  document.getElementById('edit-price').value  = t.price || '';
+  document.getElementById('edit-price').value  = (t.type === 'grant') ? '0' : (t.price || '');
+
+  // ضبط حقل السعر للمنحة
+  onEditTypeChange(t.type || 'buy');
   updateEditCalc();
   document.getElementById('edit-modal').style.display = 'flex';
+}
+
+// يتحكم في قفل/فتح حقل السعر في نافذة التعديل
+function onEditTypeChange(type) {
+  const priceInput = document.getElementById('edit-price');
+  if (!priceInput) return;
+  if (type === 'grant') {
+    priceInput.value    = '0';
+    priceInput.readOnly = true;
+    priceInput.style.opacity = '0.5';
+  } else {
+    priceInput.readOnly = false;
+    priceInput.style.opacity = '';
+    if (priceInput.value === '0') priceInput.value = '';
+  }
 }
 
 function closeEditModal(e) {
@@ -409,7 +562,8 @@ function updateEditCalc() {
   const shares = +document.getElementById('edit-shares').value;
   const price  = +document.getElementById('edit-price').value;
   const type   = document.getElementById('edit-type').value;
-  if (!shares || !price) {
+  const isGrant = type === 'grant';
+  if (!shares || (!price && !isGrant)) {
     ['edit-commission','edit-vat','edit-total'].forEach(id => document.getElementById(id).value = '');
     return;
   }
@@ -430,9 +584,9 @@ async function saveEditModal() {
   const name   = document.getElementById('edit-name').value.trim();
   const date   = document.getElementById('edit-date').value;
 
-  if (!date || !ticker || !name || !shares) {
-    showToast('جميع الحقول مطلوبة', 'error'); return;
-  }
+  if (!date || !ticker || !name)            { showToast('جميع الحقول مطلوبة', 'error'); return; }
+  if (shares <= 0)                          { showToast('عدد الأسهم يجب أن يكون أكبر من صفر', 'error'); return; }
+  if (type !== 'grant' && price <= 0)       { showToast('سعر السهم يجب أن يكون أكبر من صفر', 'error'); return; }
 
   const c = type === 'grant'
     ? { commission: 0, vat: 0, totalBuy: shares * price, totalSell: shares * price }
@@ -446,11 +600,32 @@ async function saveEditModal() {
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
 
+  // عكس أثر المعاملة القديمة ثم تطبيق الجديدة على holdings
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const oldTx = transactions.find(t => t.id === _editId);
+  if (oldTx) await reverseHolding(user.id, oldTx);
+  await updateHolding(user.id, { ticker, name, type, shares, price, total });
+
   showToast('تم حفظ التعديلات ✓', 'success');
   document.getElementById('edit-modal').style.display = 'none';
   _editId = null;
   await loadTransactions();
   renderTable();
+}
+
+// ── تصدير CSV ─────────────────────────────────────────────────
+function exportTransactionsCSV() {
+  if (!transactions.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+  const TYPE_AR = { buy: 'شراء', sell: 'بيع', grant: 'منحة', split: 'تجزئة' };
+  exportCSV(`معاملات_${todayISO()}.csv`,
+    ['التاريخ', 'الرمز', 'الاسم', 'النوع', 'الأسهم', 'السعر', 'العمولة', 'الضريبة', 'الإجمالي'],
+    transactions.map(t => [
+      t.date, t.ticker, t.name,
+      TYPE_AR[t.type] || t.type,
+      t.shares, t.price, t.commission, t.vat, t.total
+    ])
+  );
+  showToast(`✓ تم تصدير ${transactions.length} معاملة`, 'success');
 }
 
 init();

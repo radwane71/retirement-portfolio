@@ -1,6 +1,10 @@
 let dividends    = [];
-let txBuyRows    = [];   // {date, ticker, total} — buy transactions only
+let txBuyRows    = [];
+let txSellRows   = [];
 let selectedYear = 'all';
+let chartView    = 'month';   // 'month' | 'year'
+let incomeMode   = 'bar';     // 'bar' | 'line' | 'stacked' | 'table'
+let incomeChart  = null;
 
 function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
   return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
@@ -19,18 +23,31 @@ async function init() {
   document.getElementById('d-month').value = now.getMonth() + 1;
   document.getElementById('d-year').value  = now.getFullYear();
 
+  document.getElementById('d-ticker').addEventListener('input', onDivTickerInput);
+
   await loadData();
   renderAll();
 }
 
+function onDivTickerInput() {
+  const inp    = document.getElementById('d-ticker');
+  const ticker = inp.value.trim().toUpperCase();
+  inp.value    = ticker;
+  const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
+  const name     = official?.name || (typeof TICKER_DB !== 'undefined' ? TICKER_DB[ticker] : null);
+  if (name) document.getElementById('d-name').value = name;
+}
+
 async function loadData() {
   const [rDiv, rTx] = await Promise.all([
-    supabaseClient.from('dividends').select('*').order('date', { ascending: false }),
-    supabaseClient.from('transactions').select('date, ticker, total, type').eq('type', 'buy')
+    supabaseClient.from('dividends').select('*').eq('is_archived', false).order('date', { ascending: false }),
+    supabaseClient.from('transactions').select('date, ticker, name, total, type, shares, price').eq('is_archived', false)
   ]);
   if (rDiv.error) { showToast('خطأ في تحميل الأرباح', 'error'); return; }
-  dividends  = rDiv.data || [];
-  txBuyRows  = rTx.data  || [];
+  const allTx  = rTx.data || [];
+  dividends    = rDiv.data || [];
+  txBuyRows    = allTx.filter(t => t.type === 'buy' || t.type === 'grant');
+  txSellRows   = allTx.filter(t => t.type === 'sell');
 }
 
 async function loadDividends() {
@@ -38,51 +55,191 @@ async function loadDividends() {
 }
 
 function renderAll() {
+  renderDivStats();
   renderSummaries();
   renderTable();
+  renderIncomeChart();
+}
+
+// مجموع التوزيعات الفعلية خلال آخر 12 شهراً (TTM) — العُرف المالي المعتمد
+// لا توسيع خطّي: نجمع ما استُلم فعلاً في آخر 12 فترة شهرية (متطابق مع منطق رسم آخر 12 شهراً)
+function _ttmDividends() {
+  const now  = new Date();
+  const keys = new Set();
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    keys.add(d.getFullYear() + '-' + (d.getMonth() + 1));
+  }
+  return dividends.reduce((s, d) => keys.has(+d.year + '-' + +d.month) ? s + +d.amount : s, 0);
+}
+
+// تكلفة الحيازات الحالية = مجموع (متوسط التكلفة × الأسهم المتبقية) لكل سهم
+// نفس المحرّك المستخدم في الجدول السنوي → مقام موحّد للعائد بلا تضارب
+function _currentCostBasis() {
+  const currentYear = new Date().getFullYear();
+  const tickers = [...new Set([...txBuyRows.map(t => t.ticker), ...txSellRows.map(t => t.ticker)])];
+  return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
+}
+
+// ── شريط الإحصائيات الكلية ────────────────────────────────────
+function renderDivStats() {
+  const el = document.getElementById('div-stats');
+  if (!el) return;
+
+  const currentYear = new Date().getFullYear();
+  const today       = new Date();
+  const startOfYear = new Date(currentYear, 0, 1);
+  const daysElapsed = Math.floor((today - startOfYear) / 86400000) + 1;
+  const daysInYear  = ((currentYear % 4 === 0 && currentYear % 100 !== 0) || currentYear % 400 === 0) ? 366 : 365;
+
+  const totalAll = dividends.reduce((s, d) => s + +d.amount, 0);
+  const yearDiv  = dividends.filter(d => +d.year === currentYear).reduce((s, d) => s + +d.amount, 0);
+  const ttm      = _ttmDividends();
+
+  // رأس المال المنشغل الحالي = تكلفة الحيازات (متوسط التكلفة × الأسهم المتبقية)
+  const netCapital = _currentCostBasis();
+
+  // العائد على التكلفة بأساس TTM (Trailing Yield on Cost)
+  const yieldPct = netCapital > 0 ? ttm / netCapital * 100 : 0;
+  const yieldCls = yieldPct >= 5 ? 'text-success' : yieldPct >= 3 ? 'text-accent' : 'text-muted';
+
+  // عدد الأسهم الموزِّعة
+  const uniqueTickers = new Set(dividends.map(d => d.ticker)).size;
+
+  el.innerHTML = `
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-success">${formatSAR(totalAll)}</div>
+      <div class="tx-stat-lbl">إجمالي الأرباح (كل الأوقات)</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-accent">${formatSAR(yearDiv)}</div>
+      <div class="tx-stat-lbl">أرباح ${currentYear} حتى الآن</div>
+      <div class="tx-stat-sub">يوم ${daysElapsed} من ${daysInYear}</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-accent" title="مجموع التوزيعات الفعلية المستلمة خلال آخر 12 شهراً — بلا تخمين أو توسيع">${formatSAR(ttm)}</div>
+      <div class="tx-stat-lbl">أرباح آخر 12 شهراً (TTM)</div>
+      <div class="tx-stat-sub">فعلي — العُرف المعتمد</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val ${yieldCls}" title="العائد على التكلفة = أرباح آخر 12 شهراً ÷ تكلفة الحيازات الحالية">${yieldPct.toFixed(2)}%</div>
+      <div class="tx-stat-lbl">العائد على التكلفة (TTM)</div>
+      <div class="tx-stat-sub">TTM ÷ تكلفة الحيازات</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val" title="متوسط التكلفة × الأسهم المتبقية — صافي رأس المال المستثمر فعلاً">${formatSAR(netCapital)}</div>
+      <div class="tx-stat-lbl">تكلفة الحيازات الحالية</div>
+      <div class="tx-stat-sub">متوسط التكلفة × الأسهم المتبقية</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val">${uniqueTickers}</div>
+      <div class="tx-stat-lbl">أسهم موزِّعة</div>
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════
-// بناء خرائط التكلفة من سجل المعاملات
+// بناء خرائط التكلفة — الحسبة الصحيحة: avg_cost × الأسهم المتبقية
 // ══════════════════════════════════════════════════════════════
+
+// تكلفة الحيازات الفعلية لرمز واحد في نهاية سنة معينة
+// avg_cost = مجموع (price × shares للمشتريات) ÷ إجمالي الأسهم المشتراة
+// costBasis = avg_cost × (أسهم مشتراة − أسهم مباعة)
+function _tickerCostBasisAtYear(ticker, upToYear) {
+  const allTx = [...txBuyRows, ...txSellRows].filter(t => t.ticker === ticker);
+  let buyShares = 0, buyCost = 0, sellShares = 0;
+  allTx.forEach(t => {
+    if (!t.date) return;
+    if (new Date(t.date).getFullYear() > upToYear) return;
+    if (t.type === 'buy') {
+      buyCost   += +t.price * +t.shares;   // price per share × shares (بدون عمولة)
+      buyShares += +t.shares;
+    } else if (t.type === 'grant') {
+      buyShares += +t.shares;              // منحة: تضيف أسهم بتكلفة صفر
+    } else if (t.type === 'sell') {
+      sellShares += +t.shares;
+    }
+  });
+  const remaining = buyShares - sellShares;
+  if (remaining < 0.001 || buyShares < 0.001) return 0;
+  const avgCost = buyCost / buyShares;
+  return avgCost * remaining;
+}
+
 function buildCostMaps() {
-  // yearBuyCost:       { '2025': 150000, ... }
-  // tickerYearCost:    { '2222': { '2025': 50000, 'all': 80000 }, ... }
+  const allTickers = [...new Set([
+    ...txBuyRows.map(t => t.ticker),
+    ...txSellRows.map(t => t.ticker),
+  ])];
+
+  const txAllYears = [...new Set([
+    ...txBuyRows.map(t => new Date(t.date).getFullYear()),
+    ...txSellRows.map(t => new Date(t.date).getFullYear()),
+  ])].sort((a, b) => a - b);
+
+  if (!txAllYears.length) {
+    return { yearBuyCost: {}, tickerYearCost: {}, yearPortfolio: {}, tickerYearPortfolio: {} };
+  }
+
+  const firstYear  = txAllYears[0];
+  const currentYear = new Date().getFullYear();
+
+  // ── yearPortfolio: إجمالي تكلفة الحيازات في نهاية كل سنة ───
+  const yearPortfolio      = {};
+  const tickerYearPortfolio = {};
+
+  for (let yr = firstYear; yr <= currentYear; yr++) {
+    const y = String(yr);
+    let total = 0;
+    allTickers.forEach(ticker => {
+      const basis = _tickerCostBasisAtYear(ticker, yr);
+      if (!tickerYearPortfolio[ticker]) tickerYearPortfolio[ticker] = { all: 0 };
+      tickerYearPortfolio[ticker][y] = basis;
+      total += basis;
+    });
+    yearPortfolio[y] = total;
+  }
+
+  // all = القيمة الحالية (آخر سنة)
+  yearPortfolio.all = yearPortfolio[String(currentYear)] || 0;
+  allTickers.forEach(ticker => {
+    if (tickerYearPortfolio[ticker])
+      tickerYearPortfolio[ticker].all = tickerYearPortfolio[ticker][String(currentYear)] || 0;
+  });
+
+  // ── yearBuyCost و tickerYearCost (مطلوبة لعرض رأس المال في الجدول فقط) ─
   const yearBuyCost    = {};
   const tickerYearCost = {};
-
   txBuyRows.forEach(tx => {
     const yr     = String(new Date(tx.date).getFullYear());
     const ticker = String(tx.ticker);
-    const total  = +tx.total || 0;
-
-    yearBuyCost[yr] = (yearBuyCost[yr] || 0) + total;
-
+    const cost   = tx.type === 'grant' ? 0 : +tx.total || 0;
+    yearBuyCost[yr] = (yearBuyCost[yr] || 0) + cost;
     if (!tickerYearCost[ticker]) tickerYearCost[ticker] = { all: 0 };
-    tickerYearCost[ticker][yr]  = (tickerYearCost[ticker][yr]  || 0) + total;
-    tickerYearCost[ticker].all  = (tickerYearCost[ticker].all  || 0) + total;
+    tickerYearCost[ticker][yr]  = (tickerYearCost[ticker][yr]  || 0) + cost;
+    tickerYearCost[ticker].all  = (tickerYearCost[ticker].all  || 0) + cost;
   });
-
-  // حساب 'all' لكل السنوات
   yearBuyCost.all = Object.entries(yearBuyCost)
-    .filter(([k]) => k !== 'all')
-    .reduce((s, [, v]) => s + v, 0);
+    .filter(([k]) => k !== 'all').reduce((s, [, v]) => s + v, 0);
 
-  return { yearBuyCost, tickerYearCost };
+  return { yearBuyCost, tickerYearCost, yearPortfolio, tickerYearPortfolio };
 }
 
 // ══════════════════════════════════════════════════════════════
 // رسم الملخصات
 // ══════════════════════════════════════════════════════════════
 function renderSummaries() {
-  const { yearBuyCost, tickerYearCost } = buildCostMaps();
-
-  renderYearlySummary(yearBuyCost);
-  renderHoldingSummary(tickerYearCost);
+  const maps = buildCostMaps();
+  renderYearlySummary(maps);
+  renderHoldingSummary(maps);
 }
 
 // ── اليمين: الإجمالي السنوي ───────────────────────────────────
-function renderYearlySummary(yearBuyCost) {
+function renderYearlySummary({ yearPortfolio }) {
   const yearMap = {};
   dividends.forEach(d => {
     yearMap[d.year] = (yearMap[d.year] || 0) + +d.amount;
@@ -95,37 +252,100 @@ function renderYearlySummary(yearBuyCost) {
     return;
   }
 
+  // ── حساب أيام السنة الحالية المنقضية ─────────────────────────
+  const today       = new Date();
+  const currentYear = today.getFullYear();
+  const startOfYear = new Date(currentYear, 0, 1);          // 1 يناير
+  const daysElapsed = Math.floor((today - startOfYear) / 86400000) + 1;  // +1 ليشمل اليوم
+  const daysInYear  = ((currentYear % 4 === 0 && currentYear % 100 !== 0) || currentYear % 400 === 0) ? 366 : 365;
+
   yEl.innerHTML = `<div class="table-wrapper"><table>
     <thead><tr>
       <th>السنة</th>
-      <th>إجمالي الأرباح</th>
-      <th title="الأرباح ÷ تكلفة شراء الأسهم في تلك السنة">نسبة العائد %</th>
+      <th title="رأس المال المنشغل = مشتريات تراكمية − مبيعات تراكمية&#10;السنة الجارية: حتى اليوم | السنوات المنتهية: 31 ديسمبر">رأس المال المنشغل</th>
+      <th>الأرباح المستلمة</th>
+      <th title="سنوات منتهية: أرباح فعلية ÷ رأس المال أول السنة&#10;السنة الجارية: عائد فعلي جزئي حتى الآن (التقدير السنوي الكامل في مؤشر TTM بالأعلى)">العائد السنوي %</th>
     </tr></thead>
     <tbody>${years.map(y => {
-      const buyCost = yearBuyCost[y] || 0;
-      let yieldStr, yieldCls;
-      if (buyCost > 0) {
-        const pct = (yearMap[y] / buyCost * 100);
-        yieldStr = pct.toFixed(2) + '%';
-        yieldCls = 'text-accent';
+      const isCurrentYear = +y === currentYear;
+
+      // رأس المال في نهاية السنة (أو حتى اليوم للسنة الجارية)
+      const endPort   = yearPortfolio[y]          ?? 0;
+      // رأس المال بداية السنة = نهاية السنة السابقة (المقام الصحيح للعائد)
+      const prevYear  = String(+y - 1);
+      const beginPort = yearPortfolio[prevYear]   ?? 0;
+      // السنة الأولى في السجل: لا يوجد "قبلها" → نستخدم نهاية نفس السنة
+      const denominator = beginPort > 0 ? beginPort : endPort;
+
+      let yieldStr, yieldCls, tooltip;
+
+      if (denominator > 0 && yearMap[y] > 0) {
+        if (isCurrentYear) {
+          // سنة جارية: نعرض العائد الفعلي حتى الآن (بلا توسيع خطّي مضلِّل)
+          // التقدير السنوي المعتمد (TTM) معروض في شريط الإحصائيات بالأعلى
+          const pct = yearMap[y] / denominator * 100;
+          yieldStr = pct.toFixed(2) + '% 🔄';
+          yieldCls = pct >= 5 ? 'text-success' : pct >= 3 ? 'text-accent' : 'text-muted';
+          tooltip  = 'السنة الجارية ' + currentYear + ' — يوم ' + daysElapsed + ' من ' + daysInYear + '\n' +
+                     'أرباح مستلمة حتى الآن: ' + formatSAR(yearMap[y]) + '\n' +
+                     'رأس المال أول يناير ' + currentYear + ': ' + formatSAR(denominator) + '\n' +
+                     '─────────────────────────────\n' +
+                     'العائد الفعلي حتى الآن (جزئي): ' + pct.toFixed(2) + '%\n' +
+                     'للتقدير السنوي الكامل راجع مؤشر TTM في الأعلى';
+        } else {
+          // سنة منتهية: أرباح فعلية ÷ رأس المال أول يناير من تلك السنة
+          const pct = yearMap[y] / denominator * 100;
+          yieldStr = pct.toFixed(2) + '%';
+          yieldCls = pct >= 5 ? 'text-success' : pct >= 3 ? 'text-accent' : 'text-muted';
+          tooltip  = 'أرباح ' + y + ' (فعلية): ' + formatSAR(yearMap[y]) + '\n' +
+                     'رأس المال أول يناير ' + y + ': ' + formatSAR(denominator) + '\n' +
+                     (beginPort > 0 ? '' : '(أول سنة في السجل — استُخدم نهاية السنة)\n') +
+                     '─────────────────────────────\n' +
+                     'العائد: ' + pct.toFixed(2) + '%';
+        }
       } else {
         yieldStr = '—';
         yieldCls = 'text-muted';
+        tooltip  = denominator === 0 ? 'لا يوجد رأس مال مسجّل لهذه السنة' : 'لا توجد أرباح';
       }
+
+      // عرض رأس المال: للسنة الجارية يوضّح أنه "حتى اليوم"
+      const portDisplay = endPort > 0
+        ? formatSAR(endPort) + (isCurrentYear
+            ? `<br><span class="small text-muted">حتى اليوم</span>`
+            : `<br><span class="small text-muted">31 ديس ${y}</span>`)
+        : '—';
+
       return `<tr>
-        <td><strong>${y}</strong></td>
-        <td class="num text-success bold">${formatSAR(yearMap[y])}</td>
-        <td class="num ${yieldCls}">${yieldStr}</td>
+        <td>
+          <strong>${y}</strong>
+          ${isCurrentYear
+            ? ` <span style="font-size:0.65rem;background:#f0b429;color:#000;padding:1px 6px;border-radius:4px;font-weight:700">🔄 جارية</span>`
+            : ` <span style="font-size:0.65rem;background:rgba(248,81,73,0.15);color:#f85149;padding:1px 6px;border-radius:4px;font-weight:700">منتهية</span>`}
+        </td>
+        <td class="num text-muted"
+            title="مستخدم في حساب العائد: رأس المال أول يناير ${y} = ${beginPort > 0 ? formatSAR(beginPort) : 'غير متوفر (أول سنة)'}">
+          ${portDisplay}
+        </td>
+        <td class="num text-success bold">
+          ${formatSAR(yearMap[y])}
+          ${isCurrentYear
+            ? `<br><span class="small text-muted">يوم ${daysElapsed} / ${daysInYear}</span>`
+            : ''}
+        </td>
+        <td class="num ${yieldCls}" title="${tooltip}" style="cursor:help">
+          ${yieldStr}
+        </td>
       </tr>`;
     }).join('')}</tbody>
   </table></div>
   <p class="small text-muted mt-2" style="padding:0 4px">
-    * نسبة العائد = إجمالي الأرباح ÷ تكلفة الأسهم المشتراة (buy) في نفس السنة من سجل المعاملات
+    🔄 سنة جارية — عائد فعلي جزئي حتى الآن (التقدير السنوي الكامل بأساس TTM في الأعلى) | السنوات المنتهية: أرباح فعلية ÷ رأس المال أول يناير | مرّر على العائد % لتفاصيل الحسبة
   </p>`;
 }
 
 // ── اليسار: لكل سهم مع فلتر السنة ───────────────────────────
-function renderHoldingSummary(tickerYearCost) {
+function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
   // جمع الأرباح لكل سهم لكل سنة
   const holdMap = {};
   dividends.forEach(d => {
@@ -136,9 +356,9 @@ function renderHoldingSummary(tickerYearCost) {
   });
 
   // السنوات المتاحة (من الأرباح أو المعاملات، مدمجة)
-  const divYears = [...new Set(dividends.map(d => String(d.year)))];
-  const txYears  = [...new Set(txBuyRows.map(tx => String(new Date(tx.date).getFullYear())))];
-  const allYears = [...new Set([...divYears, ...txYears])].sort((a, b) => b - a);
+  const divYears  = [...new Set(dividends.map(d => String(d.year)))];
+  const txYears   = [...new Set([...txBuyRows, ...txSellRows].map(tx => String(new Date(tx.date).getFullYear())))];
+  const allYears  = [...new Set([...divYears, ...txYears])].sort((a, b) => b - a);
 
   const tickers    = Object.keys(holdMap).sort((a, b) => holdMap[b].total - holdMap[a].total);
   const grandTotal = dividends.reduce((s, d) => s + +d.amount, 0);
@@ -163,93 +383,102 @@ function renderHoldingSummary(tickerYearCost) {
   // البيانات حسب السنة المختارة
   const rows = tickers.map(ticker => {
     const h = holdMap[ticker];
-    let divAmt, buyCost;
+    let divAmt, portVal;
 
     if (selectedYear === 'all') {
       divAmt  = h.total;
-      buyCost = tickerYearCost[ticker]?.all || 0;
+      portVal = tickerYearPortfolio[ticker]?.all ?? null;
     } else {
       divAmt  = h.byYear[selectedYear] || 0;
-      buyCost = tickerYearCost[ticker]?.[selectedYear] || 0;
+      portVal = tickerYearPortfolio[ticker]?.[selectedYear] ?? null;
     }
 
-    // نسبة العائد
-    let yieldStr = '—', yieldCls = 'text-muted';
-    if (buyCost > 0 && divAmt > 0) {
-      const pct = divAmt / buyCost * 100;
-      yieldStr = pct.toFixed(2) + '%';
-      yieldCls = 'text-accent';
-    } else if (divAmt === 0) {
-      yieldStr = '—';
-      yieldCls = 'text-muted';
-    }
-
-    // نسبة من الكل — تحسب نسبة هذا السهم من إجمالي أرباح السنة المختارة
-    let yearTotal;
-    if (selectedYear === 'all') {
-      yearTotal = grandTotal;
-    } else {
-      yearTotal = dividends.filter(d => String(d.year) === selectedYear)
-        .reduce((s, d) => s + +d.amount, 0);
-    }
-    const pctOfAll = yearTotal > 0 && divAmt > 0
-      ? (divAmt / yearTotal * 100).toFixed(1) + '%'
-      : '—';
-
-    return { ticker, name: h.name, divAmt, buyCost, yieldStr, yieldCls, pctOfAll };
+    return { ticker, name: h.name, divAmt, portVal };
   }).filter(r => selectedYear === 'all' || r.divAmt > 0);
 
-  // الإجماليات للسنة المختارة
-  const yearDivTotal  = selectedYear === 'all'
+  // إجماليات الصف السفلي
+  const yearDivTotal = selectedYear === 'all'
     ? grandTotal
     : dividends.filter(d => String(d.year) === selectedYear).reduce((s,d) => s + +d.amount, 0);
-  const yearBuyTotal  = selectedYear === 'all'
-    ? (tickerYearCost['__all__'] || Object.values(tickerYearCost).reduce((s, v) => s + (v.all||0), 0))
-    : txBuyRows.filter(tx => String(new Date(tx.date).getFullYear()) === selectedYear)
-        .reduce((s, tx) => s + (+tx.total||0), 0);
-  const totalYield = yearBuyTotal > 0 && yearDivTotal > 0
-    ? (yearDivTotal / yearBuyTotal * 100).toFixed(2) + '%'
-    : '—';
 
   const yearLabel = selectedYear === 'all' ? 'الكل' : selectedYear;
+
+  // بناء خريطة ثقة البيانات لكل سهم
+  const today = new Date();
+  const tickerConfidence = {};
+  tickers.forEach(ticker => {
+    const tickerDivs = dividends.filter(d => d.ticker === ticker).sort((a,b) => a.date?.localeCompare(b.date));
+    const firstDate   = tickerDivs[0]?.date ? new Date(tickerDivs[0].date) : null;
+    const daysSince   = firstDate ? Math.floor((today - firstDate) / 86400000) : 0;
+    const paymentCount = tickerDivs.length;
+    // مستويات الثقة:
+    // موثوق:       730+ يوم (سنتين) + 3 توزيعات — دورة كاملة مؤكدة بما فيها تأخر الربع الرابع
+    // أولي:        365+ يوم + توزيعتان — قد تكون دورة ناقصة
+    // غير كافٍ:    دون ذلك
+    const level = (daysSince >= 730 && paymentCount >= 3) ? 'full'
+                : (daysSince >= 365 && paymentCount >= 2) ? 'partial'
+                : 'low';
+    tickerConfidence[ticker] = { daysSince, paymentCount, level };
+  });
 
   hEl.innerHTML = tabsHtml + `
     <div class="table-wrapper"><table>
       <thead><tr>
         <th>الرمز</th>
         <th>الاسم</th>
+        <th title="صافي رأس المال المستثمر في هذا السهم حتى 31 ديسمبر = مشتريات تراكمية − مبيعات تراكمية">قيمة الاستثمار${selectedYear!=='all'?' '+selectedYear:''}</th>
         <th>الأرباح${selectedYear!=='all'?' '+selectedYear:''}</th>
-        <th title="تكلفة شراء السهم من سجل المعاملات">التكلفة (buy)</th>
-        <th title="الأرباح ÷ تكلفة الشراء">نسبة العائد %</th>
-        <th title="نسبة أرباح هذا السهم من إجمالي أرباح الفترة">من الكل</th>
+        <th title="العائد على التكلفة = أرباح ÷ قيمة الاستثمار">YOC %</th>
+        <th>ثقة البيانات</th>
       </tr></thead>
-      <tbody>${rows.length ? rows.map(r => `<tr>
-        <td><strong class="text-accent">${esc(r.ticker)}</strong></td>
-        <td>${esc(r.name)}</td>
-        <td class="num text-success bold">${formatSAR(r.divAmt)}</td>
-        <td class="num text-muted">${r.buyCost > 0 ? formatSAR(r.buyCost) : '—'}</td>
-        <td class="num ${r.yieldCls}">${r.yieldStr}</td>
-        <td class="num text-muted">${r.pctOfAll}</td>
-      </tr>`).join('') : `<tr><td colspan="6" class="text-center text-muted small" style="padding:20px">
+      <tbody>${rows.length ? rows.map(r => {
+        const conf   = tickerConfidence[r.ticker] || {};
+        const yoc    = r.portVal > 0 && r.divAmt > 0 ? (r.divAmt / r.portVal * 100) : null;
+        // عائد فعلي (بلا توسيع) — للسنة الجارية يبقى جزئياً وهذا أصدق من التقدير
+        let yocStr = '—', yocCls = 'text-muted';
+        if (yoc != null) {
+          yocStr = yoc.toFixed(2) + '%';
+          yocCls = yoc >= 5 ? 'text-success' : yoc >= 3 ? 'text-accent' : 'text-muted';
+        }
+        // شارة الثقة — 3 مستويات
+        let confBadge;
+        if (conf.level === 'full') {
+          confBadge = `<span title="${conf.daysSince} يوم — ${conf.paymentCount} توزيعات — دورتان كاملتان أو أكثر" style="cursor:help;background:rgba(63,185,80,0.12);color:#3fb950;border-radius:4px;padding:2px 6px;font-size:0.72rem;font-weight:600">✅ موثوق</span>`;
+        } else if (conf.level === 'partial') {
+          const msg = `${conf.daysSince} يوم — ${conf.paymentCount} توزيعات — دورة واحدة قد تكون ناقصة (ربع رابع متأخر). يحتاج 730 يوماً و3 توزيعات للثقة الكاملة`;
+          confBadge = `<span title="${msg}" style="cursor:help;display:inline-flex;align-items:center;gap:3px;background:rgba(240,180,41,0.12);color:#f0b429;border-radius:4px;padding:2px 6px;font-size:0.72rem;font-weight:600">🟡 بيانات أولية</span>`;
+        } else {
+          const msg = conf.paymentCount < 2
+            ? `توزيعة واحدة فقط — غير كافٍ للحكم على النمط`
+            : `${conf.daysSince} يوم فقط — يحتاج سنة كاملة على الأقل`;
+          confBadge = `<span title="${msg}" style="cursor:help;display:inline-flex;align-items:center;gap:3px;background:rgba(248,81,73,0.12);color:#f85149;border-radius:4px;padding:2px 6px;font-size:0.72rem;font-weight:600">⚠️ بيانات غير كافية</span>`;
+        }
+        return `<tr>
+          <td><strong class="text-accent">${esc(r.ticker)}</strong></td>
+          <td>${esc(r.name)}</td>
+          <td class="num text-muted">${r.portVal != null && r.portVal > 0 ? formatSAR(r.portVal) : '—'}</td>
+          <td class="num text-success bold">${formatSAR(r.divAmt)}</td>
+          <td class="num ${yocCls}">${yocStr}</td>
+          <td>${confBadge}</td>
+        </tr>`;
+      }).join('') : `<tr><td colspan="6" class="text-center text-muted small" style="padding:20px">
         لا توجد أرباح مسجلة لسنة ${yearLabel}
       </td></tr>`}</tbody>
       <tfoot><tr style="border-top:2px solid var(--border)">
-        <td colspan="2"><strong>إجمالي ${yearLabel}</strong></td>
+        <td colspan="3"><strong>إجمالي ${yearLabel}</strong></td>
         <td class="num bold text-accent">${formatSAR(yearDivTotal)}</td>
-        <td class="num text-muted">${yearBuyTotal > 0 ? formatSAR(yearBuyTotal) : '—'}</td>
-        <td class="num bold text-accent">${totalYield}</td>
-        <td class="num text-muted">100%</td>
+        <td colspan="2"></td>
       </tr></tfoot>
     </table></div>
-    <p class="small text-muted mt-2" style="padding:0 4px">
-      * نسبة العائد = أرباح الفترة ÷ تكلفة الشراء (buy) في نفس الفترة من سجل المعاملات
-    </p>`;
+  <div class="small text-muted mt-2" style="padding:6px 4px;border-top:1px solid var(--border);margin-top:8px">
+    ⚠️ <strong>متى تظهر علامة "بيانات غير كافية"؟</strong> — عندما يكون سجل الأرباح أقل من 12 شهراً أو أقل من توزيعتين مسجّلتين.
+    المواقع الكبرى (Investing.com / Yahoo Finance / Groww) تحسب الـ Yield على أساس آخر 12 شهراً كاملة من التوزيعات — بينما سجلك الشخصي قد لا يغطي هذه الفترة بعد.
+  </div>`;
 }
 
 function switchDivYear(yr) {
   selectedYear = yr;
-  const { tickerYearCost } = buildCostMaps();
-  renderHoldingSummary(tickerYearCost);
+  renderHoldingSummary(buildCostMaps());
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -272,7 +501,7 @@ function renderTable() {
     <td ${ed('dividends',d.id,'amount','number',d.amount,'num text-success bold')}>${formatSAR(d.amount)}</td>
     <td ${ed('dividends',d.id,'month','text',d.month,'','month')}>${MONTHS_AR[d.month-1]}</td>
     <td ${ed('dividends',d.id,'year','number',d.year,'num')}>${d.year}</td>
-    <td><button class="btn btn-danger btn-sm" onclick="deleteDiv('${esc(d.id)}')">حذف</button></td>
+    <td><button class="btn btn-danger btn-sm" onclick="archiveDiv('${esc(d.id)}')">أرشفة</button></td>
   </tr>`).join('');
 
   enableInlineEditing(tbody, onDivSaved);
@@ -286,13 +515,19 @@ async function onDivSaved(id, field, val) {
 
 async function addDividend(e) {
   e.preventDefault();
+  const ticker = document.getElementById('d-ticker').value.trim().toUpperCase();
+  const name   = document.getElementById('d-name').value.trim();
+  const amount = +document.getElementById('d-amount').value;
+
+  if (!ticker)      { showToast('أدخل رمز السهم', 'error'); return; }
+  if (!name)        { showToast('أدخل اسم السهم', 'error'); return; }
+  if (amount <= 0)  { showToast('مبلغ الأرباح يجب أن يكون أكبر من صفر', 'error'); return; }
+
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     user_id: user.id,
     date:    document.getElementById('d-date').value,
-    ticker:  document.getElementById('d-ticker').value.trim().toUpperCase(),
-    name:    document.getElementById('d-name').value.trim(),
-    amount:  +document.getElementById('d-amount').value,
+    ticker, name, amount,
     month:   +document.getElementById('d-month').value,
     year:    +document.getElementById('d-year').value
   };
@@ -308,13 +543,205 @@ async function addDividend(e) {
   renderAll();
 }
 
-async function deleteDiv(id) {
-  if (!confirm('هل أنت متأكد من الحذف؟')) return;
-  const { error } = await supabaseClient.from('dividends').delete().eq('id', id);
+async function archiveDiv(id) {
+  if (!confirm('أرشفة هذه الأرباح؟ ستُخفى من الحسابات لكنها تبقى في قاعدة البيانات.')) return;
+  const { error } = await supabaseClient.from('dividends').update({ is_archived: true }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast('تم الحذف', 'success');
+  showToast('تمت الأرشفة', 'success');
   await loadData();
   renderAll();
+}
+
+// ── تصدير CSV ─────────────────────────────────────────────────
+function exportDividendsCSV() {
+  if (!dividends.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+  exportCSV(`أرباح_موزعة_${todayISO()}.csv`,
+    ['التاريخ', 'الرمز', 'الاسم', 'المبلغ', 'الشهر', 'السنة'],
+    dividends.map(d => [d.date, d.ticker, d.name, d.amount, MONTHS_AR[d.month - 1], d.year])
+  );
+  showToast(`✓ تم تصدير ${dividends.length} سجل`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════
+// البار شارت — الدخل الشهري / السنوي
+// ══════════════════════════════════════════════════════════════
+function setChartView(v) {
+  chartView = v;
+  document.getElementById('chart-view-month').className = 'btn btn-sm ' + (v==='month' ? 'btn-primary' : 'btn-secondary');
+  document.getElementById('chart-view-year').className  = 'btn btn-sm ' + (v==='year'  ? 'btn-primary' : 'btn-secondary');
+  renderIncomeChart();
+}
+
+function setIncomeMode(mode) {
+  incomeMode = mode;
+  ['bar','line','stacked','table'].forEach(m => {
+    document.getElementById('im-' + m)?.classList.toggle('active', m === mode);
+  });
+  renderIncomeChart();
+}
+
+function renderIncomeChart() {
+  const canvas   = document.getElementById('income-bar-chart');
+  const wrap     = document.getElementById('income-chart-wrap');
+  const tableArea = document.getElementById('income-table-area');
+  const legend   = document.getElementById('income-chart-legend');
+
+  if (!canvas) return;
+
+  if (incomeMode === 'table') {
+    if (incomeChart) { incomeChart.destroy(); incomeChart = null; }
+    if (wrap)      wrap.style.display = 'none';
+    if (legend)    legend.style.display = 'none';
+    if (tableArea) { tableArea.style.display = ''; tableArea.innerHTML = _buildIncomeTable(); }
+    return;
+  }
+
+  if (wrap)       wrap.style.display = '';
+  if (legend)     legend.style.display = incomeMode === 'stacked' ? 'none' : '';
+  if (tableArea)  tableArea.style.display = 'none';
+
+  if (chartView === 'year') {
+    renderYearChart(canvas);
+  } else {
+    renderMonthChart(canvas);
+  }
+}
+
+// palette for stacked mode
+const STACKED_COLORS = ['#14b8a6','#3fb950','#58a6ff','#f0b429','#f85149','#bc8cff','#ff7b72','#39d353','#79c0ff','#ffa657','#d2a8ff','#56d364'];
+
+function renderYearChart(canvas) {
+  const yearMap = {};
+  dividends.forEach(d => { yearMap[String(d.year)] = (yearMap[String(d.year)] || 0) + +d.amount; });
+  const years  = Object.keys(yearMap).sort((a,b) => +a - +b);
+  const values = years.map(y => yearMap[y]);
+  const total  = values.reduce((s,v) => s+v, 0);
+
+  document.getElementById('chart-total-label').textContent = 'إجمالي كل السنوات: ~' + total.toFixed(2) + ' ر.س';
+
+  if (incomeMode === 'stacked') {
+    const tickers = [...new Set(dividends.map(d => d.ticker))].sort();
+    const datasets = tickers.map((t, i) => {
+      const data = years.map(y => dividends.filter(d => d.ticker === t && String(d.year) === y).reduce((s,d) => s + +d.amount, 0));
+      const c = STACKED_COLORS[i % STACKED_COLORS.length];
+      return { label: t, data, backgroundColor: c + 'cc', borderColor: c, borderWidth: 1, borderRadius: 2 };
+    });
+    buildChart(canvas, years, datasets, true);
+  } else {
+    buildChart(canvas, years, [{ data: values, backgroundColor: values.map(() => '#14b8a6cc'), borderColor: '#14b8a6', borderWidth: 1, borderRadius: 4, label: 'مستلم' }]);
+  }
+}
+
+function renderMonthChart(canvas) {
+  const now = new Date();
+  const labels = [];
+  const periodKeys = [];
+  for (let i = 11; i >= 0; i--) {
+    const d  = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    periodKeys.push(d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0'));
+    labels.push(MONTHS_AR[d.getMonth()].slice(0,3) + ' \'' + String(d.getFullYear()).slice(2));
+  }
+
+  if (incomeMode === 'stacked') {
+    const tickers = [...new Set(dividends.map(d => d.ticker))].sort();
+    const datasets = tickers.map((t, i) => {
+      const data = periodKeys.map(key => {
+        const [yr, mo] = key.split('-').map(Number);
+        return dividends.filter(d => d.ticker === t && d.year === yr && d.month === mo).reduce((s,d) => s + +d.amount, 0);
+      });
+      const c = STACKED_COLORS[i % STACKED_COLORS.length];
+      return { label: t, data, backgroundColor: c + 'cc', borderColor: c, borderWidth: 1, borderRadius: 2 };
+    });
+    const total = dividends.filter(d => {
+      const key = d.year + '-' + String(d.month).padStart(2,'0');
+      return periodKeys.includes(key);
+    }).reduce((s,d) => s + +d.amount, 0);
+    document.getElementById('chart-total-label').textContent = 'إجمالي آخر 12 شهراً: ~' + total.toFixed(2) + ' ر.س';
+    buildChart(canvas, labels, datasets, true);
+    return;
+  }
+
+  const actualMap = {};
+  dividends.forEach(d => { const key = d.year + '-' + String(d.month).padStart(2,'0'); actualMap[key] = (actualMap[key] || 0) + +d.amount; });
+  const received = periodKeys.map(k => actualMap[k] || 0);
+  const total    = received.reduce((s,v) => s+v, 0);
+  document.getElementById('chart-total-label').textContent = 'إجمالي آخر 12 شهراً: ~' + total.toFixed(2) + ' ر.س';
+
+  buildChart(canvas, labels, [{ label: 'مستلم', data: received, backgroundColor: '#14b8a6cc', borderColor: '#14b8a6', borderWidth: 1, borderRadius: 4 }]);
+}
+
+function _buildIncomeTable() {
+  if (!dividends.length) return '<p class="small text-muted" style="padding:12px">لا توجد بيانات</p>';
+
+  if (chartView === 'year') {
+    const yearMap = {};
+    dividends.forEach(d => { yearMap[String(d.year)] = (yearMap[String(d.year)] || 0) + +d.amount; });
+    const years = Object.keys(yearMap).sort((a,b) => +b - +a);
+    const total = Object.values(yearMap).reduce((s,v) => s+v, 0);
+    const rows = years.map(y => `<tr><td>${y}</td><td class="num">${formatSAR(yearMap[y])}</td><td class="num text-muted">${(yearMap[y]/total*100).toFixed(1)}%</td></tr>`).join('');
+    return `<table class="data-table"><thead><tr><th>السنة</th><th>الإجمالي</th><th>النسبة</th></tr></thead><tbody>${rows}</tbody><tfoot><tr><td><strong>المجموع</strong></td><td class="num"><strong>${formatSAR(total)}</strong></td><td></td></tr></tfoot></table>`;
+  }
+
+  // monthly view
+  const now = new Date();
+  const rows = [];
+  let total = 0;
+  for (let i = 11; i >= 0; i--) {
+    const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const yr  = d.getFullYear(), mo = d.getMonth() + 1;
+    const amt = dividends.filter(x => x.year === yr && x.month === mo).reduce((s,x) => s + +x.amount, 0);
+    total += amt;
+    const label = MONTHS_AR[mo-1] + ' ' + yr;
+    rows.push(`<tr${amt === 0 ? ' style="opacity:0.4"' : ''}><td>${label}</td><td class="num">${amt > 0 ? formatSAR(amt) : '—'}</td></tr>`);
+  }
+  return `<table class="data-table"><thead><tr><th>الشهر</th><th>المستلم</th></tr></thead><tbody>${rows.reverse().join('')}</tbody><tfoot><tr><td><strong>الإجمالي</strong></td><td class="num"><strong>${formatSAR(total)}</strong></td></tr></tfoot></table>`;
+}
+
+function buildChart(canvas, labels, datasets, stacked = false) {
+  if (incomeChart) { incomeChart.destroy(); incomeChart = null; }
+
+  const isDark = !document.body.classList.contains('light-mode');
+  const gridColor = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)';
+  const tickColor = isDark ? '#8b949e' : '#666';
+
+  const isLine    = incomeMode === 'line';
+  const chartType = isLine ? 'line' : 'bar';
+
+  const processedDatasets = datasets.map(ds => isLine
+    ? { ...ds, type: 'line', fill: true, tension: 0.35, pointRadius: 3, pointHoverRadius: 5,
+        backgroundColor: (ds.borderColor || '#14b8a6') + '30',
+        borderColor: ds.borderColor || '#14b8a6', borderWidth: 2 }
+    : ds);
+
+  incomeChart = new Chart(canvas, {
+    type: chartType,
+    data: { labels, datasets: processedDatasets },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: stacked, position: 'bottom', labels: { color: tickColor, font: { family: 'Tajawal', size: 10 }, padding: 8, usePointStyle: true, boxWidth: 10 } },
+        tooltip: {
+          rtl: true,
+          callbacks: {
+            label: ctx => ' ' + ctx.dataset.label + ': ' + formatSAR(ctx.parsed.y)
+          }
+        }
+      },
+      scales: {
+        x: {
+          stacked: stacked,
+          ticks: { color: tickColor, font: { family: 'Tajawal', size: 11 } },
+          grid:  { color: gridColor }
+        },
+        y: {
+          stacked: stacked,
+          ticks: { color: tickColor, font: { family: 'Tajawal', size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(1)+'k' : v },
+          grid: { color: gridColor }
+        }
+      }
+    }
+  });
 }
 
 init();

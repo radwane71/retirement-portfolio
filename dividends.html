@@ -1,7 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>الأرباح الموزعة - محفظتي</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,20 +17,61 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>💎 ثروة</h2>
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
       <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
-      <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
-      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
-      <a href="dividends.html"    class="nav-link" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
-      <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
-      <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
-      <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
-      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
-      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
-      <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
-      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -68,6 +113,38 @@
       </form>
     </div>
 
+    <!-- Summary Stats Bar -->
+    <div id="div-stats" class="tx-stats-bar" style="margin-bottom:16px">
+      <div class="tx-stat-item"><div class="tx-stat-val text-muted">—</div><div class="tx-stat-lbl">جارٍ التحميل…</div></div>
+    </div>
+
+    <!-- Monthly Income Chart -->
+    <div class="card" id="income-chart-card">
+      <div class="section-header" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
+        <span class="section-title">الدخل الشهري، ر.س</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-right:auto">
+          <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+            <button id="chart-view-month" class="btn btn-sm btn-primary" onclick="setChartView('month')" style="border-radius:0;border:none">شهري</button>
+            <button id="chart-view-year"  class="btn btn-sm btn-secondary" onclick="setChartView('year')"  style="border-radius:0;border:none">سنوي</button>
+          </div>
+          <div class="chart-mode-btns">
+            <button class="chart-mode-btn active" onclick="setIncomeMode('bar')"     id="im-bar">أعمدة</button>
+            <button class="chart-mode-btn"         onclick="setIncomeMode('line')"    id="im-line">خط</button>
+            <button class="chart-mode-btn"         onclick="setIncomeMode('stacked')" id="im-stacked">مكدس</button>
+            <button class="chart-mode-btn"         onclick="setIncomeMode('table')"   id="im-table">جدول</button>
+          </div>
+        </div>
+      </div>
+      <div id="chart-total-label" style="text-align:left;font-size:0.85rem;color:var(--text-muted);margin-bottom:12px"></div>
+      <div id="income-chart-wrap" style="position:relative;height:260px">
+        <canvas id="income-bar-chart"></canvas>
+      </div>
+      <div id="income-table-area" style="display:none;overflow-x:auto"></div>
+      <div id="income-chart-legend" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px;font-size:0.75rem;color:var(--text-muted)">
+        <span><span style="display:inline-block;width:10px;height:10px;background:#14b8a6;border-radius:2px;margin-left:4px"></span>مستلم فعلياً</span>
+      </div>
+    </div>
+
     <!-- Summaries -->
     <div class="charts-grid">
       <div class="card">
@@ -82,7 +159,10 @@
 
     <!-- All dividends -->
     <div class="card">
-      <div class="section-header"><span class="section-title">جميع السجلات</span></div>
+      <div class="section-header">
+        <span class="section-title">جميع السجلات</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportDividendsCSV()">⬇ تصدير CSV</button>
+      </div>
       <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
         <table>
@@ -106,6 +186,7 @@
 
   <div class="toast" id="toast"></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="js/supabase.js"></script>
   <script src="js/auth.js"></script>

@@ -1,0 +1,550 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>المتابعة المدرسية - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Children Tabs ── */
+    .children-bar {
+      display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+      background:var(--bg-2); border:1px solid var(--border);
+      border-radius:var(--radius-lg); padding:10px 14px; margin-bottom:20px;
+    }
+    .child-tab {
+      display:flex; align-items:center; gap:7px;
+      padding:7px 14px; border-radius:var(--radius); border:1.5px solid transparent;
+      background:var(--bg-3); color:var(--text-2); font-family:inherit;
+      font-size:0.86rem; font-weight:600; cursor:pointer; transition:all .18s;
+    }
+    .child-tab:hover  { border-color:var(--accent); color:var(--accent); }
+    .child-tab.active { border-color:var(--accent); color:var(--accent); background:var(--accent-dim); }
+    .child-tab .avatar { font-size:1.1rem; }
+    .add-child-btn {
+      padding:7px 14px; border-radius:var(--radius); border:1.5px dashed var(--border);
+      background:none; color:var(--text-2); font-family:inherit; font-size:0.83rem;
+      cursor:pointer; transition:all .18s; margin-right:4px;
+    }
+    .add-child-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+    /* ── Profile card ── */
+    .profile-card {
+      background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg);
+      padding:18px 22px; margin-bottom:20px; display:flex; align-items:flex-start;
+      gap:18px; flex-wrap:wrap;
+    }
+    .profile-avatar-big {
+      width:64px; height:64px; border-radius:50%; background:var(--accent-dim);
+      border:3px solid var(--accent); display:flex; align-items:center;
+      justify-content:center; font-size:1.8rem; flex-shrink:0; cursor:pointer;
+      transition:transform .15s;
+    }
+    .profile-avatar-big:hover { transform:scale(1.08); }
+    .profile-main { flex:1; min-width:0; }
+    .profile-main h2 { margin:0 0 4px; font-size:1.2rem; }
+    .profile-meta { display:flex; flex-wrap:wrap; gap:10px; margin-top:6px; }
+    .profile-meta-item { font-size:0.8rem; color:var(--text-2); display:flex; align-items:center; gap:4px; }
+    .profile-extra { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    .extra-chip {
+      display:inline-flex; align-items:center; gap:6px; padding:4px 10px;
+      background:var(--bg-3); border:1px solid var(--border); border-radius:20px;
+      font-size:0.78rem; color:var(--text-2);
+    }
+    .extra-chip .chip-val { color:var(--text); font-weight:600; }
+    .extra-chip .del-chip { background:none; border:none; cursor:pointer; color:var(--text-2); font-size:0.8rem; padding:0 2px; }
+    .extra-chip .del-chip:hover { color:var(--danger); }
+    .profile-actions { display:flex; flex-direction:column; gap:8px; flex-shrink:0; }
+
+    /* ── Tabs ── */
+    .page-tabs { display:flex; gap:2px; border-bottom:2px solid var(--border); margin-bottom:18px; flex-wrap:wrap; }
+    .page-tab-btn {
+      background:none; border:none; border-bottom:3px solid transparent; margin-bottom:-2px;
+      padding:9px 16px; font-family:inherit; font-size:0.86rem; color:var(--text-2);
+      cursor:pointer; transition:all .18s; font-weight:600;
+    }
+    .page-tab-btn:hover  { color:var(--text); }
+    .page-tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-pane { display:none; }
+    .tab-pane.active { display:block; }
+
+    /* ── Goals section ── */
+    .goals-section { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); overflow:hidden; margin-bottom:20px; }
+    .goals-section-head {
+      display:flex; align-items:center; justify-content:space-between;
+      padding:14px 18px; border-bottom:1px solid var(--border);
+    }
+    .goals-section-head h3 { margin:0; font-size:0.88rem; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:.04em; }
+    .goals-tbl { width:100%; border-collapse:collapse; font-size:0.86rem; }
+    .goals-tbl th { background:var(--bg-3); color:var(--text-2); font-size:0.76rem; text-transform:uppercase; letter-spacing:.04em; padding:9px 14px; text-align:right; border-bottom:1px solid var(--border); }
+    .goals-tbl td { padding:10px 14px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .goals-tbl tr:last-child td { border-bottom:none; }
+    .goals-tbl tr:hover td { background:rgba(255,255,255,0.02); }
+
+    /* inline editable cell */
+    .editable-cell { cursor:pointer; border-radius:4px; padding:2px 4px; margin:-2px -4px; transition:background .15s; }
+    .editable-cell:hover { background:var(--accent-dim); }
+    .inline-edit-input {
+      background:var(--bg-3); border:1.5px solid var(--accent); color:var(--text);
+      font-family:inherit; font-size:inherit; border-radius:4px;
+      padding:4px 8px; width:100%; box-sizing:border-box; outline:none;
+    }
+
+    /* Status select */
+    .status-sel {
+      appearance:none; -webkit-appearance:none; background:transparent; border:none;
+      font-family:inherit; font-size:0.72rem; font-weight:700; cursor:pointer;
+      padding:3px 6px; border-radius:12px;
+    }
+    .s-active  { background:rgba(34,197,94,0.15);  color:#4ade80; }
+    .s-done    { background:rgba(59,130,246,0.15);  color:#60a5fa; }
+    .s-delayed { background:rgba(249,115,22,0.15);  color:#fb923c; }
+    .s-cancel  { background:rgba(239,68,68,0.15);   color:#f87171; }
+    .s-planned { background:rgba(168,85,247,0.15);  color:#c084fc; }
+
+    /* Priority */
+    .pri-sel {
+      appearance:none; -webkit-appearance:none; background:transparent; border:none;
+      font-family:inherit; font-size:0.72rem; font-weight:700; cursor:pointer;
+      padding:3px 6px; border-radius:12px;
+    }
+    .p-1 { background:rgba(239,68,68,0.15);  color:#f87171; }
+    .p-2 { background:rgba(240,180,41,0.15); color:#fbbf24; }
+    .p-3 { background:rgba(59,130,246,0.15); color:#60a5fa; }
+    .p-4 { background:rgba(107,114,128,0.15);color:#9ca3af; }
+
+    /* ── Grades ── */
+    .grades-controls { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .grades-controls select { background:var(--bg-2); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:0.84rem; border-radius:var(--radius); padding:7px 10px; }
+    .grades-controls select:focus { outline:none; border-color:var(--accent); }
+    .grade-wrap { overflow-x:auto; }
+    .grade-tbl { border-collapse:collapse; font-size:0.84rem; min-width:400px; }
+    .grade-tbl th, .grade-tbl td { border:1px solid var(--border); padding:9px 13px; text-align:center; }
+    .grade-tbl th { background:var(--bg-3); color:var(--text-2); font-size:0.76rem; text-transform:uppercase; letter-spacing:.03em; white-space:nowrap; }
+    .grade-tbl td:first-child { text-align:right; font-weight:600; color:var(--text); min-width:130px; }
+    .grade-tbl td:last-child { font-weight:700; }
+    .grade-tbl tr:hover td { background:rgba(255,255,255,0.02); }
+    .g-cell { cursor:pointer; transition:background .12s; }
+    .g-cell:hover { background:var(--accent-dim) !important; }
+    .g-A { background:rgba(34,197,94,0.13);  color:#4ade80; font-weight:700; }
+    .g-B { background:rgba(59,130,246,0.13); color:#60a5fa; font-weight:700; }
+    .g-C { background:rgba(240,180,41,0.13); color:#fbbf24; font-weight:700; }
+    .g-D { background:rgba(239,68,68,0.13);  color:#f87171; font-weight:700; }
+    .g-empty { color:var(--border); font-size:0.75rem; }
+    .term-head { background:rgba(240,180,41,0.1) !important; color:var(--accent) !important; font-weight:700 !important; }
+    .avg-head  { background:rgba(34,197,94,0.08) !important; }
+
+    .subj-row td:first-child { display:flex; align-items:center; gap:6px; }
+    .subj-del-btn { background:none; border:none; cursor:pointer; color:var(--text-2); font-size:0.75rem; padding:1px 4px; border-radius:3px; opacity:0; transition:opacity .15s; }
+    .subj-row:hover .subj-del-btn { opacity:1; }
+    .subj-del-btn:hover { color:var(--danger); background:rgba(239,68,68,0.1); }
+
+    /* ── Grade input modal ── */
+    .grade-input-wrap { display:flex; flex-direction:column; gap:10px; }
+    .grade-input-big { font-size:2rem; text-align:center; font-weight:700; background:var(--bg-3); border:2px solid var(--accent); border-radius:var(--radius); color:var(--text); font-family:inherit; padding:12px; width:100%; box-sizing:border-box; }
+    .grade-input-big:focus { outline:none; }
+    .grade-quick-btns { display:flex; gap:6px; flex-wrap:wrap; }
+    .grade-quick { padding:5px 10px; border-radius:var(--radius); border:1px solid var(--border); background:var(--bg-3); color:var(--text-2); font-family:inherit; font-size:0.8rem; cursor:pointer; transition:all .15s; }
+    .grade-quick:hover { border-color:var(--accent); color:var(--accent); }
+
+    /* ── Year/Term management ── */
+    .year-chip {
+      display:inline-flex; align-items:center; gap:6px; padding:5px 11px;
+      background:var(--bg-3); border:1px solid var(--border); border-radius:20px;
+      font-size:0.8rem; cursor:default;
+    }
+    .year-chip.active-year { border-color:var(--accent); background:var(--accent-dim); color:var(--accent); }
+    .chip-del { background:none; border:none; cursor:pointer; color:var(--text-2); font-size:0.75rem; padding:0 2px; }
+    .chip-del:hover { color:var(--danger); }
+
+    .terms-list { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+    .term-chip {
+      display:inline-flex; align-items:center; gap:6px; padding:4px 10px;
+      background:var(--bg-3); border:1px solid var(--border); border-radius:16px; font-size:0.79rem;
+    }
+
+    /* ── Modals ── */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:26px; width:100%; max-width:480px; max-height:90vh; overflow-y:auto; }
+    .modal-box.sm { max-width:360px; }
+    .modal-box h3 { margin:0 0 18px; font-size:1rem; }
+    .form-row { margin-bottom:13px; }
+    .form-row label { display:block; font-size:0.79rem; color:var(--text-2); margin-bottom:5px; }
+    .form-row input, .form-row select, .form-row textarea {
+      width:100%; box-sizing:border-box; background:var(--bg-3); border:1px solid var(--border);
+      color:var(--text); font-family:inherit; font-size:0.87rem; border-radius:var(--radius); padding:8px 10px;
+    }
+    .form-row textarea { resize:vertical; min-height:70px; }
+    .form-row input:focus,.form-row select:focus,.form-row textarea:focus { outline:none; border-color:var(--accent); }
+    .form-2col { display:grid; grid-template-columns:1fr 1fr; gap:11px; }
+    .form-actions { display:flex; gap:8px; justify-content:flex-end; margin-top:18px; flex-wrap:wrap; }
+    .emoji-picker { display:flex; flex-wrap:wrap; gap:8px; margin-top:6px; }
+    .emoji-opt { font-size:1.4rem; cursor:pointer; padding:4px 6px; border-radius:6px; border:2px solid transparent; transition:all .15s; }
+    .emoji-opt:hover, .emoji-opt.selected { border-color:var(--accent); background:var(--accent-dim); }
+
+    .empty-state { text-align:center; padding:36px 20px; color:var(--text-2); font-size:0.87rem; }
+    .no-children { text-align:center; padding:60px 20px; color:var(--text-2); }
+    .no-children .big { font-size:3rem; margin-bottom:12px; }
+
+    /* progress bar */
+    .prog-wrap { background:var(--bg-3); border-radius:4px; height:5px; overflow:hidden; margin-top:4px; min-width:80px; }
+    .prog-bar  { height:5px; border-radius:4px; background:var(--accent); }
+    .prog-row  { display:flex; align-items:center; gap:8px; }
+    .prog-pct  { font-size:0.72rem; color:var(--text-2); white-space:nowrap; }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span><span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span><span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span><span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span><span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html" class="nav-link nav-sub" id="nav-life-goals"><span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"  class="nav-link nav-sub" id="nav-inventory"><span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html"     class="nav-link nav-sub" id="nav-school">   <span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>🎓 المتابعة المدرسية</h1>
+        <p>متابعة شاملة لكل طفل — الأهداف والدرجات والتطور الأكاديمي</p>
+      </div>
+    </div>
+
+    <!-- Children selector bar -->
+    <div class="children-bar" id="children-bar">
+      <button class="add-child-btn" onclick="openChildModal()">＋ إضافة طفل</button>
+    </div>
+
+    <!-- No children placeholder -->
+    <div id="no-children-msg" class="no-children" style="display:none">
+      <div class="big">👶</div>
+      <p>لا يوجد أطفال بعد — اضغط "＋ إضافة طفل" للبدء</p>
+    </div>
+
+    <!-- Per-child view -->
+    <div id="child-view" style="display:none">
+
+      <!-- Profile -->
+      <div class="profile-card" id="profile-card">
+        <div class="profile-avatar-big" id="profile-emoji" onclick="openChildModal(true)" title="تعديل البيانات">👧</div>
+        <div class="profile-main">
+          <h2 id="p-name"></h2>
+          <div class="profile-meta" id="p-meta"></div>
+          <div class="profile-extra" id="p-extra"></div>
+        </div>
+        <div class="profile-actions">
+          <button class="btn btn-secondary" onclick="openChildModal(true)" style="font-size:0.82rem;padding:6px 12px">✏️ تعديل</button>
+          <button class="btn btn-secondary" onclick="openExtraFieldModal()" style="font-size:0.82rem;padding:6px 12px">＋ حقل</button>
+          <button class="btn btn-secondary" style="font-size:0.82rem;padding:6px 12px;border-color:var(--danger);color:var(--danger)" onclick="deleteCurrentChild()">🗑️ حذف الطفل</button>
+        </div>
+      </div>
+
+      <!-- Inner tabs -->
+      <div class="page-tabs">
+        <button class="page-tab-btn active" onclick="switchTab('life-tab')">🌟 الأهداف الحياتية</button>
+        <button class="page-tab-btn"        onclick="switchTab('school-tab')">📚 الأهداف المدرسية</button>
+        <button class="page-tab-btn"        onclick="switchTab('grades-tab')">📊 الدرجات الدراسية</button>
+      </div>
+
+      <!-- Life Goals tab -->
+      <div class="tab-pane active" id="life-tab">
+        <div class="goals-section">
+          <div class="goals-section-head">
+            <h3>🌟 الأهداف الحياتية</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="addGoal('life')">＋ هدف جديد</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="goals-tbl">
+              <thead><tr>
+                <th style="min-width:200px">الهدف</th>
+                <th>الفئة</th>
+                <th>الأولوية</th>
+                <th>الحالة</th>
+                <th>الإنجاز</th>
+                <th>السنة</th>
+                <th>المبلغ</th>
+                <th>ملاحظات</th>
+                <th></th>
+              </tr></thead>
+              <tbody id="life-goals-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- School Goals tab -->
+      <div class="tab-pane" id="school-tab">
+        <div class="goals-section">
+          <div class="goals-section-head">
+            <h3>📚 الأهداف المدرسية</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="addGoal('school')">＋ هدف جديد</button>
+          </div>
+          <div style="overflow-x:auto">
+            <table class="goals-tbl">
+              <thead><tr>
+                <th style="min-width:200px">الهدف</th>
+                <th>الفئة</th>
+                <th>الأولوية</th>
+                <th>الحالة</th>
+                <th>الإنجاز</th>
+                <th>السنة</th>
+                <th>ملاحظات</th>
+                <th></th>
+              </tr></thead>
+              <tbody id="school-goals-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Grades tab -->
+      <div class="tab-pane" id="grades-tab">
+        <!-- Year management -->
+        <div class="goals-section" style="margin-bottom:16px">
+          <div class="goals-section-head">
+            <h3>📅 السنوات الدراسية</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="openYearModal()">＋ سنة جديدة</button>
+          </div>
+          <div style="padding:14px 18px" id="years-list"></div>
+        </div>
+
+        <!-- Grades grid -->
+        <div class="goals-section">
+          <div class="goals-section-head">
+            <h3>📊 جدول الدرجات</h3>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+              <select id="sel-year" onchange="renderGrades()" style="background:var(--bg-3);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:0.83rem;border-radius:var(--radius);padding:5px 9px"></select>
+              <button class="btn btn-secondary" style="font-size:0.8rem;padding:6px 12px" onclick="openSubjectModal()">＋ مادة</button>
+            </div>
+          </div>
+          <div style="padding:14px 18px">
+            <div class="grade-wrap" id="grade-wrap"></div>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /child-view -->
+  </main>
+
+  <!-- ── Child Modal ── -->
+  <div class="modal-overlay" id="child-modal">
+    <div class="modal-box">
+      <h3 id="child-modal-title">إضافة طفل جديد</h3>
+      <div style="margin-bottom:14px">
+        <label style="font-size:0.79rem;color:var(--text-2);display:block;margin-bottom:6px">الإيموجي / الصورة الرمزية</label>
+        <div class="emoji-picker" id="emoji-picker"></div>
+        <input type="text" id="cm-emoji" placeholder="أو اكتب إيموجي مخصص" style="margin-top:8px;width:100%;box-sizing:border-box;background:var(--bg-3);border:1px solid var(--border);color:var(--text);font-family:inherit;font-size:1.3rem;text-align:center;border-radius:var(--radius);padding:6px">
+      </div>
+      <div class="form-2col">
+        <div class="form-row"><label>الاسم *</label><input type="text" id="cm-name" placeholder="اسم الطفل"></div>
+        <div class="form-row"><label>تاريخ الميلاد</label><input type="date" id="cm-birth"></div>
+      </div>
+      <div class="form-2col">
+        <div class="form-row"><label>المدرسة</label><input type="text" id="cm-school" placeholder="اسم المدرسة"></div>
+        <div class="form-row"><label>الصف الحالي</label><input type="text" id="cm-grade" placeholder="مثال: الثالث الابتدائي"></div>
+      </div>
+      <div class="form-row"><label>ملاحظات عامة</label><textarea id="cm-notes" placeholder="أي معلومات إضافية…"></textarea></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('child-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveChild()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Extra Field Modal ── -->
+  <div class="modal-overlay" id="extra-modal">
+    <div class="modal-box sm">
+      <h3>＋ حقل إضافي</h3>
+      <div class="form-row"><label>اسم الحقل</label><input type="text" id="ef-label" placeholder="مثال: رقم الطالب، المعلمة، الحافلة…"></div>
+      <div class="form-row"><label>القيمة</label><input type="text" id="ef-value" placeholder="القيمة"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('extra-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveExtraField()">إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Goal Modal ── -->
+  <div class="modal-overlay" id="goal-modal">
+    <div class="modal-box">
+      <h3 id="goal-modal-title">إضافة هدف</h3>
+      <input type="hidden" id="gm-type">
+      <div class="form-row"><label>وصف الهدف *</label><input type="text" id="gm-desc" placeholder="وصف الهدف…"></div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>الفئة</label>
+          <input type="text" id="gm-cat" list="cat-suggestions" placeholder="اكتب أو اختر…">
+          <datalist id="cat-suggestions">
+            <option value="تعليمي"><option value="شخصي"><option value="اجتماعي">
+            <option value="ديني"><option value="صحي"><option value="رياضي">
+            <option value="فني"><option value="قرآني"><option value="لغوي">
+          </datalist>
+        </div>
+        <div class="form-row">
+          <label>الأولوية</label>
+          <select id="gm-priority">
+            <option value="1">🔴 هام وعاجل</option>
+            <option value="2" selected>🟡 هام وغير عاجل</option>
+            <option value="3">🔵 عاجل وغير هام</option>
+            <option value="4">⚪ غير عاجل وغير هام</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>الحالة</label>
+          <select id="gm-status">
+            <option value="planned">مخطط</option>
+            <option value="active" selected>قيد التنفيذ</option>
+            <option value="done">مكتمل</option>
+            <option value="delayed">مؤجل</option>
+            <option value="cancel">ملغي</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>نسبة الإنجاز %</label>
+          <input type="number" id="gm-progress" min="0" max="100" value="0">
+        </div>
+      </div>
+      <div class="form-2col">
+        <div class="form-row"><label>السنة المستهدفة</label><input type="text" id="gm-year" placeholder="2026"></div>
+        <div class="form-row"><label>المبلغ (ر.س) — اختياري</label><input type="number" id="gm-amount" min="0" step="any"></div>
+      </div>
+      <div class="form-row"><label>ملاحظات</label><textarea id="gm-notes" placeholder="تفاصيل إضافية…"></textarea></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('goal-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveGoal()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Year Modal ── -->
+  <div class="modal-overlay" id="year-modal">
+    <div class="modal-box sm">
+      <h3 id="year-modal-title">سنة دراسية جديدة</h3>
+      <div class="form-row"><label>العام الدراسي *</label><input type="text" id="ym-label" placeholder="مثال: 2025-2026"></div>
+      <div class="form-row"><label>الصف / المرحلة</label><input type="text" id="ym-class" placeholder="مثال: الثالث الابتدائي"></div>
+      <div class="form-row"><label>المدرسة</label><input type="text" id="ym-school" placeholder="اختياري"></div>
+      <div class="form-row">
+        <label>الفصول الدراسية</label>
+        <div id="terms-editor" style="display:flex;flex-direction:column;gap:6px;margin-top:4px"></div>
+        <button type="button" class="btn btn-secondary" style="font-size:0.78rem;padding:4px 10px;margin-top:6px" onclick="addTermField()">＋ فصل</button>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('year-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveYear()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Subject Modal ── -->
+  <div class="modal-overlay" id="subject-modal">
+    <div class="modal-box sm">
+      <h3>إضافة مادة دراسية</h3>
+      <div class="form-row"><label>اسم المادة *</label>
+        <input type="text" id="sm-name" list="subj-suggestions" placeholder="مثال: الرياضيات">
+        <datalist id="subj-suggestions">
+          <option value="القرآن الكريم"><option value="التربية الإسلامية">
+          <option value="اللغة العربية"><option value="الرياضيات">
+          <option value="العلوم"><option value="الاجتماعيات">
+          <option value="اللغة الإنجليزية"><option value="الحاسب الآلي">
+          <option value="التربية الفنية"><option value="التربية البدنية">
+          <option value="الدراسات الاجتماعية"><option value="التربية الوطنية">
+        </datalist>
+      </div>
+      <div class="form-row">
+        <label>الدرجة القصوى</label>
+        <input type="number" id="sm-max" value="100" min="1">
+      </div>
+      <div class="form-row">
+        <label>اللون</label>
+        <input type="color" id="sm-color" value="#3b82f6" style="height:36px;padding:2px">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('subject-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveSubject()">إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Grade Edit Modal ── -->
+  <div class="modal-overlay" id="grade-modal">
+    <div class="modal-box sm">
+      <h3 id="grd-title">تعديل الدرجة</h3>
+      <div class="grade-input-wrap">
+        <input class="grade-input-big" type="number" id="grd-score" min="0" max="999" step="0.5" placeholder="—">
+        <div class="grade-quick-btns" id="grd-quick-btns"></div>
+      </div>
+      <div class="form-row" style="margin-top:12px"><label>ملاحظة</label><input type="text" id="grd-note" placeholder="اختياري"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('grade-modal')">إلغاء</button>
+        <button class="btn btn-danger"    onclick="saveGrade(true)">مسح</button>
+        <button class="btn btn-primary"   onclick="saveGrade(false)">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>  <script src="js/school.js"></script>
+  <script>setActiveNav('nav-school');</script>
+</body>
+</html>

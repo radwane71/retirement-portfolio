@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مقسّم الراتب - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Dashboard Cards ─────────────────────────────────────── */
+    .salary-dash {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .salary-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; }
+    .salary-card .card-label { font-size:0.75rem; color:var(--text-2); margin-bottom:6px; }
+    .salary-card .card-value { font-size:1.3rem; font-weight:700; color:var(--text); }
+    .salary-card .card-sub   { font-size:0.72rem; color:var(--text-2); margin-top:4px; }
+    .salary-card.accent  { border-color:var(--accent); }
+    .salary-card.success { border-color:var(--success); }
+    .salary-card.danger  { border-color:var(--danger); }
+
+    /* ── Section Box ─────────────────────────────────────────── */
+    .section-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px; margin-bottom:20px; }
+    .section-box h3 { font-size:0.9rem; font-weight:600; color:var(--text-2); margin-bottom:14px; text-transform:uppercase; letter-spacing:0.05em; }
+
+    /* ── Category Breakdown ──────────────────────────────────── */
+    .cat-breakdown-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
+    .dash-cat-card { display:flex; align-items:center; gap:10px; background:var(--bg-3); border-radius:var(--radius); padding:10px 14px; border:1px solid var(--border); }
+    .dash-cat-dot  { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
+    .dash-cat-info { flex:1; min-width:0; }
+    .dash-cat-name { display:block; font-size:0.82rem; color:var(--text-2); }
+    .dash-cat-amt  { display:block; font-size:0.95rem; font-weight:600; color:var(--text); }
+    .dash-cat-pct  { font-size:0.78rem; color:var(--text-2); flex-shrink:0; }
+
+    /* ── Category Management ─────────────────────────────────── */
+    .cat-manager { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
+    .cat-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 8px; border-radius:20px; border:1px solid var(--border); background:var(--bg-3); font-size:0.83rem; }
+    .cat-dot   { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+    .cat-badge-name { cursor:default; }
+    .cat-del-btn { background:none; border:none; color:var(--text-2); cursor:pointer; font-size:1rem; line-height:1; padding:0 2px; transition:color .15s; }
+    .cat-del-btn:hover { color:var(--danger); }
+    .cat-rename-input { background:var(--bg); border:1px solid var(--accent); border-radius:4px; color:var(--text); font-family:inherit; font-size:0.83rem; padding:2px 6px; width:100px; }
+    .add-cat-row { display:flex; gap:8px; align-items:center; margin-top:12px; }
+    .add-cat-row input { flex:1; max-width:220px; background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-family:inherit; font-size:0.88rem; padding:8px 12px; }
+    .add-cat-row input:focus { outline:none; border-color:var(--accent); }
+
+    /* ── Charts ──────────────────────────────────────────────── */
+    .charts-grid-salary { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px; margin-bottom:20px; }
+    .chart-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; }
+    .chart-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .chart-title  { font-size:0.88rem; font-weight:600; color:var(--text); }
+    .chart-mode-btns { display:flex; gap:4px; }
+    .chart-mode-btn {
+      padding:4px 10px; font-size:0.75rem; font-family:inherit;
+      background:var(--bg-3); border:1px solid var(--border);
+      border-radius:5px; color:var(--text-2); cursor:pointer; transition:all .15s;
+    }
+    .chart-mode-btn.active { background:var(--accent); border-color:var(--accent); color:#000; font-weight:600; }
+    .chart-mode-btn:hover:not(.active) { background:var(--border); color:var(--text); }
+    .chart-container-salary { height:260px; position:relative; }
+    .chart-alt { padding:4px 0; }
+
+    /* ── Date Range Filter ───────────────────────────────────── */
+    .date-range-bar {
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+      background:var(--bg-2); border:1px solid var(--border);
+      border-radius:var(--radius-lg); padding:12px 16px; margin-bottom:20px;
+    }
+    .date-range-bar label { font-size:0.8rem; color:var(--text-2); white-space:nowrap; }
+    .date-range-bar select {
+      background:var(--bg-3); border:1px solid var(--border);
+      border-radius:var(--radius); color:var(--text);
+      font-family:inherit; font-size:0.85rem; padding:6px 10px;
+    }
+    .date-range-bar select:focus { outline:none; border-color:var(--accent); }
+    .range-sep { color:var(--text-2); font-size:0.8rem; }
+
+    /* ── Table ───────────────────────────────────────────────── */
+    .table-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .table-wrap { overflow-x:auto; }
+    .salary-table { width:100%; border-collapse:collapse; font-size:0.875rem; }
+    .salary-table th { background:var(--bg-3); padding:10px 12px; text-align:right; font-size:0.78rem; font-weight:600; color:var(--text-2); border-bottom:1px solid var(--border); white-space:nowrap; }
+    .salary-table td { padding:9px 12px; border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }
+    .salary-table tr:hover td { background:rgba(255,255,255,.02); }
+    .salary-table .num { text-align:right; font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:embed; }
+    .salary-table .neg { color:var(--danger); }
+    .salary-table .pos { color:var(--success); }
+    .salary-table .notes-cell { max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font-size:0.8rem; }
+    .empty-state { text-align:center; color:var(--text-2); padding:40px; font-size:0.9rem; }
+    .text-dim { color:var(--text-2); }
+    .actions-cell { display:flex; gap:4px; }
+    .btn-icon { background:none; border:1px solid var(--border); border-radius:6px; padding:4px 8px; cursor:pointer; font-size:0.85rem; transition:background .15s,border-color .15s; }
+    .btn-icon:hover { background:var(--bg-3); }
+    .btn-icon.danger:hover { border-color:var(--danger); }
+
+    /* ── Modal ───────────────────────────────────────────────── */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:200; align-items:center; justify-content:center; padding:16px; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:28px 28px 24px; width:100%; max-width:520px; max-height:90vh; overflow-y:auto; }
+    .modal-box h2 { font-size:1.05rem; margin-bottom:20px; }
+    .form-row { margin-bottom:14px; }
+    .form-row label { display:block; font-size:0.78rem; color:var(--text-2); margin-bottom:5px; }
+    .form-row input,.form-row select,.form-row textarea { width:100%; background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-family:inherit; font-size:0.9rem; padding:9px 12px; }
+    .form-row input:focus,.form-row select:focus,.form-row textarea:focus { outline:none; border-color:var(--accent); }
+    .form-2col { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .alloc-section { margin:16px 0; }
+    .alloc-section h3 { font-size:0.78rem; color:var(--text-2); text-transform:uppercase; letter-spacing:.05em; margin-bottom:10px; }
+    .alloc-row { display:flex; align-items:center; gap:10px; margin-bottom:8px; }
+    .alloc-label { display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text); min-width:130px; flex-shrink:0; }
+    .alloc-input { flex:1; background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-family:inherit; font-size:0.9rem; padding:7px 10px; text-align:left; }
+    .alloc-input:focus { outline:none; border-color:var(--accent); }
+    .modal-remaining { font-size:0.92rem; font-weight:600; padding:10px 14px; border-radius:var(--radius); background:var(--bg-3); border:1px solid var(--border); margin:12px 0; text-align:center; }
+    .modal-remaining.neg { color:var(--danger); border-color:var(--danger); }
+    .modal-remaining.pos { color:var(--success); border-color:var(--success); }
+    .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+
+    /* ── Confirm Modals ──────────────────────────────────────── */
+    .confirm-box { background:var(--bg-2); border:1px solid var(--danger); border-radius:var(--radius-lg); padding:28px; width:100%; max-width:400px; text-align:center; }
+    .confirm-box .ci { font-size:2.2rem; margin-bottom:12px; }
+    .confirm-box h2  { font-size:1rem; margin-bottom:10px; }
+    .confirm-box p   { font-size:0.85rem; color:var(--text-2); white-space:pre-line; margin-bottom:20px; }
+    .confirm-box .modal-actions { justify-content:center; }
+
+    /* ── Alt chart helpers ───────────────────────────────────── */
+    .bars-alt-row { display:flex; align-items:center; gap:10px; margin-bottom:9px; }
+    .bars-alt-label { width:88px; font-size:0.8rem; color:var(--text); text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0; }
+    .bars-alt-track { flex:1; height:16px; background:rgba(255,255,255,.06); border-radius:3px; position:relative; }
+    .bars-alt-fill  { height:100%; border-radius:3px; min-width:2px; }
+    .bars-alt-pct   { width:40px; font-size:0.8rem; font-weight:600; color:var(--text); text-align:left; }
+    .bars-alt-val   { width:100px; font-size:0.76rem; color:var(--text-2); text-align:left; }
+
+    .cards-alt-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; padding:4px 0; }
+    .cards-alt-item { background:var(--bg-3); border-radius:var(--radius); padding:10px 12px; border-top:3px solid var(--border); }
+    .cards-alt-name { font-size:0.78rem; color:var(--text-2); margin-bottom:4px; }
+    .cards-alt-val  { font-size:1rem; font-weight:700; color:var(--text); }
+    .cards-alt-pct  { font-size:0.72rem; color:var(--text-2); margin-top:2px; }
+
+    .tbl-alt { width:100%; border-collapse:collapse; font-size:0.82rem; }
+    .tbl-alt th { background:var(--bg-3); padding:7px 10px; text-align:right; font-size:0.75rem; color:var(--text-2); border-bottom:1px solid var(--border); }
+    .tbl-alt td { padding:7px 10px; border-bottom:1px solid var(--border); color:var(--text); }
+    .tbl-alt .num { text-align:left; }
+    .tbl-alt .neg { color:var(--danger); }
+    .tbl-alt .pos { color:var(--success); }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>مقسّم الراتب</h1>
+        <p>توزيع الراتب الشهري الفعلي — مستقل عن باقي الصفحات</p>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="onCSVFileSelected(event)">
+        <button class="btn btn-secondary" onclick="triggerImport()">📥 استيراد CSV</button>
+        <button class="btn btn-secondary" style="border-color:var(--danger);color:var(--danger)" onclick="openResetModal()">🗑️ ريست</button>
+        <button class="btn btn-primary"   onclick="openAddModal()">+ إضافة سجل</button>
+      </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="salary-dash">
+      <div class="salary-card accent">
+        <div class="card-label">إجمالي الرواتب</div>
+        <div class="card-value" id="dash-salary">—</div>
+        <div class="card-sub" id="dash-label">الإجمالي الكلي</div>
+      </div>
+      <div class="salary-card">
+        <div class="card-label">إجمالي المُوزَّع</div>
+        <div class="card-value" id="dash-allocated">—</div>
+        <div class="card-sub" id="dash-months">0 شهر</div>
+      </div>
+      <div class="salary-card success">
+        <div class="card-label">المتبقي غير الموزع</div>
+        <div class="card-value" id="dash-remaining">—</div>
+        <div class="card-sub">الفرق بين الراتب والتوزيعات</div>
+      </div>
+    </div>
+
+    <!-- Date Range Filter -->
+    <div class="date-range-bar">
+      <label>من:</label>
+      <select id="from-month" onchange="applyDateRange()">
+        <option value="">— شهر</option>
+        <option value="1">يناير</option><option value="2">فبراير</option>
+        <option value="3">مارس</option><option value="4">أبريل</option>
+        <option value="5">مايو</option><option value="6">يونيو</option>
+        <option value="7">يوليو</option><option value="8">أغسطس</option>
+        <option value="9">سبتمبر</option><option value="10">أكتوبر</option>
+        <option value="11">نوفمبر</option><option value="12">ديسمبر</option>
+      </select>
+      <select id="from-year" onchange="applyDateRange()"><option value="">— سنة</option></select>
+      <span class="range-sep">—</span>
+      <label>إلى:</label>
+      <select id="to-month" onchange="applyDateRange()">
+        <option value="">— شهر</option>
+        <option value="1">يناير</option><option value="2">فبراير</option>
+        <option value="3">مارس</option><option value="4">أبريل</option>
+        <option value="5">مايو</option><option value="6">يونيو</option>
+        <option value="7">يوليو</option><option value="8">أغسطس</option>
+        <option value="9">سبتمبر</option><option value="10">أكتوبر</option>
+        <option value="11">نوفمبر</option><option value="12">ديسمبر</option>
+      </select>
+      <select id="to-year" onchange="applyDateRange()"><option value="">— سنة</option></select>
+      <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.82rem" onclick="clearDateRange()">مسح الفلتر</button>
+    </div>
+
+    <!-- Category Breakdown -->
+    <div class="section-box">
+      <h3>تفصيل الفئات</h3>
+      <div class="cat-breakdown-grid" id="cat-breakdown"></div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid-salary">
+
+      <!-- Chart 1: Salary vs Allocations over time -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">الراتب والتوزيعات</span>
+          <div class="chart-mode-btns">
+            <button class="chart-mode-btn active" id="c1-stacked" onclick="setChart1Mode('stacked')">مكدّس</button>
+            <button class="chart-mode-btn"        id="c1-line"    onclick="setChart1Mode('line')">خطي</button>
+            <button class="chart-mode-btn"        id="c1-table"   onclick="setChart1Mode('table')">جدول</button>
+          </div>
+        </div>
+        <div id="c1-canvas-wrap" class="chart-container-salary"><canvas id="chart1"></canvas></div>
+        <div id="c1-alt" class="chart-alt" style="display:none"></div>
+      </div>
+
+      <!-- Chart 2: Category distribution -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">توزيع الفئات</span>
+          <div class="chart-mode-btns">
+            <button class="chart-mode-btn active" id="c2-donut"  onclick="setChart2Mode('donut')">دائري</button>
+            <button class="chart-mode-btn"        id="c2-bars"   onclick="setChart2Mode('bars')">أشرطة</button>
+            <button class="chart-mode-btn"        id="c2-cards"  onclick="setChart2Mode('cards')">بطاقات</button>
+          </div>
+        </div>
+        <div id="c2-canvas-wrap" class="chart-container-salary"><canvas id="chart2"></canvas></div>
+        <div id="c2-alt" class="chart-alt" style="display:none"></div>
+      </div>
+
+      <!-- Chart 3: Monthly remaining -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">المتبقي الشهري</span>
+          <div class="chart-mode-btns">
+            <button class="chart-mode-btn active" id="c3-bars"  onclick="setChart3Mode('bars')">أشرطة</button>
+            <button class="chart-mode-btn"        id="c3-line"  onclick="setChart3Mode('line')">خطي</button>
+            <button class="chart-mode-btn"        id="c3-table" onclick="setChart3Mode('table')">جدول</button>
+          </div>
+        </div>
+        <div id="c3-canvas-wrap" class="chart-container-salary"><canvas id="chart3"></canvas></div>
+        <div id="c3-alt" class="chart-alt" style="display:none"></div>
+      </div>
+
+      <!-- Chart 4: Annual comparison -->
+      <div class="chart-card">
+        <div class="chart-header">
+          <span class="chart-title">المقارنة السنوية</span>
+          <div class="chart-mode-btns">
+            <button class="chart-mode-btn active" id="c4-bars"  onclick="setChart4Mode('bars')">أشرطة</button>
+            <button class="chart-mode-btn"        id="c4-cards" onclick="setChart4Mode('cards')">بطاقات</button>
+            <button class="chart-mode-btn"        id="c4-table" onclick="setChart4Mode('table')">جدول</button>
+          </div>
+        </div>
+        <div id="c4-canvas-wrap" class="chart-container-salary"><canvas id="chart4"></canvas></div>
+        <div id="c4-alt" class="chart-alt" style="display:none"></div>
+      </div>
+
+    </div>
+
+    <!-- Category Management -->
+    <div class="section-box">
+      <h3>إدارة الفئات <small style="font-weight:400;text-transform:none;color:var(--text-2);font-size:0.75rem">(انقر مرتين على الاسم لتعديله)</small></h3>
+      <div class="cat-manager" id="cat-list"></div>
+      <div class="add-cat-row">
+        <input type="text" id="new-cat-name" placeholder="اسم الفئة الجديدة..."
+          onkeydown="if(event.key==='Enter') addCategory()">
+        <button class="btn btn-secondary" onclick="addCategory()">+ إضافة فئة</button>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="section-box">
+      <div class="table-toolbar">
+        <h3 style="margin:0">السجلات الشهرية</h3>
+        <button class="btn btn-secondary" onclick="exportCSV()" style="margin-right:auto">📤 تصدير CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="salary-table">
+          <thead id="salary-thead"></thead>
+          <tbody id="salary-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Add / Edit Modal -->
+  <div class="modal-overlay" id="entry-modal" onclick="if(event.target===this)closeModal()">
+    <div class="modal-box">
+      <h2 id="modal-title">إضافة سجل جديد</h2>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>السنة</label>
+          <input type="number" id="entry-year" min="2000" max="2100" placeholder="2025">
+        </div>
+        <div class="form-row">
+          <label>الشهر</label>
+          <select id="entry-month">
+            <option value="1">يناير</option><option value="2">فبراير</option>
+            <option value="3">مارس</option><option value="4">أبريل</option>
+            <option value="5">مايو</option><option value="6">يونيو</option>
+            <option value="7">يوليو</option><option value="8">أغسطس</option>
+            <option value="9">سبتمبر</option><option value="10">أكتوبر</option>
+            <option value="11">نوفمبر</option><option value="12">ديسمبر</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>الراتب / إجمالي الدخل</label>
+        <input type="number" id="entry-salary" min="0" step="0.01" placeholder="0.00">
+      </div>
+      <div class="alloc-section">
+        <h3>توزيع المبالغ</h3>
+        <div id="allocations-form"></div>
+        <div class="modal-remaining" id="modal-remaining">المتبقي: —</div>
+      </div>
+      <div class="form-row">
+        <label>ملاحظات (اختياري)</label>
+        <textarea id="entry-notes" rows="2" placeholder="أي ملاحظات..."></textarea>
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveEntry()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Single Record Modal -->
+  <div class="modal-overlay" id="delete-modal" onclick="if(event.target===this)closeDeleteModal()">
+    <div class="confirm-box">
+      <div class="ci">⚠️</div>
+      <h2>تأكيد الحذف</h2>
+      <p id="delete-msg"></p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeDeleteModal()">إلغاء</button>
+        <button class="btn" style="background:var(--danger);color:#fff" onclick="executeDelete()">حذف نهائياً</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reset All Modal -->
+  <div class="modal-overlay" id="reset-modal" onclick="if(event.target===this)closeResetModal()">
+    <div class="confirm-box">
+      <div class="ci">🗑️</div>
+      <h2>ريست كامل</h2>
+      <p>سيتم حذف جميع السجلات الشهرية نهائياً.\nالفئات لن تُحذف — فقط البيانات.\nلا يمكن التراجع عن هذا الإجراء.</p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeResetModal()">إلغاء</button>
+        <button class="btn" style="background:var(--danger);color:#fff" onclick="executeReset()">نعم، احذف كل شيء</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/salary.js"></script>
+  <script>init();</script>
+</body>
+</html>

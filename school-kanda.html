@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>متابعة كندة - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Profile card ── */
+    .profile-card {
+      background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg);
+      padding:22px 24px; margin-bottom:24px;
+      display:flex; align-items:center; gap:24px; flex-wrap:wrap;
+    }
+    .profile-avatar {
+      width:72px; height:72px; border-radius:50%; background:var(--accent-dim);
+      border:3px solid var(--accent); display:flex; align-items:center; justify-content:center;
+      font-size:2rem; flex-shrink:0;
+    }
+    .profile-info h2 { margin:0 0 4px; font-size:1.3rem; }
+    .profile-info .age { color:var(--text-2); font-size:0.88rem; }
+    .profile-info .birth { color:var(--text-2); font-size:0.82rem; margin-top:2px; }
+    .profile-edit-btn { margin-right:auto; }
+
+    /* ── Tabs ── */
+    .tabs { display:flex; gap:4px; margin-bottom:20px; border-bottom:2px solid var(--border); }
+    .tab-btn { background:none; border:none; border-bottom:3px solid transparent; margin-bottom:-2px;
+      padding:10px 18px; font-family:inherit; font-size:0.88rem; color:var(--text-2); cursor:pointer;
+      transition:all .18s; font-weight:600; }
+    .tab-btn:hover { color:var(--text); }
+    .tab-btn.active { color:var(--accent); border-bottom-color:var(--accent); }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+
+    /* ── Section card ── */
+    .sec-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px; margin-bottom:20px; }
+    .sec-card h3 { font-size:0.88rem; font-weight:700; color:var(--text-2); text-transform:uppercase; letter-spacing:.05em; margin:0 0 14px; }
+
+    /* ── Goals tables ── */
+    .goals-table { width:100%; border-collapse:collapse; font-size:0.86rem; }
+    .goals-table th { background:var(--bg-3); color:var(--text-2); font-weight:600; padding:9px 12px; text-align:right; border-bottom:2px solid var(--border); }
+    .goals-table td { padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .goals-table tr:last-child td { border-bottom:none; }
+    .goals-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .goals-2col { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+    @media(max-width:700px) { .goals-2col { grid-template-columns:1fr; } }
+
+    /* ── Status badges ── */
+    .gs-badge { display:inline-block; padding:3px 9px; border-radius:12px; font-size:0.7rem; font-weight:700; white-space:nowrap; cursor:pointer; }
+    .gs-active  { background:rgba(34,197,94,0.15);  color:#4ade80; border:1px solid rgba(34,197,94,0.3); }
+    .gs-delayed { background:rgba(249,115,22,0.15); color:#fb923c; border:1px solid rgba(249,115,22,0.3); }
+    .gs-done    { background:rgba(59,130,246,0.15); color:#60a5fa; border:1px solid rgba(59,130,246,0.3); }
+    .gs-cancel  { background:rgba(107,114,128,0.15);color:#9ca3af; border:1px solid rgba(107,114,128,0.3); }
+
+    /* ── Grades section ── */
+    .grade-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:14px; }
+    .grade-toolbar select { background:var(--bg-2); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:0.83rem; border-radius:var(--radius); padding:6px 10px; }
+    .grade-toolbar select:focus { outline:none; border-color:var(--accent); }
+
+    .grade-table-wrap { overflow-x:auto; }
+    .grade-table { border-collapse:collapse; font-size:0.83rem; min-width:600px; }
+    .grade-table th, .grade-table td { padding:8px 12px; border:1px solid var(--border); text-align:center; }
+    .grade-table th { background:var(--bg-3); color:var(--text-2); font-weight:600; white-space:nowrap; }
+    .grade-table td:first-child { text-align:right; font-weight:600; color:var(--text-2); white-space:nowrap; }
+    .grade-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .g-cell { cursor:pointer; border-radius:6px; transition:background .15s; min-width:55px; }
+    .g-cell:hover { background:var(--accent-dim) !important; }
+    .g-high   { background:rgba(34,197,94,0.12);  color:#4ade80; font-weight:700; }
+    .g-mid    { background:rgba(240,180,41,0.12);  color:#fbbf24; font-weight:700; }
+    .g-low    { background:rgba(239,68,68,0.12);   color:#f87171; font-weight:700; }
+    .g-empty  { color:var(--border); font-size:0.75rem; }
+    .term-header { background:rgba(240,180,41,0.1); color:var(--accent); font-weight:700; }
+
+    /* ── Modals ── */
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:26px; width:100%; max-width:460px; max-height:90vh; overflow-y:auto; }
+    .modal-box h3 { margin:0 0 18px; font-size:1rem; }
+    .form-row { margin-bottom:13px; }
+    .form-row label { display:block; font-size:0.79rem; color:var(--text-2); margin-bottom:4px; }
+    .form-row input, .form-row select { width:100%; box-sizing:border-box; background:var(--bg-3); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:0.87rem; border-radius:var(--radius); padding:8px 10px; }
+    .form-row input:focus, .form-row select:focus { outline:none; border-color:var(--accent); }
+    .form-2g { display:grid; grid-template-columns:1fr 1fr; gap:11px; }
+    .form-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:18px; }
+    .empty-state { text-align:center; padding:30px 10px; color:var(--text-2); font-size:0.85rem; }
+
+    .add-row-btn { background:none; border:1px dashed var(--border); border-radius:var(--radius); color:var(--text-2); font-family:inherit; font-size:0.82rem; padding:7px 14px; cursor:pointer; transition:all .15s; margin-top:8px; }
+    .add-row-btn:hover { border-color:var(--accent); color:var(--accent); }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school-kanda.html" class="nav-link nav-sub" id="nav-school-kanda"><span class="icon">🎓</span><span>متابعة كندة</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>🎓 متابعة كندة</h1>
+        <p>الأهداف الحياتية والمدرسية والدرجات الدراسية</p>
+      </div>
+    </div>
+
+    <!-- Profile -->
+    <div class="profile-card" id="profile-card">
+      <div class="profile-avatar">👧</div>
+      <div class="profile-info">
+        <h2 id="p-name-display">كندة</h2>
+        <div class="birth" id="p-birth-display"></div>
+        <div class="age"   id="p-age-display"></div>
+      </div>
+      <button class="btn btn-secondary profile-edit-btn" onclick="openProfileModal()">✏️ تعديل البيانات</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('tab-life')">🌟 الأهداف الحياتية</button>
+      <button class="tab-btn"        onclick="switchTab('tab-school')">📚 الأهداف المدرسية</button>
+      <button class="tab-btn"        onclick="switchTab('tab-grades')">📊 الدرجات الدراسية</button>
+    </div>
+
+    <!-- Tab: Life Goals -->
+    <div class="tab-panel active" id="tab-life">
+      <div class="sec-card">
+        <h3>🌟 الأهداف الحياتية</h3>
+        <div style="overflow-x:auto">
+          <table class="goals-table" id="life-goals-table">
+            <thead><tr><th>الهدف</th><th>السنة المستهدفة</th><th>الحالة</th><th></th></tr></thead>
+            <tbody id="life-goals-tbody"></tbody>
+          </table>
+        </div>
+        <button class="add-row-btn" onclick="addGoalRow('life')">＋ إضافة هدف</button>
+      </div>
+    </div>
+
+    <!-- Tab: School Goals -->
+    <div class="tab-panel" id="tab-school">
+      <div class="sec-card">
+        <h3>📚 الأهداف المدرسية</h3>
+        <div style="overflow-x:auto">
+          <table class="goals-table" id="school-goals-table">
+            <thead><tr><th>الهدف</th><th>السنة المستهدفة</th><th>الحالة</th><th></th></tr></thead>
+            <tbody id="school-goals-tbody"></tbody>
+          </table>
+        </div>
+        <button class="add-row-btn" onclick="addGoalRow('school')">＋ إضافة هدف</button>
+      </div>
+    </div>
+
+    <!-- Tab: Grades -->
+    <div class="tab-panel" id="tab-grades">
+      <div class="sec-card">
+        <div class="grade-toolbar">
+          <select id="sel-year" onchange="renderGrades()"></select>
+          <button class="btn btn-secondary" onclick="openYearModal()">＋ سنة دراسية جديدة</button>
+          <button class="btn btn-secondary" onclick="openSubjectModal()">＋ مادة جديدة</button>
+        </div>
+        <div class="grade-table-wrap" id="grade-wrap"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Profile Modal -->
+  <div class="modal-overlay" id="profile-modal">
+    <div class="modal-box">
+      <h3>👧 بيانات كندة</h3>
+      <div class="form-row"><label>الاسم</label><input type="text"  id="pm-name" value="كندة"></div>
+      <div class="form-row"><label>تاريخ الميلاد</label><input type="date" id="pm-birth"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('profile-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveProfile()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Year Modal -->
+  <div class="modal-overlay" id="year-modal">
+    <div class="modal-box" style="max-width:380px">
+      <h3>📅 سنة دراسية جديدة</h3>
+      <div class="form-row"><label>العام الدراسي (مثال: 2025-2026)</label><input type="text" id="ym-year" placeholder="2025-2026"></div>
+      <div class="form-row"><label>الصف الدراسي</label><input type="text" id="ym-class" placeholder="الثالث الابتدائي"></div>
+      <div class="form-row"><label>المدرسة</label><input type="text" id="ym-school" placeholder="اختياري"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('year-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveYear()">إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Subject Modal -->
+  <div class="modal-overlay" id="subject-modal">
+    <div class="modal-box" style="max-width:380px">
+      <h3>📖 مادة جديدة</h3>
+      <div class="form-row"><label>اسم المادة *</label><input type="text" id="sm-name" placeholder="مثال: الرياضيات"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('subject-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveSubject()">إضافة</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Grade Edit Modal -->
+  <div class="modal-overlay" id="grade-modal">
+    <div class="modal-box" style="max-width:360px">
+      <h3 id="gm-title">تعديل الدرجة</h3>
+      <div class="form-row"><label>الدرجة (من 100)</label><input type="number" id="gm-score" min="0" max="100" step="0.5"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('grade-modal')">إلغاء</button>
+        <button class="btn btn-danger"    onclick="saveGrade(null)">مسح</button>
+        <button class="btn btn-primary"   onclick="saveGrade()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="js/utils.js"></script>
+  <script src="js/school-kanda.js"></script>
+  <script>setActiveNav('nav-school-kanda');</script>
+</body>
+</html>

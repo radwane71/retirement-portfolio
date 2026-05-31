@@ -26,6 +26,7 @@ async function loadProperties() {
     .from('real_estate')
     .select('*')
     .eq('user_id', _userId)
+    .eq('is_active', true)
     .order('purchase_date', { ascending: false });
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   properties = data || [];
@@ -114,12 +115,20 @@ function closeModal() {
 
 async function saveProperty(e) {
   e.preventDefault();
+  const name           = document.getElementById('m-name').value.trim();
+  const purchase_value = +document.getElementById('m-purchase-val').value || 0;
+
+  const type = document.getElementById('m-type').value;
+  if (!name)               { showToast('أدخل اسم العقار', 'error'); return; }
+  if (!type)               { showToast('اختر نوع العقار', 'error'); return; }
+  if (purchase_value <= 0) { showToast('قيمة الشراء يجب أن تكون أكبر من صفر', 'error'); return; }
+
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     user_id:        user.id,
-    name:           document.getElementById('m-name').value.trim(),
-    type:           document.getElementById('m-type').value,
-    purchase_value: +document.getElementById('m-purchase-val').value || 0,
+    name,
+    type,
+    purchase_value,
     current_value:  +document.getElementById('m-current-val').value  || 0,
     status:         document.getElementById('m-status').value,
     monthly_rental: +document.getElementById('m-rental').value       || 0,
@@ -137,13 +146,29 @@ async function saveProperty(e) {
 }
 
 async function deleteProp(id) {
-  if (!confirm('هل أنت متأكد من حذف هذا العقار؟')) return;
-  const { error } = await supabaseClient.from('real_estate').delete().eq('id', id);
+  if (!confirm('سيتم أرشفة هذا العقار (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
+  const { error } = await supabaseClient.from('real_estate')
+    .update({ is_active: false, archived_at: new Date().toISOString() }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast('تم الحذف', 'success');
+  showToast('تمت الأرشفة ✓', 'success');
   await loadProperties();
   renderStats();
   renderTable();
+}
+
+// ── تصدير CSV ─────────────────────────────────────────────────
+function exportRealEstateCSV() {
+  if (!properties.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+  exportCSV(`عقارات_${todayISO()}.csv`,
+    ['الاسم', 'النوع', 'الحالة', 'تكلفة الشراء', 'القيمة الحالية', 'ر/خ', 'الإيجار الشهري', 'تاريخ الشراء'],
+    properties.map(p => [
+      p.name, p.type, STATUS_LBL[p.status] || p.status,
+      p.purchase_value, p.current_value,
+      (+p.current_value - +p.purchase_value).toFixed(2),
+      p.monthly_rental || 0, p.purchase_date || ''
+    ])
+  );
+  showToast(`✓ تم تصدير ${properties.length} عقار`, 'success');
 }
 
 init();

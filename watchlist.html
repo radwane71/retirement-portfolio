@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>أسهم تحت المراقبة - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>👁️ أسهم تحت المراقبة</h1>
+        <p>سجّل الأسهم التي تراقبها — حدد سعر الدخول المستهدف والنسبة المخططة</p>
+      </div>
+      <button class="btn btn-primary" onclick="openModal()">+ إضافة سهم</button>
+    </div>
+
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">قائمة المراقبة</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportWatchlistCSV()">⬇ تصدير CSV</button>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الرمز</th>
+              <th>الاسم</th>
+              <th>القطاع</th>
+              <th>سعر الدخول المستهدف</th>
+              <th>النسبة المخططة %</th>
+              <th>ملاحظات</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="wl-tbody">
+            <tr><td colspan="7"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية
+    </footer>
+  </main>
+
+  <!-- Modal -->
+  <div class="modal-overlay" id="wl-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="wl-modal-title">إضافة سهم للمراقبة</span>
+        <button class="modal-close" onclick="closeModal()">✕</button>
+      </div>
+      <form id="wl-form" onsubmit="saveItem(event)">
+        <div class="form-grid">
+          <div class="form-group">
+            <label>رمز السهم *</label>
+            <input type="text" id="wl-ticker" placeholder="مثال: 2222" required
+                   oninput="onTickerInput()" style="text-transform:uppercase">
+          </div>
+          <div class="form-group">
+            <label>اسم السهم *</label>
+            <input type="text" id="wl-name" placeholder="يُملأ تلقائياً" required>
+          </div>
+          <div class="form-group">
+            <label>القطاع</label>
+            <input type="text" id="wl-sector" placeholder="يُملأ تلقائياً">
+          </div>
+          <div class="form-group">
+            <label>سعر الدخول المستهدف (ر.س)</label>
+            <input type="number" id="wl-target-price" step="0.01" min="0" placeholder="0.00">
+          </div>
+          <div class="form-group">
+            <label>النسبة المخططة من المحفظة (%)</label>
+            <input type="number" id="wl-planned-pct" step="0.1" min="0" max="100" placeholder="0.0">
+          </div>
+          <div class="form-group" style="grid-column:span 2">
+            <label>ملاحظات</label>
+            <input type="text" id="wl-notes" placeholder="اختياري — سبب المراقبة، مستهدف السعر…">
+          </div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="button" class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+          <button type="submit" class="btn btn-primary">حفظ</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/tickerdb.js"></script>
+  <script src="js/watchlist.js"></script>
+</body>
+</html>

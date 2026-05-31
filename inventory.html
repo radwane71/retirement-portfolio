@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مخزون المنزل - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .inv-dash { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:24px; }
+    .inv-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px 18px; }
+    .inv-card .lbl { font-size:0.73rem; color:var(--text-2); margin-bottom:5px; }
+    .inv-card .val { font-size:1.4rem; font-weight:700; }
+
+    .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
+    .filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
+    .filter-bar select, .filter-bar input[type=text] {
+      background:var(--bg-2); border:1px solid var(--border); color:var(--text);
+      font-family:inherit; font-size:0.83rem; border-radius:var(--radius); padding:6px 10px;
+    }
+    .filter-bar select:focus,.filter-bar input:focus { outline:none; border-color:var(--accent); }
+
+    .inv-table-wrap { overflow-x:auto; }
+    .inv-table { width:100%; border-collapse:collapse; font-size:0.87rem; }
+    .inv-table th { background:var(--bg-3); color:var(--text-2); font-weight:600; padding:10px 12px; text-align:right; border-bottom:2px solid var(--border); white-space:nowrap; }
+    .inv-table td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .inv-table tr:last-child td { border-bottom:none; }
+    .inv-table tr:hover td { background:rgba(255,255,255,0.02); }
+
+    .cond-badge { display:inline-block; padding:3px 9px; border-radius:12px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
+    .cond-good    { background:rgba(34,197,94,0.15);  color:#4ade80; border:1px solid rgba(34,197,94,0.3); }
+    .cond-worn    { background:rgba(240,180,41,0.15); color:#fbbf24; border:1px solid rgba(240,180,41,0.3); }
+    .cond-damaged { background:rgba(239,68,68,0.15);  color:#f87171; border:1px solid rgba(239,68,68,0.3); }
+    .cond-replace { background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); }
+    .cond-missing { background:rgba(107,114,128,0.15);color:#9ca3af; border:1px solid rgba(107,114,128,0.3); }
+
+    .loc-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.7rem; background:var(--bg-3); border:1px solid var(--border); color:var(--text-2); }
+
+    .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1000; align-items:center; justify-content:center; }
+    .modal-overlay.open { display:flex; }
+    .modal-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:28px; width:100%; max-width:520px; max-height:90vh; overflow-y:auto; }
+    .modal-box h3 { margin:0 0 20px; font-size:1rem; }
+    .form-row { margin-bottom:14px; }
+    .form-row label { display:block; font-size:0.8rem; color:var(--text-2); margin-bottom:5px; }
+    .form-row input, .form-row select, .form-row textarea { width:100%; box-sizing:border-box; background:var(--bg-3); border:1px solid var(--border); color:var(--text); font-family:inherit; font-size:0.88rem; border-radius:var(--radius); padding:8px 10px; }
+    .form-row textarea { resize:vertical; min-height:60px; }
+    .form-row input:focus,.form-row select:focus,.form-row textarea:focus { outline:none; border-color:var(--accent); }
+    .form-2col { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    .form-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
+    .empty-state { text-align:center; padding:50px 20px; color:var(--text-2); }
+    .empty-state .big { font-size:2.5rem; margin-bottom:10px; }
+
+    /* qty badge */
+    .qty-num { font-weight:700; font-variant-numeric:tabular-nums; }
+    .qty-low  { color:var(--danger); }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>📦 مخزون المنزل</h1>
+        <p>تتبع محتويات المنزل والمستودع — الحالة والكمية والموقع</p>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="openAddModal()">＋ إضافة عنصر</button>
+      </div>
+    </div>
+
+    <!-- Dashboard -->
+    <div class="inv-dash" id="inv-dash"></div>
+
+    <!-- Filters -->
+    <div class="filter-bar">
+      <select id="flt-cat"  onchange="renderTable()"><option value="">كل الفئات</option></select>
+      <select id="flt-loc"  onchange="renderTable()"><option value="">كل المواقع</option></select>
+      <select id="flt-cond" onchange="renderTable()">
+        <option value="">كل الحالات</option>
+        <option value="جيد">جيد</option>
+        <option value="مستعمل">مستعمل</option>
+        <option value="متضرر">متضرر</option>
+        <option value="للاستبدال">للاستبدال</option>
+        <option value="مفقود">مفقود</option>
+      </select>
+      <input type="text" id="flt-q" placeholder="بحث…" oninput="renderTable()" style="min-width:160px">
+    </div>
+
+    <!-- Table -->
+    <div class="section-box" style="padding:0;overflow:hidden">
+      <div class="inv-table-wrap">
+        <table class="inv-table">
+          <thead><tr>
+            <th>اسم العنصر</th><th>الفئة</th><th>الموقع</th>
+            <th>الحالة</th><th style="text-align:center">الكمية</th>
+            <th>القيمة التقريبية</th><th>ملاحظات</th><th>إجراءات</th>
+          </tr></thead>
+          <tbody id="inv-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <!-- Add/Edit Modal -->
+  <div class="modal-overlay" id="item-modal">
+    <div class="modal-box">
+      <h3 id="modal-title">إضافة عنصر</h3>
+      <div class="form-row">
+        <label>اسم العنصر *</label>
+        <input type="text" id="i-name" placeholder="مثال: غسالة ملابس">
+      </div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>الفئة</label>
+          <select id="i-cat">
+            <option>أجهزة كهربائية</option>
+            <option>أثاث</option>
+            <option>مطبخ</option>
+            <option>ملابس</option>
+            <option>أدوات</option>
+            <option>إلكترونيات</option>
+            <option>مواد غذائية</option>
+            <option>منظفات</option>
+            <option>ألعاب أطفال</option>
+            <option>أخرى</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>الموقع</label>
+          <select id="i-loc">
+            <option>صالة</option>
+            <option>مطبخ</option>
+            <option>غرفة نوم رئيسية</option>
+            <option>غرفة أطفال</option>
+            <option>حمام</option>
+            <option>مستودع</option>
+            <option>مرآب</option>
+            <option>خارجي</option>
+            <option>أخرى</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>الحالة</label>
+          <select id="i-cond">
+            <option value="جيد">جيد</option>
+            <option value="مستعمل">مستعمل</option>
+            <option value="متضرر">متضرر</option>
+            <option value="للاستبدال">للاستبدال</option>
+            <option value="مفقود">مفقود</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>الكمية</label>
+          <input type="number" id="i-qty" min="1" step="1" value="1">
+        </div>
+      </div>
+      <div class="form-row">
+        <label>القيمة التقريبية (ر.س)</label>
+        <input type="number" id="i-value" min="0" step="any" placeholder="اختياري">
+      </div>
+      <div class="form-row">
+        <label>ملاحظات</label>
+        <textarea id="i-notes" placeholder="موديل، رقم سيريال، أي تفاصيل…"></textarea>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveItem()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Delete Confirm -->
+  <div class="modal-overlay" id="del-modal">
+    <div class="modal-box" style="max-width:380px">
+      <h3>🗑️ حذف العنصر</h3>
+      <p style="color:var(--text-2);margin-bottom:20px">هل أنت متأكد؟ لا يمكن التراجع.</p>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeDelModal()">إلغاء</button>
+        <button class="btn btn-danger"    onclick="confirmDelete()">حذف</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/auth.js"></script>  <script src="js/inventory.js"></script>
+  <script>setActiveNav('nav-inventory');</script>
+</body>
+</html>

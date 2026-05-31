@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>الأداء التاريخي - محفظتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .perf-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
+    .perf-tab  { padding:7px 16px; border-radius:var(--radius); border:1px solid var(--border);
+                 background:var(--bg-2); color:var(--text-2); cursor:pointer; font-family:inherit;
+                 font-size:0.85rem; font-weight:500; transition:all .15s; }
+    .perf-tab.active { background:var(--accent); color:#000; border-color:var(--accent); font-weight:700; }
+    .perf-tab:hover:not(.active) { background:var(--bg-3); color:var(--text); }
+
+    .timeline-dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-left:6px; flex-shrink:0; }
+
+    .position-open   { border-right:3px solid #3fb950; }
+    .position-closed { border-right:3px solid #8b949e; }
+    .position-partial{ border-right:3px solid #f0b429; }
+
+    .monthly-chart-wrap { height:320px; }
+
+    /* CSV import */
+    .import-zone {
+      border: 2px dashed var(--border); border-radius:var(--radius-lg);
+      padding:28px; text-align:center; cursor:pointer;
+      transition:border-color .2s;
+    }
+    .import-zone:hover { border-color:var(--accent); }
+    .import-zone .icon { font-size:2rem; margin-bottom:8px; }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>📉 الأداء التاريخي</h1>
+        <p>سجل تدقيق كامل — مراكز مفتوحة، مغلقة، تايم لاين شهري للقيمة والربح والأرباح</p>
+      </div>
+      <button class="btn btn-secondary" onclick="exportPerformanceCSV()">⬇ تصدير CSV</button>
+    </div>
+
+    <!-- KPI strip -->
+    <div class="stats-grid" id="perf-kpis">
+      <div class="stat-card"><div class="label">مراكز مفتوحة <span class="eng-label">Open</span></div><div class="value num text-success" id="pk-open">—</div><div class="sub">سهم نشط</div></div>
+      <div class="stat-card"><div class="label">مراكز مغلقة <span class="eng-label">Closed</span></div><div class="value num text-muted" id="pk-closed">—</div><div class="sub">صفقات منتهية</div></div>
+      <div class="stat-card"><div class="label">إجمالي ر/خ محقق <span class="eng-label">Realized P&amp;L</span></div><div class="value num" id="pk-realized">—</div><div class="sub">من صفقات البيع</div></div>
+      <div class="stat-card"><div class="label">ر/خ غير محقق <span class="eng-label">Unrealized P&amp;L</span></div><div class="value num" id="pk-unrealized">—</div><div class="sub">على المراكز الحالية</div></div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="perf-tabs">
+      <button class="perf-tab active" onclick="showPerfTab('open')"    id="ptab-open">📗 المراكز المفتوحة</button>
+      <button class="perf-tab"        onclick="showPerfTab('closed')"  id="ptab-closed">📕 المراكز المغلقة</button>
+      <button class="perf-tab"        onclick="showPerfTab('timeline')" id="ptab-timeline">📅 التايم لاين الشهري</button>
+      <button class="perf-tab"        onclick="showPerfTab('monthly-chart')" id="ptab-monthly-chart">📈 الرسم البياني</button>
+    </div>
+
+    <!-- ── TAB: Open positions ── -->
+    <div id="pview-open" class="card">
+      <div class="section-header">
+        <span class="section-title">المراكز المفتوحة — Open Positions</span>
+        <span class="small text-muted">الأسهم الموجودة حالياً في المحفظة</span>
+      </div>
+      <p class="small text-muted mb-4" style="margin-top:-8px">الأسهم مرتبة بالربح/الخسارة غير المحقق — التكلفة من متوسط سعر الشراء المرجّح</p>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الرمز</th><th>الاسم</th><th>الأسهم</th>
+              <th>متوسط التكلفة <span class="eng-label">Avg Cost</span></th>
+              <th>السعر الحالي <span class="eng-label">Current</span></th>
+              <th>التكلفة الكلية <span class="eng-label">Cost Basis</span></th>
+              <th>القيمة الحالية <span class="eng-label">Market Value</span></th>
+              <th>ر/خ غير محقق <span class="eng-label">Unreal. P&amp;L</span></th>
+              <th>ر/خ % <span class="eng-label">Return%</span></th>
+              <th>أرباح مستلمة <span class="eng-label">Dividends</span></th>
+              <th>إجمالي العائد <span class="eng-label">Total Return</span></th>
+            </tr>
+          </thead>
+          <tbody id="open-tbody">
+            <tr><td colspan="11"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+          </tbody>
+          <tfoot id="open-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TAB: Closed positions ── -->
+    <div id="pview-closed" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">المراكز المغلقة — Closed Positions</span>
+        <span class="small text-muted">صفقات تم إغلاقها بالكامل (بيع = شراء)</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الرمز</th><th>الاسم</th>
+              <th>تاريخ الفتح</th><th>تاريخ الإغلاق</th><th>مدة الاحتفاظ</th>
+              <th>الأسهم</th><th>تكلفة الشراء</th><th>عائد البيع</th>
+              <th>ر/خ محقق</th><th>ر/خ %</th>
+              <th>أرباح مستلمة</th><th>إجمالي العائد</th>
+            </tr>
+          </thead>
+          <tbody id="closed-tbody">
+            <tr><td colspan="12"><div class="empty-state"><div class="icon">📕</div><p>جارٍ التحميل…</p></div></td></tr>
+          </tbody>
+          <tfoot id="closed-tfoot"></tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TAB: Monthly timeline ── -->
+    <div id="pview-timeline" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">التايم لاين الشهري</span>
+        <div class="flex gap-2">
+          <select id="timeline-year-filter" onchange="renderMonthlyTimeline()"
+            style="padding:5px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.85rem">
+            <option value="">كل السنوات</option>
+          </select>
+        </div>
+      </div>
+      <p class="small text-muted mb-4" style="margin-top:-8px">
+        رأس المال المُودَع = إجمالي الإيداعات − السحوبات التراكمية من صفحة التدفقات النقدية حتى نهاية كل شهر
+      </p>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الشهر</th>
+              <th title="إجمالي الإيداعات − السحوبات من التدفقات النقدية حتى نهاية الشهر — يطابق صفحة التدفقات النقدية">رأس المال المُودَع <span class="eng-label">Net Deposits</span></th>
+              <th>الأرباح الموزعة <span class="eng-label">Dividends</span></th>
+              <th>حركات الشراء <span class="eng-label">Buys</span></th>
+              <th>حركات البيع <span class="eng-label">Sells</span></th>
+              <th>صافي الحركة</th>
+            </tr>
+          </thead>
+          <tbody id="timeline-tbody">
+            <tr><td colspan="6"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TAB: Monthly chart ── -->
+    <div id="pview-monthly-chart" class="card" style="display:none">
+      <div class="section-header" style="flex-wrap:wrap;gap:8px">
+        <span class="section-title">رسم بياني — رأس المال والأرباح عبر الزمن</span>
+        <div class="chart-mode-btns">
+          <button class="chart-mode-btn active" onclick="setMonthlyChartMode('combined')" id="mcm-combined">مدمج</button>
+          <button class="chart-mode-btn"         onclick="setMonthlyChartMode('lines')"    id="mcm-lines">خطوط</button>
+          <button class="chart-mode-btn"         onclick="setMonthlyChartMode('stacked')"  id="mcm-stacked">مكدس</button>
+          <button class="chart-mode-btn"         onclick="setMonthlyChartMode('divonly')"  id="mcm-divonly">أرباح فقط</button>
+        </div>
+      </div>
+      <div class="monthly-chart-wrap"><canvas id="monthly-chart"></canvas></div>
+    </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+    </footer>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/performance.js"></script>
+</body>
+</html>

@@ -2,6 +2,10 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>الإعدادات - محفظتي</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,20 +17,61 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>💎 ثروة</h2>
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
       <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
-      <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
-      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
-      <a href="dividends.html"    class="nav-link" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
-      <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
-      <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
-      <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
-      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
-      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
-      <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
-      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -73,6 +118,62 @@
 
     </div>
 
+    <!-- ── Alert Thresholds ── -->
+    <div class="card mb-6">
+      <div class="section-header mb-4">
+        <span class="section-title">🎨 عتبات ألوان التنبيهات</span>
+      </div>
+      <p class="small text-muted mb-4">
+        تحدد متى يتغير لون حالة السهم أو القطاع في صفحة الأهداف — بناءً على الفارق بين الوزن الحالي والهدف المحدد.
+      </p>
+
+      <div style="display:grid;gap:20px;max-width:480px">
+        <!-- Green threshold -->
+        <div style="display:flex;align-items:center;gap:16px">
+          <span style="min-width:16px;height:16px;border-radius:50%;background:#22c55e;display:inline-block"></span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">الأخضر — ضمن الهدف</div>
+            <div class="small text-muted">يظهر أخضر إذا كان الفارق أقل من أو يساوي هذه القيمة</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" id="thresh-green" min="0" max="20" step="0.5" value="1"
+              style="width:70px;padding:6px 8px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;text-align:center">
+            <span class="small text-muted">%</span>
+          </div>
+        </div>
+
+        <!-- Yellow threshold -->
+        <div style="display:flex;align-items:center;gap:16px">
+          <span style="min-width:16px;height:16px;border-radius:50%;background:#f0b429;display:inline-block"></span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">الأصفر — تنبيه</div>
+            <div class="small text-muted">يظهر أصفر إذا تجاوز الفارق الحد الأخضر ولم يتجاوز هذه القيمة</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:6px">
+            <input type="number" id="thresh-yellow" min="0" max="20" step="0.5" value="3"
+              style="width:70px;padding:6px 8px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;text-align:center">
+            <span class="small text-muted">%</span>
+          </div>
+        </div>
+
+        <!-- Red (auto) -->
+        <div style="display:flex;align-items:center;gap:16px;opacity:0.7">
+          <span style="min-width:16px;height:16px;border-radius:50%;background:#f85149;display:inline-block"></span>
+          <div style="flex:1">
+            <div style="font-weight:600;margin-bottom:2px">الأحمر — خارج الهدف</div>
+            <div class="small text-muted">يظهر أحمر تلقائياً عند تجاوز حد الأصفر</div>
+          </div>
+          <span class="small text-muted">تلقائي</span>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center">
+          <button class="btn btn-primary" onclick="saveAlertThresholds()">حفظ العتبات</button>
+          <button class="btn btn-secondary" onclick="resetAlertThresholds()">إعادة للافتراضي (1% / 3%)</button>
+        </div>
+        <div id="thresh-status" class="small" style="min-height:18px"></div>
+      </div>
+    </div>
+
     <!-- ── Backup & Restore ── -->
     <div class="card mb-6">
       <div class="section-header mb-4">
@@ -85,14 +186,14 @@
           <div class="bc-icon">📤</div>
           <h3>تصدير نسخة احتياطية</h3>
           <p>
-            يصدّر جميع بياناتك (الأسهم، المعاملات، الأرباح، التدفقات، صافي الثروة، العقارات)
-            في ملف JSON واحد يمكنك حفظه بأمان.
+            يصدّر <strong>100% من بياناتك</strong> — جميع الجداول الـ 14 + جميع بيانات localStorage —
+            في ملف JSON واحد محمي يمكنك حفظه على جهازك.
           </p>
           <p class="small text-muted">
-            اسم الملف: <code style="color:var(--accent)">portfolio_backup_YYYY-MM-DD.json</code>
+            اسم الملف: <code style="color:var(--accent)">tharwa_backup_YYYY-MM-DD.json</code>
           </p>
           <button class="btn btn-primary" id="btn-export" onclick="exportBackup()">
-            تصدير النسخة الاحتياطية
+            📤 تصدير النسخة الاحتياطية
           </button>
           <div class="backup-status" id="export-status"></div>
         </div>
@@ -115,19 +216,63 @@
         </div>
       </div>
 
-      <p class="small text-muted mb-4">الجداول المشمولة في النسخ الاحتياطي:</p>
+      <p class="small text-muted mb-4">الجداول المشمولة في النسخ الاحتياطي (14 جدول Supabase + 11 مفتاح localStorage):</p>
       <table class="info-table">
         <tbody>
-          <tr><td>holdings</td><td>الأسهم في المحفظة</td></tr>
-          <tr><td>transactions</td><td>سجل المعاملات</td></tr>
+          <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">☁️ Supabase — البيانات الرئيسية</th></tr>
+          <tr><td>holdings</td><td>الأسهم في المحفظة (الأسهم، متوسطات، أسعار)</td></tr>
+          <tr><td>transactions</td><td>سجل المعاملات (شراء، بيع، منح)</td></tr>
           <tr><td>dividends</td><td>الأرباح الموزعة</td></tr>
           <tr><td>cashflow_entries</td><td>التدفقات النقدية (إيداعات / سحوبات)</td></tr>
           <tr><td>net_worth_snapshots</td><td>لقطات صافي الثروة</td></tr>
-          <tr><td>nw_assets</td><td>الأصول (حسابات، صكوك، مركبات…)</td></tr>
-          <tr><td>nw_liabilities</td><td>الالتزامات (قروض، بطاقات…)</td></tr>
-          <tr><td>real_estate</td><td>الأصول العقارية</td></tr>
+          <tr><td>nw_assets</td><td>الأصول (حسابات، صكوك، مركبات…) + الأرشيف</td></tr>
+          <tr><td>nw_liabilities</td><td>الالتزامات (قروض، بطاقات…) + الأرشيف</td></tr>
+          <tr><td>real_estate</td><td>الأصول العقارية + الأرشيف</td></tr>
+          <tr><td>user_stocks</td><td>قاعدة بيانات أسهمك (الأكواد والقطاعات)</td></tr>
+          <tr><td>stock_targets</td><td>أهداف الأوزان لكل سهم</td></tr>
+          <tr><td>sector_targets</td><td>أهداف الأوزان لكل قطاع</td></tr>
+          <tr><td>watchlist</td><td>أسهم تحت المراقبة</td></tr>
+          <tr><td>portfolio_cash</td><td>نقد المحفظة عند الوسيط</td></tr>
+          <tr><td>portfolio_tasks</td><td>المهام والتذكيرات</td></tr>
+          <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">💾 localStorage — البيانات المحلية وتفضيلات المستخدم</th></tr>
+          <tr><td>salary_planner_v1</td><td>مخطط الراتب والمصاريف</td></tr>
+          <tr><td>sukuk_planner_v1</td><td>مخطط الصكوك</td></tr>
+          <tr><td>life_goals_v1</td><td>أهداف الحياة</td></tr>
+          <tr><td>inventory_v1</td><td>إدارة المنزل والمخزون</td></tr>
+          <tr><td>school_tracker_v2</td><td>المتابعة المدرسية (جميع الأطفال)</td></tr>
+          <tr><td>nav_groups_v1</td><td>حالة مجموعات الشريط الجانبي (مفتوح/مغلق)</td></tr>
+          <tr><td>tharwa-theme</td><td>المظهر (داكن / فاتح)</td></tr>
+          <tr><td>tharwa-zoom</td><td>حجم الخط</td></tr>
+          <tr><td>portfolio_cash_v1</td><td>نقد المحفظة (نسخة محلية)</td></tr>
+          <tr><td>tharwa-alert-green</td><td>عتبة التنبيه الأخضر</td></tr>
+          <tr><td>tharwa-alert-yellow</td><td>عتبة التنبيه الأصفر</td></tr>
         </tbody>
       </table>
+    </div>
+
+    <!-- ── Monthly Review MD Export ── -->
+    <div class="card mb-6">
+      <div class="section-header mb-4">
+        <span class="section-title">📋 تقرير المراجعة الشهرية</span>
+      </div>
+      <p style="font-size:0.9rem;color:var(--text-2);margin-bottom:12px">
+        يُصدّر ملف <strong>.md</strong> شامل يحتوي على <strong>كل شيء</strong> في المحفظة —
+        المعاملات، الأرباح، الأصول، الأهداف، المهام — بصياغة واضحة يفهمها الذكاء الاصطناعي مباشرةً.
+        مثالي للمراجعة الشهرية: ارفع الملف لأي نموذج AI واسأله ما تريد.
+      </p>
+      <ul style="font-size:0.82rem;color:var(--text-2);margin:0 0 16px 0;padding-right:18px;line-height:2">
+        <li>الأسهم الحالية مع القيم والر/خ غير المحقق</li>
+        <li>كامل سجل المعاملات (شراء / بيع / منح)</li>
+        <li>الأرباح الموزعة مقسّمة بالسنة والرمز</li>
+        <li>التدفقات النقدية وصافي الإيداع</li>
+        <li>الأصول والالتزامات والعقارات</li>
+        <li>الأهداف وقائمة المراقبة والمهام النشطة</li>
+        <li>ملخص إحصائي جاهز للتحليل</li>
+      </ul>
+      <button class="btn btn-primary" id="btn-export-md" onclick="exportMonthlyReviewMD()">
+        📋 تصدير تقرير المراجعة (.md)
+      </button>
+      <div class="backup-status" id="md-export-status"></div>
     </div>
 
     <!-- ── Account ── -->

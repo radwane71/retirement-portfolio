@@ -54,6 +54,14 @@ function formatNum(num, decimals = 2) {
   return (parseFloat(num) || 0).toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 }
 
+// عدد الأسهم: يُظهر أعداداً صحيحة بدون أصفار، وكسور بحد أقصى 4 أرقام بدون trailing zeros
+function formatShares(num) {
+  const v = parseFloat(num) || 0;
+  if (v === Math.floor(v)) return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  // كسور: أزل الأصفار اللاحقة حتى 4 خانات
+  return v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return '—';
   const d = new Date(dateStr + 'T00:00:00');
@@ -64,12 +72,42 @@ function todayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
+// ── تصدير CSV ─────────────────────────────────────────────────
+// headers: مصفوفة أسماء الأعمدة بالعربي
+// rows:    مصفوفة مصفوفات (كل صف = مصفوفة قيم مرتبة بنفس ترتيب headers)
+function exportCSV(filename, headers, rows) {
+  const BOM = '﻿';   // يجعل Excel يقرأ العربية صحيحاً
+  const escape = v => {
+    const s = v == null ? '' : String(v);
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"'
+      : s;
+  };
+  const lines = [
+    headers.map(escape).join(','),
+    ...rows.map(r => r.map(escape).join(','))
+  ];
+  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // HTML-attribute-safe escape
 function esc(v) {
   return String(v == null ? '' : v)
     .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
+
+// ── ID generator ─────────────────────────────────────────────
+function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
 
 // ── UI helpers ────────────────────────────────────────────────
 function showToast(msg, type = 'info') {
@@ -85,6 +123,38 @@ function setActiveNav(linkId) {
   document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
   const el = document.getElementById(linkId);
   if (el) el.classList.add('active');
+  initNavGroups();
+}
+
+// ── Collapsible nav groups ────────────────────────────────────
+function toggleNavGroup(id) {
+  const body = document.getElementById(id);
+  const btn  = body && body.previousElementSibling;
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  if (btn) btn.classList.toggle('open', isOpen);
+  try {
+    const state = JSON.parse(localStorage.getItem('nav_groups_v1') || '{}');
+    state[id] = isOpen;
+    localStorage.setItem('nav_groups_v1', JSON.stringify(state));
+  } catch(e) {}
+}
+
+function initNavGroups() {
+  const GROUPS = ['grp-portfolio', 'grp-finance', 'grp-other', 'grp-life'];
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('nav_groups_v1') || '{}'); } catch(e) {}
+
+  GROUPS.forEach(id => {
+    const body = document.getElementById(id);
+    const btn  = body && body.previousElementSibling;
+    if (!body) return;
+    const hasActive = body.querySelector('.nav-link.active');
+    // Auto-open group containing active page; otherwise use saved state (default open)
+    const shouldOpen = hasActive || (saved[id] !== false);
+    body.classList.toggle('open', !!shouldOpen);
+    if (btn) btn.classList.toggle('open', !!shouldOpen);
+  });
 }
 
 // ── Finance ───────────────────────────────────────────────────
@@ -159,6 +229,43 @@ function chartDefaults() {
     document.body.appendChild(w);
   });
 })();
+
+// ── Notes Popup (shared — used by salary, life-goals, inventory, school) ─────
+window.showNotePopup = function(btnEl) {
+  const existing = document.getElementById('note-popup');
+  if (existing) {
+    if (existing._srcBtn === btnEl) { existing.remove(); return; }
+    existing.remove();
+  }
+  const raw = btnEl.dataset.note || '';
+  const txt = raw
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  const popup = document.createElement('div');
+  popup.id = 'note-popup';
+  popup._srcBtn = btnEl;
+  popup.innerHTML = `
+    <div class="note-popup-header">
+      <span>📝 ملاحظة</span>
+      <button class="note-popup-close" onclick="document.getElementById('note-popup').remove()">✕</button>
+    </div>
+    <div class="note-popup-body">${txt.replace(/\n/g, '<br>')}</div>`;
+  document.body.appendChild(popup);
+  const rect = btnEl.getBoundingClientRect();
+  const sY = window.scrollY || 0, sX = window.scrollX || 0;
+  let top  = rect.bottom + sY + 6;
+  let left = rect.left  + sX - 180;
+  if (left < 8) left = 8;
+  if (left + 300 > window.innerWidth - 8) left = window.innerWidth - 308;
+  popup.style.top = top + 'px'; popup.style.left = left + 'px';
+  setTimeout(() => {
+    document.addEventListener('click', function outside(e) {
+      if (!popup.contains(e.target) && e.target !== btnEl) {
+        popup.remove(); document.removeEventListener('click', outside);
+      }
+    });
+  }, 0);
+};
 
 window.toggleTheme = function(isLight) {
   if (isLight) {

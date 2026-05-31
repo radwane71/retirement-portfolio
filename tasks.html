@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مهام المحفظة - محفظتي</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Task cards ── */
+    .tasks-board { display:flex; flex-direction:column; gap:12px; }
+
+    .task-item {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px 18px;
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+      transition: border-color .15s;
+    }
+    .task-item:hover { border-color: var(--accent); }
+    .task-item.done       { opacity: 0.55; border-color:rgba(63,185,80,0.3); }
+    .task-item.cancelled  { opacity: 0.45; }
+    .task-item.auto-alert { border-right: 4px solid var(--accent); }
+
+    .task-type-icon { font-size:1.5rem; flex-shrink:0; margin-top:2px; }
+
+    .task-body { flex:1; min-width:0; }
+    .task-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
+    .task-ticker { font-size:1rem; font-weight:700; color:var(--accent); }
+    .task-name   { font-size:0.85rem; color:var(--text-2); }
+
+    .task-badge {
+      padding:2px 9px; border-radius:12px; font-size:0.7rem; font-weight:700;
+    }
+    .badge-liquidation { background:rgba(248,81,73,0.15); color:#f85149; }
+    .badge-reduction   { background:rgba(240,180,41,0.15); color:#f0b429; }
+    .badge-monitoring  { background:rgba(139,148,158,0.15); color:#8b949e; }
+    .badge-accumulation{ background:rgba(63,185,80,0.15);  color:#3fb950; }
+    .badge-auto        { background:rgba(88,166,255,0.12); color:#58a6ff; font-size:0.65rem; }
+
+    .badge-status-active    { background:rgba(63,185,80,0.12);  color:#3fb950; }
+    .badge-status-done      { background:rgba(139,148,158,0.12);color:#8b949e; }
+    .badge-status-cancelled { background:rgba(248,81,73,0.12);  color:#f85149; }
+
+    .task-notes { font-size:0.82rem; color:var(--text-2); margin-top:4px; line-height:1.6; white-space:pre-wrap; }
+    .task-meta  { font-size:0.72rem; color:var(--text-2); margin-top:6px; opacity:0.8; }
+
+    .task-actions { display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap; align-items:center; }
+
+    /* ── Alert section ── */
+    .alert-section {
+      background: rgba(240,180,41,0.06);
+      border: 1px solid rgba(240,180,41,0.25);
+      border-radius: var(--radius-lg);
+      padding: 18px;
+      margin-bottom: 24px;
+    }
+    .alert-section-title {
+      font-size:0.9rem; font-weight:700; color:var(--accent); margin-bottom:12px;
+    }
+
+    /* ── Year filter pill ── */
+    .year-pills { display:flex; gap:6px; flex-wrap:wrap; }
+    .year-pill  {
+      padding:4px 14px; border-radius:20px; font-size:0.8rem; cursor:pointer;
+      background:var(--bg-3); border:1px solid var(--border); color:var(--text-2);
+      font-family:inherit; transition:all .15s;
+    }
+    .year-pill.active { background:var(--accent); color:#000; border-color:var(--accent); font-weight:700; }
+
+    /* ── Modal form ── */
+    .task-modal-card { max-width:620px; }
+    .task-modal-card textarea {
+      width:100%; min-height:90px; background:var(--bg-2); border:1px solid var(--border);
+      border-radius:var(--radius); color:var(--text); font-family:Tajawal; font-size:0.9rem;
+      padding:10px; resize:vertical;
+    }
+    .task-modal-card textarea:focus { outline:none; border-color:var(--accent); }
+
+    .type-selector { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
+    .type-option {
+      padding:12px; border-radius:var(--radius); border:2px solid var(--border);
+      cursor:pointer; text-align:center; transition:all .15s;
+    }
+    .type-option.selected  { border-color:var(--accent); background:var(--accent-dim); }
+    .type-option .t-icon   { font-size:1.4rem; margin-bottom:4px; }
+    .type-option .t-name   { font-size:0.82rem; font-weight:700; }
+    .type-option .t-desc   { font-size:0.72rem; color:var(--text-2); margin-top:2px; }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>📋 مهام المحفظة</h1>
+        <p>مهامك اليدوية + تنبيهات تلقائية من الأهداف — كل شيء محفوظ، لا شيء يُحذف</p>
+      </div>
+      <button class="btn btn-primary" onclick="openTaskModal()">+ مهمة جديدة</button>
+    </div>
+
+    <!-- KPIs -->
+    <div class="stats-grid" style="margin-bottom:20px">
+      <div class="stat-card">
+        <div class="label">مهام نشطة</div>
+        <div class="value num text-accent" id="tk-active">—</div>
+        <div class="sub">تنتظر التنفيذ</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">منجزة هذا العام</div>
+        <div class="value num text-success" id="tk-done">—</div>
+        <div class="sub">تم إغلاقها</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">ملغاة</div>
+        <div class="value num text-muted" id="tk-cancelled">—</div>
+        <div class="sub">أُلغيت (محفوظة)</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">تنبيهات تلقائية</div>
+        <div class="value num text-accent" id="tk-alerts">—</div>
+        <div class="sub">من صفحة الأهداف</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card" style="padding:14px 18px">
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <!-- السنة -->
+        <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
+          <span class="small text-muted" style="min-width:50px">السنة:</span>
+          <div class="year-pills" id="year-pills"></div>
+        </div>
+        <!-- النوع -->
+        <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
+          <span class="small text-muted" style="min-width:50px">النوع:</span>
+          <div class="year-pills" id="type-pills">
+            <button class="year-pill active" onclick="filterByType('all')">كل الأنواع</button>
+            <button class="year-pill" onclick="filterByType('accumulation')">🟢 تجميع</button>
+            <button class="year-pill" onclick="filterByType('reduction')">⚖️ تخفيف</button>
+            <button class="year-pill" onclick="filterByType('monitoring')">👁 مراقبة</button>
+            <button class="year-pill" onclick="filterByType('liquidation')">🔴 تصفية</button>
+          </div>
+        </div>
+        <!-- الحالة -->
+        <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
+          <span class="small text-muted" style="min-width:50px">الحالة:</span>
+          <select id="status-filter" onchange="applyFilters()"
+            style="padding:5px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.85rem">
+            <option value="active">نشطة فقط</option>
+            <option value="all">الكل</option>
+            <option value="done">منجزة</option>
+            <option value="cancelled">ملغاة</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- Manual tasks board — مهامي أولاً -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">مهامي اليدوية</span>
+        <span class="small text-muted" id="tasks-count-label">—</span>
+      </div>
+      <div class="tasks-board" id="tasks-board">
+        <div class="empty-state" style="padding:30px"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div>
+      </div>
+    </div>
+
+    <!-- Archive / history -->
+    <details class="card">
+      <summary style="font-weight:700;font-size:0.95rem;list-style:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
+        <span>📦 أرشيف المهام المنتهية والملغاة</span>
+        <span class="small text-muted">▼</span>
+      </summary>
+      <div style="margin-top:14px">
+        <div class="tasks-board" id="archive-board">
+          <p class="small text-muted" style="padding:10px">لا توجد مهام مؤرشفة</p>
+        </div>
+      </div>
+    </details>
+
+    <!-- Auto-alerts section — تنبيهات النظام في الأسفل -->
+    <div class="alert-section" id="auto-alerts-section">
+      <div class="alert-section-title">👁 تنبيهات تلقائية من أهداف المحفظة</div>
+      <div id="auto-alerts-body">
+        <p class="small text-muted">جارٍ التحميل…</p>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+    </footer>
+  </main>
+
+  <!-- Task Modal -->
+  <div class="modal-overlay" id="task-modal" style="display:none" onclick="closeTaskModalOverlay(event)">
+    <div class="modal-card task-modal-card">
+      <div class="modal-header">
+        <h3 style="margin:0;font-size:1rem" id="task-modal-title">مهمة جديدة</h3>
+        <button class="modal-close" onclick="closeTaskModal()">✕</button>
+      </div>
+
+      <!-- Task type selector -->
+      <div style="margin:16px 0 8px;font-size:0.8rem;color:var(--text-2)">نوع المهمة *</div>
+      <div class="type-selector" id="type-selector">
+        <div class="type-option" data-type="liquidation" onclick="selectTaskType('liquidation')">
+          <div class="t-icon">🔴</div>
+          <div class="t-name">تصفية كاملة</div>
+          <div class="t-desc">بيع كامل الموقف</div>
+        </div>
+        <div class="type-option" data-type="reduction" onclick="selectTaskType('reduction')">
+          <div class="t-icon">⚖️</div>
+          <div class="t-name">تخفيف</div>
+          <div class="t-desc">بيع جزء من الموقف</div>
+        </div>
+        <div class="type-option" data-type="monitoring" onclick="selectTaskType('monitoring')">
+          <div class="t-icon">👁</div>
+          <div class="t-name">تحت المراقبة</div>
+          <div class="t-desc">مراقبة بدون إجراء</div>
+        </div>
+        <div class="type-option" data-type="accumulation" onclick="selectTaskType('accumulation')">
+          <div class="t-icon">🟢</div>
+          <div class="t-name">تجميع / إضافة</div>
+          <div class="t-desc">زيادة الموقف</div>
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <div class="form-group">
+          <label>رمز السهم *</label>
+          <input type="text" id="task-ticker" placeholder="مثال: 2222" oninput="onTaskTickerInput()">
+        </div>
+        <div class="form-group">
+          <label>اسم السهم</label>
+          <input type="text" id="task-name" placeholder="اختياري — يُملأ تلقائياً">
+        </div>
+
+        <!-- Accumulation: target price -->
+        <div class="form-group" id="task-price-group" style="display:none">
+          <label>تجميع عند سعر أقل من (ر.س)</label>
+          <input type="number" id="task-price" step="0.01" min="0" placeholder="0.00">
+        </div>
+
+        <!-- Reduction: percentage -->
+        <div class="form-group" id="task-pct-group" style="display:none">
+          <label>نسبة التخفيف %</label>
+          <input type="number" id="task-pct" step="1" min="1" max="99" placeholder="مثال: 30">
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-top:8px">
+        <label>ملاحظات / استراتيجية التنفيذ</label>
+        <textarea id="task-notes" placeholder="مثال: 40% عند السعر 18 ريال، 30% عند 22 ريال...&#10;أو أي ملاحظات تريدها"></textarea>
+      </div>
+
+      <div class="flex gap-3 mt-4" style="justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeTaskModal()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveTask()">حفظ المهمة</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/tickerdb.js"></script>
+  <script src="js/tasks.js"></script>
+</body>
+</html>

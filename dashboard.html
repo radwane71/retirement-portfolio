@@ -1,7 +1,11 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>لوحة التحكم - محفظتي</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -13,20 +17,61 @@
 
   <aside class="sidebar">
     <div class="sidebar-logo">
-      <h2>💎 ثروة</h2>
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
       <p>مفكرة حسابية شخصية</p>
     </div>
     <nav class="sidebar-nav">
-      <a href="dashboard.html"    class="nav-link" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
-      <a href="transactions.html" class="nav-link" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
-      <a href="dividends.html"    class="nav-link" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
-      <a href="cashflows.html"    class="nav-link" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
-      <a href="networth.html"     class="nav-link" id="nav-networth">    <span class="icon">🏦</span><span>صافي الثروة</span></a>
-      <a href="realestate.html"   class="nav-link" id="nav-realestate">  <span class="icon">🏠</span><span>العقارات</span></a>
-      <a href="userdb.html"       class="nav-link" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
-      <a href="targets.html"      class="nav-link" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
-      <a href="settings.html"     class="nav-link" id="nav-settings">    <span class="icon">⚙️</span><span>الإعدادات</span></a>
-      <a href="admin.html"        class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
     </nav>
     <div class="sidebar-footer">
       <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
@@ -42,66 +87,290 @@
       <button class="btn btn-primary" onclick="openModal()">+ إضافة سهم</button>
     </div>
 
-    <!-- Row 1: Portfolio stats -->
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="label">إجمالي القيمة السوقية</div>
-        <div class="value num" id="stat-total-value">—</div>
-        <div class="sub">الأسهم × السعر الحالي</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">صافي رأس المال المنشغل</div>
-        <div class="value num" id="stat-invested">—</div>
-        <div class="sub">إجمالي شراء − إجمالي بيع</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">الربح / الخسارة غير المحقق</div>
-        <div class="value num" id="stat-pnl">—</div>
-        <div class="sub" id="stat-pnl-pct">—</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">صافي الثروة</div>
-        <div class="value num text-accent" id="stat-net-worth">—</div>
-        <div class="sub" id="stat-nw-date">آخر لقطة</div>
-      </div>
-    </div>
+    <!-- ══ صف 1: القيمة الكلية للثروة ══ -->
+    <div class="stats-grid stats-grid-4">
 
-    <!-- Row 2: Income & other assets -->
-    <div class="stats-grid">
       <div class="stat-card">
-        <div class="label">إجمالي الأرباح الموزعة</div>
-        <div class="value num text-success" id="stat-total-div">—</div>
-        <div class="sub">جميع السنوات</div>
+        <button class="info-btn" onclick="showCardInfo('total-value')">ⓘ</button>
+        <div class="label">إجمالي قيمة المحفظة <span class="eng-label">Portfolio Value</span></div>
+        <div class="value num" id="stat-total-value">—</div>
+        <div class="sub" id="stat-total-value-sub">أسهم + نقد</div>
       </div>
+
       <div class="stat-card">
-        <div class="label" id="stat-year-label">أرباح هذا العام</div>
-        <div class="value num text-accent" id="stat-year-div">—</div>
-        <div class="sub">من جدول الأرباح</div>
+        <button class="info-btn" onclick="showCardInfo('portfolio-cash')">ⓘ</button>
+        <div class="label">نقد المحفظة <span class="eng-label">Cash</span></div>
+        <div class="value num text-accent" id="stat-portfolio-cash"
+             title="انقر للتعديل" onclick="startEditCash()" style="cursor:pointer">—</div>
+        <div class="sub" id="stat-portfolio-cash-sub">انقر للإدخال</div>
+        <input type="number" id="cash-edit-input" min="0" step="0.01"
+               style="display:none;width:100%;margin-top:6px;padding:4px 8px;border-radius:6px;border:1px solid var(--accent);background:var(--bg-2);color:var(--text);font-family:Tajawal;font-size:14px;text-align:center"
+               onblur="saveCash()" onkeydown="if(event.key==='Enter')saveCash();if(event.key==='Escape')cancelEditCash()">
       </div>
+
       <div class="stat-card">
-        <div class="label">قيمة العقارات</div>
+        <button class="info-btn" onclick="showCardInfo('realestate')">ⓘ</button>
+        <div class="label">قيمة العقارات <span class="eng-label">Real Estate</span></div>
         <div class="value num" id="stat-realestate">—</div>
         <div class="sub">المملوكة والمؤجرة</div>
       </div>
+
       <div class="stat-card">
-        <div class="label">صافي التدفق النقدي هذا العام</div>
+        <button class="info-btn" onclick="showCardInfo('networth')">ⓘ</button>
+        <div class="label">صافي الثروة <span class="eng-label">Net Worth</span></div>
+        <div class="value num text-accent" id="stat-net-worth">—</div>
+        <div class="sub" id="stat-nw-date">آخر لقطة</div>
+      </div>
+
+    </div>
+
+    <!-- ══ صف 2: رأس المال والأداء ══ -->
+    <div class="stats-grid stats-grid-4">
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('invested')">ⓘ</button>
+        <div style="display:flex;gap:4px;margin-bottom:6px">
+          <button id="tab-invested-net" class="mini-tab mini-tab-active" onclick="switchInvestedTab('net')">رأس المال</button>
+          <button id="tab-invested-wac" class="mini-tab" onclick="switchInvestedTab('wac')">طريقة الوسيط</button>
+        </div>
+        <div class="label" id="stat-invested-label">صافي رأس المال المنشغل <span class="eng-label">Net Invested Capital</span></div>
+        <div class="value num" id="stat-invested">—</div>
+        <div class="sub" id="stat-invested-sub">إجمالي شراء − إجمالي بيع</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('capital')">ⓘ</button>
+        <div class="label">📊 التكلفة مقابل القيمة السوقية</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin:6px 0 2px">
+          <span class="small text-muted">التكلفة (WAC)</span>
+          <span class="num small bold" id="ins-cost-basis">—</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
+          <span class="small text-muted">القيمة السوقية</span>
+          <span class="num small bold text-accent" id="ins-market-value">—</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="ins-mkt-bar-fill" style="width:0%"></div>
+        </div>
+        <div class="mt-1 small" id="ins-mkt-pnl">—</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('pnl')">ⓘ</button>
+        <div class="label">الربح / الخسارة غير المحقق <span class="eng-label">Unrealized P&amp;L</span></div>
+        <div class="value num" id="stat-pnl">—</div>
+        <div class="sub" id="stat-pnl-pct">—</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('realized')">ⓘ</button>
+        <div class="label">✅ ر/خ محقق من البيع <span class="eng-label">Realized P&amp;L</span></div>
+        <div class="value num" id="ins-realized-pnl">—</div>
+        <div class="sub" id="ins-realized-sub">إجمالي صفقات البيع المغلقة</div>
+      </div>
+
+    </div>
+
+    <!-- ══ صف 3: الدخل ══ -->
+    <div class="stats-grid stats-grid-4">
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('total-div')">ⓘ</button>
+        <div class="label">إجمالي الأرباح الموزعة <span class="eng-label">Total Dividends</span></div>
+        <div class="value num text-success" id="stat-total-div">—</div>
+        <div class="sub">جميع السنوات</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('year-div')">ⓘ</button>
+        <div class="label" id="stat-year-label">أرباح هذا العام <span class="eng-label">YTD Dividends</span></div>
+        <div class="value num text-accent" id="stat-year-div">—</div>
+        <div class="sub">من جدول الأرباح</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('div-yield')">ⓘ</button>
+        <div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap">
+          <button id="tab-yield-ann"    class="mini-tab mini-tab-active" onclick="switchYieldTab('ann')">مُسنوى <span class="eng-label" style="font-size:0.6rem">Ann.</span></button>
+          <button id="tab-yield-yoc"    class="mini-tab"                 onclick="switchYieldTab('yoc')">على التكلفة <span class="eng-label" style="font-size:0.6rem">YOC</span></button>
+          <button id="tab-yield-market" class="mini-tab"                 onclick="switchYieldTab('market')">سوقي <span class="eng-label" style="font-size:0.6rem">Current</span></button>
+        </div>
+        <div class="label" id="yield-tab-label">العائد المُسنوى (السنة الجارية)</div>
+        <div class="value num text-success" id="stat-div-yield">—</div>
+        <div class="sub" id="stat-div-yield-sub">—</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('cashflow')">ⓘ</button>
+        <div class="label">صافي التدفق النقدي هذا العام <span class="eng-label">Net Cash Flow</span></div>
         <div class="value num" id="stat-cash-actual">—</div>
         <div class="sub" id="stat-cash-sub">—</div>
         <div class="progress-bar mt-2">
           <div class="progress-fill" id="stat-cash-fill" style="width:0%"></div>
         </div>
       </div>
+
+    </div>
+
+    <!-- ══ صف 4: التنويع والتكاليف ══ -->
+    <div class="stats-grid stats-grid-4">
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('composition')">ⓘ</button>
+        <div class="label">تفاصيل المحفظة</div>
+        <div class="value num" id="ins-stock-count">—</div>
+        <div class="sub">سهم في المحفظة</div>
+        <div class="mt-2" style="border-top:1px solid var(--border);padding-top:8px">
+          <span class="small text-muted">القطاعات: </span>
+          <span class="small bold text-accent" id="ins-sector-count">—</span>
+        </div>
+        <div class="mt-1">
+          <span class="small text-muted">🎁 أسهم منح: </span>
+          <span class="small bold text-accent" id="ins-grant-shares">—</span>
+          <span class="small text-muted" id="ins-grant-value"></span>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('top-sector')">ⓘ</button>
+        <div class="label">🏆 أعلى قطاع وزناً</div>
+        <div class="value num text-accent" id="ins-top-sector-pct">—</div>
+        <div class="sub bold" id="ins-top-sector-name">—</div>
+        <div class="small text-muted mt-1" id="ins-top-sector-sub">—</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('bot-sector')">ⓘ</button>
+        <div class="label">📉 أقل قطاع وزناً</div>
+        <div class="value num text-danger" id="ins-bot-sector-pct">—</div>
+        <div class="sub bold" id="ins-bot-sector-name">—</div>
+        <div class="small text-muted mt-1" id="ins-bot-sector-sub">—</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('costs')">ⓘ</button>
+        <div class="label">💸 التكاليف التراكمية</div>
+        <div class="value num" id="ins-costs-total">—</div>
+        <div class="sub">عمولات + ضريبة (VAT)</div>
+        <div class="mt-2" style="border-top:1px solid var(--border);padding-top:8px;display:flex;justify-content:space-between">
+          <span class="small text-muted">عمولات: <span class="text-primary" id="ins-commission">—</span></span>
+          <span class="small text-muted">ضريبة: <span class="text-primary" id="ins-vat">—</span></span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ══ صف 5: الأداء السنوي والدخل ══ -->
+    <div class="stats-grid stats-grid-4">
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('xirr')">ⓘ</button>
+        <div class="label">📈 العائد السنوي الحقيقي <span class="eng-label">XIRR</span></div>
+        <div class="value num" id="stat-xirr">—</div>
+        <div class="sub" id="stat-xirr-sub">معدل النمو السنوي المركّب</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('fwd-income')">ⓘ</button>
+        <div class="label">💵 الدخل التوزيعي المتوقع <span class="eng-label">Fwd Income</span></div>
+        <div class="value num text-success" id="stat-fwd-income">—</div>
+        <div class="sub" id="stat-fwd-income-sub">على أساس آخر 12 شهراً</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('passive-cover')">ⓘ</button>
+        <div class="label">🛡️ تغطية الدخل السلبي للمصاريف</div>
+        <div class="value num" id="stat-passive-cover">—</div>
+        <div class="sub" id="stat-passive-cover-sub">انقر على هدف التقاعد لإدخال مصاريفك</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('total-assets')">ⓘ</button>
+        <div class="label">🏦 إجمالي الأصول الاستثمارية</div>
+        <div class="value num text-accent" id="stat-total-assets">—</div>
+        <div class="sub" id="stat-total-assets-sub">أسهم + نقد + عقار + صكوك</div>
+      </div>
+
+    </div>
+
+    <!-- Asset Allocation + Retirement Goal -->
+    <div class="charts-grid">
+      <div class="card">
+        <div class="section-header" style="margin-bottom:8px">
+          <span class="section-title">🍰 التخصيص الكلي للأصول <span class="eng-label">Asset Allocation</span></span>
+          <button class="info-btn" onclick="showCardInfo('allocation')">ⓘ</button>
+        </div>
+        <div id="allocChart-container" class="chart-container"><canvas id="allocChart"></canvas></div>
+        <div id="alloc-legend" style="padding:8px 4px 0"></div>
+      </div>
+
+      <div class="card" id="retirement-card">
+        <div class="section-header" style="margin-bottom:12px">
+          <span class="section-title">🎯 هدف الاستقلال المالي <span class="eng-label">FIRE</span></span>
+          <button class="info-btn" onclick="showCardInfo('retirement')">ⓘ</button>
+        </div>
+        <div id="retirement-body">
+          <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Break-Even Card -->
+    <div class="card" style="margin-bottom:16px" id="breakeven-card">
+      <div class="section-header" style="margin-bottom:16px">
+        <span class="section-title">⚖️ تحليل نقطة التعادل <span class="eng-label">Break-Even</span></span>
+        <button class="info-btn" onclick="showCardInfo('breakeven')">ⓘ</button>
+      </div>
+      <div id="breakeven-body">
+        <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>
+      </div>
     </div>
 
     <!-- Charts -->
     <div class="charts-grid">
       <div class="card">
-        <div class="section-header"><span class="section-title">توزيع القطاعات</span></div>
-        <div class="chart-container"><canvas id="sectorChart"></canvas></div>
+        <div class="section-header" style="flex-wrap:wrap;gap:8px">
+          <span class="section-title">توزيع القطاعات</span>
+          <div class="chart-mode-btns" id="sector-mode-btns">
+            <button class="chart-mode-btn active" onclick="setSectorMode('donut')"  id="sm-donut">دائري</button>
+            <button class="chart-mode-btn"         onclick="setSectorMode('bars')"   id="sm-bars">أشرطة</button>
+            <button class="chart-mode-btn"         onclick="setSectorMode('cards')"  id="sm-cards">بطاقات</button>
+          </div>
+        </div>
+        <div id="sectorChart-container" class="chart-container"><canvas id="sectorChart"></canvas></div>
+        <div id="sector-alt-area" style="display:none"></div>
       </div>
       <div class="card">
-        <div class="section-header"><span class="section-title">وزن المحفظة — الحالي vs المستهدف</span></div>
-        <div class="chart-container"><canvas id="weightChart"></canvas></div>
+        <div class="section-header" style="flex-wrap:wrap;gap:8px">
+          <span class="section-title">وزن المحفظة — الحالي vs المستهدف</span>
+          <div class="chart-mode-btns" id="weight-mode-btns">
+            <button class="chart-mode-btn active" onclick="setWeightMode('bars')"   id="wm-bars">أشرطة</button>
+            <button class="chart-mode-btn"         onclick="setWeightMode('gap')"    id="wm-gap">الفجوة</button>
+            <button class="chart-mode-btn"         onclick="setWeightMode('cards')"  id="wm-cards">بطاقات</button>
+            <button class="chart-mode-btn"         onclick="setWeightMode('table')"  id="wm-table">جدول</button>
+          </div>
+        </div>
+        <div id="weight-legend" style="display:flex;gap:10px;align-items:center;font-size:0.78rem;color:var(--text-muted);flex-wrap:wrap;padding:0 4px 8px">
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(63,185,80,0.85);display:inline-block"></span>ضمن الهدف</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(239,68,68,0.85);display:inline-block"></span>زيادة</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(99,179,237,0.85);display:inline-block"></span>نقص</span>
+          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(240,180,41,0.85);display:inline-block"></span>بدون هدف</span>
+        </div>
+        <div id="weightChart-container" class="chart-container" style="height:460px;overflow-y:auto">
+          <canvas id="weightChart"></canvas>
+        </div>
+        <div id="weight-alt-area" style="display:none"></div>
+      </div>
+    </div>
+
+    <!-- Price Zones Card -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-header" style="margin-bottom:8px">
+        <span class="section-title">🎯 مناطق الدخول والخروج</span>
+        <a href="targets.html" class="btn btn-secondary btn-sm">تعديل المناطق</a>
+      </div>
+      <div id="price-zones-card-body">
+        <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>
       </div>
     </div>
 
@@ -110,13 +379,14 @@
       <div class="section-header">
         <span class="section-title">الأسهم في المحفظة</span>
         <div class="flex gap-2">
+          <button class="btn btn-secondary btn-sm" onclick="exportHoldingsCSV()">⬇ تصدير CSV</button>
           <button class="btn btn-secondary btn-sm" id="btn-sync-tx" onclick="syncHoldingsFromTx()" title="يعيد حساب الأسهم والمتوسط من سجل المعاملات — يحافظ على القطاع والهدف والسعر الحالي">⟳ مزامنة من المعاملات</button>
           <button class="btn btn-primary btn-sm" onclick="openModal()">+ إضافة</button>
         </div>
       </div>
       <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
-        <table>
+        <table id="holdings-table">
           <thead>
             <tr>
               <th>الرمز</th><th>الاسم</th><th>القطاع</th><th>الأسهم</th>
@@ -162,6 +432,47 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Info Modal -->
+  <div class="modal-overlay" id="info-modal" style="display:none" onclick="closeInfoModal(event)">
+    <div class="modal" style="max-width:480px" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span class="modal-title" id="info-modal-title">—</span>
+        <button class="modal-close" onclick="closeInfoModal()">✕</button>
+      </div>
+      <div id="info-modal-body" style="padding:4px 0 8px;line-height:1.8;font-size:0.92rem"></div>
+    </div>
+  </div>
+
+  <!-- Sync Confirmation Modal -->
+  <div class="modal-overlay" id="sync-confirm-modal" style="display:none" onclick="closeSyncModal(event)">
+    <div class="modal" style="max-width:600px;max-height:80vh;display:flex;flex-direction:column" onclick="event.stopPropagation()">
+      <div class="modal-header">
+        <span class="modal-title">⚠️ تأكيد المزامنة</span>
+        <button class="modal-close" onclick="closeSyncModal()">✕</button>
+      </div>
+      <p style="margin:0 0 12px;color:var(--text-muted);font-size:0.9rem">
+        المزامنة ستُغيّر البيانات التالية بناءً على سجل المعاملات — أي تعديل يدوي على هذه الأسهم سيُستبدل:
+      </p>
+      <div class="table-wrapper" style="overflow-y:auto;flex:1;margin-bottom:16px">
+        <table id="sync-diff-table">
+          <thead><tr>
+            <th>الرمز</th>
+            <th>الأسهم (قبل)</th>
+            <th>الأسهم (بعد)</th>
+            <th>متوسط (قبل)</th>
+            <th>متوسط (بعد)</th>
+            <th>التأثير</th>
+          </tr></thead>
+          <tbody id="sync-diff-tbody"></tbody>
+        </table>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-secondary" onclick="closeSyncModal()">إلغاء</button>
+        <button class="btn btn-danger" id="sync-confirm-btn" onclick="confirmSync()">تأكيد المزامنة</button>
+      </div>
+    </div>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>

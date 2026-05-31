@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>الرؤية المستقبلية — ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Scenario Cards ── */
+    .scenario-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 16px;
+      margin-bottom: 8px;
+    }
+    @media (max-width: 1100px) { .scenario-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 600px)  { .scenario-grid { grid-template-columns: 1fr; } }
+
+    .scenario-card {
+      background: var(--bg-2);
+      border: 2px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 20px 18px;
+      cursor: pointer;
+      transition: border-color .2s, box-shadow .2s;
+    }
+    .scenario-card.active  { box-shadow: 0 0 0 3px var(--sc-color); }
+    .scenario-card:hover   { border-color: var(--sc-color); }
+    .scenario-card .sc-badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+      background: color-mix(in srgb, var(--sc-color) 18%, transparent);
+      color: var(--sc-color);
+      letter-spacing: .04em;
+    }
+    .scenario-card .sc-name  { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+    .scenario-card .sc-desc  { font-size: 0.75rem; color: var(--text-2); margin-bottom: 14px; line-height: 1.5; }
+    .scenario-card .sc-rates { display: flex; flex-direction: column; gap: 5px; }
+    .scenario-card .sc-rate-row { display: flex; justify-content: space-between; font-size: 0.78rem; }
+    .scenario-card .sc-rate-row .label { color: var(--text-2); }
+    .scenario-card .sc-rate-row .val   { font-weight: 700; }
+
+    .sc-conservative { --sc-color: #8b949e; }
+    .sc-base         { --sc-color: #3fb950; }
+    .sc-optimistic   { --sc-color: #f0b429; }
+    .sc-exceptional  { --sc-color: #a371f7; }
+    .sc-conservative.active { border-color: #8b949e; }
+    .sc-base.active         { border-color: #3fb950; }
+    .sc-optimistic.active   { border-color: #f0b429; }
+    .sc-exceptional.active  { border-color: #a371f7; }
+
+    /* ── Inputs panel ── */
+    .inputs-panel {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      padding: 20px;
+      background: var(--bg-3);
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--border);
+      margin-bottom: 0;
+    }
+    .inputs-panel .inp-group { display: flex; flex-direction: column; gap: 5px; }
+    .inputs-panel label      { font-size: 0.78rem; color: var(--text-2); }
+    .inputs-panel input, .inputs-panel select {
+      background: var(--bg-2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      padding: 8px 10px;
+      font-family: 'Tajawal', sans-serif;
+      font-size: 0.88rem;
+      width: 100%;
+    }
+    .inputs-panel input:focus, .inputs-panel select:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+
+    /* ── Toggle switch ── */
+    .toggle-wrap { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; color: var(--text-2); }
+    .toggle-wrap input[type=checkbox] { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
+    /* ── Goal type buttons ── */
+    .goal-type-btns { display: flex; gap: 8px; margin-bottom: 12px; }
+    .goal-type-btn {
+      flex: 1;
+      padding: 8px 12px;
+      border-radius: var(--radius);
+      border: 2px solid var(--border);
+      background: var(--bg-3);
+      color: var(--text-2);
+      font-family: 'Tajawal', sans-serif;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all .2s;
+      text-align: center;
+    }
+    .goal-type-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+      font-weight: 700;
+    }
+
+    /* ── Goal result card ── */
+    .goal-header-label {
+      font-size: 0.9rem;
+      margin-bottom: 16px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .goal-rows { display: flex; flex-direction: column; gap: 10px; }
+    .goal-row {
+      padding: 14px 16px;
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      background: var(--bg-3);
+    }
+    .goal-row.goal-reached { border-color: rgba(63, 185, 80, 0.4); background: rgba(63, 185, 80, 0.06); }
+    .goal-row.goal-missed  { border-color: rgba(255, 107, 107, 0.3); background: rgba(255, 107, 107, 0.04); }
+    .goal-row-head {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+    .goal-row-scenario { font-weight: 700; font-size: 0.92rem; }
+    .goal-row-when { margin-right: auto; font-size: 0.82rem; }
+    .goal-row-detail { line-height: 1.8; }
+
+    /* ── Historical summary ── */
+    .hist-summary {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 14px 18px;
+      background: var(--bg-3);
+      border-radius: var(--radius);
+      border: 1px solid var(--border);
+      font-size: 0.8rem;
+    }
+    .hist-item { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+    .hist-item .h-val { font-size: 1rem; font-weight: 700; color: var(--accent); }
+    .hist-item .h-lbl { color: var(--text-2); }
+
+    /* ── Section badge ── */
+    .hist-tag {
+      display: inline-block;
+      background: var(--accent-dim);
+      color: var(--accent);
+      border-radius: 4px;
+      padding: 1px 7px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      margin-right: 6px;
+    }
+
+    /* ── Chart ── */
+    .chart-wrap { position: relative; height: 400px; }
+    .chart-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      padding: 10px 0 0;
+      font-size: 0.8rem;
+    }
+    .chart-legend-item { display: flex; align-items: center; gap: 6px; }
+    .chart-legend-dot  { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+
+    /* ── Milestone table ── */
+    .milestone-table th { font-size: 0.78rem; }
+    .milestone-table td { font-size: 0.82rem; }
+    .milestone-table .highlight { color: var(--accent); font-weight: 700; }
+    .milestone-hl { background: color-mix(in srgb, var(--accent) 5%, transparent); }
+    .milestone-hl td { font-weight: 600; }
+
+    /* ── Chart mode buttons ── */
+    .chart-mode-btns {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+    .chart-mode-btn {
+      padding: 6px 14px;
+      border-radius: var(--radius);
+      border: 1.5px solid var(--border);
+      background: var(--bg-3);
+      color: var(--text-2);
+      font-family: 'Tajawal', sans-serif;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all .18s;
+    }
+    .chart-mode-btn:hover  { border-color: var(--accent); color: var(--accent); }
+    .chart-mode-btn.active { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); font-weight: 700; }
+
+    /* ── Cards view ── */
+    .sc-cards-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 14px;
+    }
+    .sc-value-card {
+      background: var(--bg-3);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-lg);
+      padding: 16px;
+    }
+    .sc-value-card .cv-header {
+      font-size: 0.8rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .sc-value-card .cv-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 5px 0;
+      border-bottom: 1px solid rgba(48,54,61,0.4);
+      font-size: 0.82rem;
+    }
+    .sc-value-card .cv-row:last-child { border-bottom: none; }
+    .sc-value-card .cv-year  { color: var(--text-2); }
+    .sc-value-card .cv-val   { font-weight: 700; font-size: 0.9rem; }
+
+    /* ── Disclaimer ── */
+    .disclaimer {
+      background: color-mix(in srgb, var(--danger) 8%, var(--bg-2));
+      border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-size: 0.78rem;
+      color: var(--text-2);
+      line-height: 1.7;
+    }
+    .disclaimer strong { color: var(--danger); }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2>
+      <p>مفكرة حسابية شخصية</p>
+    </div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>🔮 الرؤية المستقبلية</h1>
+        <p>محاكاة 4 سيناريوهات مستندة إلى أدائك التاريخي الفعلي — أداة حسابية شخصية بحتة</p>
+      </div>
+    </div>
+
+    <!-- ── Historical snapshot ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">البيانات التاريخية المستخرجة من محفظتك</span>
+        <span class="hist-tag" id="hist-period-badge">جارٍ التحميل…</span>
+      </div>
+      <p class="small text-muted mb-4">كل الأرقام محسوبة من معاملاتك وأرباحك الموزعة المسجّلة فعلياً — لا تخمين ولا بيانات خارجية</p>
+      <div class="hist-summary" id="hist-summary">
+        <div class="hist-item"><div class="h-val">—</div><div class="h-lbl">القيمة الحالية</div></div>
+      </div>
+    </div>
+
+    <!-- ── Scenario selector ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">السيناريوهات الأربعة</span>
+        <span class="small text-muted">اضغط على السيناريو لتفعيله أو إيقافه في الرسم</span>
+      </div>
+      <div class="scenario-grid" id="scenario-grid">
+        <!-- filled by JS -->
+      </div>
+    </div>
+
+    <!-- ── User inputs ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">معطيات الإسقاط</span>
+        <button class="btn btn-primary btn-sm" onclick="runForecast()">تحديث الإسقاط ↻</button>
+      </div>
+      <div class="inputs-panel">
+        <div class="inp-group">
+          <label>القيمة الحالية للمحفظة (ر.س)</label>
+          <input type="number" id="inp-current-value" step="1000" placeholder="تلقائي من المحفظة" min="0">
+        </div>
+        <div class="inp-group">
+          <label>إضافة شهرية — DCA (ر.س)</label>
+          <input type="number" id="inp-monthly-add" step="100" value="0" min="0">
+        </div>
+        <div class="inp-group">
+          <label>مبلغ إضافي فوري (ر.س)</label>
+          <input type="number" id="inp-lump-sum" step="1000" value="0" min="0">
+        </div>
+        <div class="inp-group">
+          <label>أفق الإسقاط (سنة)</label>
+          <select id="inp-horizon">
+            <option value="35" selected>35 سنة</option>
+            <option value="30">30 سنة</option>
+            <option value="25">25 سنة</option>
+            <option value="20">20 سنة</option>
+            <option value="15">15 سنة</option>
+            <option value="10">10 سنوات</option>
+          </select>
+        </div>
+        <div class="inp-group">
+          <label>معدل السحب السنوي (%)</label>
+          <input type="number" id="inp-withdrawal-rate" step="0.1" value="0" min="0" max="20">
+        </div>
+        <div class="inp-group">
+          <label id="div-yield-label" style="display:flex;align-items:center;gap:6px">
+            عائد الأرباح السنوي (%)
+            <span id="div-yield-auto" style="font-size:0.7rem;background:rgba(63,185,80,0.15);color:#3fb950;border-radius:4px;padding:1px 6px"></span>
+          </label>
+          <input type="number" id="inp-div-yield" step="0.1" min="0" max="30" placeholder="تلقائي من بياناتك">
+          <span class="small text-muted" style="margin-top:3px">اتركه فارغاً لاستخدام بياناتك الفعلية — أو أدخل نسبتك الحقيقية يدوياً</span>
+        </div>
+        <div class="inp-group">
+          <label>معدل التضخم السنوي (%)</label>
+          <input type="number" id="inp-inflation-rate" step="0.1" value="2.5" min="0" max="20" placeholder="2.5">
+        </div>
+        <div class="inp-group" style="justify-content:flex-end; padding-top:8px; gap:10px">
+          <label class="toggle-wrap">
+            <input type="checkbox" id="inp-reinvest" checked>
+            إعادة استثمار الأرباح
+          </label>
+          <label class="toggle-wrap">
+            <input type="checkbox" id="inp-inflation" checked>
+            تعديل القيمة الحقيقية للتضخم
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Goal setting ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">🎯 تحديد الهدف — متى تصل؟</span>
+        <span class="small text-muted">حدّد هدفك لكل سيناريو</span>
+      </div>
+      <div class="goal-type-btns">
+        <button class="goal-type-btn active" id="btn-goal-portfolio" onclick="setGoalType('portfolio_value')">
+          💼 هدف قيمة المحفظة
+        </button>
+        <button class="goal-type-btn" id="btn-goal-income" onclick="setGoalType('monthly_income')">
+          💵 هدف الدخل الشهري
+        </button>
+      </div>
+      <div class="inp-group" style="max-width:320px">
+        <label id="goal-amount-label">قيمة المحفظة المستهدفة (ر.س)</label>
+        <input type="number" id="inp-goal-amount" step="10000" min="0" placeholder="مثال: 1,000,000"
+               oninput="runForecast()">
+      </div>
+    </div>
+
+    <!-- ── Goal result card ── -->
+    <div class="card" id="goal-result-card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">📅 توقيت الوصول للهدف</span>
+      </div>
+      <div id="goal-result-body"></div>
+    </div>
+
+    <!-- ── Chart ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">مسار نمو المحفظة</span>
+        <span class="small text-muted" id="chart-subtitle">—</span>
+      </div>
+      <!-- أوضاع العرض -->
+      <div class="chart-mode-btns" id="chart-mode-btns">
+        <button class="chart-mode-btn active" onclick="setChartMode('line')"    id="cmbtn-line">📈 خط</button>
+        <button class="chart-mode-btn"        onclick="setChartMode('log')"     id="cmbtn-log">🔢 لوغاريتمي</button>
+        <button class="chart-mode-btn"        onclick="setChartMode('bar')"     id="cmbtn-bar">📊 أشرطة</button>
+        <button class="chart-mode-btn"        onclick="setChartMode('cards')"   id="cmbtn-cards">🃏 بطاقات</button>
+      </div>
+      <div class="chart-legend" id="chart-legend"></div>
+      <div id="chart-area">
+        <div class="chart-wrap" style="margin-top:16px">
+          <canvas id="forecast-chart"></canvas>
+        </div>
+      </div>
+      <div id="cards-area" style="display:none; margin-top:16px"></div>
+    </div>
+
+    <!-- ── Milestone table ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">المعالم الرئيسية</span>
+        <span class="small text-muted">القيم بالريال السعودي — الأرقام المختصرة (م = مليون)</span>
+      </div>
+      <div class="table-wrapper">
+        <table class="milestone-table">
+          <thead>
+            <tr>
+              <th rowspan="2">السنة</th>
+              <th rowspan="2">التاريخ</th>
+              <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">قيمة المحفظة</th>
+              <th colspan="4" style="text-align:center;border-bottom:1px solid var(--border)">الدخل الشهري (الأرباح)</th>
+            </tr>
+            <tr>
+              <th style="color:#8b949e">🛡️ متحفظ</th>
+              <th style="color:#3fb950">📊 معتدل</th>
+              <th style="color:#f0b429">🚀 متفائل</th>
+              <th style="color:#a371f7">⚡ استثنائي</th>
+              <th style="color:#8b949e">🛡️</th>
+              <th style="color:#3fb950">📊</th>
+              <th style="color:#f0b429">🚀</th>
+              <th style="color:#a371f7">⚡</th>
+            </tr>
+          </thead>
+          <tbody id="milestone-tbody">
+            <tr><td colspan="8"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ الحساب…</p></div></td></tr>
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="10" class="small text-muted" style="padding-top:8px">
+                الدخل الشهري = قيمة المحفظة × عائد أرباح السيناريو ÷ 12 — الصفوف المظللة كل 5 سنوات
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Scenario detail ── -->
+    <div class="card" id="scenario-detail-card">
+      <div class="section-header">
+        <span class="section-title" id="scenario-detail-title">تفاصيل السيناريو</span>
+        <span class="small text-muted">اضغط على بطاقة سيناريو لعرض تفاصيله</span>
+      </div>
+      <div id="scenario-detail-body" class="hist-summary" style="flex-wrap:wrap;gap:20px"></div>
+    </div>
+
+    <!-- ── Disclaimer ── -->
+    <div class="disclaimer">
+      <strong>⚠️ تنبيه مهم:</strong>
+      هذه الصفحة أداة حسابية شخصية بحتة. جميع الأرقام مبنية على افتراضات رياضية ومعدلات تاريخية محسوبة من بياناتك الشخصية فقط.
+      <strong>لا تمثل توصيات استثمارية</strong> ولا تنبؤات مضمونة بأي شكل من الأشكال.
+      الأداء التاريخي لا يضمن نتائج مستقبلية. القرار الاستثماري مسؤوليتك الكاملة.
+    </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+    </footer>
+  </main>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/forecast.js"></script>
+</body>
+</html>

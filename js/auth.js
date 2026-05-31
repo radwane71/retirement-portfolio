@@ -16,13 +16,13 @@ async function requireAuth() {
     if (adminLink) adminLink.style.display = '';
   }
 
-  // فحص وضع الصيانة
-  supabaseClient.from('site_config').select('value').eq('key', 'maintenance_mode').maybeSingle()
-    .then(({ data }) => {
-      if (data?.value === 'true' && !user.user_metadata?.is_admin) {
-        window.location.href = 'maintenance.html';
-      }
-    });
+  // فحص وضع الصيانة — await لمنع تحميل الصفحة قبل التحقق
+  const { data: maintData } = await supabaseClient
+    .from('site_config').select('value').eq('key', 'maintenance_mode').maybeSingle();
+  if (maintData?.value === 'true' && !user.user_metadata?.is_admin) {
+    window.location.href = 'maintenance.html';
+    return null;
+  }
 
   return user;
 }
