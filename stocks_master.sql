@@ -1,5 +1,6 @@
--- عمود وقت آخر تحديث للسعر في holdings (إذا لم يكن موجوداً)
+-- أعمدة جديدة في holdings
 ALTER TABLE holdings ADD COLUMN IF NOT EXISTS price_updated_at TIMESTAMPTZ;
+ALTER TABLE holdings ADD COLUMN IF NOT EXISTS price_manual BOOLEAN DEFAULT FALSE;
 
 -- جدول مرجعي لكل أسهم تداول
 CREATE TABLE IF NOT EXISTS stocks (

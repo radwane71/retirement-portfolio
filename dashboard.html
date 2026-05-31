@@ -368,10 +368,7 @@
     <div class="card" style="margin-bottom:16px">
       <div class="section-header" style="margin-bottom:8px">
         <span class="section-title">🎯 مناطق الدخول والخروج</span>
-        <div style="display:flex;gap:8px;align-items:center">
-          <button id="refresh-prices-btn" class="btn btn-secondary btn-sm" onclick="refreshPrices()">🔄 تحديث الأسعار</button>
-          <a href="targets.html" class="btn btn-secondary btn-sm">تعديل المناطق</a>
-        </div>
+        <a href="targets.html" class="btn btn-secondary btn-sm">تعديل المناطق</a>
       </div>
       <div id="price-zones-card-body">
         <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>
@@ -383,6 +380,7 @@
       <div class="section-header">
         <span class="section-title">الأسهم في المحفظة</span>
         <div class="flex gap-2">
+          <button id="refresh-prices-btn" class="btn btn-secondary btn-sm" onclick="refreshPrices()">🔄 تحديث الأسعار</button>
           <button class="btn btn-secondary btn-sm" onclick="exportHoldingsCSV()">⬇ تصدير CSV</button>
           <button class="btn btn-secondary btn-sm" id="btn-sync-tx" onclick="syncHoldingsFromTx()" title="يعيد حساب الأسهم والمتوسط من سجل المعاملات — يحافظ على القطاع والهدف والسعر الحالي">⟳ مزامنة من المعاملات</button>
           <button class="btn btn-primary btn-sm" onclick="openModal()">+ إضافة</button>

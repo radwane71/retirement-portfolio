@@ -93,7 +93,7 @@ function getSukukActiveTotal() {
   } catch (_) { return 0; }
 }
 
-// ── Auto Price Update ─────────────────────────────────────────
+// ── Auto Price Update (Yahoo Finance via proxy) ───────────────
 let _priceRefreshTimer = null;
 
 async function refreshPrices(silent = false) {
@@ -101,16 +101,41 @@ async function refreshPrices(silent = false) {
   try {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التحديث...'; }
 
-    const { data, error } = await supabaseClient.functions.invoke('update-prices');
-    if (error) throw error;
-    const json = data;
+    // فقط الأسهم التي لم يُعيَّن سعرها يدوياً
+    const autoHoldings = holdings.filter(h => !h.price_manual);
+    if (!autoHoldings.length) {
+      if (btn) btn.textContent = '✅ لا يوجد ما يُحدَّث';
+      return;
+    }
 
-    if (json.updated > 0) {
+    const symbols = autoHoldings.map(h => h.ticker + '.SR').join(',');
+    const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice`;
+    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
+
+    const res = await fetch(proxyUrl);
+    if (!res.ok) throw new Error('proxy error');
+    const data = await res.json();
+    const quotes = data?.quoteResponse?.result || [];
+
+    let updated = 0;
+    for (const q of quotes) {
+      const ticker = q.symbol?.replace('.SR', '');
+      const price = q.regularMarketPrice;
+      if (!ticker || price == null) continue;
+
+      await supabaseClient
+        .from('holdings')
+        .update({ current_price: price, price_updated_at: new Date().toISOString() })
+        .eq('ticker', ticker);
+      updated++;
+    }
+
+    if (updated > 0) {
       await loadAllData();
       renderStats(); renderCharts(); renderTable();
       renderPriceZonesCard(); renderBreakEvenCard();
       renderAllocationChart(); renderRetirementCard();
-      if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
+      if (btn) btn.textContent = `✅ تم (${updated} سهم)`;
     } else {
       if (btn) btn.textContent = '⚠️ لم يتحدث';
     }
@@ -123,8 +148,8 @@ async function refreshPrices(silent = false) {
 }
 
 function startPriceAutoRefresh() {
-  refreshPrices(true); // تحديث فوري عند الفتح
-  _priceRefreshTimer = setInterval(() => refreshPrices(true), 5 * 60 * 1000); // كل 5 دقائق
+  refreshPrices(true);
+  _priceRefreshTimer = setInterval(() => refreshPrices(true), 5 * 60 * 1000);
 }
 
 // ── Init ──────────────────────────────────────────────────────
@@ -1005,7 +1030,12 @@ function renderTable() {
 async function onHoldingSaved(id, field, val) {
   const h = holdings.find(x => x.id === id);
   if (h) h[field] = val;
-  if (field === 'current_price' && h) checkPriceZones(h.ticker, +val);
+  // لو عدّل السعر يدوياً — ضع علامة حتى لا يُلمس في الـ refresh التلقائي
+  if (field === 'current_price' && h) {
+    h.price_manual = true;
+    await supabaseClient.from('holdings').update({ price_manual: true }).eq('id', id);
+    checkPriceZones(h.ticker, +val);
+  }
   renderStats();
   renderCharts();
   renderTable();
