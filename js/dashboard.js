@@ -93,7 +93,7 @@ function getSukukActiveTotal() {
   } catch (_) { return 0; }
 }
 
-// ── Auto Price Update (Yahoo Finance via proxy) ───────────────
+// ── Auto Price Update (Supabase Edge Function) ────────────────
 let _priceRefreshTimer = null;
 
 async function refreshPrices(silent = false) {
@@ -101,43 +101,17 @@ async function refreshPrices(silent = false) {
   try {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التحديث...'; }
 
-    // فقط الأسهم التي لم يُعيَّن سعرها يدوياً
-    const autoHoldings = holdings.filter(h => !h.price_manual);
-    if (!autoHoldings.length) {
-      if (btn) btn.textContent = '✅ لا يوجد ما يُحدَّث';
-      return;
-    }
+    const { data: json, error } = await supabaseClient.functions.invoke('update-prices');
+    if (error) throw error;
 
-    const symbols = autoHoldings.map(h => h.ticker + '.SR').join(',');
-    const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/quote?symbols=${symbols}&fields=regularMarketPrice`;
-    const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`;
-
-    const res = await fetch(proxyUrl);
-    if (!res.ok) throw new Error('proxy error');
-    const data = await res.json();
-    const quotes = data?.quoteResponse?.result || [];
-
-    let updated = 0;
-    for (const q of quotes) {
-      const ticker = q.symbol?.replace('.SR', '');
-      const price = q.regularMarketPrice;
-      if (!ticker || price == null) continue;
-
-      await supabaseClient
-        .from('holdings')
-        .update({ current_price: price, price_updated_at: new Date().toISOString() })
-        .eq('ticker', ticker);
-      updated++;
-    }
-
-    if (updated > 0) {
+    if (json?.updated > 0) {
       await loadAllData();
       renderStats(); renderCharts(); renderTable();
       renderPriceZonesCard(); renderBreakEvenCard();
       renderAllocationChart(); renderRetirementCard();
-      if (btn) btn.textContent = `✅ تم (${updated} سهم)`;
+      if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
     } else {
-      if (btn) btn.textContent = '⚠️ لم يتحدث';
+      if (btn) btn.textContent = json?.message ? `⚠️ ${json.message}` : '⚠️ لم يتحدث';
     }
   } catch (e) {
     if (!silent) console.warn('refreshPrices error:', e);
