@@ -8,7 +8,7 @@ let _weightMode = 'bars';  // 'bars' | 'gap' | 'cards' | 'table'
 let allocChart  = null;    // مخطط التخصيص الكلي للأصول
 let editingId   = null;
 let investedTab      = 'net';  // 'net' = رأس المال المنشغل | 'wac' = تكلفة الوسيط
-let yieldTab         = 'ann';  // 'ann' = مُسنوى | 'yoc' = على التكلفة | 'market' = سوقي
+let yieldTab         = 'fwd';  // 'fwd' = متوقع Forward | 'ann' = مُسنوى | 'yoc' = على التكلفة | 'market' = سوقي
 let portfolioCash    = 0;      // نقد المحفظة عند الوسيط
 let cashUpdatedAt    = null;   // تاريخ آخر تحديث للنقد
 

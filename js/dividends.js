@@ -1,6 +1,7 @@
 let dividends    = [];
 let txBuyRows    = [];
 let txSellRows   = [];
+let holdings     = [];
 let selectedYear = 'all';
 let chartView    = 'month';   // 'month' | 'year'
 let incomeMode   = 'bar';     // 'bar' | 'line' | 'stacked' | 'table'
@@ -39,13 +40,15 @@ function onDivTickerInput() {
 }
 
 async function loadData() {
-  const [rDiv, rTx] = await Promise.all([
+  const [rDiv, rTx, rH] = await Promise.all([
     supabaseClient.from('dividends').select('*').eq('is_archived', false).order('date', { ascending: false }),
-    supabaseClient.from('transactions').select('date, ticker, name, total, type, shares, price').eq('is_archived', false)
+    supabaseClient.from('transactions').select('date, ticker, name, total, type, shares, price').eq('is_archived', false),
+    supabaseClient.from('holdings').select('ticker, name, shares, avg_price, current_price'),
   ]);
   if (rDiv.error) { showToast('خطأ في تحميل الأرباح', 'error'); return; }
   const allTx  = rTx.data || [];
   dividends    = rDiv.data || [];
+  holdings     = rH.data  || [];
   txBuyRows    = allTx.filter(t => t.type === 'buy' || t.type === 'grant');
   txSellRows   = allTx.filter(t => t.type === 'sell');
 }
@@ -101,14 +104,12 @@ function _sharesAtDate(ticker, dateStr) {
 //   ③. DPS × الدورية × الأسهم الحالية = الدخل المتوقع من هذا السهم سنوياً
 // هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم
 function _projectedAnnualIncome() {
-  if (typeof holdings === 'undefined') return { total: 0, breakdown: [] };
-
   const breakdown = [];
   let total = 0;
 
-  const heldTickers = new Set((holdings || []).map(h => h.ticker));
+  const heldTickers = new Set(holdings.map(h => h.ticker));
   heldTickers.forEach(ticker => {
-    const holding = (holdings || []).find(h => h.ticker === ticker);
+    const holding = holdings.find(h => h.ticker === ticker);
     if (!holding || +holding.shares <= 0) return;
 
     const tickerDivs = dividends
