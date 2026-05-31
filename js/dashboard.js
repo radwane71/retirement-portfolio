@@ -984,15 +984,17 @@ async function onHoldingSaved(id, field, val) {
 function checkPriceZones(ticker, price) {
   const zone = stockZones[ticker];
   if (!zone) return;
+  const h = holdings.find(x => x.ticker === ticker);
+  const name = h?.name || '';
   const alerts = [];
   if (zone.entry_price != null && price <= zone.entry_price)
-    alerts.push({ ticker, type: 'entry', label: 'منطقة شراء', color: '#22c55e', price, zone: zone.entry_price });
+    alerts.push({ ticker, name, type: 'entry', label: 'منطقة شراء', color: '#22c55e', price, zone: zone.entry_price });
   if (zone.exit_price != null && price >= zone.exit_price)
-    alerts.push({ ticker, type: 'exit', label: 'منطقة بيع', color: '#f85149', price, zone: zone.exit_price });
+    alerts.push({ ticker, name, type: 'exit', label: 'منطقة بيع', color: '#f85149', price, zone: zone.exit_price });
   alerts.forEach(a => showPriceZoneAlert(a));
 }
 
-function showPriceZoneAlert({ ticker, label, color, price, zone }) {
+function showPriceZoneAlert({ ticker, label, color, price, zone, name }) {
   const id = 'pz-alert-' + ticker + '-' + label;
   if (document.getElementById(id)) return;
   const banner = document.createElement('div');
@@ -1001,7 +1003,7 @@ function showPriceZoneAlert({ ticker, label, color, price, zone }) {
     background:${color};color:#fff;padding:12px 20px;border-radius:8px;font-size:0.95rem;
     display:flex;align-items:center;gap:12px;box-shadow:0 4px 16px rgba(0,0,0,0.3);min-width:300px`;
   banner.innerHTML = `<span style="font-size:1.2rem">${label === 'منطقة شراء' ? '🟢' : '🔴'}</span>
-    <span><strong>${ticker}</strong> — ${label} مُفعَّلة! السعر الحالي <strong>${price}</strong> (الحد: ${zone})</span>
+    <span><strong>${ticker}</strong>${name ? ` (${name})` : ''} — ${label === 'منطقة شراء' ? 'السهم الآن في منطقة شراء' : 'السهم الآن في منطقة بيع'}! السعر الحالي <strong>${price}</strong> ${label === 'منطقة شراء' ? 'وصل الحد' : 'تجاوز الحد'} ${zone}</span>
     <button onclick="this.parentElement.remove()" style="margin-right:auto;background:rgba(255,255,255,0.3);border:none;color:#fff;
       border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:0.9rem">✕</button>`;
   document.body.appendChild(banner);
@@ -1019,12 +1021,16 @@ function renderPriceZonesCard() {
     const price = +h.current_price;
     let entryStatus = '', exitStatus = '';
     if (zone.entry_price != null) {
-      if (price <= zone.entry_price) entryStatus = `<span style="color:#22c55e;font-weight:bold">✅ مُفعَّل (${price})</span>`;
-      else entryStatus = `<span class="text-muted">${price} / الحد: ${zone.entry_price}</span>`;
+      if (price <= zone.entry_price)
+        entryStatus = `<span style="color:#22c55e;font-weight:bold">🟢 في منطقة شراء — السعر ${price} وصل الحد ${zone.entry_price}</span>`;
+      else
+        entryStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.entry_price}</span>`;
     }
     if (zone.exit_price != null) {
-      if (price >= zone.exit_price) exitStatus = `<span style="color:#f85149;font-weight:bold">🚨 مُفعَّل (${price})</span>`;
-      else exitStatus = `<span class="text-muted">${price} / الحد: ${zone.exit_price}</span>`;
+      if (price >= zone.exit_price)
+        exitStatus = `<span style="color:#f85149;font-weight:bold">🔴 في منطقة بيع — السعر ${price} تجاوز الحد ${zone.exit_price}</span>`;
+      else
+        exitStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.exit_price}</span>`;
     }
     rows.push({ ticker: h.ticker, name: h.name, entryStatus, exitStatus, zone, price });
   });
@@ -1038,12 +1044,12 @@ function renderPriceZonesCard() {
 
   el.innerHTML = `<table style="width:100%;font-size:0.82rem;border-collapse:collapse">
     <thead><tr style="color:var(--text-muted);border-bottom:1px solid var(--border)">
-      <th style="text-align:right;padding:4px 6px">الرمز</th>
+      <th style="text-align:right;padding:4px 6px">السهم</th>
       <th style="text-align:right;padding:4px 6px">منطقة الشراء ≤</th>
       <th style="text-align:right;padding:4px 6px">منطقة البيع ≥</th>
     </tr></thead>
     <tbody>${rows.map(r => `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:4px 6px"><strong class="text-accent">${esc(r.ticker)}</strong></td>
+      <td style="padding:4px 6px"><strong class="text-accent">${esc(r.ticker)}</strong>${r.name ? `<br><span class="text-muted" style="font-size:0.75rem">${esc(r.name)}</span>` : ''}</td>
       <td style="padding:4px 6px">${r.zone.entry_price != null ? r.entryStatus || '—' : '<span class="text-muted">—</span>'}</td>
       <td style="padding:4px 6px">${r.zone.exit_price  != null ? r.exitStatus  || '—' : '<span class="text-muted">—</span>'}</td>
     </tr>`).join('')}</tbody>
