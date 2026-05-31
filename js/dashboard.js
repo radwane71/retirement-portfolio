@@ -94,21 +94,16 @@ function getSukukActiveTotal() {
 }
 
 // ── Auto Price Update ─────────────────────────────────────────
-const EDGE_URL = 'https://mlqqxxpkzzquzftzvzfj.supabase.co/functions/v1/update-prices';
 let _priceRefreshTimer = null;
 
 async function refreshPrices(silent = false) {
   const btn = document.getElementById('refresh-prices-btn');
   try {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التحديث...'; }
-    const { data: { session } } = await supabaseClient.auth.getSession();
-    if (!session) return;
 
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${session.access_token}` }
-    });
-    const json = await res.json();
+    const { data, error } = await supabaseClient.functions.invoke('update-prices');
+    if (error) throw error;
+    const json = data;
 
     if (json.updated > 0) {
       await loadAllData();
