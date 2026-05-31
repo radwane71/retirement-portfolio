@@ -81,6 +81,73 @@ function _currentCostBasis() {
   return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
 }
 
+// عدد الأسهم المحتفظ بها لرمز معين في تاريخ معين
+function _sharesAtDate(ticker, dateStr) {
+  const cutoff = new Date(dateStr);
+  let shares = 0;
+  [...txBuyRows, ...txSellRows]
+    .filter(t => t.ticker === ticker && t.date && new Date(t.date) <= cutoff)
+    .forEach(t => {
+      if (t.type === 'buy' || t.type === 'grant') shares += +t.shares;
+      else if (t.type === 'sell') shares -= +t.shares;
+    });
+  return Math.max(0, shares);
+}
+
+// الدخل التوزيعي المتوقع سنوياً (Forward Projected Income)
+// المنطق: لكل سهم محتفظ به الآن:
+//   ١. آخر دفعة مستلمة ÷ الأسهم التي كانت عندي وقتها = دخل لكل سهم (DPS)
+//   ②. حدّد الدورية من الفجوة الزمنية بين آخر دفعتين
+//   ③. DPS × الدورية × الأسهم الحالية = الدخل المتوقع من هذا السهم سنوياً
+// هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم
+function _projectedAnnualIncome() {
+  if (typeof holdings === 'undefined') return { total: 0, breakdown: [] };
+
+  const breakdown = [];
+  let total = 0;
+
+  const heldTickers = new Set((holdings || []).map(h => h.ticker));
+  heldTickers.forEach(ticker => {
+    const holding = (holdings || []).find(h => h.ticker === ticker);
+    if (!holding || +holding.shares <= 0) return;
+
+    const tickerDivs = dividends
+      .filter(d => d.ticker === ticker && d.date)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    if (!tickerDivs.length) return;
+
+    const lastDiv = tickerDivs[tickerDivs.length - 1];
+    const sharesAtLastDiv = _sharesAtDate(ticker, lastDiv.date);
+    if (sharesAtLastDiv < 0.001) return;
+
+    const dps = +lastDiv.amount / sharesAtLastDiv; // دخل لكل سهم في آخر دفعة
+
+    // الدورية: ربع سنوي / نصف سنوي / سنوي
+    let freq = 1;
+    let freqLabel = 'سنوي';
+    if (tickerDivs.length >= 2) {
+      const prev = tickerDivs[tickerDivs.length - 2];
+      const gapDays = Math.floor((new Date(lastDiv.date) - new Date(prev.date)) / 86400000);
+      if (gapDays <= 105)      { freq = 4; freqLabel = 'ربع سنوي'; }
+      else if (gapDays <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
+    }
+
+    const currentShares = +holding.shares;
+    const projected = dps * freq * currentShares;
+    total += projected;
+
+    breakdown.push({
+      ticker, name: holding.name || ticker,
+      dps, freq, freqLabel, currentShares,
+      lastDivDate: lastDiv.date, lastDivAmt: +lastDiv.amount,
+      sharesAtLastDiv, projected,
+    });
+  });
+
+  return { total, breakdown };
+}
+
 // ── شريط الإحصائيات الكلية ────────────────────────────────────
 function renderDivStats() {
   const el = document.getElementById('div-stats');
@@ -95,16 +162,25 @@ function renderDivStats() {
   const totalAll = dividends.reduce((s, d) => s + +d.amount, 0);
   const yearDiv  = dividends.filter(d => +d.year === currentYear).reduce((s, d) => s + +d.amount, 0);
   const ttm      = _ttmDividends();
-
-  // رأس المال المنشغل الحالي = تكلفة الحيازات (متوسط التكلفة × الأسهم المتبقية)
   const netCapital = _currentCostBasis();
 
-  // العائد على التكلفة بأساس TTM (Trailing Yield on Cost)
-  const yieldPct = netCapital > 0 ? ttm / netCapital * 100 : 0;
-  const yieldCls = yieldPct >= 5 ? 'text-success' : yieldPct >= 3 ? 'text-accent' : 'text-muted';
+  // TTM YOC — مفيد لكنه متأثر بنمو المحفظة (المقام الحالي أكبر من متوسط الفترة)
+  const ttmYoc    = netCapital > 0 ? ttm / netCapital * 100 : 0;
+  const ttmYocCls = ttmYoc >= 5 ? 'text-success' : ttmYoc >= 3 ? 'text-accent' : 'text-muted';
+
+  // Forward Projected — الأصح للمحافظ النامية: آخر دفعة لكل سهم × دوريتها × الأسهم الحالية
+  const fwd        = _projectedAnnualIncome();
+  const fwdYoc     = netCapital > 0 ? fwd.total / netCapital * 100 : 0;
+  const fwdYocCls  = fwdYoc >= 5 ? 'text-success' : fwdYoc >= 3 ? 'text-accent' : 'text-muted';
 
   // عدد الأسهم الموزِّعة
   const uniqueTickers = new Set(dividends.map(d => d.ticker)).size;
+  const coveredByFwd  = fwd.breakdown.length;
+
+  // ملاحظة TTM
+  const ttmNote = ttmYoc < fwdYoc
+    ? `<div class="tx-stat-sub" style="color:var(--warning,#f0b429)" title="سبب الفرق: TTM يقسم على المحفظة الحالية الكاملة، لكن الأرباح المقيسة جُمعت حين كانت المحفظة أصغر — الـ Forward أدق.">▲ أقل من المتوقع (نمو المحفظة)</div>`
+    : `<div class="tx-stat-sub">TTM ÷ تكلفة الحيازات</div>`;
 
   el.innerHTML = `
     <div class="tx-stat-item">
@@ -119,19 +195,36 @@ function renderDivStats() {
     </div>
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item">
-      <div class="tx-stat-val text-accent" title="مجموع التوزيعات الفعلية المستلمة خلال آخر 12 شهراً — بلا تخمين أو توسيع">${formatSAR(ttm)}</div>
+      <div class="tx-stat-val text-accent" title="مجموع التوزيعات الفعلية المستلمة خلال آخر 12 شهراً">${formatSAR(ttm)}</div>
       <div class="tx-stat-lbl">أرباح آخر 12 شهراً (TTM)</div>
-      <div class="tx-stat-sub">فعلي — العُرف المعتمد</div>
+      <div class="tx-stat-sub">فعلي — ≈ ${formatSAR(ttm/12)} / شهر</div>
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item"
+      title="TTM YOC = أرباح آخر 12 شهر ÷ تكلفة الحيازات الحالية&#10;قد يبدو منخفضاً إذا نمت المحفظة مؤخراً (المقام أكبر من متوسط الفترة)">
+      <div class="tx-stat-val ${ttmYocCls}">${ttmYoc.toFixed(2)}%</div>
+      <div class="tx-stat-lbl">YOC الفعلي (TTM)</div>
+      ${ttmNote}
+    </div>
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item"
+      title="Forward Projected = لكل سهم: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية&#10;هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم&#10;يعكس ما تتوقع استلامه سنوياً من محفظتك الحالية&#10;مغطى: ${coveredByFwd} رمز من أصل ${uniqueTickers}">
+      <div class="tx-stat-val ${fwdYocCls}">${fwdYoc.toFixed(2)}%</div>
+      <div class="tx-stat-lbl">العائد المتوقع (Forward)</div>
+      <div class="tx-stat-sub" style="color:var(--success,#3fb950)">≈ ${formatSAR(fwd.total)} سنوياً</div>
     </div>
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item">
-      <div class="tx-stat-val ${yieldCls}" title="العائد على التكلفة = أرباح آخر 12 شهراً ÷ تكلفة الحيازات الحالية">${yieldPct.toFixed(2)}%</div>
-      <div class="tx-stat-lbl">العائد على التكلفة (TTM)</div>
-      <div class="tx-stat-sub">TTM ÷ تكلفة الحيازات</div>
+      <div class="tx-stat-val text-success"
+        title="الدخل التوزيعي السنوي المتوقع من المحفظة الحالية&#10;= مجموع (آخر DPS × الدورية × الأسهم الحالية) لكل رمز">
+        ${formatSAR(fwd.total)}
+      </div>
+      <div class="tx-stat-lbl">الدخل المتوقع / سنة</div>
+      <div class="tx-stat-sub" style="color:var(--success,#3fb950)">≈ ${formatSAR(fwd.total/12)} / شهر</div>
     </div>
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item">
-      <div class="tx-stat-val" title="متوسط التكلفة × الأسهم المتبقية — صافي رأس المال المستثمر فعلاً">${formatSAR(netCapital)}</div>
+      <div class="tx-stat-val">${formatSAR(netCapital)}</div>
       <div class="tx-stat-lbl">تكلفة الحيازات الحالية</div>
       <div class="tx-stat-sub">متوسط التكلفة × الأسهم المتبقية</div>
     </div>
@@ -139,6 +232,7 @@ function renderDivStats() {
     <div class="tx-stat-item">
       <div class="tx-stat-val">${uniqueTickers}</div>
       <div class="tx-stat-lbl">أسهم موزِّعة</div>
+      <div class="tx-stat-sub">${coveredByFwd} مغطى بـ Forward</div>
     </div>`;
 }
 
@@ -259,12 +353,20 @@ function renderYearlySummary({ yearPortfolio }) {
   const daysElapsed = Math.floor((today - startOfYear) / 86400000) + 1;  // +1 ليشمل اليوم
   const daysInYear  = ((currentYear % 4 === 0 && currentYear % 100 !== 0) || currentYear % 400 === 0) ? 366 : 365;
 
+  // Forward projected للسنة الجارية
+  const fwd = _projectedAnnualIncome();
+  const fwdNetCap = (() => {
+    const tickers = [...new Set([...txBuyRows.map(t => t.ticker), ...txSellRows.map(t => t.ticker)])];
+    return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
+  })();
+  const fwdYocPct = fwdNetCap > 0 ? fwd.total / fwdNetCap * 100 : 0;
+
   yEl.innerHTML = `<div class="table-wrapper"><table>
     <thead><tr>
       <th>السنة</th>
       <th title="رأس المال المنشغل = مشتريات تراكمية − مبيعات تراكمية&#10;السنة الجارية: حتى اليوم | السنوات المنتهية: 31 ديسمبر">رأس المال المنشغل</th>
       <th>الأرباح المستلمة</th>
-      <th title="سنوات منتهية: أرباح فعلية ÷ رأس المال أول السنة&#10;السنة الجارية: عائد فعلي جزئي حتى الآن (التقدير السنوي الكامل في مؤشر TTM بالأعلى)">العائد السنوي %</th>
+      <th title="سنوات منتهية: أرباح فعلية ÷ رأس المال أول السنة&#10;السنة الجارية: عائد فعلي جزئي حتى الآن">العائد الفعلي %</th>
     </tr></thead>
     <tbody>${years.map(y => {
       const isCurrentYear = +y === currentYear;
@@ -337,10 +439,28 @@ function renderYearlySummary({ yearPortfolio }) {
           ${yieldStr}
         </td>
       </tr>`;
-    }).join('')}</tbody>
-  </table></div>
+    }).join('')}
+    ${fwd.total > 0 ? `<tr style="border-top:2px solid var(--border);background:rgba(63,185,80,0.05)">
+      <td><strong style="color:var(--success)">▶ متوقع</strong>
+        <span style="font-size:0.65rem;background:rgba(63,185,80,0.2);color:#3fb950;padding:1px 6px;border-radius:4px;font-weight:700">Forward</span>
+      </td>
+      <td class="num text-muted" title="تكلفة الحيازات الحالية">${fwdNetCap > 0 ? formatSAR(fwdNetCap) : '—'}</td>
+      <td class="num text-success bold"
+        title="الدخل السنوي المتوقع من المحفظة الحالية&#10;= مجموع (آخر DPS × الدورية × الأسهم الحالية) لكل رمز">
+        ${formatSAR(fwd.total)}
+        <br><span class="small text-muted">≈ ${formatSAR(fwd.total/12)} / شهر</span>
+      </td>
+      <td class="num ${fwdYocPct >= 5 ? 'text-success' : fwdYocPct >= 3 ? 'text-accent' : 'text-muted'} bold"
+        title="Forward YOC = الدخل المتوقع ÷ تكلفة الحيازات&#10;يعكس العائد الحقيقي للمحفظة الحالية بصرف النظر عن نموها">
+        ${fwdYocPct.toFixed(2)}%
+        <br><span class="small" style="color:var(--text-muted);font-weight:400">يُقارَن بياهو</span>
+      </td>
+    </tr>` : ''}
+  </tbody></table></div>
   <p class="small text-muted mt-2" style="padding:0 4px">
-    🔄 سنة جارية — عائد فعلي جزئي حتى الآن (التقدير السنوي الكامل بأساس TTM في الأعلى) | السنوات المنتهية: أرباح فعلية ÷ رأس المال أول يناير | مرّر على العائد % لتفاصيل الحسبة
+    🔄 <strong>السنة الجارية</strong>: عائد جزئي فعلي حتى اليوم (${daysElapsed}/${daysInYear} يوم) — ليس مقياس الأداء الأنسب للسنة غير المكتملة |
+    ▶ <strong>Forward</strong>: الأدق — آخر دفعة لكل سهم × دوريتها × الأسهم الحالية (مثل ياهو فاينانس) |
+    السنوات المنتهية: أرباح فعلية ÷ رأس المال أول يناير
   </p>`;
 }
 
@@ -411,15 +531,18 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
     const firstDate   = tickerDivs[0]?.date ? new Date(tickerDivs[0].date) : null;
     const daysSince   = firstDate ? Math.floor((today - firstDate) / 86400000) : 0;
     const paymentCount = tickerDivs.length;
-    // مستويات الثقة:
-    // موثوق:       730+ يوم (سنتين) + 3 توزيعات — دورة كاملة مؤكدة بما فيها تأخر الربع الرابع
-    // أولي:        365+ يوم + توزيعتان — قد تكون دورة ناقصة
-    // غير كافٍ:    دون ذلك
     const level = (daysSince >= 730 && paymentCount >= 3) ? 'full'
                 : (daysSince >= 365 && paymentCount >= 2) ? 'partial'
                 : 'low';
     tickerConfidence[ticker] = { daysSince, paymentCount, level };
   });
+
+  // Forward projected لكل سهم (للعمود الإضافي)
+  const fwdData = _projectedAnnualIncome();
+  const fwdMap  = {};
+  fwdData.breakdown.forEach(b => { fwdMap[b.ticker] = b; });
+
+  const showFwdCol = selectedYear === 'all' || selectedYear === String(today.getFullYear());
 
   hEl.innerHTML = tabsHtml + `
     <div class="table-wrapper"><table>
@@ -428,19 +551,37 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
         <th>الاسم</th>
         <th title="صافي رأس المال المستثمر في هذا السهم حتى 31 ديسمبر = مشتريات تراكمية − مبيعات تراكمية">قيمة الاستثمار${selectedYear!=='all'?' '+selectedYear:''}</th>
         <th>الأرباح${selectedYear!=='all'?' '+selectedYear:''}</th>
-        <th title="العائد على التكلفة = أرباح ÷ قيمة الاستثمار">YOC %</th>
+        <th title="العائد على التكلفة = أرباح ÷ قيمة الاستثمار">YOC % فعلي</th>
+        ${showFwdCol ? `<th title="Forward = آخر DPS × الدورية × الأسهم الحالية — مثل ياهو فاينانس&#10;الأدق للمحافظ النامية" style="color:var(--success)">▶ Forward / سنة</th>` : ''}
         <th>ثقة البيانات</th>
       </tr></thead>
       <tbody>${rows.length ? rows.map(r => {
         const conf   = tickerConfidence[r.ticker] || {};
         const yoc    = r.portVal > 0 && r.divAmt > 0 ? (r.divAmt / r.portVal * 100) : null;
-        // عائد فعلي (بلا توسيع) — للسنة الجارية يبقى جزئياً وهذا أصدق من التقدير
         let yocStr = '—', yocCls = 'text-muted';
         if (yoc != null) {
           yocStr = yoc.toFixed(2) + '%';
           yocCls = yoc >= 5 ? 'text-success' : yoc >= 3 ? 'text-accent' : 'text-muted';
         }
-        // شارة الثقة — 3 مستويات
+
+        // Forward cell
+        let fwdCell = '';
+        if (showFwdCol) {
+          const fb = fwdMap[r.ticker];
+          if (fb) {
+            const fwdYoc = r.portVal > 0 ? fb.projected / r.portVal * 100 : 0;
+            const fwdCls = fwdYoc >= 5 ? 'text-success' : fwdYoc >= 3 ? 'text-accent' : 'text-muted';
+            fwdCell = `<td class="num ${fwdCls}"
+              title="آخر دفعة: ${formatSAR(fb.lastDivAmt)} (${fb.lastDivDate})&#10;أسهم وقتها: ${fb.sharesAtLastDiv.toFixed(0)}&#10;DPS: ${fb.dps.toFixed(4)} ر.س&#10;دورية: ${fb.freqLabel} (×${fb.freq})&#10;الأسهم الحالية: ${fb.currentShares.toFixed(0)}&#10;الدخل المتوقع: ${formatSAR(fb.projected)}" style="cursor:help">
+              ${formatSAR(fb.projected)}
+              <br><span class="small" style="font-weight:400">${fwdYoc.toFixed(2)}% — ${fb.freqLabel}</span>
+            </td>`;
+          } else {
+            fwdCell = `<td class="num text-muted" title="لا توجد أسهم حالية أو لا توجد دفعات مسجّلة">—</td>`;
+          }
+        }
+
+        // شارة الثقة
         let confBadge;
         if (conf.level === 'full') {
           confBadge = `<span title="${conf.daysSince} يوم — ${conf.paymentCount} توزيعات — دورتان كاملتان أو أكثر" style="cursor:help;background:rgba(63,185,80,0.12);color:#3fb950;border-radius:4px;padding:2px 6px;font-size:0.72rem;font-weight:600">✅ موثوق</span>`;
@@ -459,20 +600,25 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
           <td class="num text-muted">${r.portVal != null && r.portVal > 0 ? formatSAR(r.portVal) : '—'}</td>
           <td class="num text-success bold">${formatSAR(r.divAmt)}</td>
           <td class="num ${yocCls}">${yocStr}</td>
+          ${fwdCell}
           <td>${confBadge}</td>
         </tr>`;
-      }).join('') : `<tr><td colspan="6" class="text-center text-muted small" style="padding:20px">
+      }).join('') : `<tr><td colspan="${showFwdCol ? 7 : 6}" class="text-center text-muted small" style="padding:20px">
         لا توجد أرباح مسجلة لسنة ${yearLabel}
       </td></tr>`}</tbody>
       <tfoot><tr style="border-top:2px solid var(--border)">
         <td colspan="3"><strong>إجمالي ${yearLabel}</strong></td>
         <td class="num bold text-accent">${formatSAR(yearDivTotal)}</td>
-        <td colspan="2"></td>
+        ${showFwdCol ? `<td class="num bold text-success"
+          title="مجموع الدخل السنوي المتوقع من جميع الأسهم الحالية">
+          ${fwdData.total > 0 ? formatSAR(fwdData.total) + '<br><span class="small" style="font-weight:400">متوقع/سنة</span>' : '—'}
+        </td>` : ''}
+        <td colspan="${showFwdCol ? 1 : 2}"></td>
       </tr></tfoot>
     </table></div>
   <div class="small text-muted mt-2" style="padding:6px 4px;border-top:1px solid var(--border);margin-top:8px">
-    ⚠️ <strong>متى تظهر علامة "بيانات غير كافية"؟</strong> — عندما يكون سجل الأرباح أقل من 12 شهراً أو أقل من توزيعتين مسجّلتين.
-    المواقع الكبرى (Investing.com / Yahoo Finance / Groww) تحسب الـ Yield على أساس آخر 12 شهراً كاملة من التوزيعات — بينما سجلك الشخصي قد لا يغطي هذه الفترة بعد.
+    ⚠️ <strong>YOC الفعلي منخفض؟</strong> — طبيعي إذا نمت محفظتك مؤخراً: الأرباح المقاسة جُمعت حين كانت أصغر، بينما المقام (تكلفة الحيازات) يعكس حجمها الحالي الأكبر.
+    <strong>▶ Forward</strong> هو الأدق — يحسب ما تتوقع استلامه بناءً على محفظتك الحالية وآخر دفعة لكل سهم (نفس طريقة ياهو فاينانس).
   </div>`;
 }
 

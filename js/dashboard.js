@@ -162,7 +162,7 @@ async function loadAllData() {
   const [rH, rTx, rDiv, rCf, rNw, rRe, rSt, rSecT, rCash] = await Promise.all([
     supabaseClient.from('holdings').select('*').order('ticker'),
     supabaseClient.from('transactions').select('type, total, shares, price, commission, vat, ticker, date').eq('is_archived', false),
-    supabaseClient.from('dividends').select('amount, year, date').eq('is_archived', false),
+    supabaseClient.from('dividends').select('amount, year, date, ticker').eq('is_archived', false),
     supabaseClient.from('cashflow_entries').select('type, amount, date').eq('is_archived', false),
     supabaseClient.from('net_worth_snapshots').select('total_value, date').order('date', { ascending: false }).limit(1),
     supabaseClient.from('real_estate').select('current_value, status').eq('is_active', true),
@@ -292,6 +292,41 @@ async function loadAllData() {
   const divYieldYear = divYieldMarket;
   const divYieldAll  = divYieldYOC;
 
+  // ── Forward Projected Income — الأدق للمحافظ النامية ─────────
+  // لكل سهم في الحيازات: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية
+  const fwdProjected = (() => {
+    let total = 0;
+    holdings.forEach(h => {
+      if (+h.shares <= 0) return;
+      const tickerDivs = divRows
+        .filter(d => d.ticker === h.ticker && d.date)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (!tickerDivs.length) return;
+      const lastDiv = tickerDivs[tickerDivs.length - 1];
+      // أسهم وقت آخر دفعة
+      const cutoff = new Date(lastDiv.date);
+      let sharesAtLastDiv = 0;
+      txRows.forEach(t => {
+        if (t.ticker !== h.ticker || !t.date || new Date(t.date) > cutoff) return;
+        if (t.type === 'buy' || t.type === 'grant') sharesAtLastDiv += +t.shares;
+        else if (t.type === 'sell') sharesAtLastDiv -= +t.shares;
+      });
+      sharesAtLastDiv = Math.max(0, sharesAtLastDiv);
+      if (sharesAtLastDiv < 0.001) return;
+      const dps = +lastDiv.amount / sharesAtLastDiv;
+      // الدورية
+      let freq = 1;
+      if (tickerDivs.length >= 2) {
+        const gapDays = Math.floor((new Date(lastDiv.date) - new Date(tickerDivs[tickerDivs.length - 2].date)) / 86400000);
+        if (gapDays <= 105) freq = 4;
+        else if (gapDays <= 210) freq = 2;
+      }
+      total += dps * freq * +h.shares;
+    });
+    return total;
+  })();
+  const divYieldFwd = costBasis > 0 ? fwdProjected / costBasis * 100 : 0;
+
   // ── XIRR — العائد الداخلي السنوي الحقيقي ─────────────────
   // التدفقات: شراء = خروج (−)، بيع = دخول (+)، توزيعات = دخول (+)
   // القيمة النهائية = القيمة السوقية للأسهم اليوم (كأنها بيعت)
@@ -314,8 +349,8 @@ async function loadAllData() {
     realizedPnL,
     totalDivAll,     yearDiv,
     divYieldYear,    divYieldAll,
-    divYieldAnn, divYieldYOC, divYieldMarket,
-    ttmDiv, xirr,
+    divYieldAnn, divYieldYOC, divYieldMarket, divYieldFwd,
+    fwdProjected, ttmDiv, xirr,
     annualizedYearDiv, daysElapsed, daysInYear, beginYearCap, denomAnn,
     grantMap, totalGrantShares, totalGrantTickers,
     latestNW:        nwRows[0] ? +nwRows[0].total_value : null,
@@ -367,7 +402,7 @@ function switchInvestedTab(tab) {
 function switchYieldTab(tab) {
   yieldTab = tab;
   const s = window._ds || {};
-  ['ann','yoc','market'].forEach(t => {
+  ['ann','yoc','market','fwd'].forEach(t => {
     document.getElementById('tab-yield-' + t)?.classList.toggle('mini-tab-active', t === tab);
   });
 
@@ -383,7 +418,11 @@ function switchYieldTab(tab) {
   } else if (tab === 'yoc') {
     setText('yield-tab-label', 'العائد على التكلفة (YOC)');
     setText('stat-div-yield',  (s.divYieldYOC || 0).toFixed(2) + '%');
-    setText('stat-div-yield-sub', `أرباح آخر 12 شهراً (${formatSAR(s.ttmDiv||0)}) ÷ تكلفة الشراء`);
+    setText('stat-div-yield-sub', `TTM (${formatSAR(s.ttmDiv||0)}) ÷ تكلفة الشراء`);
+  } else if (tab === 'fwd') {
+    setText('yield-tab-label', '▶ العائد المتوقع (Forward)');
+    setText('stat-div-yield',  (s.divYieldFwd || 0).toFixed(2) + '%');
+    setText('stat-div-yield-sub', `${formatSAR(s.fwdProjected||0)}/سنة ≈ ${formatSAR((s.fwdProjected||0)/12)}/شهر`);
   } else {
     setText('yield-tab-label', 'العائد السوقي');
     setText('stat-div-yield',  (s.divYieldMarket || 0).toFixed(2) + '%');
@@ -391,8 +430,9 @@ function switchYieldTab(tab) {
   }
 
   // لون حسب القيمة
-  const val = tab === 'ann' ? (s.divYieldAnn||0)
-            : tab === 'yoc' ? (s.divYieldYOC||0)
+  const val = tab === 'ann'    ? (s.divYieldAnn||0)
+            : tab === 'yoc'    ? (s.divYieldYOC||0)
+            : tab === 'fwd'    ? (s.divYieldFwd||0)
             : (s.divYieldMarket||0);
   const el = document.getElementById('stat-div-yield');
   if (el) el.className = 'value num ' + (val >= 5 ? 'text-success' : val >= 3 ? 'text-accent' : 'text-muted');
@@ -457,11 +497,15 @@ function renderStats() {
     }
   }
 
-  // الدخل التوزيعي المتوقع = أرباح آخر 12 شهراً
-  const fwdIncome = s.ttmDiv || 0;
-  setText('stat-fwd-income', formatSAR(fwdIncome));
-  const fwdYield = totalValue > 0 ? fwdIncome / totalValue * 100 : 0;
-  setText('stat-fwd-income-sub', `≈ ${formatSAR(fwdIncome/12)}/شهر · عائد ${fwdYield.toFixed(2)}%`);
+  // الدخل التوزيعي المتوقع — Forward Projected (الأدق للمحافظ النامية)
+  const fwdIncome  = s.fwdProjected || 0;
+  const ttmIncome  = s.ttmDiv || 0;
+  setText('stat-fwd-income', formatSAR(fwdIncome || ttmIncome));
+  const fwdYield = costBasis > 0 ? (fwdIncome || ttmIncome) / costBasis * 100 : 0;
+  const fwdNote  = fwdIncome > 0
+    ? `Forward · ≈ ${formatSAR(fwdIncome/12)}/شهر · ${fwdYield.toFixed(2)}%`
+    : `TTM · ≈ ${formatSAR(ttmIncome/12)}/شهر · ${fwdYield.toFixed(2)}%`;
+  setText('stat-fwd-income-sub', fwdNote);
 
   // إجمالي الأصول الاستثمارية
   const sukukTotal  = getSukukActiveTotal();

@@ -34,7 +34,9 @@ const LS_KEYS = [
   'life_goals_v1',
   'inventory_v1',
   'school_tracker_v2',
+  'school_kanda_v1',
   'nav_groups_v1',
+  'retirement_goal_v1',
 ];
 
 async function init() {
@@ -558,7 +560,7 @@ async function exportMonthlyReviewMD() {
     setStatus('md-export-status', 'info', 'جارٍ تحميل البيانات…');
     const [holdings, transactions, dividends, cashflows, snapshots,
            assets, liabilities, realEstate, stockTargets, sectorTargets,
-           watchlist, tasks] = await Promise.all([
+           watchlist, tasks, userStocks] = await Promise.all([
       fetchTable('holdings'),
       fetchTable('transactions', 'date'),
       fetchTable('dividends', 'date'),
@@ -571,7 +573,15 @@ async function exportMonthlyReviewMD() {
       fetchTable('sector_targets'),
       fetchTable('watchlist'),
       fetchTable('portfolio_tasks', 'created_at'),
+      fetchTable('user_stocks'),
     ]);
+
+    // ── بيانات localStorage ──────────────────────────────────
+    const lsGet = (key, def) => { try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; } };
+    const retGoal    = lsGet('retirement_goal_v1', { monthly: 0, swr: 4 });
+    const salaryData = lsGet('salary_planner_v1',  { categories: [], entries: [] });
+    const sukukData  = lsGet('sukuk_planner_v1',   { opportunities: [] });
+    const lifeGoals  = lsGet('life_goals_v1',      []);
 
     setStatus('md-export-status', 'info', 'جارٍ بناء التقرير…');
 
@@ -1071,6 +1081,391 @@ async function exportMonthlyReviewMD() {
       } else {
         p('_جميع الأسهم ضمن نطاق الهدف (انحراف < 1.5%)._');
       }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 11. هدف التقاعد / الاستقلال المالي (FIRE)
+    // ════════════════════════════════════════════════════════
+    h2('11. هدف الاستقلال المالي (FIRE)');
+    if (retGoal.monthly > 0) {
+      const monthlyTarget  = retGoal.monthly;
+      const swrPct         = retGoal.swr || 4;
+      const portfolioNeeded = (monthlyTarget * 12) / (swrPct / 100);
+      const currentPortfolio = totalMktValue + activeRE.reduce((s, r) => s + +r.current_value, 0)
+                              + activeAssets.reduce((s, a) => s + +a.value, 0)
+                              - activeLiabilities.reduce((s, l) => s + +l.value, 0);
+      const fireProgress   = portfolioNeeded > 0 ? currentPortfolio / portfolioNeeded * 100 : 0;
+      const remaining      = portfolioNeeded - currentPortfolio;
+
+      p('```');
+      p(`المصاريف الشهرية المستهدفة  : ${SAR(monthlyTarget)} ر.س`);
+      p(`المصاريف السنوية المستهدفة  : ${SAR(monthlyTarget * 12)} ر.س`);
+      p(`نسبة السحب الآمن (SWR)      : ${swrPct}%`);
+      p(`قاعدة الضرب                 : ${(100 / swrPct).toFixed(0)}× (قاعدة ${100 / swrPct >= 25 ? '25' : (100/swrPct).toFixed(0)} ضعف)`);
+      p(`المحفظة المطلوبة للتقاعد    : ${SAR(portfolioNeeded)} ر.س`);
+      p(`إجمالي الثروة الحالية        : ${SAR(currentPortfolio)} ر.س`);
+      p(`نسبة الإنجاز                : ${PCT(fireProgress)}`);
+      p(`المبلغ المتبقي               : ${SAR(Math.max(0, remaining))} ر.س`);
+      p('```');
+
+      if (fireProgress < 100) {
+        p(`\n**تحليل:** بلغت نسبة الإنجاز نحو **${PCT(fireProgress)}** من الهدف. المتبقي ${SAR(remaining)} ر.س لتحقيق الاستقلال المالي بمصاريف شهرية ${SAR(monthlyTarget)} ر.س ونسبة سحب ${swrPct}%.`);
+      } else {
+        p(`\n**🎯 الهدف محقق!** الثروة الحالية تتجاوز الحد المطلوب للاستقلال المالي (${PCT(fireProgress)}).`);
+      }
+    } else {
+      p('_لم يُحدَّد هدف التقاعد بعد. يمكن إدخاله من لوحة التحكم (بطاقة الاستقلال المالي)._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 12. الأداء التاريخي التفصيلي لكل سهم
+    // ════════════════════════════════════════════════════════
+    h2('12. الأداء التاريخي التفصيلي لكل سهم');
+    p('يشمل: الربح/الخسارة الورقية، المحقق من البيع، الأرباح الموزعة، والعائد على التكلفة (YOC) لكل رمز.');
+
+    {
+      // بناء خريطة شاملة لكل رمز مرّ عبر المحفظة
+      const allTickers = new Set([
+        ...holdings.map(h => h.ticker),
+        ...transactions.map(t => t.ticker),
+        ...dividends.map(d => d.ticker),
+      ]);
+
+      const stockPerf = {};
+      allTickers.forEach(tk => {
+        stockPerf[tk] = {
+          name: '', buyShares: 0, buyCostTotal: 0,
+          sellShares: 0, sellRevTotal: 0,
+          grantShares: 0, divTotal: 0,
+        };
+      });
+
+      transactions.forEach(t => {
+        const e = stockPerf[t.ticker];
+        if (!e) return;
+        e.name = e.name || t.name || '';
+        if (t.type === 'buy')   { e.buyShares += +t.shares; e.buyCostTotal += +t.price * +t.shares; }
+        if (t.type === 'sell')  { e.sellShares += +t.shares; e.sellRevTotal += +t.total; }
+        if (t.type === 'grant') { e.grantShares += +t.shares; }
+      });
+
+      dividends.forEach(d => {
+        if (stockPerf[d.ticker]) {
+          stockPerf[d.ticker].divTotal += +d.amount;
+          stockPerf[d.ticker].name = stockPerf[d.ticker].name || d.name || '';
+        }
+      });
+
+      holdings.forEach(h => {
+        if (stockPerf[h.ticker]) {
+          stockPerf[h.ticker].name = stockPerf[h.ticker].name || h.name || '';
+        }
+      });
+
+      const perfRows = [];
+      Object.entries(stockPerf).forEach(([tk, e]) => {
+        const holding    = holdings.find(h => h.ticker === tk);
+        const avgCost    = e.buyShares > 0 ? e.buyCostTotal / e.buyShares : 0;
+        const costBasis  = holding ? +holding.shares * +holding.avg_price : 0;
+        const mktVal     = holding ? +holding.shares * +holding.current_price : 0;
+        const unrealPnL  = mktVal - costBasis;
+        // realized: revenue from sells minus cost of sold shares at avg price
+        const soldCost   = avgCost > 0 ? e.sellShares * avgCost : 0;
+        const realPnL    = e.sellRevTotal - soldCost;
+        const yoc        = costBasis > 0 ? e.divTotal / costBasis * 100 : 0;
+        const totalReturn = unrealPnL + realPnL + e.divTotal;
+
+        perfRows.push({
+          tk, name: e.name,
+          shares: holding ? +holding.shares : 0,
+          avgCost, mktVal, costBasis,
+          unrealPnL, realPnL, divTotal: e.divTotal,
+          yoc, totalReturn,
+          inPortfolio: !!holding,
+        });
+      });
+
+      // مرتبة: الحيازات الحالية أولاً ثم المُصفّاة
+      perfRows.sort((a, b) => {
+        if (a.inPortfolio !== b.inPortfolio) return b.inPortfolio - a.inPortfolio;
+        return b.mktVal - a.mktVal;
+      });
+
+      if (perfRows.length) {
+        h3('الحيازات الحالية — الأداء الكامل');
+        const currentRows = perfRows.filter(r => r.inPortfolio).map(r => [
+          r.tk, r.name || '—', N(r.shares),
+          SAR(r.avgCost), SAR(r.costBasis), SAR(r.mktVal),
+          (r.unrealPnL >= 0 ? '+' : '') + SAR(r.unrealPnL),
+          (r.realPnL   >= 0 ? '+' : '') + SAR(r.realPnL),
+          SAR(r.divTotal),
+          PCT(r.yoc),
+          (r.totalReturn >= 0 ? '+' : '') + SAR(r.totalReturn),
+        ]);
+        if (currentRows.length) {
+          p(mdTable(
+            ['الرمز','الاسم','الأسهم','متوسط التكلفة','تكلفة الحيازة','القيمة السوقية',
+             'ر/خ ورقي','ر/خ محقق','أرباح موزعة','YOC%','إجمالي العائد'],
+            currentRows
+          ));
+        }
+
+        const closedRows = perfRows.filter(r => !r.inPortfolio && (r.realPnL !== 0 || r.divTotal > 0));
+        if (closedRows.length) {
+          h3('المراكز المُصفّاة (مُباعة بالكامل)');
+          const clRows = closedRows.map(r => [
+            r.tk, r.name || '—',
+            (r.realPnL >= 0 ? '+' : '') + SAR(r.realPnL),
+            SAR(r.divTotal),
+            (r.totalReturn >= 0 ? '+' : '') + SAR(r.totalReturn),
+          ]);
+          p(mdTable(['الرمز','الاسم','ر/خ محقق','أرباح موزعة','إجمالي العائد'], clRows));
+        }
+      } else {
+        p('_لا توجد بيانات أداء._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 13. الأرباح الموزعة — ملخص شهري
+    // ════════════════════════════════════════════════════════
+    h2('13. الأرباح الموزعة — ملخص شهري');
+    p('توزيع الأرباح المستلمة بحسب الشهر والسنة. مفيد لتقدير الدخل السلبي الشهري.');
+
+    if (dividends.length) {
+      // بناء مصفوفة سنة × شهر
+      const divMatrix = {};
+      const yearsSet  = new Set();
+      dividends.forEach(d => {
+        const yr = d.year || new Date(d.date).getFullYear();
+        const mo = d.month || (new Date(d.date).getMonth() + 1);
+        yearsSet.add(yr);
+        if (!divMatrix[yr]) divMatrix[yr] = {};
+        divMatrix[yr][mo] = (divMatrix[yr][mo] || 0) + +d.amount;
+      });
+
+      const years = [...yearsSet].sort((a, b) => b - a);
+      const moNums = [1,2,3,4,5,6,7,8,9,10,11,12];
+
+      const matHeaders = ['السنة', ...MONTHS, 'الإجمالي'];
+      const matRows = years.map(yr => {
+        const total = moNums.reduce((s, m) => s + (divMatrix[yr]?.[m] || 0), 0);
+        return [
+          String(yr),
+          ...moNums.map(m => divMatrix[yr]?.[m] ? SAR(divMatrix[yr][m]) : '—'),
+          SAR(total)
+        ];
+      });
+      p(mdTable(matHeaders, matRows));
+
+      // أعلى شهر
+      let bestMonth = { yr: 0, mo: 0, amt: 0 };
+      years.forEach(yr => {
+        moNums.forEach(mo => {
+          const amt = divMatrix[yr]?.[mo] || 0;
+          if (amt > bestMonth.amt) bestMonth = { yr, mo, amt };
+        });
+      });
+      if (bestMonth.amt > 0) {
+        p(`\n**أعلى شهر أرباح:** ${MONTHS[bestMonth.mo - 1]} ${bestMonth.yr} — ${SAR(bestMonth.amt)} ر.س`);
+      }
+
+      // متوسط شهري
+      const totalMonthsWithDiv = Object.values(divMatrix).flatMap(yr => Object.values(yr)).filter(v => v > 0).length;
+      const totalDivs = dividends.reduce((s, d) => s + +d.amount, 0);
+      if (totalMonthsWithDiv > 0) {
+        p(`**متوسط الأرباح في الأشهر التي صدرت بها أرباح:** ${SAR(totalDivs / totalMonthsWithDiv)} ر.س/شهر`);
+      }
+    } else {
+      p('_لا توجد أرباح موزعة مسجّلة._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 14. مخطط الراتب والتوزيعات
+    // ════════════════════════════════════════════════════════
+    h2('14. مخطط الراتب والتوزيعات الشهرية');
+    p('بيانات مخطط الراتب — الدخل الشهري وتوزيعه على: مصاريف، ادخار، أصول، محفظة التقاعد.');
+
+    {
+      const entries = (salaryData.entries || []).sort((a, b) =>
+        (a.year !== b.year ? a.year - b.year : a.month - b.month));
+      const cats = salaryData.categories || [];
+
+      if (entries.length) {
+        const totalSalary = entries.reduce((s, e) => s + (+e.salary || 0), 0);
+        const avgSalary   = totalSalary / entries.length;
+
+        p(`**عدد الأشهر المسجّلة:** ${entries.length}  `);
+        p(`**إجمالي الدخل المسجّل:** ${SAR(totalSalary)} ر.س  `);
+        p(`**متوسط الراتب الشهري:** ${SAR(avgSalary)} ر.س`);
+
+        // إجمالي التوزيعات لكل فئة
+        const catTotals = {};
+        cats.forEach(c => { catTotals[c.id] = { name: c.name, total: 0 }; });
+        entries.forEach(e => {
+          (e.allocations || []).forEach(al => {
+            if (catTotals[al.catId]) catTotals[al.catId].total += +al.amount || 0;
+            else catTotals[al.catId] = { name: al.catId, total: +al.amount || 0 };
+          });
+        });
+
+        h3('إجمالي التوزيعات حسب الفئة');
+        const catRows = Object.values(catTotals)
+          .filter(c => c.total > 0)
+          .sort((a, b) => b.total - a.total)
+          .map(c => [c.name, SAR(c.total), PCT(totalSalary > 0 ? c.total / totalSalary * 100 : 0)]);
+        if (catRows.length) p(mdTable(['الفئة', 'الإجمالي', '% من الدخل'], catRows));
+
+        // آخر 12 شهراً
+        h3('آخر 12 شهراً');
+        const last12 = entries.slice(-12);
+        const last12Headers = ['السنة', 'الشهر', 'الراتب', ...cats.map(c => c.name), 'المتبقي'];
+        const last12Rows = last12.map(e => {
+          const allocs = cats.map(c => {
+            const al = (e.allocations || []).find(a => a.catId === c.id);
+            return al ? SAR(al.amount) : '—';
+          });
+          const totalAlloc = (e.allocations || []).reduce((s, a) => s + (+a.amount || 0), 0);
+          const remaining  = (+e.salary || 0) - totalAlloc;
+          return [String(e.year), MONTHS[(e.month || 1) - 1], SAR(e.salary), ...allocs, SAR(remaining)];
+        });
+        p(mdTable(last12Headers, last12Rows));
+
+        // مساهمة محفظة التقاعد تحديداً
+        const retCat = cats.find(c => c.id === 'cat_retirement' || c.name.includes('تقاعد'));
+        if (retCat) {
+          const retTotal = catTotals[retCat.id]?.total || 0;
+          p(`\n**إجمالي ما أُودع في محفظة التقاعد:** ${SAR(retTotal)} ر.س (${PCT(totalSalary > 0 ? retTotal / totalSalary * 100 : 0)} من إجمالي الدخل المسجّل)`);
+        }
+      } else {
+        p('_لا توجد بيانات في مخطط الراتب._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 15. الصكوك والسندات
+    // ════════════════════════════════════════════════════════
+    h2('15. الصكوك والسندات');
+    p('فرص الصكوك المُدخَّلة في مخطط الصكوك.');
+
+    {
+      const opps = sukukData.opportunities || [];
+      if (opps.length) {
+        const totalInvested = opps.reduce((s, o) => s + (+o.amount || 0), 0);
+        let totalNetProfit = 0, totalPaid = 0, totalUnpaid = 0;
+        opps.forEach(o => {
+          const dur = o.duration || 0;
+          const ann = o.annualReturn || 0;
+          const ret  = (+o.amount || 0) * (ann / 100) * (dur / 12);
+          totalNetProfit += ret;
+          (o.distributions || []).forEach(d => {
+            if (d.status === 'تم السداد')  totalPaid   += +d.amount || 0;
+            else                             totalUnpaid += +d.amount || 0;
+          });
+        });
+
+        p(`**إجمالي المستثمر:** ${SAR(totalInvested)} ر.س  `);
+        p(`**العائد الإجمالي المتوقع:** ${SAR(totalNetProfit)} ر.س  `);
+        p(`**التوزيعات المستلمة:** ${SAR(totalPaid)} ر.س  `);
+        p(`**التوزيعات المعلّقة:** ${SAR(totalUnpaid)} ر.س`);
+
+        h3('قائمة الصكوك');
+        const oppRows = opps.map(o => {
+          const dur = o.duration || 0;
+          const ann = o.annualReturn || 0;
+          const net = (+o.amount || 0) * (ann / 100) * (dur / 12);
+          return [
+            o.name || '—', SAR(o.amount || 0),
+            o.annualReturn ? PCT(o.annualReturn) : '—',
+            dur ? dur + ' شهر' : '—',
+            SAR(net), o.status || '—',
+            o.issueDate || '—', o.maturityDate || '—',
+          ];
+        });
+        p(mdTable(
+          ['الاسم','المبلغ','العائد السنوي','المدة','صافي العائد','الحالة','تاريخ الإصدار','تاريخ الاستحقاق'],
+          oppRows
+        ));
+
+        // التوزيعات التفصيلية
+        const allDists = [];
+        opps.forEach(o => {
+          (o.distributions || []).forEach(d => {
+            allDists.push({ opp: o.name || '—', date: d.date || '—', amount: +d.amount || 0, status: d.status || '—' });
+          });
+        });
+        if (allDists.length) {
+          h3('سجل التوزيعات');
+          allDists.sort((a, b) => a.date.localeCompare(b.date));
+          const distRows = allDists.map(d => [d.opp, d.date, SAR(d.amount), d.status]);
+          p(mdTable(['الصك','التاريخ','المبلغ','الحالة'], distRows));
+        }
+      } else {
+        p('_لا توجد صكوك مسجّلة._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 16. الأهداف الحياتية
+    // ════════════════════════════════════════════════════════
+    h2('16. الأهداف الحياتية');
+    p('قائمة الأهداف الشخصية والمالية وحالة الإنجاز.');
+
+    if (Array.isArray(lifeGoals) && lifeGoals.length) {
+      const activeGoals   = lifeGoals.filter(g => g.status === 'قيد التنفيذ');
+      const doneGoals     = lifeGoals.filter(g => g.status === 'مكتمل');
+      const delayedGoals  = lifeGoals.filter(g => g.status === 'مؤجل');
+      const avgProg = lifeGoals.length
+        ? (lifeGoals.reduce((s, g) => s + (+g.progress || 0), 0) / lifeGoals.length).toFixed(1)
+        : 0;
+
+      p(`**إجمالي الأهداف:** ${lifeGoals.length} | قيد التنفيذ: ${activeGoals.length} | مكتملة: ${doneGoals.length} | مؤجلة: ${delayedGoals.length}  `);
+      p(`**متوسط نسبة الإنجاز:** ${avgProg}%`);
+
+      const goalRows = [...lifeGoals]
+        .sort((a, b) => {
+          const order = { 'قيد التنفيذ': 0, 'مؤجل': 1, 'ملغي': 2, 'مكتمل': 3 };
+          return (order[a.status] ?? 9) - (order[b.status] ?? 9);
+        })
+        .map(g => [
+          g.title || '—', g.area || '—', g.priority || '—',
+          g.status || '—', `${+g.progress || 0}%`,
+          g.deadline || '—',
+          g.cost ? SAR(g.cost) : '—',
+          (g.notes || '').replace(/\n/g, ' ').slice(0, 60),
+        ]);
+      p(mdTable(
+        ['الهدف','المجال','الأولوية','الحالة','الإنجاز','الموعد النهائي','التكلفة','ملاحظات'],
+        goalRows
+      ));
+    } else {
+      p('_لا توجد أهداف حياتية مسجّلة._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 17. قاعدة بيانات الأسهم (User Stocks)
+    // ════════════════════════════════════════════════════════
+    h2('17. قاعدة بيانات الأسهم المتابَعة');
+    p('جميع الأسهم المُدخَّلة في قاعدة بيانات المستخدم — سواء كانت في المحفظة أم لا.');
+
+    if (userStocks.length) {
+      const inPort  = userStocks.filter(s => s.in_portfolio);
+      const outPort = userStocks.filter(s => !s.in_portfolio);
+      p(`**إجمالي الأسهم المتابَعة:** ${userStocks.length} | في المحفظة: ${inPort.length} | خارج المحفظة: ${outPort.length}`);
+
+      const usRows = [...userStocks]
+        .sort((a, b) => (b.in_portfolio ? 1 : 0) - (a.in_portfolio ? 1 : 0) || (a.ticker || '').localeCompare(b.ticker || ''))
+        .map(s => [s.ticker || '—', s.name || '—', s.sector || '—', s.in_portfolio ? '✅ نعم' : '—']);
+      p(mdTable(['الرمز','الاسم','القطاع','في المحفظة'], usRows));
+    } else {
+      p('_لا توجد أسهم في قاعدة البيانات._');
     }
     hr();
 
