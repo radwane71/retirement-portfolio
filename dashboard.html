@@ -368,7 +368,10 @@
     <div class="card" style="margin-bottom:16px">
       <div class="section-header" style="margin-bottom:8px">
         <span class="section-title">🎯 مناطق الدخول والخروج</span>
-        <a href="targets.html" class="btn btn-secondary btn-sm">تعديل المناطق</a>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button id="refresh-prices-btn" class="btn btn-secondary btn-sm" onclick="refreshPrices()">🔄 تحديث الأسعار</button>
+          <a href="targets.html" class="btn btn-secondary btn-sm">تعديل المناطق</a>
+        </div>
       </div>
       <div id="price-zones-card-body">
         <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>

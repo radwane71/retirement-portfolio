@@ -93,6 +93,45 @@ function getSukukActiveTotal() {
   } catch (_) { return 0; }
 }
 
+// ── Auto Price Update ─────────────────────────────────────────
+const EDGE_URL = 'https://mlqqxxpkzzquzftzvzfj.supabase.co/functions/v1/update-prices';
+let _priceRefreshTimer = null;
+
+async function refreshPrices(silent = false) {
+  const btn = document.getElementById('refresh-prices-btn');
+  try {
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التحديث...'; }
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) return;
+
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${session.access_token}` }
+    });
+    const json = await res.json();
+
+    if (json.updated > 0) {
+      await loadAllData();
+      renderStats(); renderCharts(); renderTable();
+      renderPriceZonesCard(); renderBreakEvenCard();
+      renderAllocationChart(); renderRetirementCard();
+      if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
+    } else {
+      if (btn) btn.textContent = '⚠️ لم يتحدث';
+    }
+  } catch (e) {
+    if (!silent) console.warn('refreshPrices error:', e);
+    if (btn) btn.textContent = '❌ خطأ';
+  } finally {
+    if (btn) setTimeout(() => { btn.disabled = false; btn.textContent = '🔄 تحديث الأسعار'; }, 3000);
+  }
+}
+
+function startPriceAutoRefresh() {
+  refreshPrices(true); // تحديث فوري عند الفتح
+  _priceRefreshTimer = setInterval(() => refreshPrices(true), 5 * 60 * 1000); // كل 5 دقائق
+}
+
 // ── Init ──────────────────────────────────────────────────────
 async function init() {
   const user = await requireAuth();
@@ -106,6 +145,7 @@ async function init() {
   renderBreakEvenCard();
   renderAllocationChart();
   renderRetirementCard();
+  startPriceAutoRefresh();
 }
 
 // ── Data ──────────────────────────────────────────────────────
