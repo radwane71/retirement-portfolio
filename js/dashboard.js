@@ -295,31 +295,51 @@ async function loadAllData() {
   // ── Forward Projected Income — الأدق للمحافظ النامية ─────────
   // لكل سهم في الحيازات: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية
   const fwdProjected = (() => {
+    // مساعدة: بناء تاريخ مرجعي من سجل أرباح (date أو year+month)
+    const divDate = d => {
+      if (d.date) return d.date;
+      const mo = String(d.month || 1).padStart(2, '0');
+      return `${d.year || new Date().getFullYear()}-${mo}-01`;
+    };
+    // أسهم محتفظ بها في تاريخ معين
+    const sharesAt = (ticker, dateStr) => {
+      const cutoff = new Date(dateStr);
+      let s = 0;
+      txRows.forEach(t => {
+        if (t.ticker !== ticker || !t.date || new Date(t.date) > cutoff) return;
+        if (t.type === 'buy' || t.type === 'grant') s += +t.shares;
+        else if (t.type === 'sell') s -= +t.shares;
+      });
+      return Math.max(0, s);
+    };
+
     let total = 0;
     holdings.forEach(h => {
       if (+h.shares <= 0) return;
       const tickerDivs = divRows
-        .filter(d => d.ticker === h.ticker && d.date)
-        .sort((a, b) => a.date.localeCompare(b.date));
+        .filter(d => d.ticker === h.ticker)
+        .sort((a, b) => divDate(a).localeCompare(divDate(b)));
       if (!tickerDivs.length) return;
-      const lastDiv = tickerDivs[tickerDivs.length - 1];
-      // أسهم وقت آخر دفعة
-      const cutoff = new Date(lastDiv.date);
-      let sharesAtLastDiv = 0;
-      txRows.forEach(t => {
-        if (t.ticker !== h.ticker || !t.date || new Date(t.date) > cutoff) return;
-        if (t.type === 'buy' || t.type === 'grant') sharesAtLastDiv += +t.shares;
-        else if (t.type === 'sell') sharesAtLastDiv -= +t.shares;
-      });
-      sharesAtLastDiv = Math.max(0, sharesAtLastDiv);
-      if (sharesAtLastDiv < 0.001) return;
-      const dps = +lastDiv.amount / sharesAtLastDiv;
+
+      // ابحث عن أحدث توزيعة كان يملك فيها أسهماً
+      let dps = 0, refShares = 0;
+      for (let i = tickerDivs.length - 1; i >= 0; i--) {
+        const s = sharesAt(h.ticker, divDate(tickerDivs[i]));
+        if (s >= 0.001) { dps = +tickerDivs[i].amount / s; refShares = s; break; }
+      }
+      // احتياطي: إجمالي الأرباح ÷ الأسهم الحالية
+      if (dps < 0.0001) {
+        const tot = tickerDivs.reduce((s, d) => s + +d.amount, 0);
+        dps = tot / +h.shares;
+      }
+      if (dps < 0.0001) return;
+
       // الدورية
       let freq = 1;
       if (tickerDivs.length >= 2) {
-        const gapDays = Math.floor((new Date(lastDiv.date) - new Date(tickerDivs[tickerDivs.length - 2].date)) / 86400000);
-        if (gapDays <= 105) freq = 4;
-        else if (gapDays <= 210) freq = 2;
+        const g = Math.floor((new Date(divDate(tickerDivs[tickerDivs.length - 1])) - new Date(divDate(tickerDivs[tickerDivs.length - 2]))) / 86400000);
+        if (g <= 105) freq = 4;
+        else if (g <= 210) freq = 2;
       }
       total += dps * freq * +h.shares;
     });

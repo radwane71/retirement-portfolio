@@ -97,6 +97,15 @@ function _sharesAtDate(ticker, dateStr) {
   return Math.max(0, shares);
 }
 
+// تحويل سجل أرباح إلى تاريخ قابل للمقارنة
+// إذا كان date فارغاً نبني تاريخاً من year + month (أول الشهر)
+function _divSortDate(d) {
+  if (d.date) return d.date;
+  const yr = d.year || new Date().getFullYear();
+  const mo = String(d.month || 1).padStart(2, '0');
+  return `${yr}-${mo}-01`;
+}
+
 // الدخل التوزيعي المتوقع سنوياً (Forward Projected Income)
 // المنطق: لكل سهم محتفظ به الآن:
 //   ١. آخر دفعة مستلمة ÷ الأسهم التي كانت عندي وقتها = دخل لكل سهم (DPS)
@@ -112,24 +121,46 @@ function _projectedAnnualIncome() {
     const holding = holdings.find(h => h.ticker === ticker);
     if (!holding || +holding.shares <= 0) return;
 
+    // نقبل السجلات سواء كان date موجوداً أم لا (نبني التاريخ من year+month)
     const tickerDivs = dividends
-      .filter(d => d.ticker === ticker && d.date)
-      .sort((a, b) => a.date.localeCompare(b.date));
+      .filter(d => d.ticker === ticker)
+      .sort((a, b) => _divSortDate(a).localeCompare(_divSortDate(b)));
 
     if (!tickerDivs.length) return;
 
-    const lastDiv = tickerDivs[tickerDivs.length - 1];
-    const sharesAtLastDiv = _sharesAtDate(ticker, lastDiv.date);
-    if (sharesAtLastDiv < 0.001) return;
+    // ابحث عن أحدث توزيعة كان المستخدم يملك أسهماً عندها
+    // (قد تكون آخر توزيعة قبل تاريخ الشراء — نتراجع حتى نجد واحدة صالحة)
+    let refDivIdx = -1;
+    let sharesAtRefDiv = 0;
+    for (let i = tickerDivs.length - 1; i >= 0; i--) {
+      const s = _sharesAtDate(ticker, _divSortDate(tickerDivs[i]));
+      if (s >= 0.001) { refDivIdx = i; sharesAtRefDiv = s; break; }
+    }
 
-    const dps = +lastDiv.amount / sharesAtLastDiv; // دخل لكل سهم في آخر دفعة
+    // لا توزيعة مناسبة — قد يكون المستخدم اشترى السهم بعد كل التوزيعات المسجّلة
+    // نقدّر DPS من إجمالي الأرباح المستلمة على الأسهم الحالية (تقدير محافظ)
+    let dps, lastDivDate, usedFallback = false;
+    if (refDivIdx >= 0) {
+      const refDiv = tickerDivs[refDivIdx];
+      lastDivDate  = _divSortDate(refDiv);
+      dps          = +refDiv.amount / sharesAtRefDiv;
+    } else {
+      // احتياطي: أرباح السنة الأخيرة المسجّلة ÷ الأسهم الحالية
+      const lastDiv     = tickerDivs[tickerDivs.length - 1];
+      lastDivDate       = _divSortDate(lastDiv);
+      const totalForTicker = tickerDivs.reduce((s, d) => s + +d.amount, 0);
+      dps               = totalForTicker / +holding.shares;
+      sharesAtRefDiv    = +holding.shares;
+      usedFallback      = true;
+    }
 
     // الدورية: ربع سنوي / نصف سنوي / سنوي
     let freq = 1;
     let freqLabel = 'سنوي';
     if (tickerDivs.length >= 2) {
-      const prev = tickerDivs[tickerDivs.length - 2];
-      const gapDays = Math.floor((new Date(lastDiv.date) - new Date(prev.date)) / 86400000);
+      const d1 = _divSortDate(tickerDivs[tickerDivs.length - 1]);
+      const d2 = _divSortDate(tickerDivs[tickerDivs.length - 2]);
+      const gapDays = Math.floor((new Date(d1) - new Date(d2)) / 86400000);
       if (gapDays <= 105)      { freq = 4; freqLabel = 'ربع سنوي'; }
       else if (gapDays <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
     }
@@ -141,8 +172,8 @@ function _projectedAnnualIncome() {
     breakdown.push({
       ticker, name: holding.name || ticker,
       dps, freq, freqLabel, currentShares,
-      lastDivDate: lastDiv.date, lastDivAmt: +lastDiv.amount,
-      sharesAtLastDiv, projected,
+      lastDivDate, lastDivAmt: dps * sharesAtRefDiv,
+      sharesAtLastDiv: sharesAtRefDiv, projected, usedFallback,
     });
   });
 
@@ -572,10 +603,11 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
           if (fb) {
             const fwdYoc = r.portVal > 0 ? fb.projected / r.portVal * 100 : 0;
             const fwdCls = fwdYoc >= 5 ? 'text-success' : fwdYoc >= 3 ? 'text-accent' : 'text-muted';
+            const fallbackNote = fb.usedFallback ? '&#10;⚠️ تقدير: بُني قبل شراء السهم' : '';
             fwdCell = `<td class="num ${fwdCls}"
-              title="آخر دفعة: ${formatSAR(fb.lastDivAmt)} (${fb.lastDivDate})&#10;أسهم وقتها: ${fb.sharesAtLastDiv.toFixed(0)}&#10;DPS: ${fb.dps.toFixed(4)} ر.س&#10;دورية: ${fb.freqLabel} (×${fb.freq})&#10;الأسهم الحالية: ${fb.currentShares.toFixed(0)}&#10;الدخل المتوقع: ${formatSAR(fb.projected)}" style="cursor:help">
+              title="DPS: ${fb.dps.toFixed(4)} ر.س&#10;دورية: ${fb.freqLabel} (×${fb.freq})&#10;الأسهم الحالية: ${fb.currentShares.toFixed(0)}&#10;الدخل المتوقع: ${formatSAR(fb.projected)}${fallbackNote}" style="cursor:help">
               ${formatSAR(fb.projected)}
-              <br><span class="small" style="font-weight:400">${fwdYoc.toFixed(2)}% — ${fb.freqLabel}</span>
+              <br><span class="small" style="font-weight:400">${fwdYoc.toFixed(2)}% — ${fb.freqLabel}${fb.usedFallback ? ' ⚠️' : ''}</span>
             </td>`;
           } else {
             fwdCell = `<td class="num text-muted" title="لا توجد أسهم حالية أو لا توجد دفعات مسجّلة">—</td>`;
