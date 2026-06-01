@@ -16,11 +16,6 @@ async function init() {
   if (!currentUser) return;
   setActiveNav('nav-review-log');
   document.getElementById('rl-date').value = todayISO();
-
-  // نتأكد أن session Supabase جاهزة قبل أي query
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if (!session) { showToast('انتهت جلسة العمل، يرجى إعادة تسجيل الدخول', 'error'); return; }
-
   await loadData();
   renderTable();
 }
