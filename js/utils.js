@@ -277,6 +277,106 @@ window.toggleTheme = function(isLight) {
   }
 };
 
+// ══════════════════════════════════════════════════════════════
+// Mobile Navigation Drawer
+// يُحقن المكوّنان (topbar + overlay) في DOM عند التحميل
+// لا يحتاج تعديل HTML في أي صفحة
+// ══════════════════════════════════════════════════════════════
+(function setupMobileNav() {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _initMobileNav);
+  } else {
+    _initMobileNav();
+  }
+})();
+
+function _initMobileNav() {
+  // inject only once
+  if (document.getElementById('mobile-topbar')) return;
+
+  // ── اسم الصفحة الحالية من العنصر النشط ────────────────────
+  const activeLink = document.querySelector('.nav-link.active');
+  const pageName   = activeLink
+    ? (activeLink.querySelector('span:not(.icon)')?.textContent?.trim() || '')
+    : document.title.split('-')[0].trim();
+
+  // ── Top bar ────────────────────────────────────────────────
+  const topbar = document.createElement('div');
+  topbar.id = 'mobile-topbar';
+  topbar.innerHTML = `
+    <div class="mobile-topbar-brand">
+      <img src="apple-touch-icon.png" alt="ثروة">
+      <span>ثروة</span>
+      ${pageName ? `<span class="mobile-topbar-page">/ ${pageName}</span>` : ''}
+    </div>
+    <button class="hamburger-btn" id="hamburger-btn" aria-label="القائمة" onclick="toggleMobileNav()">
+      <span></span><span></span><span></span>
+    </button>`;
+  document.body.prepend(topbar);
+
+  // ── Overlay ─────────────────────────────────────────────────
+  const overlay = document.createElement('div');
+  overlay.id = 'mobile-overlay';
+  overlay.addEventListener('click', closeMobileNav);
+  document.body.appendChild(overlay);
+
+  // ── Close drawer on any nav-link click ──────────────────────
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', () => closeMobileNav());
+  });
+
+  // ── Close drawer on Escape key ──────────────────────────────
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeMobileNav();
+  });
+
+  // ── Update page name after setActiveNav() runs ───────────────
+  // setActiveNav تُستدعى في init() كل صفحة — ننتظر قليلاً
+  setTimeout(() => {
+    const active = document.querySelector('.nav-link.active');
+    const pageEl = document.querySelector('.mobile-topbar-page');
+    if (active && pageEl) {
+      const nm = active.querySelector('span:not(.icon)')?.textContent?.trim();
+      if (nm) pageEl.textContent = '/ ' + nm;
+    }
+  }, 400);
+
+  // ── Swipe-to-close (touch gesture) ──────────────────────────
+  let touchStartX = 0;
+  const sidebar = document.querySelector('.sidebar');
+  if (sidebar) {
+    sidebar.addEventListener('touchstart', e => {
+      touchStartX = e.touches[0].clientX;
+    }, { passive: true });
+    sidebar.addEventListener('touchend', e => {
+      const dx = touchStartX - e.changedTouches[0].clientX;
+      if (dx > 60) closeMobileNav(); // swipe left → close
+    }, { passive: true });
+  }
+}
+
+window.toggleMobileNav = function() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('mobile-overlay');
+  const btn     = document.getElementById('hamburger-btn');
+  if (!sidebar) return;
+  const isOpen = sidebar.classList.toggle('mobile-open');
+  overlay?.classList.toggle('active', isOpen);
+  btn?.classList.toggle('open', isOpen);
+  // منع scroll الصفحة الخلفية عند فتح الدراور
+  document.body.style.overflow = isOpen ? 'hidden' : '';
+};
+
+window.closeMobileNav = function() {
+  const sidebar = document.querySelector('.sidebar');
+  const overlay = document.getElementById('mobile-overlay');
+  const btn     = document.getElementById('hamburger-btn');
+  sidebar?.classList.remove('mobile-open');
+  overlay?.classList.remove('active');
+  btn?.classList.remove('open');
+  document.body.style.overflow = '';
+};
+
 // ── Inline Editing ────────────────────────────────────────────
 function enableInlineEditing(tbody, postSaveFn) {
   if (tbody._ieEnabled) return;
