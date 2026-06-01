@@ -589,9 +589,10 @@ function renderChart(horizonYears, goalAmount = 0) {
   // وضع الأشرطة: نقاط المعالم فقط
   const barMilestones = [0, 1, 3, 5, 10, 15, 20, 25, 30, 35].filter(y => y <= horizonYears);
 
+  const startYear = new Date().getFullYear();
   const labels = isBar
-    ? barMilestones.map(y => y === 0 ? 'الآن' : `${y}س`)
-    : Array.from({ length: horizonYears + 1 }, (_, i) => i === 0 ? 'الآن' : `${i}س`);
+    ? barMilestones.map(y => y === 0 ? String(startYear) : String(startYear + y))
+    : Array.from({ length: horizonYears + 1 }, (_, i) => String(startYear + i));
 
   const tooltipShared = {
     rtl: true,
@@ -605,7 +606,13 @@ function renderChart(horizonYears, goalAmount = 0) {
     titleFont: { family: 'Tajawal', size: 14, weight: 'bold' },
     bodyFont:  { family: 'Tajawal', size: 14 },
     callbacks: {
-      title: items => `السنة ${items[0].label}`,
+      title: items => {
+        const yr = items[0].label;
+        const offset = +yr - startYear;
+        return offset === 0
+          ? `${yr} (الآن)`
+          : `${yr} (بعد ${offset} سنة)`;
+      },
       label: ctx => `  ${ctx.dataset.label}: ${fmt(ctx.raw)}`,
     },
   };
