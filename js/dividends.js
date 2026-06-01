@@ -266,6 +266,114 @@ function renderDivStats() {
       <div class="tx-stat-lbl">أسهم موزِّعة</div>
       <div class="tx-stat-sub">${coveredByFwd} مغطى بـ Forward</div>
     </div>`;
+
+  // عرض مؤشر ثقة البيانات التوزيعية
+  renderDivConfidenceBanner(netCapital, ttm, fwd.total, fwd.breakdown.length);
+}
+
+// ── مؤشر ثقة البيانات التوزيعية ─────────────────────────────────────────
+function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
+  const el = document.getElementById('div-confidence-banner');
+  if (!el) return;
+
+  // ── حساب عمر المحفظة من أقدم معاملة ──────────────────────────────
+  const allDates = [...txBuyRows, ...txSellRows]
+    .map(t => t.date).filter(Boolean).sort();
+  const firstDate = allDates[0] ? new Date(allDates[0]) : null;
+  const today     = new Date();
+  const months    = firstDate
+    ? Math.floor((today - firstDate) / (30.44 * 86400000))
+    : 0;
+
+  // ── بيانات الأرباح ────────────────────────────────────────────────
+  const divYearsSet   = new Set(dividends.map(d => d.year));
+  const divYears      = divYearsSet.size;
+  const uniqueTickers = new Set(dividends.map(d => d.ticker)).size;
+
+  // ── الفجوة بين Forward و TTM ──────────────────────────────────────
+  // فجوة كبيرة = المحفظة نمت مؤخراً = الـ TTM مشوّه
+  const fwdTtmGap = ttm > 0 && fwdIncome > 0
+    ? ((fwdIncome - ttm) / ttm * 100)
+    : 0;
+
+  // ── درجة الثقة (0–100) ───────────────────────────────────────────
+  const agePct  = months < 3  ? 0.05 : months < 6  ? 0.22 :
+                  months < 9  ? 0.35 : months < 12 ? 0.50 :
+                  months < 18 ? 0.67 : months < 24 ? 0.80 :
+                  months < 36 ? 0.90 : 1.00;
+  const divPct  = divYears === 0 ? 0.05 :
+                  divYears === 1 ? 0.48 :
+                  divYears === 2 ? 0.75 :
+                  divYears >= 3  ? 0.95 : 0.05;
+  const covPct  = fwdCoveredCount === 0       ? 0.10 :
+                  fwdCoveredCount < uniqueTickers * 0.5 ? 0.50 :
+                  fwdCoveredCount < uniqueTickers * 0.8 ? 0.75 : 0.95;
+
+  const score = Math.round(agePct * 45 + divPct * 35 + covPct * 20);
+
+  // ── مستوى الثقة ──────────────────────────────────────────────────
+  let badgeColor, borderColor, bgColor;
+  if      (score < 30) { badgeColor='#f85149'; borderColor='rgba(248,81,73,.3)';  bgColor='rgba(248,81,73,.05)'; }
+  else if (score < 45) { badgeColor='#f85149'; borderColor='rgba(248,81,73,.2)';  bgColor='rgba(248,81,73,.04)'; }
+  else if (score < 60) { badgeColor='#f0b429'; borderColor='rgba(240,180,41,.3)'; bgColor='rgba(240,180,41,.05)'; }
+  else if (score < 75) { badgeColor='#f0b429'; borderColor='rgba(240,180,41,.2)'; bgColor='rgba(240,180,41,.04)'; }
+  else if (score < 87) { badgeColor='#3fb950'; borderColor='rgba(63,185,80,.3)';  bgColor='rgba(63,185,80,.05)'; }
+  else                 { badgeColor='#3b82f6'; borderColor='rgba(59,130,246,.3)'; bgColor='rgba(59,130,246,.05)'; }
+
+  // ── رسالة المستشار المالي ──────────────────────────────────────────
+  const monthsText = months < 12 ? `${months} شهراً` : `${(months/12).toFixed(1)} سنة`;
+  const fwdGapText = fwdTtmGap > 15
+    ? ` الفجوة بين الـ Forward (${formatSAR(fwdIncome)}) والـ TTM (${formatSAR(ttm)}) تؤكد أن المحفظة نمت مؤخراً — الـ TTM مشوّه لصالح الأقل.`
+    : '';
+
+  let title, body, advice;
+  if (score < 30) {
+    title  = '⚠️ بيانات غير كافية — لا تتخذ قرارات على هذه الأرقام بعد';
+    body   = `محفظتك عمرها ${monthsText} فقط وسجّلت أرباحاً لـ ${divYears} سنة. هذا الوقت القصير يجعل أي نسبة عائد تراها الآن مضلِّلة — قد تبدو ضعيفة لأن المحفظة لم تكتمل بعد، وليس لأن الأسهم رديئة.${fwdGapText}`;
+    advice = 'رسالة للمستثمر: أرقامك الآن مثل صورة طولية بعد أسبوع — تنقصها الزمن. انتظر حتى تكتمل ${12 - months} شهراً إضافية قبل الحكم.';
+  } else if (score < 45) {
+    title  = '🔴 محفظة حديثة — العوائد المعروضة تعكس فترة بناء لا أداء مستقر';
+    body   = `${monthsText} من البيانات مع ${divYears} سنة توزيعات. الـ YOC المنخفض ليس دليلاً على ضعف الأسهم — بل لأن المحفظة وصلت حجمها الكامل مؤخراً وأرباح الفترة الماضية كانت على محفظة أصغر.${fwdGapText}`;
+    advice = `العائد المتوقع Forward (${formatSAR(fwdIncome/12)}/شهر) أصدق من TTM لوضعك الحالي.`;
+  } else if (score < 60) {
+    title  = '🟡 بيانات نامية — استخدمها للاتجاه العام لا للأرقام الدقيقة';
+    body   = `${monthsText} من التاريخ و${divYears} سنة أرباح. المحفظة بدأت تُظهر نمطاً لكنها لم تمر بعد بدورة سوقية كاملة. الأرقام مفيدة للمقارنة النسبية بين الأسهم.${fwdGapText}`;
+    advice = 'قارن YOC كل سهم بالمعدلات التاريخية المعلنة لتلك الشركة — لا بالمتوسط السوقي.';
+  } else if (score < 75) {
+    title  = '📊 بيانات معقولة — صالحة للمراجعة الدورية';
+    body   = `${monthsText} من البيانات الفعلية. الأرقام تعكس أداء حقيقياً يمكن مقارنته بالسوق، مع الأخذ بعين الاعتبار أن المحفظة لا تزال في مرحلة نضوج.`;
+    advice = 'العائد الآن مؤشر جيد على جودة الأسهم — ابدأ بمراجعة الأسهم الأقل من 2% YOC.';
+  } else if (score < 87) {
+    title  = '✅ بيانات جيدة — مناسبة لاتخاذ قرارات';
+    body   = `${monthsText} من التاريخ الفعلي. المحفظة شهدت دورات سوقية كافية وأعطت بيانات موثوقة. يمكنك الاستناد إلى العوائد المعروضة بثقة معقولة.`;
+    advice = 'راجع أداء كل سهم مقارنة بالسنوات الفائتة — الأنماط الثابتة أكثر قيمة من أعلى نسبة.';
+  } else {
+    title  = '🔵 بيانات موثوقة — سجل قوي للتحليل';
+    body   = `${monthsText} من البيانات مع ${divYears} دورات أرباح كاملة. المحفظة لديها تاريخ كافٍ لاتخاذ قرارات استثمارية مبنية على أرقام موثوقة.`;
+    advice = 'بياناتك من بين أفضل ما يمكن العمل به في الاستثمار الشخصي.';
+  }
+
+  el.innerHTML = `
+    <div style="
+      border:1px solid ${borderColor};
+      background:${bgColor};
+      border-radius:10px;
+      padding:12px 16px;
+    ">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+        <span style="font-weight:700;font-size:.9rem">${title}</span>
+        <span style="
+          background:${badgeColor};color:#fff;border-radius:20px;
+          padding:1px 9px;font-size:.72rem;font-weight:700;white-space:nowrap
+        ">ثقة البيانات ${score}%</span>
+        <span style="
+          background:var(--bg-2);border:1px solid var(--border);
+          border-radius:20px;padding:1px 9px;font-size:.70rem;color:var(--text-muted);white-space:nowrap
+        ">${monthsText} · ${divYears} سنة أرباح · ${uniqueTickers} سهم موزِّع</span>
+      </div>
+      <p style="font-size:.81rem;color:var(--text-2);margin:0 0 5px;line-height:1.6">${body}</p>
+      <p style="font-size:.79rem;color:${badgeColor};margin:0;font-weight:600">💡 ${advice}</p>
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════

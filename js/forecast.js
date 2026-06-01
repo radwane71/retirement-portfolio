@@ -291,6 +291,133 @@ function renderHistSummary() {
 
   const dyBadge = document.getElementById('div-yield-auto');
   if (dyBadge) dyBadge.textContent = `من بياناتك: ${pct(h.safeDivYield)}`;
+
+  // عرض مؤشر ثقة البيانات
+  renderDataConfidenceBanner(h);
+}
+
+// ── مؤشر ثقة البيانات ─────────────────────────────────────────────────
+function renderDataConfidenceBanner(h) {
+  const el = document.getElementById('data-confidence-banner');
+  if (!el) return;
+
+  const months   = Math.round((h.yearsActive || 0) * 12);
+  const divYears = Object.keys(h.divByYear || {}).length;
+
+  // ── حساب درجة الثقة (0–100) ─────────────────────────────────────────
+  // العامل 1: عمر المحفظة (وزن 45%)
+  const agePct = months < 3  ? 0.05 : months < 6  ? 0.20 :
+                 months < 9  ? 0.32 : months < 12 ? 0.45 :
+                 months < 18 ? 0.62 : months < 24 ? 0.76 :
+                 months < 36 ? 0.88 : 1.00;
+
+  // العامل 2: دورات الأرباح الفعلية (وزن 35%)
+  // السبب: نمو رأس المال و divYield مبنيان على هذه الدورات
+  const divPct = divYears === 0 ? 0.05 :
+                 divYears === 1 ? 0.45 :
+                 divYears === 2 ? 0.72 :
+                 divYears >= 3  ? 0.95 : 0.05;
+
+  // العامل 3: عدد الأسهم / التنويع (وزن 20%)
+  const holdPct = h.holdingsCount < 3  ? 0.40 :
+                  h.holdingsCount < 6  ? 0.65 :
+                  h.holdingsCount < 10 ? 0.82 : 0.95;
+
+  const score = Math.round(agePct * 45 + divPct * 35 + holdPct * 20);
+
+  // ── مستوى الثقة ──────────────────────────────────────────────────────
+  let tier, badgeColor, borderColor, bgColor;
+  if      (score < 30) { tier = 'very_low';   badgeColor = '#f85149'; borderColor = 'rgba(248,81,73,.35)';  bgColor = 'rgba(248,81,73,.06)'; }
+  else if (score < 45) { tier = 'low';        badgeColor = '#f85149'; borderColor = 'rgba(248,81,73,.25)';  bgColor = 'rgba(248,81,73,.04)'; }
+  else if (score < 60) { tier = 'developing'; badgeColor = '#f0b429'; borderColor = 'rgba(240,180,41,.30)'; bgColor = 'rgba(240,180,41,.05)'; }
+  else if (score < 75) { tier = 'fair';       badgeColor = '#f0b429'; borderColor = 'rgba(240,180,41,.25)'; bgColor = 'rgba(240,180,41,.04)'; }
+  else if (score < 87) { tier = 'good';       badgeColor = '#3fb950'; borderColor = 'rgba(63,185,80,.30)';  bgColor = 'rgba(63,185,80,.05)';  }
+  else                 { tier = 'strong';     badgeColor = '#3b82f6'; borderColor = 'rgba(59,130,246,.30)'; bgColor = 'rgba(59,130,246,.05)'; }
+
+  // ── رسالة المستشار المالي ─────────────────────────────────────────────
+  const monthsText = months < 12
+    ? `${months} شهراً`
+    : `${(months / 12).toFixed(1)} سنة`;
+
+  const msgs = {
+    very_low: {
+      title: '⚠️ المحفظة في طور البناء — البيانات غير كافية للإسقاط',
+      body:  `محفظتك عمرها ${monthsText} فقط وهذا زمن قصير جداً. أي إسقاط الآن يشبه التنبؤ بحصاد موسم كامل بعد أسبوع من الزراعة. استخدم الأرقام للاستئناس فقط.`,
+      advice: 'انتظر حتى تكتمل ${12 - months} شهراً أخرى على الأقل قبل الاعتماد على هذه الأرقام.',
+    },
+    low: {
+      title: '🟡 بيانات أولية — الإسقاطات تقديرية',
+      body:  `${monthsText} من البيانات مع ${divYears} دورة أرباح. النمو المحسوب قد يكون مضخّماً أو مقلّصاً لأن المحفظة لم تمر بعد بدورة سوقية كاملة.`,
+      advice: 'السيناريو المتحفظ هو الأكثر صدقاً في مرحلتك الحالية.',
+    },
+    developing: {
+      title: '🟡 بيانات نامية — استخدم بحذر',
+      body:  `${monthsText} من التاريخ و${divYears} سنة أرباح. الأرقام تعكس واقعك لكنها لم تشهد بعد اختبار تصحيح سوقي حقيقي. معدل النمو الحالي قد لا يكون مستداماً.`,
+      advice: 'قارن مع بيانات القطاع للتحقق من منطقية الأرقام.',
+    },
+    fair: {
+      title: '📊 بيانات معقولة — مفيدة للتخطيط',
+      body:  `${monthsText} و${divYears} سنوات أرباح. البيانات تكفي للتخطيط الأولي لكن لا تزال بحاجة إلى سنة إضافية لتعكس التقلبات الاعتيادية في السوق.`,
+      advice: 'الأرقام مفيدة للاتجاه العام — لا تبالغ في الدقة.',
+    },
+    good: {
+      title: '✅ بيانات جيدة — يمكن الاعتماد عليها',
+      body:  `${monthsText} من التاريخ الفعلي و${divYears} دورات أرباح. المحفظة شهدت تقلبات السوق وأثبتت نمطاً. الإسقاطات ذات مصداقية عالية.`,
+      advice: 'راجع الأرقام بعد كل تغيير جوهري في تركيب المحفظة.',
+    },
+    strong: {
+      title: '🔵 بيانات موثوقة — إسقاطات ذات ثقة عالية',
+      body:  `${monthsText} من التاريخ الفعلي مع ${divYears} دورات أرباح كاملة. المحفظة لديها سجل كافٍ لاتخاذ قرارات مبنية على الأرقام.`,
+      advice: 'حافظ على تسجيل البيانات بانتظام للحفاظ على هذا المستوى من الموثوقية.',
+    },
+  };
+
+  const m = msgs[tier];
+
+  el.innerHTML = `
+    <div style="
+      border:1px solid ${borderColor};
+      background:${bgColor};
+      border-radius:10px;
+      padding:14px 16px;
+      margin-bottom:4px;
+    ">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+        <span style="font-weight:700;font-size:.95rem">${m.title}</span>
+        <span style="
+          background:${badgeColor};color:#fff;border-radius:20px;
+          padding:2px 10px;font-size:.75rem;font-weight:700;white-space:nowrap
+        ">ثقة البيانات ${score}%</span>
+        <span style="
+          background:var(--bg-2);border:1px solid var(--border);border-radius:20px;
+          padding:2px 10px;font-size:.72rem;color:var(--text-muted);white-space:nowrap
+        ">${monthsText} من البيانات · ${divYears} دورة أرباح · ${h.holdingsCount} سهم</span>
+      </div>
+      <p style="font-size:.83rem;color:var(--text-2);margin:0 0 6px;line-height:1.6">${m.body}</p>
+      <p style="font-size:.80rem;color:${badgeColor};margin:0;font-weight:600">💡 ${m.advice}</p>
+
+      <!-- شريط البيانات -->
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        ${_confFactor('عمر المحفظة', monthsText, Math.round(agePct * 100), score)}
+        ${_confFactor('دورات الأرباح', divYears + ' سنة', Math.round(divPct * 100), score)}
+        ${_confFactor('التنويع', h.holdingsCount + ' سهم', Math.round(holdPct * 100), score)}
+      </div>
+    </div>`;
+}
+
+function _confFactor(label, value, pct, totalScore) {
+  const color = pct < 40 ? '#f85149' : pct < 65 ? '#f0b429' : '#3fb950';
+  return `<div style="
+    flex:1;min-width:100px;
+    background:var(--bg-2);border:1px solid var(--border);
+    border-radius:7px;padding:7px 10px;
+  ">
+    <div style="font-size:.70rem;color:var(--text-muted);margin-bottom:3px">${label}</div>
+    <div style="font-size:.82rem;font-weight:600;color:var(--text-1)">${value}</div>
+    <div style="height:4px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden">
+      <div style="height:100%;width:${pct}%;background:${color};border-radius:2px;transition:width .4s"></div>
+    </div>
+  </div>`;
 }
 
 // ── Render scenario cards ──────────────────────────────────────────────
