@@ -21,7 +21,12 @@ const TABLES = [
 ];
 
 // حجم الـ batch لكل جدول (الجداول الكبيرة تحتاج batch أصغر)
-const BATCH_SIZES = { transactions: 50, holdings: 200 };
+// review_log_attachments: كل صف حتى 2MB → batch=5 يحافظ على حجم طلب معقول (~10MB)
+const BATCH_SIZES = {
+  transactions:            50,
+  holdings:               200,
+  review_log_attachments:   5,
+};
 const DEFAULT_BATCH = 500;
 
 // مفاتيح localStorage المشمولة في النسخة الاحتياطية — 100% من تفضيلات المستخدم
@@ -99,9 +104,15 @@ async function exportBackup() {
     };
 
     // ── جلب كل الجداول ───────────────────────────────────────
+    const { data: { user: exportUser } } = await supabaseClient.auth.getUser();
     for (const table of TABLES) {
       setStatus('export-status', 'info', `جارٍ تصدير: ${table}…`);
-      const { data, error } = await supabaseClient.from(table).select('*');
+      // نُضيف user_id filter صراحةً + limit عالٍ لتجاوز حد Supabase الافتراضي (1000)
+      const { data, error } = await supabaseClient
+        .from(table)
+        .select('*')
+        .eq('user_id', exportUser.id)
+        .limit(100000);
       if (error) {
         // بعض الجداول قد لا تكون موجودة (اختيارية) — تجاهل بهدوء
         if (error.code === '42P01') {
@@ -203,9 +214,12 @@ async function restoreBackup(input) {
     const { data: { user } } = await supabaseClient.auth.getUser();
 
     // ── 0. حفظ نسخة طارئة من البيانات الحالية في localStorage ─
+    // ملاحظة: review_log_attachments مستبعدة (محتوى ثنائي كبير يملأ localStorage)
+    // الملفات محفوظة في Supabase — النسخة الطارئة للبيانات الجدولية فقط
     setStatus('restore-status', 'info', 'يتم حفظ نسخة طارئة احترازية…');
+    const EMERGENCY_TABLES = TABLES.filter(t => t !== 'review_log_attachments');
     const emergencyBackup = { version: 'emergency', backed_up_at: new Date().toISOString() };
-    for (const table of TABLES) {
+    for (const table of EMERGENCY_TABLES) {
       const { data } = await supabaseClient.from(table).select('*').eq('user_id', user.id);
       emergencyBackup[table] = data || [];
     }
@@ -214,7 +228,13 @@ async function restoreBackup(input) {
     } catch (_) { /* localStorage قد تكون ممتلئة — نكمل على أي حال */ }
 
     // ── 1. حذف كل البيانات الحالية ───────────────────────────
-    for (const table of TABLES) {
+    // الجداول الفرعية (FK children) تُحذف أولاً قبل الجداول الأصل
+    // هذا يضمن عدم انتهاك قيود FK حتى لو لم يكن CASCADE مضبوطاً
+    const FK_CHILDREN_FIRST = [
+      'review_log_attachments',   // FK → review_log
+      ...TABLES.filter(t => t !== 'review_log_attachments'),
+    ];
+    for (const table of FK_CHILDREN_FIRST) {
       const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
       if (error && error.code !== '42P01') {
         throw new Error(`خطأ في حذف ${table}: ${error.message}`);
@@ -500,7 +520,11 @@ async function resetAllData() {
 
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
-    for (const table of TABLES) {
+    const FK_CHILDREN_FIRST_RESET = [
+      'review_log_attachments',
+      ...TABLES.filter(t => t !== 'review_log_attachments'),
+    ];
+    for (const table of FK_CHILDREN_FIRST_RESET) {
       const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
       if (error && error.code !== '42P01') {
         throw new Error(`خطأ في مسح ${table}: ${error.message}`);
