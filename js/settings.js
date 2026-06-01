@@ -964,9 +964,9 @@ async function exportMonthlyReviewMD() {
     // 9. المهام (Tasks)
     // ════════════════════════════════════════════════════════
     h2('9. مهام المحفظة (Tasks)');
-    p('المهام مقسّمة إلى: تصفية كاملة (liquidation) | تخفيف (reduction) | مراقبة (monitoring) | تجميع (accumulation)');
+    p('المهام مقسّمة إلى: تصفية كاملة (liquidation) | تخفيف (reduction) | مراقبة (monitoring) | تجميع (accumulation) | احتفاظ (hold)');
 
-    const TYPE_AR = { liquidation: 'تصفية كاملة', reduction: 'تخفيف', monitoring: 'مراقبة', accumulation: 'تجميع' };
+    const TYPE_AR = { liquidation: 'تصفية كاملة', reduction: 'تخفيف', monitoring: 'مراقبة', accumulation: 'تجميع', hold: 'احتفاظ' };
     const STATUS_AR = { active: 'نشطة', done: 'منجزة', cancelled: 'ملغاة' };
 
     const activeTasks = tasks.filter(t => !t.auto_generated && t.status === 'active');

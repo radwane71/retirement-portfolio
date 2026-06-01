@@ -210,6 +210,7 @@ const TASK_BADGE = {
   reduction:    { label: 'تخفيف',    icon: '⚖️', style: 'background:rgba(240,180,41,0.15);color:#f0b429' },
   monitoring:   { label: 'مراقبة',   icon: '👁️', style: 'background:rgba(139,148,158,0.15);color:#8b949e' },
   accumulation: { label: 'تجميع',    icon: '🟢', style: 'background:rgba(63,185,80,0.15);color:#3fb950'  },
+  hold:         { label: 'احتفاظ',   icon: '🔵', style: 'background:rgba(59,130,246,0.15);color:#3b82f6'  },
 };
 
 function taskBadgeHtml(ticker) {

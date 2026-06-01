@@ -8,7 +8,7 @@
    CREATE TABLE portfolio_tasks (
      id            UUID DEFAULT gen_random_uuid() PRIMARY KEY,
      user_id       UUID REFERENCES auth.users NOT NULL,
-     type          TEXT NOT NULL CHECK (type IN ('liquidation','reduction','monitoring','accumulation')),
+     type          TEXT NOT NULL CHECK (type IN ('liquidation','reduction','monitoring','accumulation','hold')),
      ticker        TEXT,
      name          TEXT,
      status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','done','cancelled')),
@@ -43,6 +43,7 @@ const TYPE_META = {
   reduction:    { label:'تخفيف',          icon:'⚖️', badge:'badge-reduction'  },
   monitoring:   { label:'تحت المراقبة',  icon:'👁', badge:'badge-monitoring' },
   accumulation: { label:'تجميع / إضافة', icon:'🟢', badge:'badge-accumulation'},
+  hold:         { label:'احتفاظ',         icon:'🔵', badge:'badge-hold'       },
 };
 
 // ── Init ──────────────────────────────────────────────────────────────

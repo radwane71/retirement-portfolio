@@ -45,6 +45,7 @@
     .badge-reduction   { background:rgba(240,180,41,0.15); color:#f0b429; }
     .badge-monitoring  { background:rgba(139,148,158,0.15); color:#8b949e; }
     .badge-accumulation{ background:rgba(63,185,80,0.15);  color:#3fb950; }
+    .badge-hold        { background:rgba(59,130,246,0.15);  color:#3b82f6; }
     .badge-auto        { background:rgba(88,166,255,0.12); color:#58a6ff; font-size:0.65rem; }
 
     .badge-status-active    { background:rgba(63,185,80,0.12);  color:#3fb950; }
@@ -210,6 +211,7 @@
           <div class="year-pills" id="type-pills">
             <button class="year-pill active" onclick="filterByType('all')">كل الأنواع</button>
             <button class="year-pill" onclick="filterByType('accumulation')">🟢 تجميع</button>
+            <button class="year-pill" onclick="filterByType('hold')">🔵 احتفاظ</button>
             <button class="year-pill" onclick="filterByType('reduction')">⚖️ تخفيف</button>
             <button class="year-pill" onclick="filterByType('monitoring')">👁 مراقبة</button>
             <button class="year-pill" onclick="filterByType('liquidation')">🔴 تصفية</button>
@@ -297,6 +299,11 @@
           <div class="t-icon">🟢</div>
           <div class="t-name">تجميع / إضافة</div>
           <div class="t-desc">زيادة الموقف</div>
+        </div>
+        <div class="type-option" data-type="hold" onclick="selectTaskType('hold')">
+          <div class="t-icon">🔵</div>
+          <div class="t-name">احتفاظ</div>
+          <div class="t-desc">إبقاء الموقف كما هو</div>
         </div>
       </div>
 
