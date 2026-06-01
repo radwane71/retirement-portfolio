@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>دفتر المراجعة - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── Review Log Page Styles ── */
+    .rl-form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 900px) { .rl-form-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 560px) { .rl-form-grid { grid-template-columns: 1fr; } }
+
+    .rl-bottom-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 700px) { .rl-bottom-row { grid-template-columns: 1fr; } }
+
+    .rl-notes { width:100%; min-height:80px; resize:vertical; }
+
+    .attach-zone {
+      border: 2px dashed var(--border);
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color .2s;
+      background: var(--bg-2);
+    }
+    .attach-zone:hover { border-color: var(--accent); }
+    .attach-zone.dragover { border-color: var(--accent); background: rgba(59,130,246,.07); }
+    .attach-zone input[type=file] { display:none; }
+    .attach-zone .attach-icon { font-size: 1.6rem; }
+    .attach-zone .attach-hint  { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
+    .attach-file-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+    .attach-chip {
+      display:inline-flex; align-items:center; gap:4px;
+      background: rgba(59,130,246,.12); color: #3b82f6;
+      border-radius: 6px; padding: 3px 8px; font-size: 0.78rem;
+    }
+    .attach-chip button {
+      background:none; border:none; color:#f85149; cursor:pointer; padding:0 2px; font-size:0.85rem; line-height:1;
+    }
+
+    /* Toolbar */
+    .rl-toolbar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 14px; background: var(--bg-2); border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    .rl-selected-count { font-size:.85rem; color: var(--text-muted); flex:1; }
+
+    /* Table */
+    .rl-table { width:100%; border-collapse:collapse; font-size:.88rem; }
+    .rl-table th, .rl-table td { padding: 9px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+    .rl-table th { font-weight:600; color: var(--text-muted); font-size:.78rem; white-space:nowrap; }
+    .rl-table tr:last-child td { border-bottom: none; }
+    .rl-table tr:hover td { background: var(--hover); }
+    .rl-notes-preview {
+      max-width: 220px; white-space: nowrap; overflow: hidden;
+      text-overflow: ellipsis; color: var(--text-2); font-size:.82rem;
+    }
+    .rl-att-chip {
+      display:inline-flex; align-items:center; gap:3px; cursor:pointer;
+      background: rgba(59,130,246,.10); color:#3b82f6;
+      border-radius:5px; padding:2px 7px; font-size:.76rem; margin:2px;
+      border: none;
+    }
+    .rl-att-chip:hover { background: rgba(59,130,246,.2); }
+    .ticker-badge {
+      background: rgba(240,180,41,.12); color:#f0b429;
+      border-radius:5px; padding:2px 8px; font-weight:700; font-size:.86rem;
+    }
+
+    /* Modal */
+    .rl-modal-backdrop {
+      display:none; position:fixed; inset:0; background:rgba(0,0,0,.6);
+      z-index:1000; align-items:center; justify-content:center;
+    }
+    .rl-modal-backdrop.open { display:flex; }
+    .rl-modal {
+      background: var(--bg-card); border-radius:12px; padding:28px;
+      width: min(700px, 95vw); max-height:90vh; overflow-y:auto;
+      box-shadow: 0 20px 60px rgba(0,0,0,.4);
+    }
+    .rl-modal h3 { margin:0 0 20px; font-size:1.1rem; }
+
+    .empty-rl {
+      text-align:center; padding:60px 20px; color:var(--text-muted);
+    }
+    .empty-rl .e-icon { font-size:3rem; margin-bottom:12px; }
+    .empty-rl p { font-size:.9rem; }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+          <a href="https://radwane71.github.io/InvestorNote/index.html" target="_blank" class="nav-link nav-sub" id="nav-investor-note"><span class="icon">📓</span><span>مفكرة مستثمر</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>📒 دفتر المراجعة</h1>
+        <p>سجّل جلسات إعادة التقييم الدورية لأسهمك — كل ربع سنة أو نصف سنة</p>
+      </div>
+    </div>
+
+    <!-- ── نموذج الإضافة ── -->
+    <div class="card" style="margin-bottom:18px">
+      <div class="section-header" style="margin-bottom:16px">
+        <span class="section-title">إضافة مراجعة جديدة</span>
+      </div>
+
+      <div class="rl-form-grid">
+        <div class="form-group">
+          <label>رمز السهم *</label>
+          <input type="text" id="rl-ticker" placeholder="مثال: 2222"
+                 oninput="onTickerInput()" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label>اسم الشركة</label>
+          <input type="text" id="rl-name" placeholder="يُملأ تلقائياً">
+        </div>
+        <div class="form-group">
+          <label>القطاع</label>
+          <input type="text" id="rl-sector" placeholder="مثال: الطاقة">
+        </div>
+        <div class="form-group">
+          <label>تاريخ المراجعة *</label>
+          <input type="date" id="rl-date">
+        </div>
+      </div>
+
+      <div class="rl-bottom-row">
+        <!-- المرفقات -->
+        <div>
+          <label class="form-label" style="display:block;margin-bottom:6px">المرفقات (txt, md, xlsx, csv)</label>
+          <div class="attach-zone" id="attach-zone" onclick="document.getElementById('rl-files').click()"
+               ondragover="onDragOver(event)" ondragleave="onDragLeave(event)" ondrop="onDrop(event)">
+            <input type="file" id="rl-files" multiple accept=".txt,.md,.xlsx,.csv"
+                   onchange="onFilesSelected(this.files)">
+            <div class="attach-icon">📎</div>
+            <div style="font-size:.85rem;margin-top:4px">انقر أو اسحب الملفات هنا</div>
+            <div class="attach-hint">TXT · MD · XLSX · CSV فقط · الحد الأقصى 2MB للملف</div>
+          </div>
+          <div class="attach-file-list" id="attach-preview"></div>
+        </div>
+
+        <!-- الملاحظات -->
+        <div class="form-group" style="margin:0">
+          <label>ملاحظات التقييم</label>
+          <textarea class="rl-notes" id="rl-notes"
+                    placeholder="اكتب ملاحظاتك عن هذا السهم — التقييم، السعر العادل، الرؤية، مخاطر..."></textarea>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:4px">
+        <button class="btn btn-secondary" onclick="resetForm()">مسح</button>
+        <button class="btn btn-primary"   onclick="saveEntry()">💾 حفظ المراجعة</button>
+      </div>
+    </div>
+
+    <!-- ── شريط الأدوات ── -->
+    <div class="rl-toolbar">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.85rem">
+        <input type="checkbox" id="select-all" onchange="toggleSelectAll(this.checked)"> تحديد الكل
+      </label>
+      <span class="rl-selected-count" id="selected-count">لا يوجد تحديد</span>
+      <button class="btn btn-secondary btn-sm" onclick="exportSelected()" id="btn-export-sel" disabled>
+        ⬇️ تصدير مرفقات المحدد
+      </button>
+    </div>
+
+    <!-- ── الجدول ── -->
+    <div class="card">
+      <div class="table-wrapper" id="rl-table-wrap">
+        <div class="empty-rl">
+          <div class="e-icon">📒</div>
+          <p>لا توجد مراجعات بعد — أضف أول تقييم من النموذج أعلاه</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ── مودال التعديل ── -->
+  <div class="rl-modal-backdrop" id="edit-modal" onclick="closeModalOutside(event)">
+    <div class="rl-modal">
+      <h3>✏️ تعديل المراجعة</h3>
+      <input type="hidden" id="edit-id">
+
+      <div class="rl-form-grid">
+        <div class="form-group">
+          <label>رمز السهم</label>
+          <input type="text" id="edit-ticker" style="text-transform:uppercase">
+        </div>
+        <div class="form-group">
+          <label>اسم الشركة</label>
+          <input type="text" id="edit-name">
+        </div>
+        <div class="form-group">
+          <label>القطاع</label>
+          <input type="text" id="edit-sector">
+        </div>
+        <div class="form-group">
+          <label>تاريخ المراجعة</label>
+          <input type="date" id="edit-date">
+        </div>
+      </div>
+
+      <div class="rl-bottom-row">
+        <div>
+          <label class="form-label" style="display:block;margin-bottom:6px">إضافة مرفقات جديدة</label>
+          <div class="attach-zone" onclick="document.getElementById('edit-files').click()">
+            <input type="file" id="edit-files" multiple accept=".txt,.md,.xlsx,.csv"
+                   onchange="onEditFilesSelected(this.files)">
+            <div class="attach-icon">📎</div>
+            <div style="font-size:.85rem;margin-top:4px">انقر لإضافة ملفات</div>
+          </div>
+          <div class="attach-file-list" id="edit-attach-preview"></div>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label>الملاحظات</label>
+          <textarea class="rl-notes" id="edit-notes"></textarea>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:16px">
+        <button class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveEdit()">💾 حفظ التعديلات</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- toast container -->
+  <div id="toast-container" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;align-items:center"></div>
+
+  <script src="js/supabase.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/review-log.js"></script>
+</body>
+</html>

@@ -6,7 +6,8 @@
       "Bash(findstr /n \"btn-sync-tx\" \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\dashboard.html\")",
       "Bash(findstr /n \"syncHoldingsFromTx\" \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\dashboard.js\")",
       "Bash(findstr /n \"sync\" \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\dashboard.html\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "mcp__Claude_Preview__preview_start"
     ]
   }
 }
