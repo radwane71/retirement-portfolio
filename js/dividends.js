@@ -276,14 +276,37 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
   const el = document.getElementById('div-confidence-banner');
   if (!el) return;
 
-  // ── حساب عمر المحفظة من أقدم معاملة ──────────────────────────────
-  const allDates = [...txBuyRows, ...txSellRows]
-    .map(t => t.date).filter(Boolean).sort();
-  const firstDate = allDates[0] ? new Date(allDates[0]) : null;
+  // ── عمر التقويمي وعمر رأس المال الفعلي ───────────────────────────
   const today     = new Date();
-  const months    = firstDate
+  const allDates  = [...txBuyRows, ...txSellRows].map(t => t.date).filter(Boolean).sort();
+  const firstDate = allDates[0] ? new Date(allDates[0]) : null;
+  const calMonths = firstDate
     ? Math.floor((today - firstDate) / (30.44 * 86400000))
     : 0;
+
+  // عمر رأس المال المرجَّح بالمعاملات (Capital-Weighted Age)
+  // نستخدم مبالغ الشراء كبديل لعدم توفر cashflow_entries هنا
+  const cwMonths = (() => {
+    const sorted = [...txBuyRows].filter(t => t.date && t.total)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    let wb = 0, ws = 0;
+    sorted.forEach(t => {
+      const m = (today - new Date(t.date)) / (30.44 * 86400000);
+      ws += +t.total * m;
+      wb += +t.total;
+    });
+    // السحوبات تُقلّص الوزن بنفس النسبة
+    [...txSellRows].filter(t => t.date && t.total)
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .forEach(t => {
+        if (wb > 0) { const p = Math.min(1, +t.total / wb); ws *= (1 - p); }
+        wb = Math.max(0, wb - +t.total);
+      });
+    return wb > 0 ? Math.max(0.5, ws / wb) : calMonths;
+  })();
+
+  const months  = Math.round(cwMonths);   // الفعلي — يُستخدم في الثقة
+  const cwDiff  = calMonths - months;
 
   // ── بيانات الأرباح ────────────────────────────────────────────────
   const divYearsSet   = new Set(dividends.map(d => d.year));
@@ -321,7 +344,9 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
   else                 { badgeColor='#3b82f6'; borderColor='rgba(59,130,246,.3)'; bgColor='rgba(59,130,246,.05)'; }
 
   // ── رسالة المستشار المالي ──────────────────────────────────────────
-  const monthsText = months < 12 ? `${months} شهراً` : `${(months/12).toFixed(1)} سنة`;
+  const fmtM       = m => m < 12 ? `${Math.round(m)} شهر` : `${(m/12).toFixed(1)} سنة`;
+  const monthsText = fmtM(months);
+  const calText    = fmtM(calMonths);
   const fwdGapText = fwdTtmGap > 15
     ? ` الفجوة بين الـ Forward (${formatSAR(fwdIncome)}) والـ TTM (${formatSAR(ttm)}) تؤكد أن المحفظة نمت مؤخراً — الـ TTM مشوّه لصالح الأقل.`
     : '';
@@ -369,7 +394,13 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
         <span style="
           background:var(--bg-2);border:1px solid var(--border);
           border-radius:20px;padding:1px 9px;font-size:.70rem;color:var(--text-muted);white-space:nowrap
-        ">${monthsText} · ${divYears} سنة أرباح · ${uniqueTickers} سهم موزِّع</span>
+        "
+        title="عمر رأس المال الفعلي (مرجَّح بالمعاملات) = ${months} شهر&#10;العمر التقويمي = ${calMonths} شهر&#10;الضخ التدريجي يقلّص عمر رأس المال الفعلي">
+          ${cwDiff >= 2
+            ? `رأس المال الفعلي: ${monthsText} | تقويمي: ${calText}`
+            : `عمر المحفظة: ${monthsText}`}
+          · ${divYears} سنة أرباح · ${uniqueTickers} موزِّع
+        </span>
       </div>
       <p style="font-size:.81rem;color:var(--text-2);margin:0 0 5px;line-height:1.6">${body}</p>
       <p style="font-size:.79rem;color:${badgeColor};margin:0;font-weight:600">💡 ${advice}</p>

@@ -106,6 +106,60 @@ async function loadHistoricalData() {
   const totalDeposited    = cfRows.filter(e => e.type==='deposit').reduce((s,e) => s + +e.amount, 0);
   const avgMonthlyDeposit = yearsActive > 0 ? totalDeposited / (yearsActive * 12) : 0;
 
+  // ══════════════════════════════════════════════════════════════════════
+  // عمر رأس المال المرجَّح بالتدفقات (Capital-Weighted Age)
+  // الفكرة: كل ريال يُحسب بعدد الأشهر التي قضاها فعلاً في المحفظة
+  // الصيغة: Σ(مبلغ_الإيداع × الأشهر_منذ_الإيداع) ÷ إجمالي_رأس_المال_الحالي
+  // لو بدأت بـ10K ثم حطيت 170K بعد 4 شهور:
+  //   (10K×8 + 170K×4) / 180K = (80K + 680K) / 180K = 4.2 شهر فعلي (لا 8)
+  // ══════════════════════════════════════════════════════════════════════
+  const capitalWeightedMonths = (() => {
+    const sorted = [...cfRows].filter(e => e.date)
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    let runningBalance = 0;
+    let weightedSum    = 0;
+
+    sorted.forEach(cf => {
+      const monthsAgo = (today - new Date(cf.date)) / (30.44 * 86400000);
+      const amt       = +cf.amount || 0;
+
+      if (cf.type === 'deposit') {
+        // هذا المبلغ قضى monthsAgo شهراً في المحفظة
+        weightedSum    += amt * monthsAgo;
+        runningBalance += amt;
+      } else if (cf.type === 'withdrawal') {
+        // السحب يقلص رأس المال ويُقلص الوزن التراكمي بنفس النسبة
+        if (runningBalance > 0) {
+          const pct   = Math.min(1, amt / runningBalance);
+          weightedSum *= (1 - pct);
+        }
+        runningBalance = Math.max(0, runningBalance - amt);
+      }
+    });
+
+    // إذا لا يوجد تدفقات، نستخدم تواريخ المعاملات كبديل
+    if (runningBalance < 1 && totalBuys > 0) {
+      const buysSorted = txRows.filter(t => t.type === 'buy' && t.date)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      let wb = 0, ws = 0;
+      buysSorted.forEach(t => {
+        const m = (today - new Date(t.date)) / (30.44 * 86400000);
+        ws += +t.total * m;
+        wb += +t.total;
+      });
+      txRows.filter(t => t.type === 'sell' && t.date).forEach(t => {
+        if (wb > 0) { const p = Math.min(1, +t.total / wb); ws *= (1 - p); }
+        wb = Math.max(0, wb - +t.total);
+      });
+      return wb > 0 ? Math.max(0.5, ws / wb) : yearsActive * 12;
+    }
+
+    return runningBalance > 0
+      ? Math.max(0.5, weightedSum / runningBalance)
+      : yearsActive * 12;
+  })();
+
   const divByYear = {};
   divRows.forEach(d => { divByYear[d.year] = (divByYear[d.year] || 0) + +d.amount; });
 
@@ -115,6 +169,7 @@ async function loadHistoricalData() {
     avgMonthlyDeposit, totalDivAll,
     totalBuys, totalSells,
     yearsActive, firstDate,
+    capitalWeightedMonths,   // ← العمر الفعلي المرجَّح بالتدفقات
     currentYear: today.getFullYear(),
     divByYear,
     holdingsCount: hRows.length,
@@ -301,11 +356,15 @@ function renderDataConfidenceBanner(h) {
   const el = document.getElementById('data-confidence-banner');
   if (!el) return;
 
-  const months   = Math.round((h.yearsActive || 0) * 12);
-  const divYears = Object.keys(h.divByYear || {}).length;
+  const calMonths = Math.round((h.yearsActive || 0) * 12);     // عمر تقويمي
+  const cwMonths  = Math.round(h.capitalWeightedMonths || 0);  // عمر فعلي مرجَّح
+  const divYears  = Object.keys(h.divByYear || {}).length;
+
+  // نستخدم العمر الفعلي (المرجَّح بالتدفقات) في حساب الثقة — أدق بكثير من التقويمي
+  const months = cwMonths;
 
   // ── حساب درجة الثقة (0–100) ─────────────────────────────────────────
-  // العامل 1: عمر المحفظة (وزن 45%)
+  // العامل 1: عمر رأس المال الفعلي — لا التقويمي (وزن 45%)
   const agePct = months < 3  ? 0.05 : months < 6  ? 0.20 :
                  months < 9  ? 0.32 : months < 12 ? 0.45 :
                  months < 18 ? 0.62 : months < 24 ? 0.76 :
@@ -335,9 +394,14 @@ function renderDataConfidenceBanner(h) {
   else                 { tier = 'strong';     badgeColor = '#3b82f6'; borderColor = 'rgba(59,130,246,.30)'; bgColor = 'rgba(59,130,246,.05)'; }
 
   // ── رسالة المستشار المالي ─────────────────────────────────────────────
-  const monthsText = months < 12
-    ? `${months} شهراً`
-    : `${(months / 12).toFixed(1)} سنة`;
+  const fmtM       = m => m < 12 ? `${m} شهر` : `${(m/12).toFixed(1)} سنة`;
+  const monthsText = fmtM(months);   // الفعلي
+  const calText    = fmtM(calMonths); // التقويمي
+  // هل التدفقات أثّرت بشكل واضح؟
+  const cwDiff     = calMonths - cwMonths;
+  const cwNote     = cwDiff >= 2
+    ? ` (العمر التقويمي ${calText} — الفرق بسبب ضخ رأس المال تدريجياً)`
+    : '';
 
   const msgs = {
     very_low: {
@@ -391,7 +455,11 @@ function renderDataConfidenceBanner(h) {
         <span style="
           background:var(--bg-2);border:1px solid var(--border);border-radius:20px;
           padding:2px 10px;font-size:.72rem;color:var(--text-muted);white-space:nowrap
-        ">${monthsText} من البيانات · ${divYears} دورة أرباح · ${h.holdingsCount} سهم</span>
+        "
+        title="عمر رأس المال الفعلي (مرجَّح بالتدفقات) = ${cwMonths} شهر&#10;العمر التقويمي = ${calMonths} شهر&#10;الفرق = ${cwDiff} شهر بسبب الضخ التدريجي">
+          رأس المال الفعلي: ${monthsText}${cwDiff>=2?' | تقويمي: '+calText:''}
+          · ${divYears} دورة · ${h.holdingsCount} سهم
+        </span>
       </div>
       <p style="font-size:.83rem;color:var(--text-2);margin:0 0 6px;line-height:1.6">${m.body}</p>
       <p style="font-size:.80rem;color:${badgeColor};margin:0;font-weight:600">💡 ${m.advice}</p>
