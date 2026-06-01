@@ -546,7 +546,13 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   margin-bottom: 28px;
 }
 
-.login-logo .logo-icon { font-size: 2.5rem; margin-bottom: 8px; }
+.login-logo .logo-icon { font-size: 2.5rem; margin-bottom: 8px; line-height: 1; }
+.login-logo .logo-icon img {
+  width: 72px; height: 72px;
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(0,0,0,.35);
+  display: block;
+}
 .login-logo h1 { font-size: 1.4rem; font-weight: 700; color: var(--accent); }
 .login-logo p  { color: var(--text-2); font-size: 0.85rem; margin-top: 4px; }
 
