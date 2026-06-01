@@ -16,19 +16,44 @@ async function init() {
   if (!currentUser) return;
   setActiveNav('nav-review-log');
   document.getElementById('rl-date').value = todayISO();
+
+  // نتأكد أن session Supabase جاهزة قبل أي query
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if (!session) { showToast('انتهت جلسة العمل، يرجى إعادة تسجيل الدخول', 'error'); return; }
+
   await loadData();
   renderTable();
 }
 
 async function loadData() {
+  const uid = currentUser?.id;
+  if (!uid) return;
+
+  setStatus('جارٍ التحميل…');
+
   const [rEntries, rAtts] = await Promise.all([
     supabaseClient.from('review_log')
-      .select('*').order('review_date', { ascending: false }),
+      .select('*')
+      .eq('user_id', uid)                          // صريح — لا نعتمد على RLS وحده
+      .order('review_date', { ascending: false }),
     supabaseClient.from('review_log_attachments')
-      .select('*').order('created_at', { ascending: true }),
+      .select('*')
+      .eq('user_id', uid)
+      .order('created_at', { ascending: true }),
   ]);
 
-  if (rEntries.error) { showToast('خطأ في تحميل البيانات: ' + rEntries.error.message, 'error'); return; }
+  // جدول غير موجود — Migration لم تُشغَّل بعد
+  if (rEntries.error?.code === '42P01') {
+    setStatus('⚠️ الجداول غير موجودة في قاعدة البيانات — يرجى تشغيل migration SQL من إعدادات المشروع', 'error');
+    showToast('الجداول غير موجودة — شغّل migration SQL أولاً', 'error');
+    return;
+  }
+
+  if (rEntries.error) {
+    setStatus('خطأ في التحميل: ' + rEntries.error.message, 'error');
+    showToast('خطأ: ' + rEntries.error.message, 'error');
+    return;
+  }
 
   entries = rEntries.data || [];
 
@@ -38,6 +63,16 @@ async function loadData() {
     if (!attachMap[a.entry_id]) attachMap[a.entry_id] = [];
     attachMap[a.entry_id].push(a);
   });
+
+  setStatus('');
+}
+
+function setStatus(msg, type = 'info') {
+  let el = document.getElementById('rl-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = msg ? 'block' : 'none';
+  el.className = 'backup-status status-' + type;
 }
 
 // ── Auto-fill ticker ───────────────────────────────────────────────────────
@@ -176,7 +211,7 @@ function resetForm() {
 // ── Delete entry ───────────────────────────────────────────────────────────
 async function deleteEntry(id) {
   if (!confirm('هل تريد حذف هذه المراجعة وجميع مرفقاتها نهائياً؟')) return;
-  const { error } = await supabaseClient.from('review_log').delete().eq('id', id);
+  const { error } = await supabaseClient.from('review_log').delete().eq('id', id).eq('user_id', currentUser.id);
   if (error) { showToast('خطأ في الحذف: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
   await loadData();
@@ -234,7 +269,7 @@ async function saveEdit() {
   btn.disabled = true; btn.textContent = 'جارٍ الحفظ…';
 
   try {
-    // 1. تحديث المراجعة
+    // 1. تحديث المراجعة — نُضيف eq('user_id') للأمان
     const { error: eUp } = await supabaseClient
       .from('review_log')
       .update({
@@ -245,7 +280,8 @@ async function saveEdit() {
         notes:       document.getElementById('edit-notes').value.trim()  || null,
         updated_at:  new Date().toISOString(),
       })
-      .eq('id', id);
+      .eq('id', id)
+      .eq('user_id', currentUser.id);
     if (eUp) throw eUp;
 
     // 2. إضافة المرفقات الجديدة

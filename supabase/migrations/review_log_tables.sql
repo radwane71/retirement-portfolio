@@ -29,12 +29,21 @@ CREATE TABLE IF NOT EXISTS review_log_attachments (
 
 -- Row Level Security
 ALTER TABLE review_log ENABLE ROW LEVEL SECURITY;
+-- DROP قبل إعادة الإنشاء في حال التشغيل مرة ثانية
+DROP POLICY IF EXISTS "users_own_review_log" ON review_log;
 CREATE POLICY "users_own_review_log"
-  ON review_log USING (auth.uid() = user_id);
+  ON review_log
+  FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
 ALTER TABLE review_log_attachments ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "users_own_review_log_attachments" ON review_log_attachments;
 CREATE POLICY "users_own_review_log_attachments"
-  ON review_log_attachments USING (auth.uid() = user_id);
+  ON review_log_attachments
+  FOR ALL
+  USING (auth.uid() = user_id)
+  WITH CHECK (auth.uid() = user_id);
 
 -- فهارس للأداء
 CREATE INDEX IF NOT EXISTS idx_review_log_user     ON review_log(user_id);
