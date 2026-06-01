@@ -6,6 +6,7 @@ let _sectorMode = 'donut'; // 'donut' | 'bars' | 'cards'
 let weightChart = null;
 let _weightMode = 'bars';  // 'bars' | 'gap' | 'cards' | 'table'
 let allocChart  = null;    // مخطط التخصيص الكلي للأصول
+let beChart     = null;    // مخطط نقطة التعادل
 let editingId   = null;
 let investedTab      = 'net';     // 'net' = رأس المال المنشغل | 'wac' = تكلفة الوسيط
 let yieldTab         = 'fwd';     // 'fwd' | 'ann' | 'yoc' | 'market'
@@ -1213,7 +1214,8 @@ function renderPriceZonesCard() {
 // ── Break-Even Card ───────────────────────────────────────────
 function setBreakevenMode(mode) {
   breakevenMode = mode;
-  ['summary','detail','bars'].forEach(m => {
+  if (beChart && mode !== 'chart') { beChart.destroy(); beChart = null; }
+  ['summary','detail','bars','chart'].forEach(m => {
     const btn = document.getElementById('be-mode-' + m);
     if (btn) {
       btn.className = 'btn btn-sm ' + (m === mode ? 'btn-primary' : 'btn-secondary');
@@ -1401,6 +1403,153 @@ function renderBreakEvenCard() {
           <span class="num bold" style="color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))} (${Math.abs(totalReturnPct).toFixed(2)}%)</span>
         </div>
       </div>`;
+    return;
+  }
+
+  // ════════════════════════════════════════
+  // وضع 4: مخطط — Chart.js مقارنة بصرية
+  // ════════════════════════════════════════
+  if (breakevenMode === 'chart') {
+    if (beChart) { beChart.destroy(); beChart = null; }
+
+    el.innerHTML = `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span class="small text-muted">التقدم نحو نقطة التعادل</span>
+          <span class="small bold" style="color:${barColor}">${breProgress.toFixed(1)}% ${isBreakEven ? '✅' : ''}</span>
+        </div>
+        <div style="background:var(--bg-3);border-radius:99px;height:8px;overflow:hidden">
+          <div style="height:100%;border-radius:99px;background:${barColor};width:${barWidth}%;transition:width .4s"></div>
+        </div>
+      </div>
+
+      <!-- صافي الربح مضغوط -->
+      <div style="display:flex;justify-content:space-between;align-items:center;
+                  padding:10px 14px;background:var(--bg-3);border-radius:var(--radius);
+                  margin-bottom:14px;border:1px solid ${pnlColor}33">
+        <span class="small text-muted">صافي الربح / الخسارة</span>
+        <span class="num bold" style="color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))} · ${Math.abs(totalReturnPct).toFixed(2)}%</span>
+      </div>
+
+      <!-- Canvas للمخطط -->
+      <div style="position:relative;height:180px;margin-bottom:10px">
+        <canvas id="be-chart-canvas"></canvas>
+      </div>
+
+      <!-- مفتاح الألوان -->
+      <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:6px">
+        <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(248,81,73,.7);display:inline-block"></span>رأس المال</span>
+        <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(59,130,246,.7);display:inline-block"></span>قيمة المحفظة</span>
+        <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(63,185,80,.7);display:inline-block"></span>أرباح موزعة</span>
+        ${portfolioCash > 0 ? `<span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(240,180,41,.7);display:inline-block"></span>نقد</span>` : ''}
+      </div>`;
+
+    // نبني المخطط بعد أن يُدرَج الـ canvas في DOM
+    requestAnimationFrame(() => {
+      const canvas = document.getElementById('be-chart-canvas');
+      if (!canvas) return;
+
+      // بيانات المخطط: شريطان أفقيان متراكمان
+      // 1. رأس المال (شريط واحد أحمر)
+      // 2. العوائد مكدّسة: قيمة المحفظة + أرباح + نقد
+      beChart = new Chart(canvas, {
+        type: 'bar',
+        data: {
+          labels: ['رأس المال المنشغل', 'إجمالي العوائد'],
+          datasets: [
+            {
+              label: 'رأس المال',
+              data: [netCapital, 0],
+              backgroundColor: 'rgba(248,81,73,.7)',
+              borderColor: '#f85149',
+              borderWidth: 1,
+              borderRadius: 4,
+            },
+            {
+              label: 'قيمة المحفظة',
+              data: [0, currentValue],
+              backgroundColor: 'rgba(59,130,246,.7)',
+              borderColor: '#3b82f6',
+              borderWidth: 1,
+              borderRadius: 0,
+            },
+            {
+              label: 'أرباح موزعة',
+              data: [0, totalDivAll],
+              backgroundColor: 'rgba(63,185,80,.7)',
+              borderColor: '#3fb950',
+              borderWidth: 1,
+              borderRadius: 0,
+            },
+            ...(portfolioCash > 0 ? [{
+              label: 'نقد',
+              data: [0, portfolioCash],
+              backgroundColor: 'rgba(240,180,41,.7)',
+              borderColor: '#f0b429',
+              borderWidth: 1,
+              borderRadius: 4,
+            }] : []),
+          ],
+        },
+        options: {
+          indexAxis: 'y',   // horizontal bars
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              rtl: true,
+              callbacks: {
+                label: ctx => `  ${ctx.dataset.label}: ${formatSAR(ctx.raw)}`,
+                afterBody: items => {
+                  if (items[0].dataIndex === 1) {
+                    return [`  ─────────────────`, `  الإجمالي: ${formatSAR(totalReturns)}`];
+                  }
+                  return [];
+                },
+              },
+            },
+          },
+          scales: {
+            x: {
+              stacked: true,
+              ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+'K' : v },
+              grid: { color: 'rgba(48,54,61,.5)' },
+            },
+            y: {
+              stacked: true,
+              ticks: { color: '#c9d1d9', font: { family: 'Tajawal', size: 12 } },
+              grid: { display: false },
+            },
+          },
+        },
+      });
+
+      // خط نقطة التعادل (رأس المال) كـ annotation مرسوم يدوياً بعد الرسم
+      const originalDraw = beChart.draw.bind(beChart);
+      beChart.draw = function() {
+        originalDraw();
+        const ctx2   = canvas.getContext('2d');
+        const xScale = beChart.scales.x;
+        const yScale = beChart.scales.y;
+        const xPx    = xScale.getPixelForValue(netCapital);
+        const top    = yScale.top;
+        const bot    = yScale.bottom;
+        ctx2.save();
+        ctx2.setLineDash([6, 4]);
+        ctx2.strokeStyle = '#f0b429';
+        ctx2.lineWidth   = 1.5;
+        ctx2.beginPath();
+        ctx2.moveTo(xPx, top - 4);
+        ctx2.lineTo(xPx, bot + 4);
+        ctx2.stroke();
+        ctx2.fillStyle = '#f0b429';
+        ctx2.font      = '11px Tajawal';
+        ctx2.fillText('نقطة التعادل', xPx + 4, top + 12);
+        ctx2.restore();
+      };
+      beChart.draw();
+    });
     return;
   }
 }
