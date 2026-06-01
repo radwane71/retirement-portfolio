@@ -16,6 +16,8 @@ const TABLES = [
   'watchlist',
   'portfolio_cash',
   'portfolio_tasks',
+  'review_log',
+  'review_log_attachments',
 ];
 
 // حجم الـ batch لكل جدول (الجداول الكبيرة تحتاج batch أصغر)
@@ -431,6 +433,31 @@ function mapRow(table, row, userId) {
         updated_at:     row.updated_at     ?? new Date().toISOString(),
         closed_at:      row.closed_at      ?? null,
         archived_at:    row.archived_at    ?? null,
+      };
+      break;
+
+    case 'review_log':
+      r = {
+        id:          row.id,
+        ticker:      row.ticker,
+        name:        row.name        ?? '',
+        sector:      row.sector      ?? '',
+        review_date: row.review_date,
+        notes:       row.notes       ?? '',
+        created_at:  row.created_at  ?? new Date().toISOString(),
+        updated_at:  row.updated_at  ?? new Date().toISOString(),
+      };
+      break;
+
+    case 'review_log_attachments':
+      r = {
+        id:         row.id,
+        entry_id:   row.entry_id,
+        filename:   row.filename,
+        ext:        row.ext         ?? '',
+        content:    row.content     ?? '',
+        size_bytes: row.size_bytes  ?? 0,
+        created_at: row.created_at  ?? new Date().toISOString(),
       };
       break;
 

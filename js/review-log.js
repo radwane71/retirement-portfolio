@@ -1,84 +1,84 @@
 'use strict';
 
-// ── Storage ────────────────────────────────────────────────────────────────
-const RL_KEY = 'review_log_v1';
+// ── State ──────────────────────────────────────────────────────────────────
+let entries      = [];   // review_log rows
+let attachMap    = {};   // { entry_id: [attachment rows] }
+let pendingFiles = [];   // ملفات الإضافة المعلّقة (قبل الحفظ)
+let editPendingFiles = []; // ملفات التعديل المعلّقة
+let currentUser  = null;
 
-function loadStore() {
-  try { return JSON.parse(localStorage.getItem(RL_KEY)) || []; } catch { return []; }
-}
-function saveStore(data) {
-  try {
-    localStorage.setItem(RL_KEY, JSON.stringify(data));
-  } catch (e) {
-    showToast('⚠️ التخزين المحلي ممتلئ — احذف بعض السجلات أو المرفقات الكبيرة', 'error');
-  }
-}
-
-let entries = loadStore();           // مصفوفة كل المراجعات
-let pendingFiles = [];               // ملفات الإضافة المعلّقة
-let editPendingFiles = [];           // ملفات التعديل المعلّقة
-const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2MB per file
+const MAX_FILE_BYTES = 2 * 1024 * 1024; // 2MB
+const ALLOWED_EXTS   = ['txt', 'md', 'xlsx', 'csv'];
 
 // ── Init ───────────────────────────────────────────────────────────────────
 async function init() {
-  const user = await requireAuth();
-  if (!user) return;
+  currentUser = await requireAuth();
+  if (!currentUser) return;
   setActiveNav('nav-review-log');
   document.getElementById('rl-date').value = todayISO();
+  await loadData();
   renderTable();
 }
 
-// ── Auto-fill ticker name & sector ────────────────────────────────────────
+async function loadData() {
+  const [rEntries, rAtts] = await Promise.all([
+    supabaseClient.from('review_log')
+      .select('*').order('review_date', { ascending: false }),
+    supabaseClient.from('review_log_attachments')
+      .select('*').order('created_at', { ascending: true }),
+  ]);
+
+  if (rEntries.error) { showToast('خطأ في تحميل البيانات: ' + rEntries.error.message, 'error'); return; }
+
+  entries = rEntries.data || [];
+
+  // بناء خريطة المرفقات { entry_id → [atts] }
+  attachMap = {};
+  (rAtts.data || []).forEach(a => {
+    if (!attachMap[a.entry_id]) attachMap[a.entry_id] = [];
+    attachMap[a.entry_id].push(a);
+  });
+}
+
+// ── Auto-fill ticker ───────────────────────────────────────────────────────
 function onTickerInput() {
-  const ticker = document.getElementById('rl-ticker').value.trim().toUpperCase();
-  document.getElementById('rl-ticker').value = ticker;
-  autoFillFromTicker(ticker, 'rl-name', 'rl-sector');
-}
-
-function autoFillFromTicker(ticker, nameId, sectorId) {
+  const el = document.getElementById('rl-ticker');
+  el.value = el.value.toUpperCase();
+  const ticker = el.value.trim();
   if (!ticker) return;
-  // محاولة الاستفادة من lookupTicker أو TICKER_DB من utils.js
   const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
-  const name     = official?.name   || (typeof TICKER_DB !== 'undefined' ? TICKER_DB[ticker] : null);
-  const sector   = official?.sector || null;
-  if (name   && document.getElementById(nameId))   document.getElementById(nameId).value   = name;
-  if (sector && document.getElementById(sectorId)) document.getElementById(sectorId).value = sector;
+  const name   = official?.name   || (typeof TICKER_DB !== 'undefined' ? TICKER_DB[ticker] : null);
+  const sector = official?.sector || null;
+  if (name   && !document.getElementById('rl-name').value)   document.getElementById('rl-name').value   = name;
+  if (sector && !document.getElementById('rl-sector').value) document.getElementById('rl-sector').value = sector;
 }
 
-// ── File handling ─────────────────────────────────────────────────────────
-const ALLOWED_EXTS = ['txt', 'md', 'xlsx', 'csv'];
+// ── File handling ──────────────────────────────────────────────────────────
+function getExt(filename) { return filename.split('.').pop().toLowerCase(); }
 
-function getExt(filename) {
-  return filename.split('.').pop().toLowerCase();
-}
-
-function onFilesSelected(fileList) {
-  processFiles(fileList, pendingFiles, 'attach-preview');
-}
-
-function onEditFilesSelected(fileList) {
-  processFiles(fileList, editPendingFiles, 'edit-attach-preview');
-}
+function onFilesSelected(fileList)     { processFiles(fileList, pendingFiles, 'attach-preview'); }
+function onEditFilesSelected(fileList) { processFiles(fileList, editPendingFiles, 'edit-attach-preview'); }
 
 function processFiles(fileList, bucket, previewId) {
   Array.from(fileList).forEach(file => {
     const ext = getExt(file.name);
     if (!ALLOWED_EXTS.includes(ext)) {
-      showToast(`${file.name}: نوع غير مدعوم — يُقبل txt, md, xlsx, csv فقط`, 'error');
-      return;
+      showToast(`${file.name}: نوع غير مدعوم — يُقبل txt, md, xlsx, csv فقط`, 'error'); return;
     }
     if (file.size > MAX_FILE_BYTES) {
-      showToast(`${file.name}: الحجم أكبر من 2MB`, 'error');
-      return;
+      showToast(`${file.name}: الحجم أكبر من 2MB`, 'error'); return;
     }
     const reader = new FileReader();
     reader.onload = e => {
-      bucket.push({ id: uid(), filename: file.name, ext, data: e.target.result, size: file.size });
+      bucket.push({
+        filename: file.name, ext,
+        content: e.target.result,
+        size_bytes: file.size,
+      });
       renderFilePreviews(bucket, previewId);
     };
-    // تخزين xlsx/csv كـ base64، والنصية كنص عادي
-    if (['xlsx'].includes(ext)) reader.readAsDataURL(file);
-    else                        reader.readAsText(file, 'utf-8');
+    if (ext === 'xlsx') reader.readAsDataURL(file);
+    else                reader.readAsText(file, 'utf-8');
   });
 }
 
@@ -88,135 +88,191 @@ function renderFilePreviews(bucket, previewId) {
   el.innerHTML = bucket.map((f, i) => `
     <span class="attach-chip">
       ${fileIcon(f.ext)} ${esc(f.filename)}
-      <span style="color:var(--text-muted);font-size:.7rem">(${formatBytes(f.size)})</span>
-      <button onclick="removeFile(${i},'${previewId}')">×</button>
+      <span style="color:var(--text-muted);font-size:.7rem">(${formatBytes(f.size_bytes)})</span>
+      <button onclick="removePending(${i},'${previewId}')">×</button>
     </span>`).join('');
 }
 
-function removeFile(idx, previewId) {
+function removePending(idx, previewId) {
   const bucket = previewId === 'attach-preview' ? pendingFiles : editPendingFiles;
   bucket.splice(idx, 1);
   renderFilePreviews(bucket, previewId);
 }
 
-function fileIcon(ext) {
-  return { txt:'📄', md:'📝', xlsx:'📊', csv:'📋' }[ext] || '📎';
-}
-
-function formatBytes(b) {
-  if (b < 1024) return b + ' B';
-  if (b < 1024*1024) return (b/1024).toFixed(1) + ' KB';
-  return (b/1024/1024).toFixed(2) + ' MB';
-}
-
 // ── Drag & Drop ────────────────────────────────────────────────────────────
 function onDragOver(e)  { e.preventDefault(); document.getElementById('attach-zone').classList.add('dragover'); }
-function onDragLeave(e) { document.getElementById('attach-zone').classList.remove('dragover'); }
+function onDragLeave()  { document.getElementById('attach-zone').classList.remove('dragover'); }
 function onDrop(e) {
   e.preventDefault();
   document.getElementById('attach-zone').classList.remove('dragover');
   onFilesSelected(e.dataTransfer.files);
 }
 
-// ── CRUD ───────────────────────────────────────────────────────────────────
-function uid() { return 'rl_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
-
-function saveEntry() {
+// ── Save new entry ─────────────────────────────────────────────────────────
+async function saveEntry() {
   const ticker = document.getElementById('rl-ticker').value.trim().toUpperCase();
-  const name   = document.getElementById('rl-name').value.trim();
-  const sector = document.getElementById('rl-sector').value.trim();
   const date   = document.getElementById('rl-date').value;
-  const notes  = document.getElementById('rl-notes').value.trim();
-
   if (!ticker) { showToast('أدخل رمز السهم', 'error'); return; }
   if (!date)   { showToast('حدد تاريخ المراجعة', 'error'); return; }
 
-  const entry = {
-    id:          uid(),
-    ticker, name, sector, date, notes,
-    attachments: [...pendingFiles],
-    created_at:  new Date().toISOString(),
-  };
+  const btn = document.querySelector('[onclick="saveEntry()"]');
+  btn.disabled = true; btn.textContent = 'جارٍ الحفظ…';
 
-  entries.unshift(entry); // أحدث أولاً
-  saveStore(entries);
-  resetForm();
-  renderTable();
-  showToast('✅ تمت إضافة المراجعة', 'success');
+  try {
+    // 1. أدخل المراجعة
+    const { data: inserted, error: eEntry } = await supabaseClient
+      .from('review_log')
+      .insert({
+        user_id:     currentUser.id,
+        ticker,
+        name:        document.getElementById('rl-name').value.trim()   || null,
+        sector:      document.getElementById('rl-sector').value.trim() || null,
+        review_date: date,
+        notes:       document.getElementById('rl-notes').value.trim()  || null,
+        updated_at:  new Date().toISOString(),
+      })
+      .select()
+      .single();
+
+    if (eEntry) throw eEntry;
+
+    // 2. أدخل المرفقات إن وجدت
+    if (pendingFiles.length) {
+      const attRows = pendingFiles.map(f => ({
+        entry_id:   inserted.id,
+        user_id:    currentUser.id,
+        filename:   f.filename,
+        ext:        f.ext,
+        content:    f.content,
+        size_bytes: f.size_bytes,
+      }));
+      const { error: eAtt } = await supabaseClient
+        .from('review_log_attachments').insert(attRows);
+      if (eAtt) throw eAtt;
+    }
+
+    showToast('✅ تمت إضافة المراجعة', 'success');
+    resetForm();
+    await loadData();
+    renderTable();
+
+  } catch (err) {
+    showToast('خطأ: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 حفظ المراجعة';
+  }
 }
 
 function resetForm() {
-  document.getElementById('rl-ticker').value = '';
-  document.getElementById('rl-name').value   = '';
-  document.getElementById('rl-sector').value = '';
-  document.getElementById('rl-date').value   = todayISO();
-  document.getElementById('rl-notes').value  = '';
-  document.getElementById('rl-files').value  = '';
+  ['rl-ticker','rl-name','rl-sector','rl-notes'].forEach(id => {
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('rl-date').value  = todayISO();
+  document.getElementById('rl-files').value = '';
   pendingFiles = [];
   renderFilePreviews(pendingFiles, 'attach-preview');
 }
 
-function deleteEntry(id) {
-  if (!confirm('هل تريد حذف هذه المراجعة نهائياً؟')) return;
-  entries = entries.filter(e => e.id !== id);
-  saveStore(entries);
-  renderTable();
+// ── Delete entry ───────────────────────────────────────────────────────────
+async function deleteEntry(id) {
+  if (!confirm('هل تريد حذف هذه المراجعة وجميع مرفقاتها نهائياً؟')) return;
+  const { error } = await supabaseClient.from('review_log').delete().eq('id', id);
+  if (error) { showToast('خطأ في الحذف: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
+  await loadData();
+  renderTable();
 }
 
-// ── Edit ───────────────────────────────────────────────────────────────────
+// ── Delete single attachment ───────────────────────────────────────────────
+async function removeExistingAtt(attId) {
+  const { error } = await supabaseClient
+    .from('review_log_attachments').delete().eq('id', attId);
+  if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
+  await loadData();
+  // تحديث المعاينة داخل المودال
+  const entryId = document.getElementById('edit-id').value;
+  renderEditExistingAtts(entryId);
+}
+
+// ── Edit modal ─────────────────────────────────────────────────────────────
 function openEdit(id) {
   const e = entries.find(x => x.id === id);
   if (!e) return;
   editPendingFiles = [];
   document.getElementById('edit-id').value     = id;
-  document.getElementById('edit-ticker').value = e.ticker || '';
-  document.getElementById('edit-name').value   = e.name   || '';
-  document.getElementById('edit-sector').value = e.sector || '';
-  document.getElementById('edit-date').value   = e.date   || '';
-  document.getElementById('edit-notes').value  = e.notes  || '';
-  renderEditAttachments(e.attachments || []);
+  document.getElementById('edit-ticker').value = e.ticker      || '';
+  document.getElementById('edit-name').value   = e.name        || '';
+  document.getElementById('edit-sector').value = e.sector      || '';
+  document.getElementById('edit-date').value   = e.review_date || '';
+  document.getElementById('edit-notes').value  = e.notes       || '';
+  renderEditExistingAtts(id);
   renderFilePreviews(editPendingFiles, 'edit-attach-preview');
   document.getElementById('edit-modal').classList.add('open');
 }
 
-function renderEditAttachments(atts) {
-  const el = document.getElementById('edit-attach-preview');
+function renderEditExistingAtts(entryId) {
+  const el   = document.getElementById('edit-attach-preview');
   if (!el) return;
-  // عرض المرفقات الموجودة مع زر حذف كل واحدة
-  const existingHtml = atts.map(f => `
+  const atts = attachMap[entryId] || [];
+  const html = atts.map(a => `
     <span class="attach-chip" style="background:rgba(63,185,80,.12);color:#3fb950">
-      ${fileIcon(f.ext)} ${esc(f.filename)}
-      <span style="color:var(--text-muted);font-size:.7rem">(${formatBytes(f.size || 0)})</span>
-      <button onclick="removeExistingAtt('${f.id}','${document.getElementById('edit-id').value || ''}')">×</button>
+      ${fileIcon(a.ext)} ${esc(a.filename)}
+      <span style="color:var(--text-muted);font-size:.7rem">(${formatBytes(a.size_bytes||0)})</span>
+      <button onclick="removeExistingAtt('${a.id}')">×</button>
     </span>`).join('');
-  el.innerHTML = existingHtml;
+  el.innerHTML = html;
 }
 
-function removeExistingAtt(attId, entryId) {
-  const entry = entries.find(e => e.id === entryId);
-  if (!entry) return;
-  entry.attachments = (entry.attachments || []).filter(a => a.id !== attId);
-  saveStore(entries);
-  renderEditAttachments(entry.attachments);
-}
+async function saveEdit() {
+  const id = document.getElementById('edit-id').value;
+  const ticker = document.getElementById('edit-ticker').value.trim().toUpperCase();
+  const date   = document.getElementById('edit-date').value;
+  if (!ticker) { showToast('أدخل رمز السهم', 'error'); return; }
+  if (!date)   { showToast('حدد تاريخ المراجعة', 'error'); return; }
 
-function saveEdit() {
-  const id     = document.getElementById('edit-id').value;
-  const entry  = entries.find(e => e.id === id);
-  if (!entry) return;
+  const btn = document.querySelector('[onclick="saveEdit()"]');
+  btn.disabled = true; btn.textContent = 'جارٍ الحفظ…';
 
-  entry.ticker = document.getElementById('edit-ticker').value.trim().toUpperCase();
-  entry.name   = document.getElementById('edit-name').value.trim();
-  entry.sector = document.getElementById('edit-sector').value.trim();
-  entry.date   = document.getElementById('edit-date').value;
-  entry.notes  = document.getElementById('edit-notes').value.trim();
-  entry.attachments = [...(entry.attachments || []), ...editPendingFiles];
+  try {
+    // 1. تحديث المراجعة
+    const { error: eUp } = await supabaseClient
+      .from('review_log')
+      .update({
+        ticker,
+        name:        document.getElementById('edit-name').value.trim()   || null,
+        sector:      document.getElementById('edit-sector').value.trim() || null,
+        review_date: date,
+        notes:       document.getElementById('edit-notes').value.trim()  || null,
+        updated_at:  new Date().toISOString(),
+      })
+      .eq('id', id);
+    if (eUp) throw eUp;
 
-  saveStore(entries);
-  closeModal();
-  renderTable();
-  showToast('✅ تم حفظ التعديلات', 'success');
+    // 2. إضافة المرفقات الجديدة
+    if (editPendingFiles.length) {
+      const attRows = editPendingFiles.map(f => ({
+        entry_id:   id,
+        user_id:    currentUser.id,
+        filename:   f.filename,
+        ext:        f.ext,
+        content:    f.content,
+        size_bytes: f.size_bytes,
+      }));
+      const { error: eAtt } = await supabaseClient
+        .from('review_log_attachments').insert(attRows);
+      if (eAtt) throw eAtt;
+    }
+
+    showToast('✅ تم حفظ التعديلات', 'success');
+    closeModal();
+    await loadData();
+    renderTable();
+
+  } catch (err) {
+    showToast('خطأ: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false; btn.textContent = '💾 حفظ التعديلات';
+  }
 }
 
 function closeModal() {
@@ -227,11 +283,14 @@ function closeModalOutside(e) {
   if (e.target.id === 'edit-modal') closeModal();
 }
 
-// ── Download attachment ────────────────────────────────────────────────────
-function downloadAtt(entryId, attId) {
-  const entry = entries.find(e => e.id === entryId);
-  if (!entry) return;
-  const att = (entry.attachments || []).find(a => a.id === attId);
+// ── Download ───────────────────────────────────────────────────────────────
+function downloadAtt(attId) {
+  // البحث في جميع المرفقات المحمّلة
+  let att = null;
+  for (const list of Object.values(attachMap)) {
+    att = list.find(a => a.id === attId);
+    if (att) break;
+  }
   if (!att) return;
   triggerDownload(att);
 }
@@ -240,15 +299,12 @@ function triggerDownload(att) {
   const a = document.createElement('a');
   a.download = att.filename;
   if (att.ext === 'xlsx') {
-    // already base64 dataURL
-    a.href = att.data;
+    a.href = att.content; // base64 dataURL
   } else {
-    const blob = new Blob([att.data], { type: 'text/plain;charset=utf-8' });
+    const blob = new Blob([att.content], { type: 'text/plain;charset=utf-8' });
     a.href = URL.createObjectURL(blob);
   }
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
   if (a.href.startsWith('blob:')) URL.revokeObjectURL(a.href);
 }
 
@@ -266,73 +322,60 @@ function updateSelectedCount() {
   const ids = getSelectedIds();
   const countEl = document.getElementById('selected-count');
   const btnEl   = document.getElementById('btn-export-sel');
-  if (ids.length === 0) {
-    countEl.textContent = 'لا يوجد تحديد';
-    btnEl.disabled = true;
-  } else {
-    const totalAtts = ids.reduce((s, id) => {
-      const e = entries.find(x => x.id === id);
-      return s + (e?.attachments?.length || 0);
-    }, 0);
-    countEl.textContent = `${ids.length} مراجعة محددة — ${totalAtts} مرفق`;
-    btnEl.disabled = totalAtts === 0;
+  if (!ids.length) {
+    countEl.textContent = 'لا يوجد تحديد'; btnEl.disabled = true; return;
   }
-  // مزامنة Select All
+  const totalAtts = ids.reduce((s, id) => s + (attachMap[id]?.length || 0), 0);
+  countEl.textContent = `${ids.length} مراجعة محددة — ${totalAtts} مرفق`;
+  btnEl.disabled = totalAtts === 0;
   const allChecks = document.querySelectorAll('.rl-row-check');
-  const allChecked = allChecks.length > 0 && [...allChecks].every(c => c.checked);
-  document.getElementById('select-all').checked = allChecked;
+  document.getElementById('select-all').checked =
+    allChecks.length > 0 && [...allChecks].every(c => c.checked);
 }
 
 async function exportSelected() {
   const ids = getSelectedIds();
-  if (!ids.length) return;
-
   let downloaded = 0;
   for (const id of ids) {
-    const entry = entries.find(e => e.id === id);
-    if (!entry) continue;
-    for (const att of (entry.attachments || [])) {
-      // تأخير بسيط بين التنزيلات لتجنب حجب المتصفح
+    for (const att of (attachMap[id] || [])) {
       await new Promise(r => setTimeout(r, 150));
       triggerDownload(att);
       downloaded++;
     }
   }
-  if (downloaded === 0) {
-    showToast('لا توجد مرفقات في المراجعات المحددة', 'error');
-  } else {
-    showToast(`✅ تم تصدير ${downloaded} مرفق`, 'success');
-  }
+  if (!downloaded) showToast('لا توجد مرفقات في المراجعات المحددة', 'error');
+  else showToast(`✅ تم تصدير ${downloaded} مرفق`, 'success');
 }
 
-// ── Render Table ──────────────────────────────────────────────────────────
+// ── Render ─────────────────────────────────────────────────────────────────
 function renderTable() {
   const wrap = document.getElementById('rl-table-wrap');
   if (!entries.length) {
-    wrap.innerHTML = `<div class="empty-rl"><div class="e-icon">📒</div><p>لا توجد مراجعات بعد — أضف أول تقييم من النموذج أعلاه</p></div>`;
+    wrap.innerHTML = `<div class="empty-rl"><div class="e-icon">📒</div>
+      <p>لا توجد مراجعات بعد — أضف أول تقييم من النموذج أعلاه</p></div>`;
     return;
   }
 
   const rows = entries.map(e => {
-    const atts = e.attachments || [];
+    const atts = attachMap[e.id] || [];
     const attChips = atts.map(a =>
-      `<button class="rl-att-chip" onclick="downloadAtt('${e.id}','${a.id}')" title="تنزيل ${esc(a.filename)}">
+      `<button class="rl-att-chip" onclick="downloadAtt('${a.id}')"
+               title="تنزيل ${esc(a.filename)}">
         ${fileIcon(a.ext)} ${esc(a.filename)}
-      </button>`
-    ).join('');
+      </button>`).join('');
 
-    const notesTrim = (e.notes || '').replace(/\n/g,' ').slice(0, 80);
+    const notesTrim = (e.notes || '').replace(/\n/g,' ');
     const notesHtml = notesTrim
-      ? `<div class="rl-notes-preview" title="${esc(e.notes || '')}">${esc(notesTrim)}${(e.notes||'').length > 80 ? '…' : ''}</div>`
+      ? `<div class="rl-notes-preview" title="${esc(e.notes||'')}">${esc(notesTrim.slice(0,80))}${notesTrim.length>80?'…':''}</div>`
       : '<span class="text-muted small">—</span>';
 
     return `<tr>
       <td><input type="checkbox" class="rl-row-check" data-id="${e.id}" onchange="updateSelectedCount()"></td>
       <td><span class="ticker-badge">${esc(e.ticker)}</span></td>
-      <td style="white-space:nowrap">${esc(e.name || '—')}</td>
-      <td><span class="small text-muted">${esc(e.sector || '—')}</span></td>
-      <td style="white-space:nowrap">${formatDate(e.date)}</td>
-      <td>${attChips || '<span class="small text-muted">لا يوجد</span>'}</td>
+      <td style="white-space:nowrap">${esc(e.name||'—')}</td>
+      <td><span class="small text-muted">${esc(e.sector||'—')}</span></td>
+      <td style="white-space:nowrap">${fmtDate(e.review_date)}</td>
+      <td style="min-width:120px">${attChips||'<span class="small text-muted">لا يوجد</span>'}</td>
       <td>${notesHtml}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-secondary btn-sm" onclick="openEdit('${e.id}')">✏️ تعديل</button>
@@ -342,18 +385,12 @@ function renderTable() {
   }).join('');
 
   wrap.innerHTML = `<table class="rl-table">
-    <thead>
-      <tr>
-        <th style="width:32px"></th>
-        <th>الرمز</th>
-        <th>الشركة</th>
-        <th>القطاع</th>
-        <th>تاريخ المراجعة</th>
-        <th>المرفقات</th>
-        <th>الملاحظات</th>
-        <th>إجراءات</th>
-      </tr>
-    </thead>
+    <thead><tr>
+      <th style="width:32px"></th>
+      <th>الرمز</th><th>الشركة</th><th>القطاع</th>
+      <th>تاريخ المراجعة</th><th>المرفقات</th>
+      <th>الملاحظات</th><th>إجراءات</th>
+    </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 
@@ -362,15 +399,21 @@ function renderTable() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 function esc(s) {
-  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
-
-function formatDate(d) {
+function fmtDate(d) {
   if (!d) return '—';
-  try {
-    const dt = new Date(d);
-    return dt.toLocaleDateString('ar-SA', { year:'numeric', month:'short', day:'numeric' });
-  } catch { return d; }
+  try { return new Date(d).toLocaleDateString('ar-SA',{year:'numeric',month:'short',day:'numeric'}); }
+  catch { return d; }
+}
+function fileIcon(ext) {
+  return {txt:'📄',md:'📝',xlsx:'📊',csv:'📋'}[ext]||'📎';
+}
+function formatBytes(b) {
+  b = +b || 0;
+  if (b < 1024) return b + ' B';
+  if (b < 1048576) return (b/1024).toFixed(1) + ' KB';
+  return (b/1048576).toFixed(2) + ' MB';
 }
 
 // ── Kick off ───────────────────────────────────────────────────────────────
