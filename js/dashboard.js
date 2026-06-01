@@ -7,8 +7,9 @@ let weightChart = null;
 let _weightMode = 'bars';  // 'bars' | 'gap' | 'cards' | 'table'
 let allocChart  = null;    // مخطط التخصيص الكلي للأصول
 let editingId   = null;
-let investedTab      = 'net';  // 'net' = رأس المال المنشغل | 'wac' = تكلفة الوسيط
-let yieldTab         = 'fwd';  // 'fwd' = متوقع Forward | 'ann' = مُسنوى | 'yoc' = على التكلفة | 'market' = سوقي
+let investedTab      = 'net';     // 'net' = رأس المال المنشغل | 'wac' = تكلفة الوسيط
+let yieldTab         = 'fwd';     // 'fwd' | 'ann' | 'yoc' | 'market'
+let breakevenMode    = 'summary'; // 'summary' | 'detail' | 'bars'
 let portfolioCash    = 0;      // نقد المحفظة عند الوسيط
 let cashUpdatedAt    = null;   // تاريخ آخر تحديث للنقد
 
@@ -153,6 +154,43 @@ async function init() {
   renderAllocationChart();
   renderRetirementCard();
   startPriceAutoRefresh();
+  // تسجيل قيمة المحفظة تلقائياً (مرة في الشهر) لبناء تاريخ أداء حقيقي
+  _autoSnapshotPortfolio().catch(() => {});
+}
+
+// ── Auto-snapshot: يحفظ قيمة المحفظة الحالية في net_worth_snapshots ─────
+// يعمل مرة واحدة لكل شهر — يوفر بيانات تاريخية تدريجية لصفحة الأداء
+async function _autoSnapshotPortfolio() {
+  const todayISO_ = new Date().toISOString().slice(0, 10);
+  const thisMonth = todayISO_.slice(0, 7); // YYYY-MM
+
+  // هل يوجد snapshot هذا الشهر بالفعل؟
+  const { data: existing } = await supabaseClient
+    .from('net_worth_snapshots')
+    .select('id, date')
+    .gte('date', thisMonth + '-01')
+    .lte('date', thisMonth + '-31')
+    .limit(1);
+
+  if (existing?.length) return; // موجود — لا نكرر
+
+  // احسب القيمة الكلية الحالية
+  const stocksValue  = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  if (stocksValue <= 0) return; // لا يوجد أسهم — لا نسجل
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  const s = window._ds || {};
+  const reVal = s.reTotal || 0;
+
+  // صافي الثروة = أسهم + نقد + عقارات
+  const totalNW = stocksValue + portfolioCash + reVal;
+
+  await supabaseClient.from('net_worth_snapshots').insert({
+    user_id:    user.id,
+    date:       todayISO_,
+    total_value: totalNW,
+    notes:      `auto — أسهم: ${stocksValue.toFixed(0)} | نقد: ${portfolioCash.toFixed(0)} | عقارات: ${reVal.toFixed(0)}`,
+  });
 }
 
 // ── Data ──────────────────────────────────────────────────────
@@ -1173,6 +1211,18 @@ function renderPriceZonesCard() {
 }
 
 // ── Break-Even Card ───────────────────────────────────────────
+function setBreakevenMode(mode) {
+  breakevenMode = mode;
+  ['summary','detail','bars'].forEach(m => {
+    const btn = document.getElementById('be-mode-' + m);
+    if (btn) {
+      btn.className = 'btn btn-sm ' + (m === mode ? 'btn-primary' : 'btn-secondary');
+      btn.style.cssText = 'border-radius:0;border:none;padding:4px 10px;font-size:0.76rem';
+    }
+  });
+  renderBreakEvenCard();
+}
+
 function renderBreakEvenCard() {
   const el = document.getElementById('breakeven-body');
   if (!el) return;
@@ -1229,9 +1279,9 @@ function renderBreakEvenCard() {
       </div>
     </div>`;
 
-  el.innerHTML = `
-    <!-- شريط التعادل -->
-    <div style="margin-bottom:20px">
+  // ── شريط التقدم المشترك ──────────────────────────────────
+  const progressBar = `
+    <div style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
         <span class="small text-muted">التقدم نحو نقطة التعادل</span>
         <span class="small bold" style="color:${barColor}">${breProgress.toFixed(1)}%</span>
@@ -1242,35 +1292,117 @@ function renderBreakEvenCard() {
       <div style="display:flex;justify-content:space-between;margin-top:4px">
         <span class="small text-muted">0%</span>
         <span class="small" style="color:var(--accent);font-weight:600">نقطة التعادل 100%</span>
-        ${isBreakEven ? '<span class="small text-success">✅ تجاوزت!</span>' : `<span class="small text-muted">متبقي ${formatSAR(gapToBreakEven)}</span>`}
+        ${isBreakEven
+          ? '<span class="small text-success font-bold">✅ تجاوزت!</span>'
+          : `<span class="small text-muted">متبقي ${formatSAR(gapToBreakEven)}</span>`}
       </div>
-    </div>
+    </div>`;
 
-    <!-- الصافي الكبير -->
+  // ── الصافي الكبير المشترك ─────────────────────────────────
+  const bigNumber = `
     <div style="text-align:center;padding:14px;background:var(--bg-3);border-radius:var(--radius);margin-bottom:16px;border:1px solid ${pnlColor}33">
       <div class="small text-muted" style="margin-bottom:4px">صافي الربح / الخسارة الحقيقي</div>
       <div style="font-size:1.7rem;font-weight:700;color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))}</div>
       <div class="small" style="color:${pnlColor};margin-top:2px">${trueNetPnL >= 0 ? 'ربح' : 'خسارة'} ${Math.abs(totalReturnPct).toFixed(2)}% على رأس المال</div>
-    </div>
-
-    <!-- تفاصيل الحسبة -->
-    <div style="margin-bottom:8px">
-      <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">التكلفة</div>
-      ${row('رأس المال المنشغل الصافي (مشتريات − مبيعات)', formatSAR(netCapital), 'text-danger')}
-    </div>
-    <div style="margin-bottom:8px;margin-top:12px">
-      <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">العوائد</div>
-      ${row('قيمة المحفظة الحالية', formatSAR(currentValue), '', grantValueNow > 0 ? `(يشمل منحة ${s.totalGrantShares || 0} سهم)` : '')}
-      ${portfolioCash > 0 ? row('نقد المحفظة عند الوسيط', formatSAR(portfolioCash)) : ''}
-      ${row('إجمالي الأرباح الموزعة (كل الأوقات)', formatSAR(totalDivAll), 'text-success')}
-      ${row('إجمالي العوائد', formatSAR(totalReturns), trueNetPnL >= 0 ? 'text-success' : '')}
-    </div>
-    <div style="margin-top:12px">
-      <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">تحليل الأداء</div>
-      ${row('ر/خ غير محقق (تغير السعر فقط)', formatSAR(unrealizedPnL), unrealizedPnL >= 0 ? 'text-success' : 'text-danger')}
-      ${row('ر/خ محقق من المبيعات', formatSAR(realizedPnL), realizedPnL >= 0 ? 'text-success' : 'text-danger')}
-      ${row('مساهمة الأرباح الموزعة', formatSAR(totalDivAll), 'text-success')}
     </div>`;
+
+  // ════════════════════════════════════════
+  // وضع 1: ملخص — الأرقام الرئيسية فقط
+  // ════════════════════════════════════════
+  if (breakevenMode === 'summary') {
+    const statItem = (label, val, cls = '') => `
+      <div style="text-align:center;padding:10px 8px;background:var(--bg-3);border-radius:var(--radius)">
+        <div class="num bold ${cls}" style="font-size:1rem">${val}</div>
+        <div class="small text-muted" style="margin-top:2px;font-size:0.72rem">${label}</div>
+      </div>`;
+    el.innerHTML = progressBar + bigNumber + `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
+        ${statItem('القيمة السوقية', formatSAR(currentValue), 'text-accent')}
+        ${statItem('الأرباح الموزعة', formatSAR(totalDivAll), 'text-success')}
+        ${statItem('رأس المال المنشغل', formatSAR(netCapital))}
+      </div>`;
+    return;
+  }
+
+  // ════════════════════════════════════════
+  // وضع 2: تفصيل — كل الحسابات
+  // ════════════════════════════════════════
+  if (breakevenMode === 'detail') {
+    el.innerHTML = progressBar + bigNumber + `
+      <div style="margin-bottom:8px">
+        <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">التكلفة</div>
+        ${row('رأس المال المنشغل الصافي (مشتريات − مبيعات)', formatSAR(netCapital), 'text-danger')}
+      </div>
+      <div style="margin-bottom:8px;margin-top:12px">
+        <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">العوائد</div>
+        ${row('قيمة المحفظة الحالية', formatSAR(currentValue), '', grantValueNow > 0 ? `(يشمل منحة ${s.totalGrantShares || 0} سهم)` : '')}
+        ${portfolioCash > 0 ? row('نقد المحفظة عند الوسيط', formatSAR(portfolioCash)) : ''}
+        ${row('إجمالي الأرباح الموزعة (كل الأوقات)', formatSAR(totalDivAll), 'text-success')}
+        ${row('إجمالي العوائد', formatSAR(totalReturns), trueNetPnL >= 0 ? 'text-success' : '')}
+      </div>
+      <div style="margin-top:12px">
+        <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">تحليل الأداء</div>
+        ${row('ر/خ غير محقق (تغير السعر فقط)', formatSAR(unrealizedPnL), unrealizedPnL >= 0 ? 'text-success' : 'text-danger')}
+        ${row('ر/خ محقق من المبيعات', formatSAR(realizedPnL), realizedPnL >= 0 ? 'text-success' : 'text-danger')}
+        ${row('مساهمة الأرباح الموزعة', formatSAR(totalDivAll), 'text-success')}
+      </div>`;
+    return;
+  }
+
+  // ════════════════════════════════════════
+  // وضع 3: مساهمة — أشرطة أفقية
+  // ════════════════════════════════════════
+  if (breakevenMode === 'bars') {
+    // كل مكوّن كنسبة من رأس المال المنشغل
+    const pct = v => netCapital > 0 ? Math.max(0, v / netCapital * 100) : 0;
+    const components = [
+      { label: 'ر/خ ورقي (القيمة السوقية)', value: unrealizedPnL, color: unrealizedPnL >= 0 ? '#3b82f6' : '#f85149', base: pct(currentValue - portfolioCash) },
+      { label: 'ر/خ محقق من المبيعات',      value: realizedPnL,  color: realizedPnL  >= 0 ? '#22c55e' : '#f85149', base: pct(realizedPnL) },
+      { label: 'أرباح موزعة مستلمة',        value: totalDivAll,  color: '#3fb950',                                   base: pct(totalDivAll) },
+      portfolioCash > 0
+        ? { label: 'نقد عند الوسيط',        value: portfolioCash, color: '#f0b429',                                  base: pct(portfolioCash) }
+        : null,
+    ].filter(Boolean);
+
+    const totalComponents = components.reduce((s, c) => s + Math.max(0, c.value), 0);
+    const componentBars = components.map(c => {
+      const widthPct = totalComponents > 0 ? Math.max(0, c.value) / totalComponents * 100 : 0;
+      const absPct   = netCapital > 0 ? (Math.abs(c.value) / netCapital * 100).toFixed(1) : '0.0';
+      const valColor = c.value >= 0 ? c.color : '#f85149';
+      return `
+        <div style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
+            <span class="small" style="color:var(--text-2)">${c.label}</span>
+            <span class="small bold" style="color:${valColor}">${c.value >= 0 ? '+' : ''}${formatSAR(c.value)} (${absPct}%)</span>
+          </div>
+          <div style="background:var(--bg-3);border-radius:6px;height:22px;overflow:hidden;position:relative">
+            <div style="height:100%;width:${widthPct.toFixed(1)}%;background:${c.color}33;border-radius:6px;
+                        border-right:3px solid ${c.color};transition:width .4s ease;position:relative;min-width:${c.value > 0 ? '3px' : '0'}"></div>
+          </div>
+        </div>`;
+    }).join('');
+
+    el.innerHTML = progressBar + `
+      <div style="margin-bottom:16px">
+        <div class="small bold" style="color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em">
+          مساهمة كل مكوّن في إجمالي العوائد (${formatSAR(totalReturns)})
+        </div>
+        ${componentBars}
+        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;display:flex;justify-content:space-between">
+          <span class="small text-muted">رأس المال المنشغل</span>
+          <span class="num bold">${formatSAR(netCapital)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0">
+          <span class="small text-muted">إجمالي العوائد</span>
+          <span class="num bold ${trueNetPnL >= 0 ? 'text-success' : 'text-danger'}">${formatSAR(totalReturns)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;padding:4px 0">
+          <span class="small bold">صافي الربح / الخسارة</span>
+          <span class="num bold" style="color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))} (${Math.abs(totalReturnPct).toFixed(2)}%)</span>
+        </div>
+      </div>`;
+    return;
+  }
 }
 
 // ── Asset Allocation Chart ────────────────────────────────────

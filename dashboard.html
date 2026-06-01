@@ -320,9 +320,16 @@
 
     <!-- Break-Even Card -->
     <div class="card" style="margin-bottom:16px" id="breakeven-card">
-      <div class="section-header" style="margin-bottom:16px">
+      <div class="section-header" style="margin-bottom:12px">
         <span class="section-title">⚖️ تحليل نقطة التعادل <span class="eng-label">Break-Even</span></span>
-        <button class="info-btn" onclick="showCardInfo('breakeven')">ⓘ</button>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:7px;overflow:hidden">
+            <button id="be-mode-summary" class="btn btn-sm btn-primary"   onclick="setBreakevenMode('summary')"      style="border-radius:0;border:none;padding:4px 10px;font-size:0.76rem">ملخص</button>
+            <button id="be-mode-detail"  class="btn btn-sm btn-secondary" onclick="setBreakevenMode('detail')"       style="border-radius:0;border:none;padding:4px 10px;font-size:0.76rem">تفصيل</button>
+            <button id="be-mode-bars"    class="btn btn-sm btn-secondary" onclick="setBreakevenMode('bars')"         style="border-radius:0;border:none;padding:4px 10px;font-size:0.76rem">مساهمة</button>
+          </div>
+          <button class="info-btn" onclick="showCardInfo('breakeven')">ⓘ</button>
+        </div>
       </div>
       <div id="breakeven-body">
         <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>

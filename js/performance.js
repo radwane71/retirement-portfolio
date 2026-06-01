@@ -9,6 +9,7 @@ let _tx       = [];
 let _holdings = [];
 let _divs     = [];
 let _cf       = [];   // cashflow_entries — للرأسمال التراكمي الفعلي
+let _snapshots = []; // net_worth_snapshots — لقيمة المحفظة التاريخية
 let _monthlyChart     = null;
 let _activeTab        = 'open';
 let _monthlyChartMode = 'combined'; // 'combined' | 'lines' | 'stacked' | 'divonly'
@@ -19,17 +20,19 @@ async function init() {
   if (!user) return;
   setActiveNav('nav-performance');
 
-  const [rTx, rH, rDiv, rCf] = await Promise.all([
+  const [rTx, rH, rDiv, rCf, rSnap] = await Promise.all([
     supabaseClient.from('transactions').select('*').eq('is_archived', false).order('date'),
     supabaseClient.from('holdings').select('*'),
     supabaseClient.from('dividends').select('*').eq('is_archived', false).order('date'),
     supabaseClient.from('cashflow_entries').select('date,type,amount').eq('is_archived', false).order('date'),
+    supabaseClient.from('net_worth_snapshots').select('date,total_value,notes').order('date'),
   ]);
 
-  _tx       = rTx.data   || [];
-  _holdings = rH.data    || [];
-  _divs     = rDiv.data  || [];
-  _cf       = rCf.data   || [];
+  _tx        = rTx.data   || [];
+  _holdings  = rH.data    || [];
+  _divs      = rDiv.data  || [];
+  _cf        = rCf.data   || [];
+  _snapshots = rSnap.data || [];
 
   renderKPIs();
   renderOpenPositions();
@@ -313,7 +316,17 @@ function buildMonthlyData() {
     // رأس المال المُودَع التراكمي = إيداعات − سحوبات من cashflow_entries حتى نهاية الشهر
     const cumulativeCapital = calcCumulativeCapital(yr, mo);
 
-    return { ym, yr, mo, buys, sells, divs, cumulativeCapital, netMove };
+    // قيمة المحفظة من أقرب snapshot في نفس الشهر أو قبله
+    // نأخذ آخر snapshot حتى نهاية هذا الشهر
+    const monthEnd = `${yr}-${String(mo).padStart(2,'0')}-31`;
+    const relevantSnaps = _snapshots.filter(s => s.date && s.date <= monthEnd);
+    const latestSnap = relevantSnaps.length
+      ? relevantSnaps[relevantSnaps.length - 1]
+      : null;
+    const portfolioValue = latestSnap ? +latestSnap.total_value : null;
+    const isAutoSnap     = latestSnap?.notes?.startsWith('auto') || false;
+
+    return { ym, yr, mo, buys, sells, divs, cumulativeCapital, netMove, portfolioValue, isAutoSnap };
   });
 }
 
@@ -348,10 +361,42 @@ function renderMonthlyTimeline() {
 
   const MONTHS_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 
+  // هل يوجد أي بيانات قيمة المحفظة؟
+  const hasPortfolioValues = data.some(r => r.portfolioValue != null);
+
+  // إضافة عمود "قيمة المحفظة" في الـ header إذا وجدت بيانات
+  const thead = tbody.closest('table')?.querySelector('thead tr');
+  if (thead) {
+    const existingValCol = thead.querySelector('.col-portfolio-val');
+    if (!existingValCol && hasPortfolioValues) {
+      const th = document.createElement('th');
+      th.className = 'col-portfolio-val';
+      th.title = 'قيمة المحفظة الإجمالية في ذلك الشهر (من net_worth_snapshots)\n✦ = تسجيل تلقائي | ✎ = تسجيل يدوي';
+      th.innerHTML = 'قيمة المحفظة <span style="font-size:.65rem;opacity:.6">▲</span>';
+      thead.insertBefore(th, thead.children[1]); // بعد عمود الشهر
+    }
+  }
+
   tbody.innerHTML = [...data].reverse().map(r => {
     const netCls = r.netMove >= 0 ? 'text-success' : 'text-danger';
+
+    // عمود قيمة المحفظة
+    let valCell = '';
+    if (hasPortfolioValues) {
+      if (r.portfolioValue != null) {
+        const icon = r.isAutoSnap ? '✦' : '✎';
+        const tip  = r.isAutoSnap
+          ? 'تسجيل تلقائي عند فتح الداشبورد'
+          : 'تسجيل يدوي من صافي الثروة';
+        valCell = `<td class="num text-accent bold" title="${tip}">${formatSAR(r.portfolioValue)} <span class="small text-muted">${icon}</span></td>`;
+      } else {
+        valCell = `<td class="num text-muted small" title="لا يوجد snapshot لهذا الشهر — افتح الداشبورد لتسجيله تلقائياً">—</td>`;
+      }
+    }
+
     return `<tr>
       <td><strong>${MONTHS_AR[r.mo-1]} ${r.yr}</strong></td>
+      ${valCell}
       <td class="num text-accent bold">${r.cumulativeCapital > 0 ? formatSAR(r.cumulativeCapital) : (r.cumulativeCapital < 0 ? formatSAR(r.cumulativeCapital, true) : '—')}</td>
       <td class="num text-success">${r.divs > 0 ? formatSAR(r.divs) : '—'}</td>
       <td class="num">${r.buys > 0 ? '+' + formatSAR(r.buys) : '—'}</td>
@@ -377,11 +422,13 @@ function renderMonthlyChart() {
   if (!data.length) return;
   if (_monthlyChart) { _monthlyChart.destroy(); _monthlyChart = null; }
 
-  const labels   = data.map(r => r.ym);
-  const capital  = data.map(r => r.cumulativeCapital);
-  const divs     = data.map(r => r.divs);
-  const buys     = data.map(r => r.buys);
-  const sells    = data.map(r => r.sells);
+  const labels         = data.map(r => r.ym);
+  const capital        = data.map(r => r.cumulativeCapital);
+  const divs           = data.map(r => r.divs);
+  const buys           = data.map(r => r.buys);
+  const sells          = data.map(r => r.sells);
+  const portfolioVals  = data.map(r => r.portfolioValue);
+  const hasPortVals    = portfolioVals.some(v => v != null);
 
   const baseOpts = {
     responsive: true, maintainAspectRatio: false,
@@ -403,9 +450,10 @@ function renderMonthlyChart() {
       data: {
         labels,
         datasets: [
-          { label: 'رأس المال المُودَع (تراكمي)', data: capital, type: 'line', backgroundColor: 'rgba(240,180,41,0.15)', borderColor: '#f0b429', borderWidth: 2, tension: 0.3, fill: true, pointRadius: 2, yAxisID: 'y', order: 1 },
-          { label: 'أرباح موزعة شهرية',           data: divs,    backgroundColor: 'rgba(63,185,80,0.65)',  borderColor: '#3fb950', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 2 },
-          { label: 'مشتريات شهرية',               data: buys,    backgroundColor: 'rgba(88,166,255,0.5)', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 3 },
+          { label: 'رأس المال المُودَع (تراكمي)', data: capital,       type: 'line', backgroundColor: 'rgba(240,180,41,0.15)', borderColor: '#f0b429', borderWidth: 2, tension: 0.3, fill: true,  pointRadius: 2, yAxisID: 'y',  order: 1 },
+          ...(hasPortVals ? [{ label: 'قيمة المحفظة الفعلية', data: portfolioVals, type: 'line', backgroundColor: 'rgba(59,130,246,0.10)',  borderColor: '#3b82f6', borderWidth: 2, tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y',  order: 0, borderDash: [5,3], spanGaps: true }] : []),
+          { label: 'أرباح موزعة شهرية',           data: divs,          backgroundColor: 'rgba(63,185,80,0.65)',  borderColor: '#3fb950', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 2 },
+          { label: 'مشتريات شهرية',               data: buys,          backgroundColor: 'rgba(88,166,255,0.5)', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 3 },
         ]
       },
       options: {
