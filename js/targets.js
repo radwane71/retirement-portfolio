@@ -585,27 +585,38 @@ function runRebalancing() {
     return;
   }
 
-  // ── حساب التوزيع حسب الطريقة ────────────────────────────────
+  // ── الحد الأقصى لكل سهم: ما يُوصله لهدفه بالضبط لا يتجاوزه ─
+  // maxAlloc = (هدف% / 100) × (قيمة المحفظة + الميزانية) − قيمة السهم الحالية
+  // هذا يضمن أن الوزن بعد الشراء ≤ الهدف بغض النظر عن حجم الميزانية
+  const newPortfolioTotal = totalValue + budget;
+
+  const candidates_ = candidates.map(c => {
+    const currentValue = +c.shares * +c.current_price;
+    const maxAlloc     = Math.max(0, (c.targetPct / 100) * newPortfolioTotal - currentValue);
+    return { ...c, maxAlloc };
+  });
+
+  // ── حساب التوزيع حسب الطريقة — مع تطبيق الحد الأقصى ────────
   let allocations = [];
 
   if (method === 'gap') {
-    // بالتناسب مع حجم الفجوة
-    const totalGap = candidates.reduce((s, c) => s + c.gap, 0);
-    allocations = candidates.map(c => ({
+    // بالتناسب مع حجم الفجوة ثم تقليص لـ maxAlloc
+    const totalGap = candidates_.reduce((s, c) => s + c.gap, 0);
+    allocations = candidates_.map(c => ({
       ...c,
-      allocated: budget * (c.gap / totalGap)
+      allocated: Math.min(budget * (c.gap / totalGap), c.maxAlloc)
     }));
   } else if (method === 'equal') {
-    // توزيع متساوٍ بين الأسهم الناقصة
-    const each = budget / candidates.length;
-    allocations = candidates.map(c => ({ ...c, allocated: each }));
+    // توزيع متساوٍ ثم تقليص لـ maxAlloc
+    const each = budget / candidates_.length;
+    allocations = candidates_.map(c => ({ ...c, allocated: Math.min(each, c.maxAlloc) }));
   } else {
-    // أولوية للأكثر انحرافاً فقط
-    allocations = [{ ...candidates[0], allocated: budget }];
+    // أولوية للأكثر انحرافاً فقط — مقيّدة بـ maxAlloc أيضاً
+    const top = candidates_[0];
+    allocations = [{ ...top, allocated: Math.min(budget, top.maxAlloc) }];
   }
 
-  // ── احسب عدد الأسهم القابل للشراء ──────────────────────────
-  const newPortfolioTotal = totalValue + budget;
+  // ── احسب عدد الأسهم القابل للشراء (تقريب للأسفل دائماً) ────
   let totalSpent = 0;
 
   const rows = allocations.map(c => {
@@ -615,7 +626,7 @@ function runRebalancing() {
     const newShares    = +c.shares + sharesToBuy;
     const newValue     = newShares * +c.current_price;
     const newPct       = newPortfolioTotal > 0 ? newValue / newPortfolioTotal * 100 : 0;
-    const gapAfter     = c.targetPct - newPct;
+    const gapAfter     = c.targetPct - newPct;   // موجب = ما زال ناقصاً | سالب = تجاوز (لا يحدث)
     return { ...c, sharesToBuy, cost, newPct, gapAfter };
   }).filter(r => r.sharesToBuy > 0);
 
@@ -625,7 +636,7 @@ function runRebalancing() {
   if (!rows.length) {
     resultEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted)">
       ⚠️ المبلغ غير كافٍ لشراء ولو سهم واحد من الأسهم المرشحة
-      <br><span class="small">أدنى سعر: ${formatSAR(Math.min(...candidates.map(c => +c.current_price)))}</span>
+      <br><span class="small">أدنى سعر: ${formatSAR(Math.min(...candidates_.map(c => +c.current_price)))}</span>
     </div>`;
     return;
   }
