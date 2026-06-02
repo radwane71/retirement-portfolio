@@ -315,25 +315,39 @@
         <span class="small text-muted">كلا الخطّين مُنسَّبان إلى 100 عند أول نقطة مشتركة</span>
       </div>
 
-      <!-- مدخلات قيم التاسي -->
-      <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px">
-        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
-          <strong style="font-size:.9rem">إضافة قيمة مؤشر تاسي</strong>
-          <button class="btn btn-secondary btn-sm" onclick="showBenchmarkInfo()">ⓘ كيف تستخدمه؟</button>
-        </div>
+      <!-- input مخفي للاستيراد CSV -->
+      <input type="file" id="bm-csv-input" accept=".csv,text/csv" style="display:none"
+             onchange="importBenchmarkFromCSV(this)">
+
+      <!-- شريط الأدوات -->
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
+        <button class="btn btn-primary btn-sm" onclick="document.getElementById('bm-csv-input').value='';document.getElementById('bm-csv-input').click()">
+          ⬆ استيراد CSV
+        </button>
+        <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير CSV</button>
+        <span class="small text-muted" style="margin-right:4px">
+          صيغة الملف: <code style="background:var(--bg-3);padding:1px 6px;border-radius:4px;font-size:.75rem">Date, OPEN, CLOSE</code>
+          مع تواريخ <code style="background:var(--bg-3);padding:1px 6px;border-radius:4px;font-size:.75rem">MM/DD/YYYY</code>
+        </span>
+        <button class="btn btn-secondary btn-sm" onclick="showBenchmarkInfo()" style="margin-right:auto">ⓘ</button>
+      </div>
+
+      <!-- مدخلات قيمة يدوية -->
+      <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:20px">
+        <div style="font-size:.82rem;font-weight:600;margin-bottom:10px;color:var(--text-2)">إضافة نقطة يدوية</div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
           <div style="display:flex;flex-direction:column;gap:4px">
             <label class="small text-muted">التاريخ</label>
             <input type="date" id="bm-date" class="form-control" style="min-width:150px">
           </div>
           <div style="display:flex;flex-direction:column;gap:4px">
-            <label class="small text-muted">قيمة مؤشر تاسي</label>
-            <input type="number" id="bm-value" class="form-control" placeholder="مثال: 12450.5" step="0.01" style="min-width:170px">
+            <label class="small text-muted">قيمة الإغلاق (CLOSE)</label>
+            <input type="number" id="bm-value" class="form-control" placeholder="مثال: 10991.09" step="0.01" style="min-width:170px">
           </div>
           <button class="btn btn-primary" onclick="addBenchmarkEntry()">+ إضافة</button>
         </div>
-        <p class="small text-muted" style="margin-top:10px;margin-bottom:0">
-          💡 أدخل قيمة تاسي في نفس تواريخ تسجيل صافي ثروتك — كلما تطابقت التواريخ كان الرسم أدق
+        <p class="small text-muted" style="margin-top:8px;margin-bottom:0">
+          💡 عند الاستيراد من CSV يُستخدم عمود CLOSE تلقائياً — يمكنك إضافة أي عدد من الأسابيع دفعةً واحدة
         </p>
       </div>
 
@@ -353,8 +367,11 @@
       <!-- جدول بيانات تاسي -->
       <div id="bm-entries-wrap" style="display:none">
         <div class="section-header" style="margin-top:8px">
-          <span class="section-title small">بيانات مؤشر تاسي المُدخلة</span>
-          <button class="btn btn-danger btn-sm" onclick="clearAllBenchmark()">حذف الكل</button>
+          <span class="section-title small">بيانات مؤشر تاسي <span id="bm-entries-count" class="small text-muted"></span></span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير</button>
+            <button class="btn btn-danger btn-sm"    onclick="clearAllBenchmark()">حذف الكل</button>
+          </div>
         </div>
         <div class="table-wrapper">
           <table>

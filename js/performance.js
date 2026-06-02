@@ -637,8 +637,10 @@ function renderBenchmarkTab() {
   const snapshots = [..._snapshots].sort((a, b) => a.date.localeCompare(b.date));
 
   // ── جدول بيانات تاسي ─────────────────────────────────────
-  const entriesWrap = document.getElementById('bm-entries-wrap');
+  const entriesWrap  = document.getElementById('bm-entries-wrap');
   const entriesTbody = document.getElementById('bm-entries-tbody');
+  const entriesCount = document.getElementById('bm-entries-count');
+  if (entriesCount) entriesCount.textContent = bmEntries.length ? `(${bmEntries.length} نقطة)` : '';
   if (entriesTbody) {
     if (bmEntries.length) {
       if (entriesWrap) entriesWrap.style.display = '';
@@ -865,29 +867,183 @@ function showBenchmarkInfo() {
     '',
     'كيف تعمل؟',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• أدخل قيمة مؤشر تاسي في تواريخ محددة',
-    '• الرسم يقارن محفظتك بتاسي انطلاقاً من 100',
-    '• الفرق بينهما = Alpha (أداؤك الزائد/الناقص عن السوق)',
+    '• كلا الخطين مُنسَّبان إلى 100 عند أول نقطة مشتركة',
+    '• الفرق = Alpha (أداؤك الزائد/الناقص عن السوق)',
     '',
-    'من أين أحصل على قيمة تاسي؟',
+    'استيراد CSV:',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• موقع تداول (tadawul.com.sa)',
-    '• تطبيق منصة تداول',
-    '• موقع investing.com (بحث عن TASI)',
+    '• الصيغة المقبولة: Date,OPEN,CLOSE  أو  Date,CLOSE',
+    '• التاريخ: MM/DD/YYYY  أو  YYYY-MM-DD',
+    '• الأرقام يمكن أن تحتوي فواصل (مثل "10,991.09")',
+    '• الاستيراد يدمج مع الموجود (upsert بالتاريخ)',
     '',
-    'نصيحة:',
+    'تصدير CSV:',
     '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• سجّل قيمة تاسي مرة شهرياً في نفس يوم فتح الداشبورد',
-    '• الداشبورد يسجّل صافي ثروتك تلقائياً كل شهر',
-    '• كلما تطابقت التواريخ كان الرسم أدق',
+    '• ينتج ملف بنفس الصيغة يمكن استيراده مستقبلاً',
+    '',
+    'المحفظة:',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '• مصدرها net_worth_snapshots (من الداشبورد)',
+    '• الداشبورد يسجّل لقطة تلقائياً كل شهر',
   ].join('\n'));
 }
 
+// ══════════════════════════════════════════════════════════════
+// 📥 استيراد وتصدير CSV لبيانات تاسي
+// الصيغة: Date,OPEN,CLOSE  (أو Date,CLOSE)  —  MM/DD/YYYY أو YYYY-MM-DD
+// ══════════════════════════════════════════════════════════════
+
+// البيانات التاريخية المضمنة (إغلاقات أسبوعية — Tadawul All Share)
+// تُستخدم كـ seed تلقائي عند أول فتح للتبويب بدون بيانات
+const TASI_SEED = [
+  { date:'2025-06-08', value:10810.04 },{ date:'2025-06-15', value:10429.11 },
+  { date:'2025-06-22', value:10572.64 },{ date:'2025-06-29', value:11094.65 },
+  { date:'2025-07-06', value:11211.82 },{ date:'2025-07-13', value:10977.62 },
+  { date:'2025-07-20', value:10831.35 },{ date:'2025-07-27', value:10779.11 },
+  { date:'2025-08-03', value:10725.34 },{ date:'2025-08-10', value:10745.82 },
+  { date:'2025-08-17', value:10831.26 },{ date:'2025-08-24', value:10732.31 },
+  { date:'2025-08-31', value:10611.95 },{ date:'2025-09-07', value:10421.08 },
+  { date:'2025-09-14', value:10366.59 },{ date:'2025-09-21', value:10758.92 },
+  { date:'2025-09-28', value:11213.66 },{ date:'2025-10-05', value:11509.99 },
+  { date:'2025-10-12', value:11320.27 },{ date:'2025-10-19', value:11492.03 },
+  { date:'2025-10-26', value:11590.03 },{ date:'2025-11-02', value:11256.74 },
+  { date:'2025-11-09', value:11177.66 },{ date:'2025-11-16', value:10977.78 },
+  { date:'2025-11-23', value:10576.48 },{ date:'2025-11-30', value:10499.19 },
+  { date:'2025-12-07', value:10574.86 },{ date:'2025-12-14', value:10376.54 },
+  { date:'2025-12-21', value:10449.01 },{ date:'2025-12-28', value:10339.14 },
+  { date:'2026-01-04', value:10281.49 },{ date:'2026-01-11', value:10502.67 },
+  { date:'2026-01-18', value:10844.48 },{ date:'2026-01-25', value:11139.01 },
+  { date:'2026-02-01', value:11022.14 },{ date:'2026-02-08', value:11130.45 },
+  { date:'2026-02-15', value:10929.79 },{ date:'2026-02-22', value:10703.70 },
+  { date:'2026-03-01', value:10193.83 },{ date:'2026-03-08', value:10779.55 },
+  { date:'2026-03-15', value:10779.03 },{ date:'2026-03-22', value:10880.50 },
+  { date:'2026-03-29', value:11067.76 },{ date:'2026-04-05', value:11086.26 },
+  { date:'2026-04-12', value:11269.41 },{ date:'2026-04-19', value:11102.31 },
+  { date:'2026-04-26', value:11072.77 },{ date:'2026-05-03', value:10949.27 },
+  { date:'2026-05-10', value:10992.76 },{ date:'2026-05-17', value:10933.53 },
+  { date:'2026-05-31', value:10991.09 },
+];
+
+// ── دمج مع البيانات الموجودة (upsert بالتاريخ) ───────────────
+function _mergeBenchmark(newEntries) {
+  const map = {};
+  _loadBenchmark().forEach(e => { map[e.date] = e.value; });
+  newEntries.forEach(e => { map[e.date] = e.value; });   // الجديد يُغلّب القديم
+  const merged = Object.entries(map)
+    .map(([date, value]) => ({ date, value }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  _saveBenchmark(merged);
+  return merged.length;
+}
+
+// ── تحليل صف CSV (يتعامل مع القيم المحاطة بعلامات تنصيص) ────
+function _parseCSVRow(line) {
+  const cols = [];
+  let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') { inQ = !inQ; }
+    else if (ch === ',' && !inQ) { cols.push(cur); cur = ''; }
+    else { cur += ch; }
+  }
+  cols.push(cur);
+  return cols.map(c => c.trim());
+}
+
+// ── تحويل التاريخ إلى ISO (YYYY-MM-DD) ───────────────────────
+function _toISODate(raw) {
+  raw = (raw || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;           // YYYY-MM-DD ✓
+  const m = raw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);    // MM/DD/YYYY
+  if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  return null;
+}
+
+// ── تحليل ملف CSV كامل ───────────────────────────────────────
+function _parseTasiCSV(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  if (lines.length < 2) throw new Error('الملف فارغ أو لا يحتوي على بيانات');
+
+  const headers = _parseCSVRow(lines[0]).map(h => h.toLowerCase());
+  const dateIdx  = headers.findIndex(h => h.includes('date'));
+  // CLOSE له أولوية على OPEN
+  let closeIdx = headers.findIndex(h => h === 'close' || h === 'close ');
+  if (closeIdx === -1) closeIdx = headers.findIndex(h => h.includes('close'));
+  if (closeIdx === -1) closeIdx = headers.findIndex(h => h.includes('value'));
+
+  if (dateIdx === -1)  throw new Error('عمود Date غير موجود في الملف');
+  if (closeIdx === -1) throw new Error('عمود CLOSE غير موجود في الملف');
+
+  const entries = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols  = _parseCSVRow(lines[i]);
+    const raw   = cols[dateIdx] || '';
+    const rawV  = (cols[closeIdx] || '').replace(/,/g, '');
+    const value = parseFloat(rawV);
+    const date  = _toISODate(raw);
+    if (date && !isNaN(value) && value > 0) entries.push({ date, value });
+  }
+  return entries;
+}
+
+// ── زر: استيراد CSV ──────────────────────────────────────────
+function importBenchmarkFromCSV(input) {
+  if (!input.files?.length) return;
+  const file   = input.files[0];
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const parsed = _parseTasiCSV(e.target.result);
+      if (!parsed.length) { showToast('لم تُعثر على بيانات صالحة في الملف', 'error'); return; }
+      const total = _mergeBenchmark(parsed);
+      showToast(`✓ تم استيراد ${parsed.length} نقطة — الإجمالي: ${total}`, 'success');
+      renderBenchmarkTab();
+    } catch (err) {
+      showToast('خطأ: ' + err.message, 'error');
+    }
+    input.value = '';
+  };
+  reader.readAsText(file, 'UTF-8');
+}
+
+// ── زر: تصدير CSV ────────────────────────────────────────────
+function exportBenchmarkCSV() {
+  const entries = _loadBenchmark();
+  if (!entries.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+
+  const BOM   = '﻿';
+  const lines = ['Date,CLOSE'];
+  entries.forEach(e => {
+    // YYYY-MM-DD → MM/DD/YYYY
+    const [yr, mo, dy] = e.date.split('-');
+    const d = `${mo}/${dy}/${yr}`;
+    const v = `"${e.value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}"`;
+    lines.push(`${d},${v}`);
+  });
+
+  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = `tasi_benchmark_${todayISO()}.csv`;
+  document.body.appendChild(a); a.click();
+  document.body.removeChild(a); URL.revokeObjectURL(url);
+  showToast(`✓ تم تصدير ${entries.length} نقطة`, 'success');
+}
+
 // ── تهيئة التبويب عند أول فتح ────────────────────────────────
+const BM_SEEDED_KEY = 'tharwa-benchmark-seeded-v1';  // flag: هل تم الـ seed؟
+
 function initBenchmarkTab() {
-  // ضع تاريخ اليوم في حقل التاريخ
   const dateInp = document.getElementById('bm-date');
   if (dateInp && !dateInp.value) dateInp.value = todayISO();
+
+  // auto-seed: استورد بيانات تاسي التاريخية مرة واحدة فقط (إذا لم تُفعَّل من قبل)
+  if (!localStorage.getItem(BM_SEEDED_KEY)) {
+    const total = _mergeBenchmark(TASI_SEED);
+    localStorage.setItem(BM_SEEDED_KEY, '1');
+    showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي تلقائياً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
+  }
+
   renderBenchmarkTab();
 }
 
