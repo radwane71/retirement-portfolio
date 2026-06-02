@@ -20,7 +20,7 @@ const SCENARIO_META = [
   { key:'conservative', name:'متحفظ',    emoji:'🛡️', cls:'sc-conservative', color:'#8b949e',
     desc:'أداء دون التاريخي — يناسب فترات الضغط السوقي والركود' },
   { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950',
-    desc:'يطابق أداءك التاريخي الفعلي المحسوب من معاملاتك' },
+    desc:'أداؤك التاريخي مُعدَّل بواقعية حسب ثقة بياناتك (مزج بمعيار السوق)' },
   { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429',
     desc:'أداء أعلى من التاريخي +4% نمو، +1.5% أرباح إضافية' },
   { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7',
@@ -185,24 +185,88 @@ async function loadHistoricalData() {
   const divByYear = {};
   divRows.forEach(d => { divByYear[d.year] = (divByYear[d.year] || 0) + +d.amount; });
 
+  // ══════════════════════════════════════════════════════════════════════
+  // درجة الثقة (نفس خوارزمية renderDataConfidenceBanner — نُعيد حسابها هنا
+  // لاستخدامها في المزج الواقعي للسيناريو المعتدل)
+  // ══════════════════════════════════════════════════════════════════════
+  const _cwM  = Math.round(capitalWeightedMonths);
+  const _divY = [...new Set(divRows.map(d => d.year))].length;
+  const _agePct  = _cwM < 3 ? 0.05 : _cwM < 6 ? 0.20 : _cwM < 9 ? 0.32 : _cwM < 12 ? 0.45 :
+                   _cwM < 18 ? 0.62 : _cwM < 24 ? 0.76 : _cwM < 36 ? 0.88 : 1.00;
+  const _divPct  = _divY === 0 ? 0.05 : _divY === 1 ? 0.45 : _divY === 2 ? 0.72 : 0.95;
+  const _holdPct = hRows.length < 3 ? 0.40 : hRows.length < 6 ? 0.65 : hRows.length < 10 ? 0.82 : 0.95;
+  const confidenceScore = Math.round(_agePct * 45 + _divPct * 35 + _holdPct * 20);
+
+  // ── المزج الواقعي للسيناريو المعتدل ────────────────────────────────
+  // معيار السوق السعودي (تاسي) طويل المدى: نمو السعر ~5% سنوياً (محافظ)
+  // كلما ارتفعت ثقة البيانات → نعتمد أداءك الشخصي أكثر
+  // عند ثقة 0%  → 5% (معيار السوق فقط)
+  // عند ثقة 50% → متوسط 50/50
+  // عند ثقة 100% → أداؤك الشخصي بالكامل
+  const MARKET_CAP_BENCHMARK = 0.05;
+  const confWeight = confidenceScore / 100;
+  const blendedCapGrowth = Math.min(0.35, Math.max(0.02,
+    annCapGrowth * confWeight + MARKET_CAP_BENCHMARK * (1 - confWeight)
+  ));
+
+  // ── هدف FIRE من الإعدادات المحلية ──────────────────────────────────
+  let fireGoal = { monthly: 0, swr: 4, target_year: 0 };
+  try {
+    const fg = JSON.parse(localStorage.getItem('retirement_goal_v1') || '{}');
+    fireGoal = {
+      monthly:     +fg.monthly     || 0,
+      swr:         +fg.swr         || 4,
+      target_year: +fg.target_year || 0,
+    };
+  } catch(_) {}
+
   return {
     currentValue, costBasis, netCapital,
-    annCapGrowth, safeDivYield, avgAnnualDiv,
+    annCapGrowth,                          // الأداء الشخصي الخام
+    blendedCapGrowth,                      // المستخدم فعلياً في السيناريوهات
+    safeDivYield, avgAnnualDiv,
     avgMonthlyDeposit, totalDivAll,
     totalBuys, totalSells,
     yearsActive, firstDate,
     capitalWeightedMonths,
-    xirr: xirrResult,           // ← XIRR الحقيقي (للعرض في الملخص)
-    xirrUsed: xirrRate != null, // ← هل استُخدم XIRR كأساس للسيناريوهات؟
+    xirr: xirrResult,
+    xirrUsed: xirrRate != null,
     currentYear: today.getFullYear(),
     divByYear,
     holdingsCount: hRows.length,
+    confidenceScore,
+    divYears: _divY,
+    fireGoal,
   };
+}
+
+// ── تطبيق هدف FIRE على حقل الهدف ─────────────────────────────────────
+function applyFireGoal() {
+  const fg = _hist?.fireGoal;
+  if (!fg?.monthly || !fg?.target_year) return;
+  const fireNumber = (fg.monthly * 12) / (fg.swr / 100);
+  // ضع قيمة المحفظة المستهدفة
+  const goalInp = document.getElementById('inp-goal-amount');
+  if (goalInp) { goalInp.value = Math.round(fireNumber); }
+  setGoalType('portfolio_value');
+  // اضبط الأفق على سنة التقاعد
+  const horizonSel = document.getElementById('inp-horizon');
+  const yearsLeft  = fg.target_year - new Date().getFullYear();
+  if (horizonSel && yearsLeft > 0) {
+    // اختر أقرب خيار متاح
+    const opts = [...horizonSel.options].map(o => +o.value);
+    const best = opts.reduce((p, c) => Math.abs(c - yearsLeft) < Math.abs(p - yearsLeft) ? c : p);
+    horizonSel.value = best;
+  }
+  runForecast();
+  showToast(`✓ تطبيق هدف FIRE: محفظة ${fmt(fireNumber)} بحلول ${fg.target_year}`, 'success');
 }
 
 // ── Build 4 scenarios ──────────────────────────────────────────────────
 function buildScenarios(divOverride) {
-  const base = _hist.annCapGrowth;
+  // نستخدم blendedCapGrowth بدلاً من annCapGrowth الخام
+  // هذا يُدخل واقعية: بيانات أقل ثقة → نمزج نحو معيار السوق (5%)
+  const base = _hist.blendedCapGrowth;
   const div  = divOverride !== undefined ? divOverride : _hist.safeDivYield;
   _scenarios = [
     { key:'conservative', capRate: Math.max(0.02, base * 0.60), divRate: Math.max(0.01, div * 0.70) },
@@ -235,7 +299,10 @@ function projectScenario(scenario, params) {
   const snapshots = [{
     year: 0, value, cumDiv: 0, cumAdded: 0,
     realValue: value,
-    monthlyIncome: value * monthlyDivRate,
+    monthlyIncome:     value * monthlyDivRate,
+    monthlyIncomeReal: value * monthlyDivRate,   // = nominal when no inflation yet
+    yourCapital:       startValue + lumpSum,      // مجموع ما أضفته من مالك
+    priceGrowth:       0,                         // نمو السعر الصافي
   }];
 
   for (let m = 1; m <= totalMonths; m++) {
@@ -256,13 +323,21 @@ function projectScenario(scenario, params) {
 
     // تسجيل لقطة سنوية
     if (m % 12 === 0) {
+      const realVal      = adjustInflation ? value / inflationFactor : value;
+      // رأس مالك الفعلي المُضاف (أصل + شهري + مبلغ فوري)
+      const yourCap      = startValue + cumulativeAdded;
+      // نمو السعر الصافي = كل شيء فوق ما دفعته ومن الأرباح المعاد استثمارها
+      const priceGrowth  = Math.max(0, value - yourCap - (reinvestDividends ? cumulativeDividends : 0));
       snapshots.push({
-        year:         m / 12,
+        year:              m / 12,
         value,
-        cumDiv:       cumulativeDividends,
-        cumAdded:     cumulativeAdded,
-        realValue:    adjustInflation ? value / inflationFactor : value,
-        monthlyIncome: value * monthlyDivRate,
+        cumDiv:            cumulativeDividends,
+        cumAdded:          cumulativeAdded,
+        realValue:         realVal,
+        monthlyIncome:     value * monthlyDivRate,
+        monthlyIncomeReal: realVal * monthlyDivRate,
+        yourCapital:       yourCap,
+        priceGrowth,
       });
     }
   }
@@ -346,15 +421,24 @@ function renderHistSummary() {
   const xirrLabel = h.xirr != null
     ? `${h.xirr >= 0 ? '+' : ''}${h.xirr.toFixed(2)}%`
     : '—';
-  const growthLabel = h.xirrUsed
-    ? `${pct(h.annCapGrowth)} <span style="font-size:0.65rem;color:var(--success)" title="مشتق من XIRR">✓XIRR</span>`
-    : pct(h.annCapGrowth);
+
+  // نمو رأس المال: عرض الخام vs المُعدَّل للواقعية
+  const rawCap     = h.annCapGrowth;
+  const blended    = h.blendedCapGrowth;
+  const conf       = h.confidenceScore || 0;
+  const isBlended  = Math.abs(rawCap - blended) > 0.001;
+  const growthLabel = isBlended
+    ? `${pct(blended)} <span style="font-size:0.63rem;color:var(--text-muted)"
+        title="أداؤك الشخصي ${pct(rawCap)} مُمزوج بمعيار السوق (5%)&#10;بوزن ثقة البيانات ${conf}%&#10;كلما زادت بيانات محفظتك → نعتمد أداءك أكثر">
+        (خامك ${pct(rawCap)} · ثقة ${conf}%)
+      </span>`
+    : `${pct(blended)} <span style="font-size:0.63rem;color:var(--success)" title="ثقة بيانات عالية — أداؤك الشخصي مُستخدَم بالكامل">✓ثقة ${conf}%</span>`;
 
   const items = [
     { val: fmt(h.currentValue),           lbl: 'القيمة السوقية الحالية' },
     { val: fmt(h.costBasis),              lbl: 'التكلفة الأساسية' },
-    { val: xirrLabel,                     lbl: 'XIRR — العائد الحقيقي' },
-    { val: growthLabel,                   lbl: 'نمو رأس المال (أساس السيناريوهات)', raw: true },
+    { val: xirrLabel,                     lbl: 'XIRR — العائد الداخلي الحقيقي' },
+    { val: growthLabel,                   lbl: 'نمو رأس المال (مُستخدَم في السيناريوهات)', raw: true },
     { val: pct(h.safeDivYield),           lbl: 'عائد الأرباح السنوي' },
     { val: fmt(h.avgAnnualDiv),           lbl: 'متوسط الأرباح السنوية' },
     { val: fmt(h.totalDivAll),            lbl: 'إجمالي الأرباح المتراكمة' },
@@ -382,6 +466,57 @@ function renderHistSummary() {
 
   // عرض مؤشر ثقة البيانات
   renderDataConfidenceBanner(h);
+
+  // ربط هدف FIRE
+  renderFireBanner(h);
+}
+
+// ── ربط هدف التقاعد (FIRE) بالصفحة ──────────────────────────────
+function renderFireBanner(h) {
+  const el = document.getElementById('fire-link-banner');
+  if (!el) return;
+
+  const fg = h.fireGoal || {};
+  if (!fg.monthly || !fg.target_year) {
+    el.innerHTML = `<div style="font-size:.78rem;color:var(--text-muted);padding:6px 0">
+      💡 لم يُحدَّد هدف التقاعد — اذهب للوحة التحكم وأدخل مصاريفك الشهرية بعد التقاعد + سنة التقاعد لربطها هنا.
+    </div>`;
+    return;
+  }
+
+  const fireNumber   = (fg.monthly * 12) / (fg.swr / 100);
+  const yearsLeft    = fg.target_year - new Date().getFullYear();
+  const currentNW    = h.currentValue;
+  const progress     = fireNumber > 0 ? Math.min(100, currentNW / fireNumber * 100) : 0;
+  const remaining    = Math.max(0, fireNumber - currentNW);
+  const barColor     = progress >= 100 ? '#3fb950' : progress >= 50 ? '#f0b429' : '#3b82f6';
+
+  el.innerHTML = `
+    <div style="
+      border:1px solid rgba(59,130,246,.3);background:rgba(59,130,246,.05);
+      border-radius:10px;padding:12px 16px;margin-bottom:4px;
+    ">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-weight:700;font-size:.88rem">🎯 هدف التقاعد ${fg.target_year} — ربط تلقائي من إعداداتك</span>
+        <span style="font-size:.75rem;color:var(--text-muted)">${yearsLeft} سنة متبقية</span>
+        <button class="btn btn-secondary btn-sm" style="font-size:.72rem;margin-right:auto"
+          onclick="applyFireGoal()">تطبيق على الإسقاط ↻</button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:.8rem;margin-bottom:10px">
+        <div><span style="color:var(--text-muted)">الدخل الشهري المستهدف</span><br><strong>${fmt(fg.monthly)}</strong></div>
+        <div><span style="color:var(--text-muted)">نسبة السحب الآمن</span><br><strong>${fg.swr}%</strong></div>
+        <div><span style="color:var(--text-muted)">المحفظة المطلوبة</span><br><strong>${fmt(fireNumber)}</strong></div>
+        <div><span style="color:var(--text-muted)">المتبقي</span><br><strong style="color:${barColor}">${fmt(remaining)}</strong></div>
+      </div>
+      <div style="margin-bottom:4px">
+        <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--text-muted);margin-bottom:4px">
+          <span>نسبة الإنجاز نحو FIRE</span><span style="color:${barColor};font-weight:700">${progress.toFixed(1)}%</span>
+        </div>
+        <div style="background:var(--border);border-radius:99px;height:7px;overflow:hidden">
+          <div style="height:100%;border-radius:99px;background:${barColor};width:${Math.min(progress,100)}%;transition:width .4s"></div>
+        </div>
+      </div>
+    </div>`;
 }
 
 // ── مؤشر ثقة البيانات ─────────────────────────────────────────────────
@@ -697,9 +832,46 @@ function renderChart(horizonYears, goalAmount = 0) {
     });
   }
 
+  // ── plugin مخصص لرسم خط سنة التقاعد المستهدفة ────────────────
+  const fireYear       = _hist?.fireGoal?.target_year;
+  const fireYearOffset = fireYear > 0 ? fireYear - startYear : null;
+  const retirementLinePlugin = (!isBar && fireYearOffset !== null && fireYearOffset > 0 && fireYearOffset <= horizonYears)
+    ? [{
+        id: 'retirementLine',
+        afterDraw(chart) {
+          const { ctx, chartArea } = chart;
+          if (!chartArea) return;
+          // تقدير موضع x بالنسبة المئوية (الأكثر ثباتاً مع Chart.js 4)
+          const xRatio  = fireYearOffset / horizonYears;
+          const xPixel  = chartArea.left + xRatio * (chartArea.right - chartArea.left);
+          ctx.save();
+          ctx.strokeStyle = 'rgba(240,180,41,0.75)';
+          ctx.lineWidth   = 2;
+          ctx.setLineDash([8, 4]);
+          ctx.beginPath();
+          ctx.moveTo(xPixel, chartArea.top);
+          ctx.lineTo(xPixel, chartArea.bottom);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          // تسمية
+          ctx.font      = 'bold 11px Tajawal, sans-serif';
+          ctx.fillStyle = '#f0b429';
+          ctx.textAlign = 'left';
+          const lbl = `${fireYear} 🎯`;
+          ctx.fillStyle = 'rgba(240,180,41,0.15)';
+          const tw = ctx.measureText(lbl).width + 10;
+          ctx.fillRect(xPixel + 3, chartArea.top, tw, 18);
+          ctx.fillStyle = '#f0b429';
+          ctx.fillText(lbl, xPixel + 7, chartArea.top + 13);
+          ctx.restore();
+        }
+      }]
+    : [];
+
   _forecastChart = new Chart(canvas, {
     type: isBar ? 'bar' : 'line',
     data: { labels, datasets },
+    plugins: retirementLinePlugin,
     options: {
       responsive: true,
       maintainAspectRatio: false,
@@ -759,18 +931,27 @@ function renderMilestoneTable(horizonYears) {
   const tbody = document.getElementById('milestone-tbody');
   if (!tbody) return;
 
-  const today = new Date();
-  // كل سنة من 1 حتى نهاية الأفق
-  const years = Array.from({ length: horizonYears }, (_, i) => i + 1);
+  const today      = new Date();
+  const fireYear   = _hist?.fireGoal?.target_year || 0;
+  const fireOffset = fireYear > 0 ? fireYear - today.getFullYear() : null;
+  const showReal   = document.getElementById('inp-inflation')?.checked;
+  const years      = Array.from({ length: horizonYears }, (_, i) => i + 1);
 
   tbody.innerHTML = years.map(y => {
-    const isHL = (y % 5 === 0); // تمييز كل 5 سنوات
+    const calYear    = today.getFullYear() + y;
+    const isHL       = (y % 5 === 0);
+    // سنة التقاعد المستهدفة: تمييز خاص
+    const isFireYear = (fireOffset !== null && y === fireOffset);
+    const rowClass   = isFireYear
+      ? ' class="milestone-hl" style="background:rgba(240,180,41,0.12);border-right:3px solid #f0b429"'
+      : (isHL ? ' class="milestone-hl"' : '');
 
     const valueCells = SCENARIO_META.map((m, i) => {
-      const v      = _projections[i]?.data[y]?.value;
+      const snap   = _projections[i]?.data[y];
+      const v      = snap?.value;
       const active = _activeScenarios.includes(m.key);
       const style  = active
-        ? `color:${m.color};font-weight:${isHL ? '700' : '400'}`
+        ? `color:${m.color};font-weight:${isHL || isFireYear ? '700' : '400'}`
         : 'color:var(--text-2);opacity:0.3';
       return `<td class="num" style="${style}">${v != null ? fmtShort(v) : '—'}</td>`;
     }).join('');
@@ -779,14 +960,27 @@ function renderMilestoneTable(horizonYears) {
       const snap   = _projections[i]?.data[y];
       const active = _activeScenarios.includes(m.key);
       const style  = active
-        ? `color:${m.color};font-weight:${isHL ? '700' : '400'}`
+        ? `color:${m.color};font-weight:${isHL || isFireYear ? '700' : '400'}`
         : 'color:var(--text-2);opacity:0.3';
-      return `<td class="num" style="${style}">${snap ? fmtShort(snap.monthlyIncome) : '—'}</td>`;
+      // عرض الدخل الاسمي + الحقيقي (إذا مفعّل التضخم)
+      let incomeHtml = '—';
+      if (snap) {
+        const nominal = snap.monthlyIncome;
+        const real    = snap.monthlyIncomeReal;
+        const differ  = showReal && Math.abs(nominal - real) > 10;
+        incomeHtml = fmtShort(nominal);
+        if (differ) incomeHtml += `<br><span style="font-size:.68rem;color:var(--text-muted)" title="القيمة الحقيقية بقوة شراء اليوم">${fmtShort(real)} ح</span>`;
+      }
+      return `<td class="num" style="${style}">${incomeHtml}</td>`;
     }).join('');
 
-    return `<tr${isHL ? ' class="milestone-hl"' : ''}>
-      <td><strong>${y}</strong></td>
-      <td class="text-muted small">${today.getFullYear() + y}</td>
+    const yearLabel = isFireYear
+      ? `<strong>${y}</strong><span style="font-size:.65rem;background:#f0b429;color:#000;padding:1px 5px;border-radius:3px;margin-right:4px">🎯${fireYear}</span>`
+      : `<strong>${y}</strong>`;
+
+    return `<tr${rowClass}>
+      <td>${yearLabel}</td>
+      <td class="text-muted small">${calYear}</td>
       ${valueCells}
       ${incomeCells}
     </tr>`;
@@ -864,21 +1058,45 @@ function renderScenarioDetail(horizonYears) {
   const y20   = proj.data[Math.min(20, horizonYears)];
   const start = proj.data[0]?.value || 1;
 
+  // ── تفكيك القيمة النهائية ────────────────────────────────────────
+  const endYourCap    = end?.yourCapital  || 0;
+  const endDivCum     = end?.cumDiv       || 0;
+  const endPriceGrow  = end?.priceGrowth  || 0;
+  const endVal        = end?.value        || 0;
+  const multiplier    = endYourCap > 0 ? endVal / endYourCap : 0;
+
+  // سنة FIRE إذا كانت ضمن الأفق
+  const fireYear   = _hist?.fireGoal?.target_year || 0;
+  const fireOffset = fireYear > 0 ? fireYear - new Date().getFullYear() : null;
+  const fireSnap   = (fireOffset !== null && fireOffset > 0 && fireOffset <= horizonYears)
+    ? proj.data[Math.min(fireOffset, proj.data.length - 1)]
+    : null;
+
   const items = [
     { val: pct(sc.capRate),                      lbl: 'نمو رأس المال / سنة' },
     { val: pct(sc.divRate),                      lbl: 'عائد الأرباح / سنة' },
     { val: pct(sc.capRate + sc.divRate),         lbl: 'إجمالي العائد / سنة' },
-    { val: y5  ? fmt(y5.value)           : '—', lbl: 'القيمة بعد 5 سنوات' },
-    { val: y5  ? fmt(y5.monthlyIncome)   : '—', lbl: 'دخل شهري (5 سنوات)' },
-    { val: y10 ? fmt(y10.value)          : '—', lbl: 'القيمة بعد 10 سنوات' },
-    { val: y10 ? fmt(y10.monthlyIncome)  : '—', lbl: 'دخل شهري (10 سنوات)' },
-    { val: y20 ? fmt(y20.value)          : '—', lbl: 'القيمة بعد 20 سنة' },
-    { val: y20 ? fmt(y20.monthlyIncome)  : '—', lbl: 'دخل شهري (20 سنة)' },
-    { val: end  ? fmt(end.value)         : '—', lbl: `القيمة النهائية (${horizonYears} سنة)` },
-    { val: end  ? fmt(end.monthlyIncome) : '—', lbl: 'الدخل الشهري النهائي' },
-    { val: end  ? `×${(end.value / Math.max(1, start)).toFixed(1)}` : '—', lbl: 'مضاعف النمو' },
-    { val: end  ? fmt(end.cumDiv)        : '—', lbl: 'إجمالي الأرباح الموزعة' },
-    { val: end  ? fmt(end.realValue)     : '—', lbl: 'القيمة الحقيقية (بعد التضخم)' },
+    { val: y5  ? fmt(y5.value)                  : '—', lbl: 'القيمة بعد 5 سنوات' },
+    { val: y5  ? fmt(y5.monthlyIncome)          : '—', lbl: 'دخل شهري (5 سنوات)' },
+    { val: y10 ? fmt(y10.value)                 : '—', lbl: 'القيمة بعد 10 سنوات' },
+    { val: y10 ? fmt(y10.monthlyIncome)         : '—', lbl: 'دخل شهري (10 سنوات)' },
+    { val: y20 ? fmt(y20.value)                 : '—', lbl: 'القيمة بعد 20 سنة' },
+    { val: y20 ? fmt(y20.monthlyIncome)         : '—', lbl: 'دخل شهري (20 سنة)' },
+    ...(fireSnap ? [
+      { val: fmt(fireSnap.value),               lbl: `القيمة عند تقاعدك (${fireYear}) 🎯` },
+      { val: fmt(fireSnap.monthlyIncome),        lbl: `الدخل الشهري عند ${fireYear} 🎯` },
+      { val: fmt(fireSnap.monthlyIncomeReal),    lbl: `الدخل الحقيقي عند ${fireYear} (بقوة شراء اليوم)` },
+    ] : []),
+    { val: end  ? fmt(end.value)                : '—', lbl: `القيمة النهائية (${horizonYears} سنة)` },
+    { val: end  ? fmt(end.monthlyIncome)        : '—', lbl: 'الدخل الشهري النهائي' },
+    { val: end  ? fmt(end.monthlyIncomeReal)    : '—', lbl: 'الدخل الحقيقي النهائي (بقوة شراء اليوم)' },
+    { val: end  ? fmt(end.realValue)            : '—', lbl: 'القيمة الحقيقية (بعد التضخم)' },
+    { val: end  ? fmt(end.cumDiv)              : '—', lbl: 'إجمالي الأرباح الموزعة التراكمية' },
+    // ── التفكيك: فلوسك مقابل نمو السوق
+    { val: end  ? fmt(endYourCap)              : '—', lbl: '💰 رأس مالك المُضاف (مدخراتك الفعلية)' },
+    { val: end && endDivCum > 0 ? fmt(endDivCum) : '—', lbl: '📈 أرباح معاد استثمارها (مجانية)' },
+    { val: end  ? fmt(endPriceGrow)            : '—', lbl: '🚀 نمو السعر الصافي (عمل السوق لك)' },
+    { val: end && multiplier > 0 ? `×${multiplier.toFixed(1)}` : '—', lbl: 'مضاعف رأس مالك (كل ريال أصبح ×N)' },
   ];
 
   body.innerHTML = items.map(i => `
