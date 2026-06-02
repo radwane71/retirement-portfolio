@@ -307,6 +307,71 @@ async function updateHolding(userId, tx) {
   }
 }
 
+// ── إعادة حساب كاملة لسهم واحد من صفر بناءً على جميع معاملاته ─
+// هذا أدق من reverseHolding الذي يطبّق دلتا قد تتراكم أخطاؤها
+// بعد كل حذف أو تعديل معاملة يُستدعى هذا بدلاً من reverseHolding
+async function recomputeHoldingFromTx(userId, ticker) {
+  const { data: txAll } = await supabaseClient
+    .from('transactions')
+    .select('type, shares, price, total, name')
+    .eq('ticker', ticker)
+    .eq('is_archived', false)
+    .order('date', { ascending: true });
+
+  const rows = txAll || [];
+
+  // احسب الأسهم الإجمالية والمتوسط المرجح (WAC) من الصفر
+  let totalShares = 0;
+  let totalCost   = 0;
+  let stockName   = '';
+
+  rows.forEach(t => {
+    if (!stockName && t.name) stockName = t.name;
+    if (t.type === 'buy') {
+      totalCost   += +t.shares * +t.price;
+      totalShares += +t.shares;
+    } else if (t.type === 'grant') {
+      totalShares += +t.shares;   // منحة: تكلفة = صفر
+    } else if (t.type === 'sell') {
+      const sellShares = Math.min(+t.shares, totalShares);
+      // WAC لا يتغير عند البيع — فقط الأسهم تنقص
+      const pct = totalShares > 0 ? sellShares / totalShares : 0;
+      totalCost   -= totalCost * pct;
+      totalShares -= sellShares;
+    }
+  });
+
+  totalShares = Math.max(0, +totalShares.toFixed(6));
+  const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
+
+  const { data: existing } = await supabaseClient
+    .from('holdings').select('id, current_price, sector, target_weight')
+    .eq('user_id', userId).eq('ticker', ticker).maybeSingle();
+
+  if (totalShares <= 0) {
+    // السهم بيع بالكامل — احذفه من المحفظة
+    if (existing) await supabaseClient.from('holdings').delete().eq('id', existing.id);
+  } else if (existing) {
+    // حدّث الأسهم والمتوسط فقط — احتفظ بالسعر الحالي والقطاع والهدف
+    await supabaseClient.from('holdings').update({
+      shares:    +totalShares.toFixed(6),
+      avg_price: +avgPrice.toFixed(4),
+    }).eq('id', existing.id);
+  } else {
+    // سهم جديد — أضفه
+    await supabaseClient.from('holdings').insert([{
+      user_id:      userId,
+      ticker,
+      name:         stockName,
+      sector:       '',
+      shares:       +totalShares.toFixed(6),
+      avg_price:    +avgPrice.toFixed(4),
+      current_price: +avgPrice.toFixed(4),
+      target_weight: 0,
+    }]);
+  }
+}
+
 async function reverseHolding(userId, tx) {
   const { data: existing } = await supabaseClient
     .from('holdings').select('*').eq('user_id', userId).eq('ticker', tx.ticker).maybeSingle();
@@ -504,7 +569,8 @@ async function archiveTx(id) {
   const { data: { user } } = await supabaseClient.auth.getUser();
   const { error } = await supabaseClient.from('transactions').update({ is_archived: true }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  await reverseHolding(user.id, tx);
+  // إعادة حساب كاملة من الصفر بعد الحذف — أدق من reverseHolding
+  await recomputeHoldingFromTx(user.id, tx.ticker);
   showToast('تمت الأرشفة وتحديث المحفظة', 'success');
   await loadTransactions();
   renderTable();
@@ -600,11 +666,13 @@ async function saveEditModal() {
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
 
-  // عكس أثر المعاملة القديمة ثم تطبيق الجديدة على holdings
+  // إعادة حساب كاملة من الصفر بعد التعديل — أدق من reverse+apply
   const { data: { user } } = await supabaseClient.auth.getUser();
   const oldTx = transactions.find(t => t.id === _editId);
-  if (oldTx) await reverseHolding(user.id, oldTx);
-  await updateHolding(user.id, { ticker, name, type, shares, price, total });
+  // لو الرمز تغيّر نعيد حساب القديم والجديد كليهما
+  const tickers = new Set([ticker]);
+  if (oldTx?.ticker && oldTx.ticker !== ticker) tickers.add(oldTx.ticker);
+  for (const t of tickers) await recomputeHoldingFromTx(user.id, t);
 
   showToast('تم حفظ التعديلات ✓', 'success');
   document.getElementById('edit-modal').style.display = 'none';

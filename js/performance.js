@@ -451,7 +451,7 @@ function renderMonthlyChart() {
         labels,
         datasets: [
           { label: 'رأس المال المُودَع (تراكمي)', data: capital,       type: 'line', backgroundColor: 'rgba(240,180,41,0.15)', borderColor: '#f0b429', borderWidth: 2, tension: 0.3, fill: true,  pointRadius: 2, yAxisID: 'y',  order: 1 },
-          ...(hasPortVals ? [{ label: 'قيمة المحفظة الفعلية', data: portfolioVals, type: 'line', backgroundColor: 'rgba(59,130,246,0.10)',  borderColor: '#3b82f6', borderWidth: 2, tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y',  order: 0, borderDash: [5,3], spanGaps: true }] : []),
+          ...(hasPortVals ? [{ label: 'صافي الثروة المُسجَّلة (أسهم + نقد + عقارات)', data: portfolioVals, type: 'line', backgroundColor: 'rgba(59,130,246,0.10)',  borderColor: '#3b82f6', borderWidth: 2, tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y',  order: 0, borderDash: [5,3], spanGaps: true }] : []),
           { label: 'أرباح موزعة شهرية',           data: divs,          backgroundColor: 'rgba(63,185,80,0.65)',  borderColor: '#3fb950', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 2 },
           { label: 'مشتريات شهرية',               data: buys,          backgroundColor: 'rgba(88,166,255,0.5)', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 3 },
         ]

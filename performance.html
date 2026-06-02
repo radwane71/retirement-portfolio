@@ -230,6 +230,81 @@
         </div>
       </div>
       <div class="monthly-chart-wrap"><canvas id="monthly-chart"></canvas></div>
+
+      <!-- دليل الخطوط والأعمدة -->
+      <div id="chart-legend-guide" style="margin-top:18px;padding:14px 16px;background:var(--bg-3);border-radius:var(--radius);border:1px solid var(--border)">
+        <div style="font-size:0.78rem;font-weight:700;color:var(--text-2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em">دليل الرسم البياني</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+
+          <!-- الخط الأزرق المتقطع -->
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
+              <div style="width:28px;height:3px;background:#3b82f6;border-radius:2px;
+                background:repeating-linear-gradient(90deg,#3b82f6 0,#3b82f6 5px,transparent 5px,transparent 8px)"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;flex-shrink:0"></div>
+            </div>
+            <div>
+              <span style="font-weight:700;color:#3b82f6;font-size:0.85rem">صافي الثروة المُسجَّلة (لقطة)</span>
+              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
+                قيمة ثروتك الإجمالية في تاريخ اللقطة = <strong>أسهم + نقد عند الوسيط + عقارات</strong>.
+                تُسجَّل تلقائياً مرة في الشهر عند دخول لوحة التحكم، أو يدوياً من صفحة صافي الثروة.
+                <br>
+                <span style="color:var(--accent)">⚠️ لهذا الرقم أكبر من مشترياتك الشهرية</span> — لأنه يمثل إجمالي ما تملكه، لا فقط ما اشتريته هذا الشهر.
+                الخط متقطع لأنه يمتد بآخر لقطة محفوظة حتى تُسجَّل لقطة جديدة.
+              </p>
+            </div>
+          </div>
+
+          <!-- الخط الأصفر -->
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
+              <div style="width:28px;height:3px;background:#f0b429;border-radius:2px"></div>
+              <div style="width:8px;height:8px;border-radius:50%;background:#f0b429;flex-shrink:0"></div>
+            </div>
+            <div>
+              <span style="font-weight:700;color:#f0b429;font-size:0.85rem">رأس المال المُودَع (تراكمي)</span>
+              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
+                إجمالي ما أضفته للمحفظة من إيداعات ناقصاً السحوبات حتى نهاية كل شهر — من صفحة التدفقات النقدية.
+                يمثل <strong>ما دفعته فعلاً</strong> بغض النظر عن أداء الأسهم.
+              </p>
+            </div>
+          </div>
+
+          <!-- الأعمدة الزرقاء الفاتحة -->
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
+              <div style="width:14px;height:18px;background:rgba(88,166,255,0.6);border-radius:2px;flex-shrink:0"></div>
+            </div>
+            <div>
+              <span style="font-weight:700;color:#58a6ff;font-size:0.85rem">مشتريات شهرية</span>
+              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
+                إجمالي ما اشتريته من أسهم في ذلك الشهر تحديداً — من سجل المعاملات.
+              </p>
+            </div>
+          </div>
+
+          <!-- الأعمدة الخضراء -->
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
+              <div style="width:14px;height:18px;background:rgba(63,185,80,0.7);border-radius:2px;flex-shrink:0"></div>
+            </div>
+            <div>
+              <span style="font-weight:700;color:#3fb950;font-size:0.85rem">أرباح موزعة شهرية</span>
+              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
+                الأرباح التي استلمتها من الشركات في ذلك الشهر — من سجل الأرباح الموزعة.
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);
+          font-size:0.75rem;color:var(--text-2);line-height:1.7">
+          💡 <strong>كيف تقرأ الرسم:</strong>
+          الفرق بين الخط الأزرق (صافي الثروة) والخط الأصفر (رأس المال المُودَع) هو
+          <strong>إجمالي أرباحك الرأسمالية + التوزيعات المُعاد استثمارها</strong> — كلما اتسعت الفجوة بينهما كان أداؤك أفضل.
+        </div>
+      </div>
     </div>
 
     <footer class="site-footer">

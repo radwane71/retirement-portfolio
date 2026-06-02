@@ -189,6 +189,51 @@
       </div>
     </div>
 
+    <!-- ══ محرك إعادة التوازن ══ -->
+    <div class="card" id="rebalancing-card" style="margin-top:24px">
+      <div class="section-header" style="margin-bottom:16px">
+        <span class="section-title">⚖️ محرك إعادة التوازن <span class="eng-label">Rebalancing Engine</span></span>
+        <button class="info-btn" onclick="showRebInfo()">ⓘ</button>
+      </div>
+      <p class="small text-muted" style="margin-bottom:16px">
+        أدخل المبلغ المتاح للاستثمار — يحسب لك أي الأسهم تشتري وكم سهم لتقريب محفظتك من الأوزان المستهدفة.
+      </p>
+
+      <!-- المدخلات -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:16px;padding:16px;background:var(--bg-3);border-radius:var(--radius-lg);border:1px solid var(--border)">
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-2);display:block;margin-bottom:5px">المبلغ المتاح (ر.س) *</label>
+          <input type="number" id="reb-budget" min="0" step="100" placeholder="مثال: 6000"
+            style="width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Tajawal;font-size:0.9rem;padding:8px 10px"
+            oninput="runRebalancing()">
+        </div>
+        <div>
+          <label style="font-size:0.78rem;color:var(--text-2);display:block;margin-bottom:5px">طريقة التوزيع</label>
+          <select id="reb-method" onchange="runRebalancing()"
+            style="width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Tajawal;font-size:0.88rem;padding:8px 10px">
+            <option value="gap">بالتناسب مع الفجوة</option>
+            <option value="equal">توزيع متساوٍ بين الناقص</option>
+            <option value="top1">الأولى بالأولوية فقط</option>
+          </select>
+        </div>
+        <div style="display:flex;align-items:flex-end;gap:8px;padding-bottom:2px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text-2);cursor:pointer">
+            <input type="checkbox" id="reb-entry-filter" onchange="runRebalancing()"
+              style="accent-color:var(--accent);width:15px;height:15px">
+            فقط ضمن منطقة الشراء
+          </label>
+        </div>
+      </div>
+
+      <!-- النتائج -->
+      <div id="reb-result">
+        <div class="empty-state" style="padding:32px">
+          <div class="icon">⚖️</div>
+          <p>أدخل المبلغ المتاح لبدء الحساب</p>
+        </div>
+      </div>
+    </div>
+
     <footer class="site-footer">
       ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
       أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية

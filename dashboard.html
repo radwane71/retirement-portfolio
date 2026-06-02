@@ -374,6 +374,22 @@
       </div>
     </div>
 
+    <!-- Income by Sector Card -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-header" style="margin-bottom:8px">
+        <span class="section-title">💰 الدخل التوزيعي حسب القطاع <span class="eng-label">Income by Sector</span></span>
+        <div style="display:flex;gap:6px">
+          <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:7px;overflow:hidden">
+            <button id="ibs-bars" class="btn btn-sm btn-primary" onclick="setIbsMode('bars')" style="border-radius:0;border:none;padding:4px 10px;font-size:0.76rem">أشرطة</button>
+            <button id="ibs-table" class="btn btn-sm btn-secondary" onclick="setIbsMode('table')" style="border-radius:0;border:none;padding:4px 10px;font-size:0.76rem">جدول</button>
+          </div>
+        </div>
+      </div>
+      <div id="income-by-sector-body">
+        <div class="text-muted small" style="text-align:center;padding:12px">جارٍ التحميل…</div>
+      </div>
+    </div>
+
     <!-- Price Zones Card -->
     <div class="card" style="margin-bottom:16px">
       <div class="section-header" style="margin-bottom:8px">

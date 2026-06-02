@@ -109,6 +109,48 @@ function esc(v) {
 // ── ID generator ─────────────────────────────────────────────
 function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
 
+// ── XIRR — معدل العائد الداخلي السنوي المعدَّل بالزمن ────────
+// Input: مصفوفة { date: Date, amount: number }
+// الشراء = سالب، البيع/التوزيع/القيمة الحالية = موجب
+// Output: النسبة المئوية السنوية، أو null إذا تعذّر الحساب
+function computeXIRR(flows) {
+  if (!flows || flows.length < 2) return null;
+  const cf = flows.slice().sort((a, b) => a.date - b.date);
+  const t0    = cf[0].date;
+  const years = cf.map(c => (c.date - t0) / (365 * 86400000));
+  const amts  = cf.map(c => c.amount);
+  if (!amts.some(a => a > 0) || !amts.some(a => a < 0)) return null;
+
+  const npv  = r => amts.reduce((s, a, i) => s + a / Math.pow(1 + r, years[i]), 0);
+  const dNpv = r => amts.reduce((s, a, i) => s - years[i] * a / Math.pow(1 + r, years[i] + 1), 0);
+
+  // Newton-Raphson
+  let r = 0.1;
+  for (let i = 0; i < 100; i++) {
+    const f = npv(r), d = dNpv(r);
+    if (!isFinite(f) || !isFinite(d) || d === 0) break;
+    const r2 = r - f / d;
+    if (!isFinite(r2)) break;
+    if (Math.abs(r2 - r) < 1e-7) { r = r2; break; }
+    r = r2;
+    if (r <= -0.9999) r = -0.9999;
+  }
+  // fallback: بحث ثنائي
+  if (!isFinite(r) || Math.abs(npv(r)) > 1) {
+    let lo = -0.9999, hi = 10;
+    if (npv(lo) * npv(hi) > 0) return null;
+    for (let i = 0; i < 200; i++) {
+      const mid = (lo + hi) / 2;
+      const fm  = npv(mid);
+      if (Math.abs(fm) < 1e-6) { r = mid; break; }
+      if (npv(lo) * fm < 0) hi = mid; else lo = mid;
+      r = mid;
+    }
+  }
+  if (!isFinite(r) || r <= -0.9999 || r > 100) return null;
+  return r * 100;
+}
+
 // ── UI helpers ────────────────────────────────────────────────
 function showToast(msg, type = 'info') {
   const t = document.getElementById('toast');

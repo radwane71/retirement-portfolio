@@ -75,12 +75,33 @@ async function loadHistoricalData() {
   const totalSells = txRows.filter(t => t.type==='sell').reduce((s,t) => s + +t.total, 0);
   const netCapital = Math.max(1, totalBuys - totalSells);
 
-  // معدل نمو رأس المال السنوي (CAGR)
-  // القيمة الحالية ÷ صافي ما أنفق، مرفوعاً للسنة
+  // ── معدل النمو السنوي: XIRR الحقيقي (أدق من CAGR) ──────────
+  // XIRR يأخذ توقيت كل معاملة في الحسبان — لا يُضلَّل بإيداعات متأخرة
+  const xirrFlows = [];
+  txRows.forEach(t => {
+    if (t.type === 'buy')  xirrFlows.push({ date: new Date(t.date), amount: -(+t.total) });
+    if (t.type === 'sell') xirrFlows.push({ date: new Date(t.date), amount: +(+t.total) });
+  });
+  divRows.forEach(d => {
+    // نستخدم السنة فقط إن لم يكن هناك تاريخ
+    const dDate = d.date ? new Date(d.date) : new Date(d.year + '-06-01');
+    xirrFlows.push({ date: dDate, amount: +d.amount });
+  });
+  if (currentValue > 0) xirrFlows.push({ date: new Date(), amount: currentValue });
+
+  const xirrResult = computeXIRR(xirrFlows);   // من utils.js
+
+  // annCapGrowth: XIRR إن توفّر، وإلا CAGR احتياطياً
   const rawCapGrowth = (netCapital > 0 && currentValue > 0)
     ? Math.pow(currentValue / netCapital, 1 / yearsActive) - 1
     : 0.07;
-  const annCapGrowth = Math.min(0.40, Math.max(0.02, rawCapGrowth));
+  const xirrRate = xirrResult != null ? xirrResult / 100 : null;
+  // خصم عائد الأرباح من XIRR للحصول على نمو رأس المال فقط
+  const annCapGrowth = Math.min(0.40, Math.max(0.02,
+    xirrRate != null
+      ? Math.max(0.01, xirrRate - safeDivYield)   // نمو السعر فقط
+      : rawCapGrowth
+  ));
 
   // عائد الأرباح السنوي: نستخدم آخر سنتين فعليتين من الأرباح ÷ القيمة السوقية الحالية
   // هذا أدق من المتوسط التاريخي الكلي لأنه يعكس الوضع الفعلي للمحفظة الحالية
@@ -169,7 +190,9 @@ async function loadHistoricalData() {
     avgMonthlyDeposit, totalDivAll,
     totalBuys, totalSells,
     yearsActive, firstDate,
-    capitalWeightedMonths,   // ← العمر الفعلي المرجَّح بالتدفقات
+    capitalWeightedMonths,
+    xirr: xirrResult,           // ← XIRR الحقيقي (للعرض في الملخص)
+    xirrUsed: xirrRate != null, // ← هل استُخدم XIRR كأساس للسيناريوهات؟
     currentYear: today.getFullYear(),
     divByYear,
     holdingsCount: hRows.length,
@@ -318,10 +341,19 @@ function renderHistSummary() {
     badge.textContent = `${h.yearsActive.toFixed(1)} سنة بيانات (${from}–${h.currentYear})`;
   }
 
+  // XIRR: المصدر الأصدق للعائد التاريخي الحقيقي
+  const xirrLabel = h.xirr != null
+    ? `${h.xirr >= 0 ? '+' : ''}${h.xirr.toFixed(2)}%`
+    : '—';
+  const growthLabel = h.xirrUsed
+    ? `${pct(h.annCapGrowth)} <span style="font-size:0.65rem;color:var(--success)" title="مشتق من XIRR">✓XIRR</span>`
+    : pct(h.annCapGrowth);
+
   const items = [
     { val: fmt(h.currentValue),           lbl: 'القيمة السوقية الحالية' },
     { val: fmt(h.costBasis),              lbl: 'التكلفة الأساسية' },
-    { val: pct(h.annCapGrowth),           lbl: 'نمو رأس المال السنوي' },
+    { val: xirrLabel,                     lbl: 'XIRR — العائد الحقيقي' },
+    { val: growthLabel,                   lbl: 'نمو رأس المال (أساس السيناريوهات)', raw: true },
     { val: pct(h.safeDivYield),           lbl: 'عائد الأرباح السنوي' },
     { val: fmt(h.avgAnnualDiv),           lbl: 'متوسط الأرباح السنوية' },
     { val: fmt(h.totalDivAll),            lbl: 'إجمالي الأرباح المتراكمة' },
@@ -332,8 +364,8 @@ function renderHistSummary() {
   const el = document.getElementById('hist-summary');
   if (el) el.innerHTML = items.map(i => `
     <div class="hist-item">
-      <div class="h-val">${i.val}</div>
-      <div class="h-lbl">${i.lbl}</div>
+      <div class="h-val">${i.raw ? i.val : esc(i.val)}</div>
+      <div class="h-lbl">${esc(i.lbl)}</div>
     </div>`).join('');
 
   // ملء القيم الافتراضية في حقول المدخلات

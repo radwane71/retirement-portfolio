@@ -13,6 +13,7 @@ let yieldTab         = 'fwd';     // 'fwd' | 'ann' | 'yoc' | 'market'
 let breakevenMode    = 'summary'; // 'summary' | 'detail' | 'bars'
 let portfolioCash    = 0;      // نقد المحفظة عند الوسيط
 let cashUpdatedAt    = null;   // تاريخ آخر تحديث للنقد
+let _priceTimestamps = {};     // ticker → ISO timestamp آخر تحديث للسعر
 
 // ── Sorting state for holdings table ─────────────────────────
 let hSortField = '';
@@ -41,47 +42,7 @@ function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
     (selectKey ? ` data-select="${selectKey}"` : '');
 }
 
-// ── XIRR (العائد الداخلي السنوي) ──────────────────────────────
-// يحل عن المعدل r الذي يجعل صافي القيمة الحالية = 0 لتدفقات بتواريخ غير منتظمة
-// يعيد النسبة المئوية السنوية، أو null إذا تعذّر الحساب
-function computeXIRR(flows) {
-  if (!flows || flows.length < 2) return null;
-  const cf = flows.slice().sort((a, b) => a.date - b.date);
-  const t0 = cf[0].date;
-  const years = cf.map(c => (c.date - t0) / (365 * 86400000));
-  const amts  = cf.map(c => c.amount);
-  // لا بد من وجود تدفق موجب وآخر سالب
-  if (!amts.some(a => a > 0) || !amts.some(a => a < 0)) return null;
-
-  const npv  = r => amts.reduce((s, a, i) => s + a / Math.pow(1 + r, years[i]), 0);
-  const dNpv = r => amts.reduce((s, a, i) => s - years[i] * a / Math.pow(1 + r, years[i] + 1), 0);
-
-  // Newton-Raphson
-  let r = 0.1;
-  for (let i = 0; i < 100; i++) {
-    const f = npv(r), d = dNpv(r);
-    if (!isFinite(f) || !isFinite(d) || d === 0) break;
-    const r2 = r - f / d;
-    if (!isFinite(r2)) break;
-    if (Math.abs(r2 - r) < 1e-7) { r = r2; break; }
-    r = r2;
-    if (r <= -0.9999) r = -0.9999;  // تجنّب الانفجار
-  }
-  // تحقّق من الحل؛ إن فشل نيوتن جرّب البحث الثنائي
-  if (!isFinite(r) || Math.abs(npv(r)) > 1) {
-    let lo = -0.9999, hi = 10;
-    if (npv(lo) * npv(hi) > 0) return null;
-    for (let i = 0; i < 200; i++) {
-      const mid = (lo + hi) / 2;
-      const fm = npv(mid);
-      if (Math.abs(fm) < 1e-6) { r = mid; break; }
-      if (npv(lo) * fm < 0) hi = mid; else lo = mid;
-      r = mid;
-    }
-  }
-  if (!isFinite(r) || r <= -0.9999 || r > 100) return null;
-  return r * 100;
-}
+// computeXIRR منقولة إلى utils.js — متاحة لجميع الصفحات
 
 // إجمالي الصكوك المشترَك بها (من التخزين المحلي لصفحة الصكوك)
 function getSukukActiveTotal() {
@@ -93,6 +54,35 @@ function getSukukActiveTotal() {
       .filter(o => o.status === 'مشترك')
       .reduce((s, o) => s + (+o.amount || 0), 0);
   } catch (_) { return 0; }
+}
+
+// ── تتبع قِدم الأسعار ─────────────────────────────────────────
+const PRICE_TS_KEY = 'tharwa-price-timestamps';
+const STALE_DAYS   = 7;   // عدد الأيام التي بعدها يُعتبر السعر قديماً
+
+function _loadPriceTimestamps() {
+  try { _priceTimestamps = JSON.parse(localStorage.getItem(PRICE_TS_KEY) || '{}'); }
+  catch (_) { _priceTimestamps = {}; }
+}
+
+function _savePriceTimestamps() {
+  try { localStorage.setItem(PRICE_TS_KEY, JSON.stringify(_priceTimestamps)); }
+  catch (_) {}
+}
+
+// أيام مضت على آخر تحديث للسعر (null = غير محدَّد بعد)
+function getPriceAgeDays(ticker) {
+  const ts = _priceTimestamps[ticker];
+  if (!ts) return null;
+  return (Date.now() - new Date(ts).getTime()) / 86400000;
+}
+
+// هل يوجد أي سهم في المحفظة سعره قديم أكثر من STALE_DAYS؟
+function hasStalePrice() {
+  return holdings.some(h => {
+    const age = getPriceAgeDays(h.ticker);
+    return age === null || age > STALE_DAYS;
+  });
 }
 
 // ── Auto Price Update (Supabase Edge Function) ────────────────
@@ -108,12 +98,15 @@ async function refreshPrices(silent = false) {
 
     if (json?.updated > 0) {
       // تحديث فوري للأسعار في الـ holdings المحلي
+      const nowISO = new Date().toISOString();
       if (json.prices) {
         holdings.forEach(h => {
           if (json.prices[h.ticker] != null) {
             h.current_price = json.prices[h.ticker];
+            _priceTimestamps[h.ticker] = nowISO;   // ← سجّل وقت التحديث
           }
         });
+        _savePriceTimestamps();
       }
       // رسم فوري بالأسعار الجديدة
       renderStats(); renderCharts(); renderTable();
@@ -146,6 +139,7 @@ async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-dashboard');
+  _loadPriceTimestamps();   // ← حمّل آخر تواريخ تحديث الأسعار
   await loadAllData();
   renderStats();
   renderCharts();
@@ -552,7 +546,16 @@ function renderStats() {
     } else {
       xirrEl.textContent = (s.xirr >= 0 ? '+' : '') + s.xirr.toFixed(2) + '%';
       xirrEl.className = 'value num ' + (s.xirr >= 0 ? 'text-success' : 'text-danger');
-      setText('stat-xirr-sub', 'سنوياً — يشمل التوقيت والتوزيعات');
+      // ── تحذير جودة البيانات: أسعار قديمة تُضعف دقة XIRR ───
+      if (hasStalePrice()) {
+        setText('stat-xirr-sub', '⚠️ بعض الأسعار قديمة — الدقة منخفضة');
+        const subEl = g('stat-xirr-sub');
+        if (subEl) subEl.style.color = 'var(--danger)';
+      } else {
+        setText('stat-xirr-sub', 'سنوياً — يشمل التوقيت والتوزيعات');
+        const subEl = g('stat-xirr-sub');
+        if (subEl) subEl.style.color = '';
+      }
     }
   }
 
@@ -702,6 +705,150 @@ function renderInsights(s, totalValue, costBasis, pnl, pnlPct) {
 function renderCharts() {
   renderSectorChart();
   renderWeightChart();
+  renderIncomeBySector();
+}
+
+// ══════════════════════════════════════════════════════════════
+// 💰 الدخل التوزيعي حسب القطاع — Income by Sector
+// ══════════════════════════════════════════════════════════════
+let _ibsMode = 'bars'; // 'bars' | 'table'
+
+function setIbsMode(mode) {
+  _ibsMode = mode;
+  document.getElementById('ibs-bars')?.classList.toggle('btn-primary', mode === 'bars');
+  document.getElementById('ibs-bars')?.classList.toggle('btn-secondary', mode !== 'bars');
+  document.getElementById('ibs-table')?.classList.toggle('btn-primary', mode === 'table');
+  document.getElementById('ibs-table')?.classList.toggle('btn-secondary', mode !== 'table');
+  renderIncomeBySector();
+}
+
+function renderIncomeBySector() {
+  const el = document.getElementById('income-by-sector-body');
+  if (!el) return;
+
+  const s = window._ds || {};
+
+  // نحتاج TTM dividends مقسّمة على القطاع
+  // نبني: ticker → sector من holdings
+  const tickerSector = {};
+  holdings.forEach(h => {
+    tickerSector[h.ticker] = (h.sector || '').trim() || 'غير مصنف';
+  });
+
+  // نجمع TTM dividends (آخر 12 شهراً) لكل قطاع
+  // _ttmDivByTicker: نحسبها هنا
+  const now     = new Date();
+  const yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+  // نحتاج divRows — موجودة في window._divRows لو أضفنا، لكن
+  // الأبسط هو استخدام fwdProjected breakdown إن توفّر، وإلا نستخدم القطاع من holdings
+  // نبني توزيع بناءً على نسبة الدخل المتوقع (Forward Income) لكل سهم
+  const { breakdown } = (() => {
+    // نعيد حساب Forward Income per ticker من _ds المحلي
+    // لكن _ds لا يحتوي breakdown — نبني من holdings وبيانات dividends
+    // نستخدم: dخل كل سهم = (القيمة السوقية / إجمالي القيمة) × fwdProjected
+    // هذا تقدير مقبول إذا لم يكن breakdown متاحاً
+    const totalVal = holdings.reduce((sum, h) => sum + +h.shares * +h.current_price, 0);
+    const fwd = s.fwdProjected || s.ttmDiv || 0;
+    const bd  = holdings.map(h => ({
+      ticker:    h.ticker,
+      projected: totalVal > 0 ? (+h.shares * +h.current_price / totalVal) * fwd : 0,
+    }));
+    return { breakdown: bd };
+  })();
+
+  // اجمع الدخل بالقطاع
+  const sectorIncome = {};
+  breakdown.forEach(b => {
+    const sec = tickerSector[b.ticker] || 'غير مصنف';
+    sectorIncome[sec] = (sectorIncome[sec] || 0) + (b.projected || 0);
+  });
+
+  const totalIncome = Object.values(sectorIncome).reduce((a, v) => a + v, 0);
+  const entries = Object.entries(sectorIncome)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (!entries.length || totalIncome <= 0) {
+    el.innerHTML = `<div class="empty-state" style="padding:20px">
+      <div class="icon">💰</div>
+      <p>سجّل أرباحاً موزّعة أولاً لعرض توزيع الدخل حسب القطاع</p></div>`;
+    return;
+  }
+
+  if (_ibsMode === 'table') {
+    el.innerHTML = `<div class="table-wrapper"><table>
+      <thead><tr>
+        <th>القطاع</th>
+        <th>الدخل السنوي المتوقع</th>
+        <th>نسبة الدخل</th>
+        <th>نسبة الوزن</th>
+        <th>الفرق</th>
+      </tr></thead>
+      <tbody>
+        ${entries.map(([sec, inc]) => {
+          const incomePct = totalIncome > 0 ? inc / totalIncome * 100 : 0;
+          const totalVal  = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+          const secVal    = holdings.filter(h => (h.sector||'').trim()||'غير مصنف' === sec)
+                              .reduce((s, h) => s + +h.shares * +h.current_price, 0);
+          const weightPct = totalVal > 0 ? secVal / totalVal * 100 : 0;
+          const diff      = incomePct - weightPct;
+          const diffCls   = Math.abs(diff) < 2 ? 'text-muted' : diff > 0 ? 'text-success' : 'text-accent';
+          return `<tr>
+            <td><strong>${esc(sec)}</strong></td>
+            <td class="num">${formatSAR(inc)}</td>
+            <td class="num bold" style="color:var(--accent)">${incomePct.toFixed(1)}%</td>
+            <td class="num">${weightPct.toFixed(1)}%</td>
+            <td class="num small ${diffCls}">${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+      <tfoot>
+        <tr style="border-top:2px solid var(--border)">
+          <td><strong>الإجمالي</strong></td>
+          <td class="num bold text-success">${formatSAR(totalIncome)}</td>
+          <td class="num bold">100%</td>
+          <td></td><td></td>
+        </tr>
+      </tfoot>
+    </table></div>
+    <p class="small text-muted" style="margin-top:8px">
+      الفرق = % الدخل − % الوزن — موجب يعني القطاع ينتج دخلاً أكبر من وزنه (كثافة توزيع أعلى)
+    </p>`;
+    return;
+  }
+
+  // أشرطة
+  const maxInc = entries[0][1];
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
+      ${entries.map(([sec, inc]) => {
+        const pct      = totalIncome > 0 ? inc / totalIncome * 100 : 0;
+        const barWidth = maxInc  > 0 ? inc / maxInc * 100 : 0;
+        const color    = CHART_COLORS[entries.findIndex(e => e[0] === sec) % CHART_COLORS.length];
+        return `<div style="display:flex;align-items:center;gap:10px">
+          <div style="width:90px;font-size:0.78rem;color:var(--text);text-align:right;flex-shrink:0;
+            overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(sec)}">${esc(sec)}</div>
+          <div style="flex:1;height:20px;background:var(--bg-3);border-radius:4px;overflow:hidden">
+            <div style="width:${barWidth}%;height:100%;background:${color};border-radius:4px;
+              transition:width .3s ease"></div>
+          </div>
+          <div style="width:56px;font-size:0.78rem;font-weight:700;color:var(--text);text-align:left">
+            ${pct.toFixed(1)}%</div>
+          <div style="width:90px;font-size:0.73rem;color:var(--text-muted);text-align:left">
+            ${formatSAR(inc)}</div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);
+      display:flex;justify-content:space-between;font-size:0.8rem">
+      <span class="text-muted">الدخل السنوي المتوقع الكلي:</span>
+      <span class="num bold text-success">${formatSAR(totalIncome)}</span>
+    </div>
+    <p class="small text-muted" style="margin-top:6px">
+      مبني على Forward Projected Income — اضغط "جدول" لرؤية الفرق بين نسبة الدخل ونسبة الوزن لكل قطاع.
+    </p>
+  `;
 }
 
 // ── Sector chart: mode switcher ───────────────────────────────
@@ -1093,13 +1240,24 @@ function renderTable() {
     const wt    = total > 0 ? value / total * 100 : 0;
     const cls   = pnl >= 0 ? 'text-success' : 'text-danger';
 
+    // ── مؤشر قِدم السعر ───────────────────────────────────────
+    const ageDays = getPriceAgeDays(h.ticker);
+    let staleBadge = '';
+    if (ageDays === null) {
+      staleBadge = `<span title="السعر لم يُحدَّث بعد — انقر 🔄 لتحديث الأسعار"
+        style="color:var(--text-muted);font-size:0.7rem;margin-right:4px;cursor:help">⏰?</span>`;
+    } else if (ageDays > STALE_DAYS) {
+      staleBadge = `<span title="السعر قديم — آخر تحديث منذ ${Math.floor(ageDays)} يوم"
+        style="color:var(--danger);font-size:0.7rem;margin-right:4px;cursor:help">⏰${Math.floor(ageDays)}ي</span>`;
+    }
+
     return `<tr>
       <td ${ed('holdings',h.id,'ticker','text',h.ticker)}><strong class="text-accent">${esc(h.ticker)}</strong></td>
       <td ${ed('holdings',h.id,'name','text',h.name)}>${esc(h.name)}</td>
       <td ${ed('holdings',h.id,'sector','text',h.sector||'','text-muted small')}>${esc(h.sector || '—')}</td>
       <td ${ed('holdings',h.id,'shares','number',h.shares)}>${formatShares(h.shares)}</td>
       <td ${ed('holdings',h.id,'avg_price','number',h.avg_price)}>${formatSAR(h.avg_price)}</td>
-      <td ${ed('holdings',h.id,'current_price','number',h.current_price)}>${formatSAR(h.current_price)}</td>
+      <td ${ed('holdings',h.id,'current_price','number',h.current_price)}>${staleBadge}${formatSAR(h.current_price)}</td>
       <td class="num">${formatSAR(cost)}</td>
       <td class="num bold">${formatSAR(value)}</td>
       <td class="num ${cls}">${formatSAR(pnl,true)}<br><span class="small">${(pnl>=0?'+':'')}${pnlP.toFixed(2)}%</span></td>

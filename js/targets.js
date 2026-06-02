@@ -539,4 +539,187 @@ function exportTargetsCSV() {
   showToast(`✓ تم التصدير`, 'success');
 }
 
+// ══════════════════════════════════════════════════════════════
+// ⚖️ محرك إعادة التوازن — Rebalancing Engine
+// ══════════════════════════════════════════════════════════════
+
+function runRebalancing() {
+  const budget       = +document.getElementById('reb-budget')?.value || 0;
+  const method       = document.getElementById('reb-method')?.value || 'gap';
+  const entryFilter  = document.getElementById('reb-entry-filter')?.checked || false;
+  const resultEl     = document.getElementById('reb-result');
+  if (!resultEl) return;
+
+  if (budget <= 0) {
+    resultEl.innerHTML = `<div class="empty-state" style="padding:32px">
+      <div class="icon">⚖️</div><p>أدخل المبلغ المتاح لبدء الحساب</p></div>`;
+    return;
+  }
+  if (!holdings.length || !totalValue) {
+    resultEl.innerHTML = `<div class="empty-state" style="padding:24px">
+      <div class="icon">📋</div><p>لا توجد أسهم في المحفظة</p></div>`;
+    return;
+  }
+
+  // ── بناء قائمة المرشحين ─────────────────────────────────────
+  // فقط الأسهم الفعلية (ليس المخطط) ذات الهدف المحدد والسعر الموجود
+  const candidates = holdings
+    .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0)
+    .map(h => {
+      const currentPct = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
+      const targetPct  = stockTargets[h.ticker] || 0;
+      const gap        = targetPct - currentPct;           // موجب = ناقص الهدف
+      const zone       = stockZones[h.ticker] || {};
+      const inZone     = !zone.entry_price || +h.current_price <= +zone.entry_price;
+      return { ...h, currentPct, targetPct, gap, inZone };
+    })
+    .filter(c => c.gap > 0.05)                             // فقط الناقص فعلاً (فوق 0.05%)
+    .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
+    .sort((a, b) => b.gap - a.gap);                        // ترتيب تنازلي بالفجوة
+
+  if (!candidates.length) {
+    const msg = entryFilter
+      ? 'لا توجد أسهم ناقصة عن هدفها <strong>ضمن منطقة الشراء</strong> حالياً — حاول رفع الفلتر'
+      : 'المحفظة متوازنة — لا توجد أسهم ناقصة عن أوزانها المستهدفة';
+    resultEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--success)">✅ ${msg}</div>`;
+    return;
+  }
+
+  // ── حساب التوزيع حسب الطريقة ────────────────────────────────
+  let allocations = [];
+
+  if (method === 'gap') {
+    // بالتناسب مع حجم الفجوة
+    const totalGap = candidates.reduce((s, c) => s + c.gap, 0);
+    allocations = candidates.map(c => ({
+      ...c,
+      allocated: budget * (c.gap / totalGap)
+    }));
+  } else if (method === 'equal') {
+    // توزيع متساوٍ بين الأسهم الناقصة
+    const each = budget / candidates.length;
+    allocations = candidates.map(c => ({ ...c, allocated: each }));
+  } else {
+    // أولوية للأكثر انحرافاً فقط
+    allocations = [{ ...candidates[0], allocated: budget }];
+  }
+
+  // ── احسب عدد الأسهم القابل للشراء ──────────────────────────
+  const newPortfolioTotal = totalValue + budget;
+  let totalSpent = 0;
+
+  const rows = allocations.map(c => {
+    const sharesToBuy  = Math.floor(c.allocated / +c.current_price);
+    const cost         = sharesToBuy * +c.current_price;
+    totalSpent        += cost;
+    const newShares    = +c.shares + sharesToBuy;
+    const newValue     = newShares * +c.current_price;
+    const newPct       = newPortfolioTotal > 0 ? newValue / newPortfolioTotal * 100 : 0;
+    const gapAfter     = c.targetPct - newPct;
+    return { ...c, sharesToBuy, cost, newPct, gapAfter };
+  }).filter(r => r.sharesToBuy > 0);
+
+  const leftover = budget - totalSpent;
+
+  // ── رسم الجدول ──────────────────────────────────────────────
+  if (!rows.length) {
+    resultEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted)">
+      ⚠️ المبلغ غير كافٍ لشراء ولو سهم واحد من الأسهم المرشحة
+      <br><span class="small">أدنى سعر: ${formatSAR(Math.min(...candidates.map(c => +c.current_price)))}</span>
+    </div>`;
+    return;
+  }
+
+  const totalCostFmt   = formatSAR(totalSpent);
+  const leftoverFmt    = formatSAR(leftover);
+  const leftoverCls    = leftover > 0 ? 'text-accent' : 'text-success';
+
+  resultEl.innerHTML = `
+    <!-- ملخص الإجراء -->
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;padding:14px 16px;background:var(--bg-3);border-radius:var(--radius);border:1px solid var(--border)">
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="small text-muted">المبلغ المتاح</span>
+        <span class="num bold">${formatSAR(budget)}</span>
+      </div>
+      <div style="color:var(--border);align-self:center">→</div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="small text-muted">إجمالي التكلفة</span>
+        <span class="num bold text-accent">${totalCostFmt}</span>
+      </div>
+      <div style="color:var(--border);align-self:center">=</div>
+      <div style="display:flex;flex-direction:column;gap:3px">
+        <span class="small text-muted">المتبقي نقداً</span>
+        <span class="num bold ${leftoverCls}">${leftoverFmt}</span>
+      </div>
+      <div style="margin-right:auto;display:flex;flex-direction:column;gap:3px;text-align:left">
+        <span class="small text-muted">عدد الأسهم المختلفة</span>
+        <span class="num bold">${rows.length} سهم</span>
+      </div>
+    </div>
+
+    <!-- جدول التوصيات -->
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>الرمز</th>
+            <th>الاسم</th>
+            <th>السعر الحالي</th>
+            <th>أسهم تشتري</th>
+            <th>التكلفة</th>
+            <th>الوزن قبل</th>
+            <th>الوزن بعد</th>
+            <th>الفجوة المتبقية</th>
+            <th>منطقة الشراء</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(r => {
+            const gapAfterCls = Math.abs(r.gapAfter) <= 1 ? 'text-success' : Math.abs(r.gapAfter) <= 3 ? 'text-accent' : 'text-muted';
+            const zoneEl = r.inZone
+              ? '<span style="color:var(--success)">✅ ضمن النطاق</span>'
+              : (stockZones[r.ticker]?.entry_price
+                  ? `<span style="color:var(--text-muted);font-size:0.78rem">فوق ${formatSAR(stockZones[r.ticker].entry_price)}</span>`
+                  : '<span class="text-muted small">—</span>');
+            return `<tr>
+              <td><strong class="text-accent">${esc(r.ticker)}</strong></td>
+              <td>${esc(r.name)}</td>
+              <td class="num">${formatSAR(r.current_price)}</td>
+              <td class="num bold text-accent">${r.sharesToBuy.toLocaleString()}</td>
+              <td class="num bold">${formatSAR(r.cost)}</td>
+              <td class="num text-muted">${r.currentPct.toFixed(2)}%</td>
+              <td class="num bold">${r.newPct.toFixed(2)}%
+                <span class="small" style="color:var(--success)">↑${(r.newPct - r.currentPct).toFixed(2)}%</span>
+              </td>
+              <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>
+              <td>${zoneEl}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    ${rows.some(r => !r.inZone && entryFilter === false && stockZones[r.ticker]?.entry_price) ? `
+    <p class="small text-muted" style="margin-top:10px">
+      💡 بعض الأسهم فوق منطقة الشراء المحددة — فعّل "فقط ضمن منطقة الشراء" لتصفيتها
+    </p>` : ''}
+  `;
+}
+
+function showRebInfo() {
+  alert([
+    '⚖️ محرك إعادة التوازن',
+    '',
+    'يحسب الأسهم الأنسب للشراء بمبلغ محدد لتقريب محفظتك من الأوزان المستهدفة.',
+    '',
+    'طرق التوزيع:',
+    '• بالتناسب مع الفجوة: الأسهم الأبعد عن هدفها تأخذ نصيباً أكبر',
+    '• توزيع متساوٍ: كل سهم ناقص يأخذ نفس المبلغ',
+    '• الأولى بالأولوية: كل المبلغ للسهم الأبعد انحرافاً',
+    '',
+    'عدد الأسهم يُقرَّب للأسفل دائماً (floor) — لا كسور في السهم.',
+    'المتبقي = ما لم يُنفق بعد التقريب.',
+  ].join('\n'));
+}
+
 init();

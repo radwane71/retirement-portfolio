@@ -62,6 +62,7 @@ function renderAll() {
   renderSummaries();
   renderTable();
   renderIncomeChart();
+  renderDividendQuality();
 }
 
 // مجموع التوزيعات الفعلية خلال آخر 12 شهراً (TTM) — العُرف المالي المعتمد
@@ -1060,6 +1061,197 @@ function buildChart(canvas, labels, datasets, stacked = false) {
       }
     }
   });
+}
+
+// ══════════════════════════════════════════════════════════════
+// 🏆 Dividend Quality Dashboard
+// ══════════════════════════════════════════════════════════════
+
+function renderDividendQuality() {
+  const el = document.getElementById('div-quality-body');
+  if (!el) return;
+
+  // بناء: ticker → { year → total_amount }
+  const byTickerYear = {};
+  dividends.forEach(d => {
+    const t = d.ticker;
+    const y = +d.year;
+    if (!t || !y) return;
+    if (!byTickerYear[t]) byTickerYear[t] = {};
+    byTickerYear[t][y] = (byTickerYear[t][y] || 0) + +d.amount;
+  });
+
+  const currentYear = new Date().getFullYear();
+  const tickers = Object.keys(byTickerYear).filter(t => {
+    // فقط الأسهم المحتفظ بها حالياً أو لديها 2+ سنوات توزيع
+    const yrs = Object.keys(byTickerYear[t]).length;
+    return yrs >= 1;
+  });
+
+  if (!tickers.length) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📊</div>
+      <p>سجّل توزيعات أكثر لتفعيل تحليل الجودة</p></div>`;
+    return;
+  }
+
+  const scores = tickers.map(ticker => {
+    const yearMap  = byTickerYear[ticker];
+    const years    = Object.keys(yearMap).map(Number).sort((a,b) => a - b);
+    const amounts  = years.map(y => yearMap[y]);
+    const n        = years.length;
+
+    // ── 1. الاستمرارية (0–35 نقطة) ────────────────────────────
+    // هل هناك فجوات بين سنوات التوزيع؟
+    const minYear = years[0], maxYear = years[n - 1];
+    const expectedYears = maxYear - minYear + 1;
+    const continuityRatio = expectedYears > 0 ? n / expectedYears : 1;
+    const continuityScore = Math.round(continuityRatio * 35);
+
+    // ── 2. نمو التوزيعات (0–35 نقطة) ──────────────────────────
+    let growthScore = 17; // محايد إذا لم يكفِ البيانات
+    let cagr3 = null, cagr5 = null;
+
+    if (n >= 2) {
+      // CAGR آخر N سنة
+      const calcCagr = (from, to) => {
+        if (!yearMap[from] || !yearMap[to] || yearMap[from] <= 0) return null;
+        const periods = to - from;
+        if (periods <= 0) return null;
+        return (Math.pow(yearMap[to] / yearMap[from], 1 / periods) - 1) * 100;
+      };
+
+      cagr3 = calcCagr(currentYear - 3, currentYear - 1) ??
+              calcCagr(years[Math.max(0, n-4)], years[n-1]);
+      cagr5 = calcCagr(currentYear - 5, currentYear - 1) ??
+              calcCagr(years[0], years[n-1]);
+
+      const cagr = cagr3 ?? cagr5 ?? 0;
+      // 35 نقطة عند نمو ≥ 8%، صفر عند نمو < -10%
+      growthScore = Math.round(Math.min(35, Math.max(0, (cagr + 10) / 18 * 35)));
+    }
+
+    // ── 3. انخفاض التذبذب (0–30 نقطة) ─────────────────────────
+    let volatilityScore = 15; // محايد
+    if (n >= 3) {
+      const mean = amounts.reduce((s, v) => s + v, 0) / n;
+      const variance = amounts.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / n;
+      const cv = mean > 0 ? Math.sqrt(variance) / mean : 1; // معامل الاختلاف
+      // CV = 0 → 30 نقطة، CV ≥ 1 → 0 نقطة
+      volatilityScore = Math.round(Math.max(0, (1 - cv) * 30));
+    }
+
+    const totalScore = continuityScore + growthScore + volatilityScore;
+
+    // حالة آخر توزيع مقارنة بما قبله
+    let trend = 'neutral';
+    if (n >= 2) {
+      const last  = amounts[n - 1];
+      const prev  = amounts[n - 2];
+      if (last > prev * 1.02)       trend = 'up';
+      else if (last < prev * 0.98)  trend = 'down';
+    }
+
+    const h = holdings.find(x => x.ticker === ticker);
+    return {
+      ticker,
+      name:            h?.name || dividends.find(d => d.ticker === ticker)?.name || ticker,
+      years:           n,
+      firstYear:       years[0],
+      lastYear:        years[n - 1],
+      lastAmount:      amounts[n - 1],
+      cagr3, cagr5,
+      continuityScore, growthScore, volatilityScore,
+      totalScore,
+      trend,
+      inPortfolio:     !!h,
+    };
+  }).sort((a, b) => b.totalScore - a.totalScore);
+
+  // ── رسم الجدول ─────────────────────────────────────────────
+  const scoreColor = s => s >= 75 ? '#3fb950' : s >= 50 ? '#f0b429' : '#f85149';
+  const scoreBadge = (s, lbl) =>
+    `<span title="${lbl}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:0.72rem;font-weight:700;
+      background:${scoreColor(s)}22;color:${scoreColor(s)}">${s}</span>`;
+  const trendEl = t =>
+    t === 'up'   ? '<span style="color:var(--success)">↑ نامٍ</span>' :
+    t === 'down' ? '<span style="color:var(--danger)">↓ تراجع</span>' :
+                   '<span style="color:var(--text-muted)">← ثابت</span>';
+  const cagrFmt = v =>
+    v == null ? '<span class="text-muted">—</span>' :
+    `<span style="color:${v >= 0 ? 'var(--success)' : 'var(--danger)'}">
+      ${v >= 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
+
+  el.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>الرمز</th>
+            <th>الاسم</th>
+            <th>الدرجة / 100</th>
+            <th>الاستمرارية<br><span class="small text-muted">/35</span></th>
+            <th>نمو التوزيع<br><span class="small text-muted">/35</span></th>
+            <th>ثبات التوزيع<br><span class="small text-muted">/30</span></th>
+            <th>سنوات<br>التوزيع</th>
+            <th>نمو 3 سنوات<br><span class="small text-muted">CAGR</span></th>
+            <th>آخر توزيع</th>
+            <th>الاتجاه</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${scores.map((s, i) => {
+            const rowCls = !s.inPortfolio ? 'style="opacity:0.6"' : '';
+            const totalColor = scoreColor(s.totalScore);
+            return `<tr ${rowCls}>
+              <td class="small text-muted">${i + 1}</td>
+              <td><strong class="text-accent">${esc(s.ticker)}</strong>
+                ${!s.inPortfolio ? '<span class="small text-muted"> (خارج المحفظة)</span>' : ''}
+              </td>
+              <td>${esc(s.name)}</td>
+              <td>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-size:1.1rem;font-weight:700;color:${totalColor}">${s.totalScore}</span>
+                  <div style="flex:1;height:6px;background:var(--bg-3);border-radius:3px;min-width:60px">
+                    <div style="width:${s.totalScore}%;height:100%;background:${totalColor};border-radius:3px"></div>
+                  </div>
+                </div>
+              </td>
+              <td style="text-align:center">${scoreBadge(s.continuityScore, 'انتظام سنوات التوزيع')}</td>
+              <td style="text-align:center">${scoreBadge(s.growthScore, 'نمو التوزيعات سنة على سنة')}</td>
+              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض التذبذب بين السنوات')}</td>
+              <td class="num">${s.years} <span class="small text-muted">(${s.firstYear}–${s.lastYear})</span></td>
+              <td>${cagrFmt(s.cagr3)}</td>
+              <td class="num">${formatSAR(s.lastAmount)}</td>
+              <td>${trendEl(s.trend)}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <p class="small text-muted" style="margin-top:10px;padding:0 4px">
+      * الدرجات مبنية على بياناتك المُسجّلة فقط — كلما أضفت سنوات أكثر زادت دقة التقييم.
+    </p>
+  `;
+}
+
+function showDivQualityInfo() {
+  alert([
+    '🏆 درجة جودة التوزيعات',
+    '',
+    'الدرجة من 100 مقسّمة على 3 محاور:',
+    '',
+    '📅 الاستمرارية (35 نقطة)',
+    'هل الشركة وزّعت بانتظام بدون سنوات قطع؟',
+    '',
+    '📈 نمو التوزيعات (35 نقطة)',
+    'معدل نمو التوزيع السنوي (CAGR) — كلما نما أكثر كانت الدرجة أعلى.',
+    '',
+    '📊 ثبات التوزيعات (30 نقطة)',
+    'معامل الاختلاف (CV) — كلما كانت التوزيعات متقاربة بين السنوات كانت الدرجة أعلى.',
+    '',
+    'ملاحظة: الدرجة تعكس بياناتك المُسجّلة فقط، وليست تقييماً لجودة الشركة بالمعنى التحليلي الكامل.',
+  ].join('\n'));
 }
 
 init();
