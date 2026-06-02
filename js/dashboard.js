@@ -109,7 +109,7 @@ async function refreshPrices(silent = false) {
         _savePriceTimestamps();
       }
       // رسم فوري بالأسعار الجديدة
-      renderStats(); renderRebalancingAlerts(); renderCharts(); renderTable();
+      renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
       renderPriceZonesCard(); renderBreakEvenCard();
       renderAllocationChart(); renderRetirementCard();
       if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
@@ -143,6 +143,7 @@ async function init() {
   await loadAllData();
   renderStats();
   renderRebalancingAlerts();
+  renderPortfolioHealthCard();
   renderCharts();
   renderTable();
   renderPriceZonesCard();
@@ -433,6 +434,7 @@ async function reloadHoldings() {
     return h;
   });
   renderRebalancingAlerts();
+  renderPortfolioHealthCard();
 }
 
 // ── Tab: طريقة حساب رأس المال ────────────────────────────────
@@ -675,13 +677,323 @@ function renderRebalancingAlerts() {
     </div>`;
 }
 
+// ══════════════════════════════════════════════════════════════
+// 🏥 محلل صحة المحفظة
+//
+// كل مقياس مبني على بيانات موثوقة 100% من المحفظة الفعلية:
+//   - التنوع والتركيز  ← holdings
+//   - التوزيعات        ← _ds.fwdProjected (Forward Income)
+//   - هدف الاستقلال    ← retirement_goal_v1 + _ds.latestNW
+//
+// المرجعية العلمية:
+//   - Benjamin Graham (The Intelligent Investor) — نطاقات عدد الأسهم
+//   - Peter Lynch (mبدأ "diworsification")
+//   - Modern Portfolio Theory — التركيز القطاعي وتأثيره على التشتت
+// ══════════════════════════════════════════════════════════════
+
+function renderPortfolioHealthCard() {
+  const el = document.getElementById('portfolio-health-card');
+  if (!el) return;
+
+  const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  if (!holdings.length || !totalVal) { el.style.display = 'none'; return; }
+  el.style.display = '';
+
+  const s    = window._ds || {};
+  const goal = getRetirementGoal();
+  const gThr = +(localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const yThr = +(localStorage.getItem('tharwa-alert-yellow') ?? 3);
+
+  // ── 1. تنوع الأسهم والقطاعات ───────────────────────────────
+  const stockCount = holdings.length;
+
+  const sectorMap = {};
+  holdings.forEach(h => {
+    const sec = (h.sector || '').trim() || 'غير مصنف';
+    sectorMap[sec] = (sectorMap[sec] || 0) + +h.shares * +h.current_price;
+  });
+  const sectorCount = Object.keys(sectorMap).length;
+  const sectorEntries = Object.entries(sectorMap).sort((a, b) => b[1] - a[1]);
+  const largestSectorPct  = sectorEntries[0] ? sectorEntries[0][1] / totalVal * 100 : 0;
+  const largestSectorName = sectorEntries[0]?.[0] || '';
+
+  // ── 2. تركيز الحيازات ──────────────────────────────────────
+  const sorted = [...holdings]
+    .map(h => ({ ticker: h.ticker, name: h.name || h.ticker,
+                 w: +h.shares * +h.current_price / totalVal * 100 }))
+    .sort((a, b) => b.w - a.w);
+  const top1Pct  = sorted[0]?.w   || 0;
+  const top1Name = sorted[0]?.ticker || '';
+  const top3Pct  = sorted.slice(0, 3).reduce((s, h) => s + h.w, 0);
+
+  // ── 3. التوزيعات vs الهدف ──────────────────────────────────
+  const fwdMonthly    = (s.fwdProjected || 0) / 12;
+  const monthlyTarget = goal.monthly || 0;
+
+  // ── 4. التوافق مع هدف الاستقلال المالي ──────────────────────
+  const fireNumber = goal.monthly > 0 && goal.swr > 0
+    ? (goal.monthly * 12) / (goal.swr / 100) : 0;
+  const latestNW    = s.latestNW || totalVal;
+  const fireProgress = fireNumber > 0 ? Math.min(latestNW / fireNumber * 100, 100) : null;
+  const targetYear  = goal.target_year || 0;
+  const yearsLeft   = targetYear > 0 ? targetYear - new Date().getFullYear() : null;
+
+  // ── 5. انضباط الأوزان ──────────────────────────────────────
+  const hasTargets = Object.values(stockTargets).some(t => t > 0);
+  let redDev = 0, yDev = 0;
+  if (hasTargets) {
+    Object.entries(stockTargets).forEach(([ticker, target]) => {
+      if (!target) return;
+      const h   = holdings.find(x => x.ticker === ticker);
+      const cur = h ? +h.shares * +h.current_price / totalVal * 100 : 0;
+      const d   = Math.abs(cur - target);
+      if (d > yThr)       redDev++;
+      else if (d > gThr)  yDev++;
+    });
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // تقييم كل بُعد  → 'green' | 'yellow' | 'red' | 'gray'
+  // ══════════════════════════════════════════════════════════
+
+  // بُعد A: التنوع
+  let aScore, aLabel, aDetail;
+  if (stockCount < 5) {
+    aScore = 'red';    aLabel = 'تركيز عالٍ';
+    aDetail = `${stockCount} أسهم · ${sectorCount} قطاع — أقل من 5 أسهم يُعرّض المحفظة لخسائر حادة`;
+  } else if (stockCount <= 9 || sectorCount <= 2) {
+    aScore = 'yellow'; aLabel = 'تنوع محدود';
+    aDetail = `${stockCount} أسهم · ${sectorCount} قطاع${sectorCount <= 2 ? ' — قطاعات غير كافية للحماية' : ''}`;
+  } else if (stockCount <= 20 && sectorCount >= 4) {
+    aScore = 'green';  aLabel = 'تنوع جيد';
+    aDetail = `${stockCount} أسهم · ${sectorCount} قطاعات — النطاق الأمثل لمحفظة التوزيعات`;
+  } else if (stockCount > 25) {
+    aScore = 'yellow'; aLabel = 'مراقبة التشتت';
+    aDetail = `${stockCount} سهماً — تأكد أن كل سهم يضيف قيمة فعلية (Peter Lynch: diworsification)`;
+  } else {
+    aScore = 'green';  aLabel = 'تنوع جيد';
+    aDetail = `${stockCount} أسهم · ${sectorCount} قطاعات`;
+  }
+
+  // بُعد B: التركيز
+  let bScore, bLabel, bDetail;
+  if (top1Pct > 30 || top3Pct > 65 || largestSectorPct > 50) {
+    bScore = 'red';    bLabel = 'تركيز مرتفع جداً';
+    bDetail = `أكبر سهم (${top1Name}): ${top1Pct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}% · أكبر قطاع: ${largestSectorPct.toFixed(1)}%`;
+  } else if (top1Pct > 20 || top3Pct > 50 || largestSectorPct > 38) {
+    bScore = 'yellow'; bLabel = 'تركيز مرتفع';
+    bDetail = `أكبر سهم (${top1Name}): ${top1Pct.toFixed(1)}% · أكبر قطاع (${largestSectorName}): ${largestSectorPct.toFixed(1)}%`;
+  } else {
+    bScore = 'green';  bLabel = 'توزيع متوازن';
+    bDetail = `أكبر سهم: ${top1Pct.toFixed(1)}% · أكبر قطاع (${largestSectorName}): ${largestSectorPct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}%`;
+  }
+
+  // بُعد C: التوزيعات vs الهدف
+  let cScore, cLabel, cDetail;
+  if (!monthlyTarget) {
+    cScore = 'gray';   cLabel = 'هدف غير محدد';
+    cDetail = `دخل متوقع ${formatSAR(fwdMonthly)}/شهر — حدد هدف FIRE لمقارنة التقدم`;
+  } else {
+    const ratio = fwdMonthly / monthlyTarget * 100;
+    if (ratio >= 100) {
+      cScore = 'green';  cLabel = 'يغطي الهدف';
+      cDetail = `${formatSAR(fwdMonthly)}/شهر ≥ الهدف ${formatSAR(monthlyTarget)} ✅`;
+    } else if (ratio >= 60) {
+      cScore = 'yellow'; cLabel = `${ratio.toFixed(0)}% من الهدف`;
+      cDetail = `${formatSAR(fwdMonthly)}/شهر من أصل ${formatSAR(monthlyTarget)} — متقدم في مرحلة البناء`;
+    } else {
+      cScore = 'yellow'; cLabel = `${ratio.toFixed(0)}% من الهدف`;
+      cDetail = `${formatSAR(fwdMonthly)}/شهر من أصل ${formatSAR(monthlyTarget)} — طبيعي في مراحل التراكم المبكرة`;
+    }
+  }
+
+  // بُعد D: التوافق مع الهدف الزمني
+  let dScore, dLabel, dDetail;
+  if (fireProgress === null) {
+    dScore = 'gray';   dLabel = 'هدف غير محدد';
+    dDetail = yearsLeft != null ? `${yearsLeft} سنة حتى ${targetYear}` : 'حدد هدف FIRE + سنة التقاعد';
+  } else if (fireProgress >= 100) {
+    dScore = 'green';  dLabel = 'الهدف محقق';
+    dDetail = `100% — صافي ثروتك يكفي للاستقلال المالي${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}`;
+  } else {
+    const pStr = fireProgress.toFixed(0) + '%';
+    const rem  = formatSAR(Math.max(0, fireNumber - latestNW));
+    if (fireProgress >= 50) {
+      dScore = 'yellow'; dLabel = `${pStr} من الهدف`;
+    } else {
+      dScore = 'yellow'; dLabel = `${pStr} من الهدف`;
+    }
+    dDetail = `${pStr} — متبقي ${rem}${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}`;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // التوصيات — كل توصية مبنية على بيانات حقيقية ومحددة
+  // ══════════════════════════════════════════════════════════
+  const tips = [];
+
+  // T1: عدد الأسهم
+  if (stockCount < 5)
+    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. الهدف: 10–15 سهم على الأقل لمحفظة توزيعات منيعة` });
+  else if (stockCount < 8)
+    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — تنوع أولي جيد. استمر بالإضافة وصولاً للنطاق الأمثل (10–20 سهم)` });
+  else if (stockCount > 25)
+    tips.push({ lvl:'yellow', txt: `${stockCount} سهماً — راجع كل سهم: هل تعرفه وتتابعه؟ الأسهم التي لا تعرفها جيداً تزيد المخاطر لا تقللها` });
+
+  // T2: عدد القطاعات
+  if (sectorCount === 1)
+    tips.push({ lvl:'red',    txt: `قطاع واحد فقط (${largestSectorName}) — أزمة في هذا القطاع ستضرب 100% من محفظتك. أضف قطاعات مختلفة` });
+  else if (sectorCount === 2)
+    tips.push({ lvl:'red',    txt: `قطاعان فقط — غير كافٍ للحماية من الصدمات القطاعية. الهدف: 4–5 قطاعات` });
+  else if (sectorCount === 3)
+    tips.push({ lvl:'yellow', txt: `3 قطاعات — إضافة قطاع رابع يزيد الحماية بشكل ملحوظ ضد أزمات القطاع الواحد` });
+
+  // T3: تركيز أكبر سهم
+  if (top1Pct > 30)
+    tips.push({ lvl:'red',    txt: `${top1Name} يشكل ${top1Pct.toFixed(1)}% — تراجع حاد في هذا السهم وحده يُضعف المحفظة بشكل كبير. الهدف: لا سهم > 20%` });
+  else if (top1Pct > 20)
+    tips.push({ lvl:'yellow', txt: `${top1Name} يشكل ${top1Pct.toFixed(1)}% — تركيز مرتفع. خفّضه تدريجياً لأقل من 20% عند أي فرصة إعادة توازن` });
+
+  // T4: تركيز قطاعي
+  if (largestSectorPct > 50)
+    tips.push({ lvl:'red',    txt: `قطاع ${largestSectorName} يشكل ${largestSectorPct.toFixed(1)}% — تركيز قطاعي مرتفع جداً. أضف أسهماً من قطاعات دفاعية` });
+  else if (largestSectorPct > 38)
+    tips.push({ lvl:'yellow', txt: `قطاع ${largestSectorName} (${largestSectorPct.toFixed(1)}%) — حاول إبقاؤه دون 35% وزيادة القطاعات الأخرى` });
+
+  // T5: الأوزان
+  if (hasTargets && redDev > 0)
+    tips.push({ lvl:'yellow', txt: `${redDev} سهم منحرف بشكل حاد عن هدفه — افتح "أهداف الأسهم" للتصحيح قبل أن يتسع الانحراف` });
+  else if (!hasTargets && stockCount >= 5)
+    tips.push({ lvl:'blue',   txt: `لم تحدد أهداف أوزان بعد — تحديد وزن لكل سهم يجعل قرارات الشراء والبيع أكثر انضباطاً وأقل عاطفية` });
+
+  // T6: التوزيعات
+  if (monthlyTarget > 0 && fwdMonthly < monthlyTarget * 0.4) {
+    const fwdYoc = (s.divYieldFwd || 0);
+    if (fwdYoc > 0.5) {
+      const neededPort = (monthlyTarget * 12) / (fwdYoc / 100);
+      tips.push({ lvl:'blue',  txt: `لتحقيق ${formatSAR(monthlyTarget)}/شهر بعائد ${fwdYoc.toFixed(1)}% تحتاج محفظة بحجم ${formatSAR(neededPort)} — اجعل هذا هدفك المرحلي` });
+    }
+  }
+
+  // T7: هدف زمني
+  if (targetYear > 0 && yearsLeft != null && yearsLeft <= 5 && fireProgress !== null && fireProgress < 80)
+    tips.push({ lvl:'red',    txt: `${yearsLeft} سنوات فقط للوصول ${targetYear} ونسبة الإنجاز ${fireProgress?.toFixed(0)}% — قد تحتاج لزيادة الادخار الشهري أو مراجعة الهدف` });
+
+  const shownTips = tips.slice(0, 4);  // حد أقصى 4 توصيات
+
+  // ══════════════════════════════════════════════════════════
+  // دوال مساعدة للرسم
+  // ══════════════════════════════════════════════════════════
+  const DOT = {
+    green:  `<span style="color:#3fb950;font-size:.95rem;line-height:1">●</span>`,
+    yellow: `<span style="color:#f0b429;font-size:.95rem;line-height:1">●</span>`,
+    red:    `<span style="color:#f85149;font-size:.95rem;line-height:1">●</span>`,
+    gray:   `<span style="color:#8b949e;font-size:.95rem;line-height:1">○</span>`,
+  };
+  const CLR = { green:'#3fb950', yellow:'#f0b429', red:'#f85149', gray:'#8b949e' };
+  const TIP_CLR = { red:'#f85149', yellow:'#f0b429', blue:'#58a6ff', green:'#3fb950' };
+
+  const dimRow = (dot, labelTxt, score, detail) => `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="width:18px;flex-shrink:0;padding-top:1px">${DOT[dot] || DOT.gray}</div>
+      <div style="flex:0 0 110px;font-weight:600;font-size:.83rem;color:${CLR[score] || CLR.gray};padding-top:1px">${labelTxt}</div>
+      <div style="flex:1;font-size:.82rem;color:var(--text-2);line-height:1.5">${detail}</div>
+    </div>`;
+
+  const tipHtml = shownTips.map(t => `
+    <div style="display:flex;gap:8px;margin-bottom:7px;align-items:flex-start">
+      <span style="flex-shrink:0;width:7px;height:7px;border-radius:50%;background:${TIP_CLR[t.lvl]||'#8b949e'};margin-top:5px"></span>
+      <span style="font-size:.82rem;color:var(--text-2);line-height:1.6">${t.txt}</span>
+    </div>`).join('');
+
+  // ══════════════════════════════════════════════════════════
+  // رسم الكارت
+  // ══════════════════════════════════════════════════════════
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+      <span style="font-weight:700;font-size:.95rem">🏥 محلل صحة المحفظة</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        ${targetYear > 0
+          ? `<span class="small text-muted">هدف التقاعد: <strong>${targetYear}</strong></span>`
+          : `<button class="btn btn-secondary btn-sm" onclick="editRetirementGoal()" style="font-size:.72rem">+ حدد سنة التقاعد</button>`}
+        <button class="btn btn-secondary btn-sm" onclick="showHealthInfo()" style="font-size:.72rem">ⓘ المنهجية</button>
+      </div>
+    </div>
+
+    <div style="margin-bottom:14px">
+      ${dimRow(aScore, aLabel, aScore, aDetail)}
+      ${dimRow(bScore, bLabel, bScore, bDetail)}
+      ${dimRow(cScore, cLabel, cScore, cDetail)}
+      ${dimRow(dScore, dLabel, dScore, dDetail)}
+    </div>
+
+    ${shownTips.length ? `
+    <div style="background:var(--bg-3);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px">
+      <div style="font-size:.75rem;font-weight:700;color:var(--text-muted);margin-bottom:10px;letter-spacing:.04em;text-transform:uppercase">توصيات</div>
+      ${tipHtml}
+    </div>` : ''}
+
+    <p style="margin:0;font-size:.71rem;color:var(--text-muted)">
+      التقييم مبني على: عدد الأسهم والقطاعات، تركيز الحيازات، التوزيعات المتوقعة، وهدف FIRE —
+      مرجعية: Benjamin Graham · Peter Lynch · Modern Portfolio Theory.
+      لا يشمل Beta أو Volatility (تحتاج بيانات أسعار تاريخية غير متاحة).
+    </p>`;
+}
+
+// ── معلومات منهجية محلل الصحة ───────────────────────────────
+function showHealthInfo() {
+  alert([
+    '🏥 محلل صحة المحفظة — المنهجية والمصادر',
+    '',
+    '── عدد الأسهم (Graham) ──',
+    '  < 5    : خطر تركيز عالٍ',
+    '  5–9   : تنوع محدود',
+    '  10–20 : النطاق الأمثل (Graham: 10–30)',
+    '  21–25 : جيد مع المراقبة',
+    '  > 25  : مراقبة diworsification (Lynch)',
+    '',
+    '── القطاعات ──',
+    '  1–2 : غير محمي',
+    '  3   : أولي',
+    '  4+  : حماية جيدة',
+    '',
+    '── تركيز أكبر سهم ──',
+    '  > 30% : مرتفع جداً',
+    '  20–30%: مرتفع',
+    '  < 20% : مقبول',
+    '',
+    '── تركيز أكبر قطاع ──',
+    '  > 50% : مرتفع جداً',
+    '  38–50%: مرتفع',
+    '  < 38% : متوازن',
+    '',
+    '── التوزيعات vs الهدف ──',
+    '  Forward Income الشهري مقارنة بهدف FIRE',
+    '  المصدر: صفحة الأرباح الموزعة (Forward YOC)',
+    '',
+    '── هدف الاستقلال المالي ──',
+    '  نسبة الإنجاز = صافي الثروة ÷ (مصاريف سنوية ÷ SWR)',
+    '  مثال: 15,000/شهر × 12 ÷ 4% = 4,500,000 ر.س',
+    '',
+    '⚠️ ما لا يقيسه هذا المحلل (لعدم توفر البيانات):',
+    '  Beta، Sharpe Ratio، Volatility، ارتباط الأسهم',
+    '  (تحتاج أسعار إغلاق تاريخية يومية)',
+    '',
+    'لتفعيل "هدف 2043" أو أي سنة: افتح بطاقة FIRE وأدخل',
+    '"سنة التقاعد المستهدفة" (حقل جديد).',
+  ].join('\n'));
+}
+
 // ── إعدادات هدف الاستقلال المالي (محلي) ──────────────────────
 const RET_GOAL_KEY = 'retirement_goal_v1';
 function getRetirementGoal() {
   try {
     const o = JSON.parse(localStorage.getItem(RET_GOAL_KEY)) || {};
-    return { monthly: +o.monthly || 0, swr: +o.swr || 4 };
-  } catch (_) { return { monthly: 0, swr: 4 }; }
+    return {
+      monthly:     +o.monthly     || 0,
+      swr:         +o.swr         || 4,
+      target_year: +o.target_year || 0,   // سنة التقاعد المستهدفة (اختياري)
+    };
+  } catch (_) { return { monthly: 0, swr: 4, target_year: 0 }; }
 }
 function saveRetirementGoal(g) {
   try { localStorage.setItem(RET_GOAL_KEY, JSON.stringify(g)); } catch (_) {}
@@ -692,9 +1004,12 @@ function editRetirementGoal() {
   if (m === null) return;
   const swr = prompt('نسبة السحب الآمنة السنوية % (الافتراضي 4% — قاعدة 25 ضعف)', cur.swr || 4);
   if (swr === null) return;
-  saveRetirementGoal({ monthly: +m || 0, swr: +swr || 4 });
+  const yr = prompt('سنة التقاعد المستهدفة (مثال: 2043) — اتركها فارغة إذا لم تحددها', cur.target_year || '');
+  if (yr === null) return;
+  saveRetirementGoal({ monthly: +m || 0, swr: +swr || 4, target_year: +yr || 0 });
   renderStats();
   renderRetirementCard();
+  renderPortfolioHealthCard();
 }
 
 // ── Insights (الصف التحليلي الإضافي) ─────────────────────────
@@ -1950,7 +2265,7 @@ async function saveHolding(e) {
   showToast(editingId ? 'تم التحديث' : 'تمت الإضافة', 'success');
   closeModal();
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderCharts(); renderTable();
+  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
 }
 
 // ── Sync holdings from transactions ──────────────────────────
@@ -2150,7 +2465,7 @@ async function confirmSync() {
   const keptNote  = keptCount > 0 ? ` (محتفظ بـ ${keptCount} متوسط يدوي)` : '';
   showToast(`✓ تمت المزامنة — ${upserted} سهم${keptNote}`, 'success');
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderCharts(); renderTable();
+  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
 }
 
 // ── Info Modal ────────────────────────────────────────────────
@@ -2591,7 +2906,7 @@ async function deleteHolding(id) {
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderCharts(); renderTable();
+  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
 }
 
 // ── تصدير CSV ─────────────────────────────────────────────────
