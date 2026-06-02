@@ -1071,7 +1071,7 @@ function renderDividendQuality() {
   const el = document.getElementById('div-quality-body');
   if (!el) return;
 
-  // بناء: ticker → { year → total_amount }
+  // ── بناء 1: المبالغ الإجمالية (للعرض فقط — "آخر توزيع مستلم") ──
   const byTickerYear = {};
   dividends.forEach(d => {
     const t = d.ticker;
@@ -1081,9 +1081,36 @@ function renderDividendQuality() {
     byTickerYear[t][y] = (byTickerYear[t][y] || 0) + +d.amount;
   });
 
+  // ── بناء 2: DPS (توزيع للسهم الواحد) — للحسابات الجودة ──────────────────
+  // المشكلة الأساسية: المبلغ الإجمالي يتأثر بحجم مركزك (شراء/بيع جزئي).
+  // مثال: بعت 400 سهم من 1500 في فبراير → توزيع مايو أقل بالمبلغ
+  //        رغم أن الشركة دفعت نفس DPS — الكود يحسبها "تراجع" خطأً.
+  //
+  // الحل: DPS = مبلغ التوزيع ÷ الأسهم المملوكة وقت التوزيع
+  //   ✓ يعكس قرار الشركة الفعلي — لا حجم محفظتك
+  //   ✓ محصّن ضد البيع الجزئي والشراء الإضافي
+  //   ✓ يتيح مقارنة عادلة بين سنوات مختلفة حتى لو تغير المركز
+  const byTickerYearDPS = {};  // ticker → { year → إجمالي DPS للسنة }
+  const dpsNormalized   = {};  // ticker → هل تتوفر بيانات المعاملات؟
+
+  dividends.forEach(d => {
+    const t = d.ticker;
+    const y = +d.year;
+    if (!t || !y) return;
+
+    const divDate     = _divSortDate(d);          // تاريخ التوزيع
+    const sharesAtDiv = _sharesAtDate(t, divDate); // أسهمك وقت التوزيع
+
+    if (sharesAtDiv < 0.001) return; // لا أسهم مسجّلة وقت التوزيع — تجاهل
+
+    const dps = +d.amount / sharesAtDiv; // الريال لكل سهم
+    if (!byTickerYearDPS[t]) byTickerYearDPS[t] = {};
+    byTickerYearDPS[t][y] = (byTickerYearDPS[t][y] || 0) + dps;
+    dpsNormalized[t] = true;
+  });
+
   const currentYear = new Date().getFullYear();
   const tickers = Object.keys(byTickerYear).filter(t => {
-    // فقط الأسهم المحتفظ بها حالياً أو لديها 2+ سنوات توزيع
     const yrs = Object.keys(byTickerYear[t]).length;
     return yrs >= 1;
   });
@@ -1095,24 +1122,32 @@ function renderDividendQuality() {
   }
 
   const scores = tickers.map(ticker => {
-    const yearMap  = byTickerYear[ticker];
+    // ── اختيار المصدر للحسابات ──────────────────────────────────────
+    // الأولوية: DPS المُعدَّل (يُزيل تأثير تغير المركز)
+    // الاحتياطي: المبالغ الخام (إذا لم تُسجَّل معاملات للرمز)
+    const isDPS   = !!dpsNormalized[ticker];
+    const yearMap = isDPS ? byTickerYearDPS[ticker] : byTickerYear[ticker];
+
     const years    = Object.keys(yearMap).map(Number).sort((a,b) => a - b);
-    const amounts  = years.map(y => yearMap[y]);
+    const amounts  = years.map(y => yearMap[y]); // DPS أو مبلغ خام
     const n        = years.length;
 
+    // المبلغ الفعلي المستلم (للعرض — دائماً من الخام بغض النظر عن المصدر)
+    const rawYearMap = byTickerYear[ticker];
+    const rawYears   = Object.keys(rawYearMap || {}).map(Number).sort((a,b) => a - b);
+    const lastRawAmt = rawYears.length ? (rawYearMap[rawYears[rawYears.length - 1]] || 0) : 0;
+
     // ── 1. الاستمرارية (0–35 نقطة) ────────────────────────────
-    // هل هناك فجوات بين سنوات التوزيع؟
     const minYear = years[0], maxYear = years[n - 1];
     const expectedYears = maxYear - minYear + 1;
     const continuityRatio = expectedYears > 0 ? n / expectedYears : 1;
     const continuityScore = Math.round(continuityRatio * 35);
 
-    // ── 2. نمو التوزيعات (0–35 نقطة) ──────────────────────────
-    let growthScore = 17; // محايد إذا لم يكفِ البيانات
+    // ── 2. نمو التوزيعات (0–35 نقطة) — بالـ DPS المُعدَّل ────────
+    let growthScore = 17;
     let cagr3 = null, cagr5 = null;
 
     if (n >= 2) {
-      // CAGR آخر N سنة
       const calcCagr = (from, to) => {
         if (!yearMap[from] || !yearMap[to] || yearMap[from] <= 0) return null;
         const periods = to - from;
@@ -1126,29 +1161,27 @@ function renderDividendQuality() {
               calcCagr(years[0], years[n-1]);
 
       const cagr = cagr3 ?? cagr5 ?? 0;
-      // 35 نقطة عند نمو ≥ 8%، صفر عند نمو < -10%
       growthScore = Math.round(Math.min(35, Math.max(0, (cagr + 10) / 18 * 35)));
     }
 
-    // ── 3. انخفاض التذبذب (0–30 نقطة) ─────────────────────────
-    let volatilityScore = 15; // محايد
+    // ── 3. انخفاض التذبذب (0–30 نقطة) — بالـ DPS المُعدَّل ──────
+    let volatilityScore = 15;
     if (n >= 3) {
-      const mean = amounts.reduce((s, v) => s + v, 0) / n;
+      const mean     = amounts.reduce((s, v) => s + v, 0) / n;
       const variance = amounts.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / n;
-      const cv = mean > 0 ? Math.sqrt(variance) / mean : 1; // معامل الاختلاف
-      // CV = 0 → 30 نقطة، CV ≥ 1 → 0 نقطة
+      const cv       = mean > 0 ? Math.sqrt(variance) / mean : 1;
       volatilityScore = Math.round(Math.max(0, (1 - cv) * 30));
     }
 
     const totalScore = continuityScore + growthScore + volatilityScore;
 
-    // حالة آخر توزيع مقارنة بما قبله
+    // الاتجاه: مقارنة DPS آخر سنة بالسابقة
     let trend = 'neutral';
     if (n >= 2) {
-      const last  = amounts[n - 1];
-      const prev  = amounts[n - 2];
-      if (last > prev * 1.02)       trend = 'up';
-      else if (last < prev * 0.98)  trend = 'down';
+      const last = amounts[n - 1];
+      const prev = amounts[n - 2];
+      if (last > prev * 1.02)      trend = 'up';
+      else if (last < prev * 0.98) trend = 'down';
     }
 
     const h = holdings.find(x => x.ticker === ticker);
@@ -1158,7 +1191,8 @@ function renderDividendQuality() {
       years:           n,
       firstYear:       years[0],
       lastYear:        years[n - 1],
-      lastAmount:      amounts[n - 1],
+      lastAmount:      lastRawAmt,   // المبلغ الفعلي المستلم (ليس DPS)
+      isDPS,                          // هل الدرجة محسوبة من DPS؟
       cagr3, cagr5,
       continuityScore, growthScore, volatilityScore,
       totalScore,
@@ -1181,7 +1215,22 @@ function renderDividendQuality() {
     `<span style="color:${v >= 0 ? 'var(--success)' : 'var(--danger)'}">
       ${v >= 0 ? '+' : ''}${v.toFixed(1)}%</span>`;
 
+  // هل يوجد أي رمز استفاد من تصحيح DPS؟
+  const anyDPS = scores.some(s => s.isDPS);
+
   el.innerHTML = `
+    ${anyDPS ? `
+    <div style="
+      background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.25);
+      border-radius:8px;padding:9px 14px;margin-bottom:12px;font-size:.78rem;
+      color:var(--text-2);line-height:1.6;
+    ">
+      <strong style="color:#58a6ff">📐 تصحيح DPS مُفعَّل</strong> —
+      الدرجات محسوبة من <strong>التوزيع للسهم الواحد (DPS)</strong> لا المبلغ الإجمالي.
+      هذا يُزيل تأثير شراء أو بيع جزئي على التقييم —
+      إذا بعت 400 سهم من 1500 ثم وزّعت الشركة نفس DPS، الكود يعرفها صحيحاً.
+      <span style="color:#58a6ff;font-size:.72rem">🔵 DPS</span> في عمود الرمز تعني أن الدرجة مُعدَّلة.
+    </div>` : ''}
     <div class="table-wrapper">
       <table>
         <thead>
@@ -1191,11 +1240,11 @@ function renderDividendQuality() {
             <th>الاسم</th>
             <th>الدرجة / 100</th>
             <th>الاستمرارية<br><span class="small text-muted">/35</span></th>
-            <th>نمو التوزيع<br><span class="small text-muted">/35</span></th>
-            <th>ثبات التوزيع<br><span class="small text-muted">/30</span></th>
+            <th>نمو التوزيع<br><span class="small text-muted">/35 — بـ DPS</span></th>
+            <th>ثبات التوزيع<br><span class="small text-muted">/30 — بـ DPS</span></th>
             <th>سنوات<br>التوزيع</th>
-            <th>نمو 3 سنوات<br><span class="small text-muted">CAGR</span></th>
-            <th>آخر توزيع</th>
+            <th>نمو 3 سنوات<br><span class="small text-muted">CAGR DPS</span></th>
+            <th>آخر توزيع<br><span class="small text-muted">المبلغ الفعلي</span></th>
             <th>الاتجاه</th>
           </tr>
         </thead>
@@ -1206,6 +1255,12 @@ function renderDividendQuality() {
             return `<tr ${rowCls}>
               <td class="small text-muted">${i + 1}</td>
               <td><strong class="text-accent">${esc(s.ticker)}</strong>
+                ${s.isDPS
+                  ? `<span title="الدرجة محسوبة من DPS — مُعدَّلة لتغيرات حجم المركز (شراء/بيع جزئي)"
+                       style="font-size:.65rem;background:rgba(59,130,246,0.15);color:#58a6ff;
+                              border-radius:3px;padding:1px 5px;font-weight:600;cursor:help"> DPS ✓</span>`
+                  : `<span title="لا توجد معاملات مسجّلة — الدرجة من المبالغ الخام"
+                       style="font-size:.65rem;color:var(--text-muted)"> ⓘ</span>`}
                 ${!s.inPortfolio ? '<span class="small text-muted"> (خارج المحفظة)</span>' : ''}
               </td>
               <td>${esc(s.name)}</td>
@@ -1230,7 +1285,9 @@ function renderDividendQuality() {
       </table>
     </div>
     <p class="small text-muted" style="margin-top:10px;padding:0 4px">
-      * الدرجات مبنية على بياناتك المُسجّلة فقط — كلما أضفت سنوات أكثر زادت دقة التقييم.
+      * الدرجات مبنية على بياناتك المُسجّلة فقط — كلما أضفت سنوات أكثر زادت دقة التقييم.<br>
+      <span style="color:#58a6ff">DPS ✓</span> = الدرجة محسوبة من التوزيع للسهم الواحد (يُزيل تأثير شراء/بيع جزئي) |
+      آخر توزيع = المبلغ الفعلي المُستلَم (ليس DPS)
     </p>
   `;
 }
@@ -1245,12 +1302,20 @@ function showDivQualityInfo() {
     'هل الشركة وزّعت بانتظام بدون سنوات قطع؟',
     '',
     '📈 نمو التوزيعات (35 نقطة)',
-    'معدل نمو التوزيع السنوي (CAGR) — كلما نما أكثر كانت الدرجة أعلى.',
+    'معدل نمو DPS السنوي (CAGR) — يقيس نمو الشركة لا حجم مركزك.',
     '',
     '📊 ثبات التوزيعات (30 نقطة)',
-    'معامل الاختلاف (CV) — كلما كانت التوزيعات متقاربة بين السنوات كانت الدرجة أعلى.',
+    'معامل الاختلاف (CV) — مبني على DPS، لا المبلغ الإجمالي.',
     '',
-    'ملاحظة: الدرجة تعكس بياناتك المُسجّلة فقط، وليست تقييماً لجودة الشركة بالمعنى التحليلي الكامل.',
+    '📐 تصحيح DPS (مهم):',
+    'الحسابات تعتمد على التوزيع للسهم الواحد (DPS) لا المبلغ الإجمالي.',
+    'هذا يُزيل تأثير شراء/بيع جزئي على التقييم.',
+    'مثال: بعت 400 سهم من 1500 → التوزيع التالي أقل بالريال',
+    'لكن DPS (للسهم) يبقى نفسه إذا الشركة لم تغير سياستها.',
+    'بدون هذا التصحيح، البيع الجزئي يُحسَب "تراجع في التوزيع" خطأً.',
+    '',
+    'ملاحظة: يتطلب وجود سجل معاملات للرمز لحساب DPS.',
+    'إذا لم تُسجَّل معاملات، تُستخدم المبالغ الخام.',
   ].join('\n'));
 }
 
