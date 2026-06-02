@@ -46,6 +46,7 @@ const LS_KEYS = [
   'retirement_goal_v1',
   'tharwa-price-timestamps',
   'tharwa-benchmark_v1',
+  'tharwa-benchmark-seeded-v1',  // flag: هل تمت البذرة الأولى لبيانات تاسي؟
 ];
 
 async function init() {
@@ -625,7 +626,7 @@ async function exportMonthlyReviewMD() {
     setStatus('md-export-status', 'info', 'جارٍ تحميل البيانات…');
     const [holdings, transactions, dividends, cashflows, snapshots,
            assets, liabilities, realEstate, stockTargets, sectorTargets,
-           watchlist, tasks, userStocks] = await Promise.all([
+           watchlist, tasks, userStocks, reviewLog] = await Promise.all([
       fetchTable('holdings'),
       fetchTable('transactions', 'date'),
       fetchTable('dividends', 'date'),
@@ -639,6 +640,7 @@ async function exportMonthlyReviewMD() {
       fetchTable('watchlist'),
       fetchTable('portfolio_tasks', 'created_at'),
       fetchTable('user_stocks'),
+      fetchTable('review_log', 'review_date'),   // دفتر المراجعة — notes المستخدم عن كل سهم
     ]);
 
     // ── بيانات localStorage ──────────────────────────────────
@@ -967,20 +969,33 @@ async function exportMonthlyReviewMD() {
     const totalMktNow = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
 
     if (stockTargets.length) {
-      h3('أهداف الأسهم');
+      h3('أهداف الأسهم (مع مناطق الشراء والبيع)');
+      p('**entry_price** = سعر منطقة الشراء المستهدف | **exit_price** = سعر منطقة البيع المستهدف');
       const stRows = stockTargets
         .sort((a, b) => +b.target_pct - +a.target_pct)
         .map(st => {
           const h    = holdings.find(x => x.ticker === st.ticker);
           const curr = h && totalMktNow > 0 ? (+h.shares * +h.current_price) / totalMktNow * 100 : 0;
+          const curP = h ? +h.current_price : 0;
           const diff = curr - +st.target_pct;
+          // إشارة منطقة الشراء/البيع بناءً على السعر الحالي
+          let zoneSignal = '—';
+          if (st.entry_price && curP > 0) {
+            if (curP <= +st.entry_price) zoneSignal = '🟢 في منطقة الشراء';
+            else if (st.exit_price && curP >= +st.exit_price) zoneSignal = '🔴 في منطقة البيع';
+            else zoneSignal = `فوق منطقة الشراء (${SAR(curP)} > ${SAR(+st.entry_price)})`;
+          }
           return [
             st.ticker, PCT(+st.target_pct), PCT(curr),
             (diff >= 0 ? '+' : '') + PCT(diff),
-            Math.abs(diff) > 1.5 ? (diff > 0 ? '⚖️ تخفيف' : '🟢 تجميع') : '✅ ضمن الهدف'
+            Math.abs(diff) > 1.5 ? (diff > 0 ? '⚖️ تخفيف' : '🟢 تجميع') : '✅ ضمن الهدف',
+            st.entry_price ? SAR(+st.entry_price) : '—',
+            st.exit_price  ? SAR(+st.exit_price)  : '—',
+            curP > 0 ? SAR(curP) : '—',
+            zoneSignal,
           ];
         });
-      p(mdTable(['الرمز','الهدف %','الحالي %','الفرق','التوصية'], stRows));
+      p(mdTable(['الرمز','الهدف %','الحالي %','الفرق','حالة الوزن','سعر الشراء','سعر البيع','السعر الحالي','منطقة السعر'], stRows));
     }
 
     if (sectorTargets.length) {
@@ -1096,6 +1111,37 @@ async function exportMonthlyReviewMD() {
     const activeLiabVal    = activeLiabilities.reduce((s, l) => s + +l.value, 0);
     const totalNetWorth    = totalMktValue + reCurrentVal + activeAssetVal - activeLiabVal;
 
+    // ── XIRR: معدل العائد الداخلي الحقيقي ──────────────────────
+    const xirrFlows = [];
+    transactions.forEach(t => {
+      if (t.type === 'buy')  xirrFlows.push({ date: new Date(t.date), amount: -(+t.total) });
+      if (t.type === 'sell') xirrFlows.push({ date: new Date(t.date), amount: +(+t.total) });
+    });
+    dividends.forEach(d => {
+      const dDate = d.date ? new Date(d.date) : new Date((d.year || today.getFullYear()) + '-06-01');
+      xirrFlows.push({ date: dDate, amount: +d.amount });
+    });
+    if (totalMktValue > 0) xirrFlows.push({ date: new Date(), amount: totalMktValue });
+    const xirrResult = (typeof computeXIRR === 'function') ? computeXIRR(xirrFlows) : null;
+
+    // ── Forward YOC (آخر DPS × دورية × الأسهم الحالية) ─────────
+    // تقدير مبسّط: متوسط آخر سنتين ÷ القيمة السوقية
+    const divByYr = {};
+    dividends.forEach(d => { divByYr[d.year] = (divByYr[d.year] || 0) + +d.amount; });
+    const sortedYrs = Object.keys(divByYr).map(Number).sort((a,b) => b-a);
+    const recentDivs = sortedYrs.slice(0,2).map(y => divByYr[y]);
+    const avgRecentDiv = recentDivs.length ? recentDivs.reduce((s,v) => s+v, 0) / recentDivs.length : 0;
+    const fwdYoc = totalMktValue > 0 ? avgRecentDiv / totalMktValue * 100 : 0;
+
+    // ── TTM (آخر 12 شهراً) ──────────────────────────────────────
+    const ttmKeys = new Set();
+    for (let i = 0; i < 12; i++) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      ttmKeys.add(d.getFullYear() + '-' + (d.getMonth() + 1));
+    }
+    const ttmDiv = dividends.reduce((s, d) => ttmKeys.has(+d.year + '-' + +d.month) ? s + +d.amount : s, 0);
+    const ttmYoc = totalCostBasis > 0 ? ttmDiv / totalCostBasis * 100 : 0;
+
     p('```');
     p(`تاريخ التقرير              : ${dateStr}`);
     p(`--- محفظة الأسهم ---`);
@@ -1104,10 +1150,13 @@ async function exportMonthlyReviewMD() {
     p(`إجمالي القيمة السوقية       : ${SAR(totalMktValue)} ر.س`);
     p(`ر/خ غير محقق               : ${(totalUnrealPnL >= 0 ? '+' : '') + SAR(totalUnrealPnL)} ر.س  (${PCT(totalCostBasis > 0 ? totalUnrealPnL / totalCostBasis * 100 : 0)})`);
     p(`ر/خ محقق من المبيعات        : ${(totalRealPnL >= 0 ? '+' : '') + SAR(totalRealPnL)} ر.س`);
+    p(`XIRR (العائد الداخلي السنوي): ${xirrResult != null ? (xirrResult >= 0 ? '+' : '') + xirrResult.toFixed(2) + '%' : 'غير محتسب (بيانات غير كافية)'}`);
     p(`--- الأرباح الموزعة ---`);
     p(`إجمالي الأرباح (كل الأوقات) : ${SAR(totalDivAll)} ر.س`);
     p(`أرباح السنة الحالية ${today.getFullYear()}      : ${SAR(currentYearDivs)} ر.س`);
-    p(`YOC (عائد على التكلفة)     : ${PCT(yoc)}`);
+    p(`أرباح آخر 12 شهراً (TTM)    : ${SAR(ttmDiv)} ر.س`);
+    p(`YOC على التكلفة (TTM)       : ${PCT(ttmYoc)}`);
+    p(`Forward YOC (متوقع)         : ${PCT(fwdYoc)}  (≈ ${SAR(avgRecentDiv)} / سنة)`);
     p(`--- التدفقات النقدية ---`);
     p(`إجمالي الإيداعات            : ${SAR(totalDeposited)} ر.س`);
     p(`إجمالي السحوبات             : ${SAR(totalWithdrawn)} ر.س`);
@@ -1531,6 +1580,45 @@ async function exportMonthlyReviewMD() {
       p(mdTable(['الرمز','الاسم','القطاع','في المحفظة'], usRows));
     } else {
       p('_لا توجد أسهم في قاعدة البيانات._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 18. دفتر المراجعة — ملاحظات المستخدم على كل سهم
+    // ════════════════════════════════════════════════════════
+    h2('18. دفتر المراجعة (ملاحظات المستخدم)');
+    p('مراجعات ونقاط الدراسة التي سجّلها المستخدم بنفسه عن كل سهم — مهمة لفهم القرارات الاستثمارية.');
+
+    if (reviewLog && reviewLog.length) {
+      // مجموعة حسب الرمز
+      const byTicker = {};
+      reviewLog.forEach(r => {
+        const tk = r.ticker || 'عام';
+        if (!byTicker[tk]) byTicker[tk] = { name: r.name || '', entries: [] };
+        byTicker[tk].entries.push(r);
+      });
+
+      Object.entries(byTicker)
+        .sort(([a],[b]) => a.localeCompare(b))
+        .forEach(([tk, v]) => {
+          h3(`${tk} — ${v.name}`);
+          v.entries
+            .sort((a, b) => (b.review_date || '').localeCompare(a.review_date || ''))
+            .forEach(r => {
+              p(`**📅 ${r.review_date || '—'} | المراجع:** ${r.ticker || '—'} ${r.name || ''}`);
+              if (r.notes) {
+                // نص المراجعة كاملاً محافظاً على التنسيق
+                p(r.notes.split('\n').map(line => `> ${line}`).join('\n'));
+              } else {
+                p('> _لا توجد ملاحظات مسجّلة._');
+              }
+              p('');
+            });
+        });
+
+      p(`**إجمالي المراجعات:** ${reviewLog.length} مراجعة على ${Object.keys(byTicker).length} رمز`);
+    } else {
+      p('_لا توجد مراجعات مسجّلة في دفتر المراجعة._');
     }
     hr();
 
