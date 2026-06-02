@@ -363,7 +363,10 @@ async function saveTask() {
     status:        _editingTaskId
                   ? (_tasks.find(t => t.id === _editingTaskId)?.status || 'active')
                   : 'active',
-    year:          new Date().getFullYear(),
+    // عند التعديل: احتفظ بالسنة الأصلية — لا تُعيّن السنة الحالية
+    year: _editingTaskId
+      ? (_tasks.find(t => t.id === _editingTaskId)?.year || new Date().getFullYear())
+      : new Date().getFullYear(),
     auto_generated: false,
     updated_at:    now,
   };

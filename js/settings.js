@@ -225,9 +225,15 @@ async function restoreBackup(input) {
       const { data } = await supabaseClient.from(table).select('*').eq('user_id', user.id);
       emergencyBackup[table] = data || [];
     }
+    let emergencySaved = false;
     try {
       localStorage.setItem('tharwa_emergency_backup', JSON.stringify(emergencyBackup));
-    } catch (_) { /* localStorage قد تكون ممتلئة — نكمل على أي حال */ }
+      emergencySaved = true;
+    } catch (_) {
+      // localStorage ممتلئة — نُنبّه المستخدم ولا نكذب عليه لاحقاً
+      setStatus('restore-status', 'warning',
+        '⚠️ تعذّر حفظ النسخة الطارئة (localStorage ممتلئة) — سنتابع الاستعادة لكن لا توجد حماية عند الفشل');
+    }
 
     // ── 1. حذف كل البيانات الحالية ───────────────────────────
     // الجداول الفرعية (FK children) تُحذف أولاً قبل الجداول الأصل
@@ -283,9 +289,11 @@ async function restoreBackup(input) {
     }, 800);
 
   } catch (err) {
-    setStatus('restore-status', 'error',
-      '✗ ' + err.message + '\n\n⚠️ تم حفظ نسخة طارئة من بياناتك في المتصفح قبل العملية — يمكنك استعادتها من قسم "استعادة النسخة الطارئة" أدناه إذا فقدت بياناتك.');
-    showToast('فشلت الاستعادة — نسخة طارئة محفوظة في المتصفح', 'error');
+    const emergencyMsg = emergencySaved
+      ? '⚠️ تم حفظ نسخة طارئة في المتصفح — استعدها من قسم "استعادة النسخة الطارئة" أدناه.'
+      : '⚠️ لم تُحفظ نسخة طارئة (localStorage ممتلئة) — تحقق من بياناتك يدوياً.';
+    setStatus('restore-status', 'error', '✗ ' + err.message + '\n\n' + emergencyMsg);
+    showToast(emergencySaved ? 'فشلت الاستعادة — نسخة طارئة محفوظة' : 'فشلت الاستعادة — لا توجد نسخة طارئة', 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'استعادة من نسخة احتياطية';
@@ -569,8 +577,12 @@ async function deleteAccount() {
   setStatus('del-account-status', 'info', 'يتم مسح البيانات وحذف الحساب…');
 
   try {
-    // 1. مسح كل البيانات أولاً
-    for (const table of TABLES) {
+    // 1. مسح كل البيانات أولاً — FK children أولاً لتجنب انتهاك القيود
+    const FK_ORDER_FOR_DELETE = [
+      'review_log_attachments',
+      ...TABLES.filter(t => t !== 'review_log_attachments'),
+    ];
+    for (const table of FK_ORDER_FOR_DELETE) {
       await supabaseClient.from(table).delete().eq('user_id', user.id);
     }
     // مسح جميع مفاتيح localStorage

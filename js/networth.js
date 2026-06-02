@@ -567,7 +567,7 @@ async function deleteLiab(id) {
   showToast('تمت الأرشفة ✓', 'success');
   const r = await supabaseClient.from('nw_liabilities').select('*').eq('is_active', true).order('category');
   nwLiabs = r.data || [];
-  renderTotals(); renderLiabTable();
+  renderTotals(); renderCompositionChart(); renderLiabTable();
 }
 
 // ── تصدير CSV ─────────────────────────────────────────────────

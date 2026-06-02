@@ -251,6 +251,17 @@ function resetForm() {
 // ── Delete entry ───────────────────────────────────────────────────────────
 async function deleteEntry(id) {
   if (!confirm('هل تريد حذف هذه المراجعة وجميع مرفقاتها نهائياً؟')) return;
+
+  // احذف المرفقات أولاً (FK children) قبل الإدخال الأصل
+  const { error: attErr } = await supabaseClient
+    .from('review_log_attachments')
+    .delete()
+    .eq('entry_id', id)
+    .eq('user_id', currentUser.id);
+  if (attErr && attErr.code !== '42P01') {
+    showToast('خطأ في حذف المرفقات: ' + attErr.message, 'error'); return;
+  }
+
   const { error } = await supabaseClient.from('review_log').delete().eq('id', id).eq('user_id', currentUser.id);
   if (error) { showToast('خطأ في الحذف: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');

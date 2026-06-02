@@ -42,7 +42,11 @@ async function loadEntries() {
 }
 
 function buildYearFilter() {
-  const years = [...new Set(cfEntries.map(e => new Date(e.date).getFullYear()))].sort((a,b) => b-a);
+  // يشمل سنوات التدفقات النقدية + سنوات الأرباح الموزعة
+  const years = [...new Set([
+    ...cfEntries.map(e => new Date(e.date).getFullYear()),
+    ...divEntries.map(e => new Date(e.date).getFullYear()).filter(Boolean),
+  ])].sort((a,b) => b-a);
   const sel = document.getElementById('cf-year-filter');
   // keep first "كل السنوات" option
   sel.innerHTML = '<option value="">كل السنوات</option>' +

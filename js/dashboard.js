@@ -108,9 +108,11 @@ async function refreshPrices(silent = false) {
         });
         _savePriceTimestamps();
       }
-      // رسم فوري بالأسعار الجديدة
+      // رسم فوري بالأسعار الجديدة + تحقق مناطق السعر
       renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
       renderPriceZonesCard(); renderBreakEvenCard();
+      // تحقق تنبيهات مناطق الشراء/البيع بعد كل تحديث أسعار
+      holdings.forEach(h => checkPriceZones(h.ticker, +h.current_price));
       renderAllocationChart(); renderRetirementCard();
       if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
       // مزامنة خلفية مع Supabase
@@ -194,7 +196,9 @@ async function _autoSnapshotPortfolio() {
 async function loadAllData() {
   const yr = new Date().getFullYear();
 
-  const [rH, rTx, rDiv, rCf, rNw, rRe, rSt, rSecT, rCash] = await Promise.all([
+  // Promise.all مع try/catch — فشل أي استعلام يُوقف التحميل
+  // نستخدم allSettled لتلقي نتائج جزئية بدل الفشل الكامل الصامت
+  const results = await Promise.allSettled([
     supabaseClient.from('holdings').select('*').order('ticker'),
     supabaseClient.from('transactions').select('type, total, shares, price, commission, vat, ticker, date').eq('is_archived', false),
     supabaseClient.from('dividends').select('amount, year, date, ticker').eq('is_archived', false),
@@ -205,6 +209,16 @@ async function loadAllData() {
     supabaseClient.from('sector_targets').select('sector, target_pct'),
     supabaseClient.from('portfolio_cash').select('amount, updated_at').limit(1).maybeSingle()
   ]);
+
+  const failed = results.filter(r => r.status === 'rejected');
+  if (failed.length) {
+    showToast(`⚠️ تعذّر تحميل ${failed.length} مصدر بيانات — قد تكون بعض الأرقام غير مكتملة`, 'warning');
+  }
+
+  const safe = (i) => results[i].status === 'fulfilled' ? results[i].value : { data: null, error: null };
+  const [rH, rTx, rDiv, rCf, rNw, rRe, rSt, rSecT, rCash] = results.map(r =>
+    r.status === 'fulfilled' ? r.value : { data: null, error: null }
+  );
 
   holdings = rH.data || [];
 
