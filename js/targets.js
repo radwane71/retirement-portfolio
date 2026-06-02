@@ -7,6 +7,14 @@ let sectorTargets = {};   // sector → target_pct
 let taskMap       = {};   // ticker → latest active task
 let totalValue    = 0;
 
+// ── حالة الترتيب لجدول الأسهم ──────────────────────────────────
+let _stSortField = '';    // الحقل المُرتَّب حالياً
+let _stSortDir   = 'asc';
+
+// ── حالة الترتيب لجدول القطاعات ────────────────────────────────
+let _secSortField = '';
+let _secSortDir   = 'asc';
+
 async function init() {
   const user = await requireAuth();
   if (!user) return;
@@ -220,6 +228,30 @@ function taskBadgeHtml(ticker) {
   return `<span class="task-badge" style="${b.style||''}" title="مهمة فعّالة: ${b.label||type}">${b.icon} ${b.label||type}</span>`;
 }
 
+// ── ترتيب جدول الأسهم ──────────────────────────────────────
+function sortStockTargets(field) {
+  if (_stSortField === field) _stSortDir = _stSortDir === 'asc' ? 'desc' : 'asc';
+  else { _stSortField = field; _stSortDir = 'asc'; }
+  renderStockTargets();
+}
+
+function _stArrow(field) {
+  if (_stSortField !== field) return '<span class="sort-arrow">↕</span>';
+  return `<span class="sort-arrow active">${_stSortDir === 'asc' ? '↑' : '↓'}</span>`;
+}
+
+// ── ترتيب جدول القطاعات ────────────────────────────────────
+function sortSectorTargets(field) {
+  if (_secSortField === field) _secSortDir = _secSortDir === 'asc' ? 'desc' : 'asc';
+  else { _secSortField = field; _secSortDir = 'asc'; }
+  renderSectorTargets();
+}
+
+function _secArrow(field) {
+  if (_secSortField !== field) return '<span class="sort-arrow">↕</span>';
+  return `<span class="sort-arrow active">${_secSortDir === 'asc' ? '↑' : '↓'}</span>`;
+}
+
 // ── رسم جدول الأسهم ────────────────────────────────────────
 // المصدر: holdings (المحفظة الحالية) + كل user_stocks غير الموجودة (مخطط لها)
 function renderStockTargets() {
@@ -248,7 +280,35 @@ function renderStockTargets() {
       planned: true,
     }));
 
-  const allStocks = [...activeStocks, ...plannedStocks];
+  let allStocks = [...activeStocks, ...plannedStocks];
+
+  // ── تطبيق الترتيب ─────────────────────────────────────────
+  if (_stSortField) {
+    allStocks = [...allStocks].sort((a, b) => {
+      let av, bv;
+      const aZone = stockZones[a.ticker] || {};
+      const bZone = stockZones[b.ticker] || {};
+      switch (_stSortField) {
+        case 'ticker':  av = a.ticker;  bv = b.ticker;  break;
+        case 'name':    av = a.name;    bv = b.name;    break;
+        case 'sector':  av = a.sector;  bv = b.sector;  break;
+        case 'entry':   av = +(aZone.entry_price||0);  bv = +(bZone.entry_price||0);  break;
+        case 'exit':    av = +(aZone.exit_price||0);   bv = +(bZone.exit_price||0);   break;
+        case 'target':  av = stockTargets[a.ticker]||0; bv = stockTargets[b.ticker]||0; break;
+        case 'current': av = getStockWeight(a.ticker); bv = getStockWeight(b.ticker); break;
+        case 'status': {
+          const al = alertStatus(getStockWeight(a.ticker), stockTargets[a.ticker]||0);
+          const bl = alertStatus(getStockWeight(b.ticker), stockTargets[b.ticker]||0);
+          av = al.cls; bv = bl.cls; break;
+        }
+        default: av = a.ticker; bv = b.ticker;
+      }
+      const cmp = typeof av === 'number'
+        ? av - bv
+        : String(av||'').localeCompare(String(bv||''));
+      return _stSortDir === 'asc' ? cmp : -cmp;
+    });
+  }
 
   if (!allStocks.length) {
     tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">
@@ -310,6 +370,12 @@ function renderStockTargets() {
     <td colspan="2"><span class="small text-muted">${Math.abs(totalCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalCurrentPct - 100) < 1 ? '≈ 100%' : totalCurrentPct < 100 ? 'بقي ' + (100 - totalCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalCurrentPct - 100).toFixed(2) + '%'}</span></td>
   </tr>`;
 
+  // تحديث سهام الترتيب في الهيدر
+  ['ticker','name','sector','entry','exit','target','current','status'].forEach(f => {
+    const el = document.getElementById('st-arr-' + f);
+    if (el) el.outerHTML = _stArrow(f).replace('class="sort-arrow', `id="st-arr-${f}" class="sort-arrow`);
+  });
+
   attachStockListeners();
   updateStockTargetSumInFooter();
 }
@@ -323,7 +389,29 @@ function renderSectorTargets() {
     ...holdings.map(h => (h.sector || '').trim() || 'غير مصنف'),
     ...Object.keys(sectorTargets)
   ]);
-  const sectors = [...sectorSet].filter(Boolean).sort();
+  let sectors = [...sectorSet].filter(Boolean);
+
+  // ── ترتيب القطاعات ────────────────────────────────────────
+  if (_secSortField) {
+    sectors = sectors.sort((a, b) => {
+      let av, bv;
+      switch (_secSortField) {
+        case 'sector':  av = a;                   bv = b;                   break;
+        case 'target':  av = sectorTargets[a]||0; bv = sectorTargets[b]||0; break;
+        case 'current': av = getSectorWeight(a);  bv = getSectorWeight(b);  break;
+        case 'status': {
+          const al = alertStatus(getSectorWeight(a), sectorTargets[a]||0);
+          const bl = alertStatus(getSectorWeight(b), sectorTargets[b]||0);
+          av = al.cls; bv = bl.cls; break;
+        }
+        default: av = a; bv = b;
+      }
+      const cmp = typeof av === 'number' ? av - bv : String(av||'').localeCompare(String(bv||''));
+      return _secSortDir === 'asc' ? cmp : -cmp;
+    });
+  } else {
+    sectors = sectors.sort(); // الافتراضي: أبجدي
+  }
 
   if (!sectors.length) {
     tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="icon">🏷️</div><p>لا توجد قطاعات بعد</p></div></td></tr>`;
@@ -401,6 +489,12 @@ function renderSectorTargets() {
     <td class="small text-muted" title="أهداف الأسهم / هدف القطاع">أسهم / قطاع</td>
     <td colspan="2"><span class="small text-muted">${Math.abs(totalSecCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalSecCurrentPct - 100) < 1 ? '≈ 100%' : totalSecCurrentPct < 100 ? 'بقي ' + (100 - totalSecCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalSecCurrentPct - 100).toFixed(2) + '%'}</span></td>
   </tr>`;
+
+  // تحديث سهام الترتيب في الهيدر
+  ['sector','target','current','status'].forEach(f => {
+    const el = document.getElementById('sec-arr-' + f);
+    if (el) el.outerHTML = _secArrow(f).replace('class="sort-arrow', `id="sec-arr-${f}" class="sort-arrow`);
+  });
 
   // ربط المستمعات للقطاعات
   attachSectorListeners();

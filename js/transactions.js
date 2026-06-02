@@ -4,6 +4,7 @@ let _stagingId   = 0;
 let sortField    = 'date';
 let sortDir      = 'desc';
 let _editId      = null;
+let _filterType  = 'all';   // 'all' | 'buy' | 'sell' | 'grant'
 
 // ── Init ──────────────────────────────────────────────────────
 async function init() {
@@ -393,6 +394,18 @@ async function reverseHolding(userId, tx) {
   }
 }
 
+// ── Filter by type ────────────────────────────────────────────
+function setTxFilter(type) {
+  _filterType = type;
+  // تحديث حالة الأزرار
+  ['all','buy','sell','grant'].forEach(t => {
+    const btn = document.getElementById('txf-' + t);
+    if (btn) btn.classList.toggle('btn-primary',   t === type);
+    if (btn) btn.classList.toggle('btn-secondary', t !== type);
+  });
+  renderTable();
+}
+
 // ── Sort ──────────────────────────────────────────────────────
 function sortTable(field) {
   if (sortField === field) sortDir = sortDir === 'asc' ? 'desc' : 'asc';
@@ -401,8 +414,12 @@ function sortTable(field) {
 }
 
 function getSorted() {
+  // تطبيق فلتر النوع أولاً
+  const base = _filterType === 'all'
+    ? transactions
+    : transactions.filter(t => t.type === _filterType);
   const numFields = new Set(['shares','price','commission','vat','total']);
-  return [...transactions].sort((a, b) => {
+  return [...base].sort((a, b) => {
     let av = a[sortField], bv = b[sortField];
     if (sortField === 'date') { av = new Date(av); bv = new Date(bv); }
     else if (numFields.has(sortField)) { av = +av; bv = +bv; }

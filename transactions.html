@@ -170,7 +170,15 @@
       <!-- ملخص الإحصائيات -->
       <div id="tx-stats" class="tx-stats-bar"></div>
 
-      <p class="small text-muted mb-4" style="margin-top:12px">انقر على أي خلية لتعديلها — تُحسب العمولة تلقائياً عند تعديل الأسهم أو السعر أو النوع</p>
+      <!-- فلتر النوع -->
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0 8px">
+        <button id="txf-all"   class="btn btn-primary  btn-sm" onclick="setTxFilter('all')">   الكل</button>
+        <button id="txf-buy"   class="btn btn-secondary btn-sm" onclick="setTxFilter('buy')">  🟢 شراء</button>
+        <button id="txf-sell"  class="btn btn-secondary btn-sm" onclick="setTxFilter('sell')"> 🔴 بيع</button>
+        <button id="txf-grant" class="btn btn-secondary btn-sm" onclick="setTxFilter('grant')">🎁 منح</button>
+      </div>
+
+      <p class="small text-muted mb-4">انقر على أي خلية لتعديلها — تُحسب العمولة تلقائياً عند تعديل الأسهم أو السعر أو النوع</p>
       <div class="table-wrapper">
         <table>
           <thead>
