@@ -942,8 +942,11 @@ function _parseCSVRow(line) {
   let cur = '', inQ = false;
   for (let i = 0; i < line.length; i++) {
     const ch = line[i];
-    if (ch === '"') { inQ = !inQ; }
-    else if (ch === ',' && !inQ) { cols.push(cur); cur = ''; }
+    if (ch === '"') {
+      // RFC 4180: "" = علامة تنصيص حرفية داخل حقل مقتبس
+      if (inQ && i + 1 < line.length && line[i + 1] === '"') { cur += '"'; i++; }
+      else { inQ = !inQ; }
+    } else if (ch === ',' && !inQ) { cols.push(cur); cur = ''; }
     else { cur += ch; }
   }
   cols.push(cur);

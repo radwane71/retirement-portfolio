@@ -53,7 +53,13 @@ function parseCSVLine(line) {
   let cur = '', inQuote = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === '"') { inQuote = !inQuote; continue; }
+    if (c === '"') {
+      // RFC 4180: "" داخل حقل مقتبس = علامة تنصيص حرفية
+      if (inQuote && i + 1 < line.length && line[i + 1] === '"') {
+        cur += '"'; i++; continue;
+      }
+      inQuote = !inQuote; continue;
+    }
     if (c === ',' && !inQuote) { cols.push(cur.trim()); cur = ''; continue; }
     cur += c;
   }
