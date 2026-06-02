@@ -911,11 +911,12 @@ function renderPortfolioHealthCard() {
   el.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
       <span style="font-weight:700;font-size:.95rem">🏥 محلل صحة المحفظة</span>
-      <div style="display:flex;gap:8px;align-items:center">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${targetYear > 0
-          ? `<span class="small text-muted">هدف التقاعد: <strong>${targetYear}</strong></span>`
-          : `<button class="btn btn-secondary btn-sm" onclick="editRetirementGoal()" style="font-size:.72rem">+ حدد سنة التقاعد</button>`}
-        <button class="btn btn-secondary btn-sm" onclick="showHealthInfo()" style="font-size:.72rem">ⓘ المنهجية</button>
+          ? `<span class="small text-muted" style="white-space:nowrap">🎯 ${targetYear} · ${formatSAR(monthlyTarget||0)}/شهر · SWR ${goal.swr||4}%</span>`
+          : `<span class="small text-muted">لم يُحدَّد هدف التقاعد بعد</span>`}
+        <button class="btn btn-secondary btn-sm" onclick="editRetirementGoal()" style="font-size:.72rem">✏️ تعديل الهدف</button>
+        <button class="btn btn-secondary btn-sm" onclick="showHealthInfo()"     style="font-size:.72rem">ⓘ المنهجية</button>
       </div>
     </div>
 
