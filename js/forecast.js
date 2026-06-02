@@ -91,20 +91,9 @@ async function loadHistoricalData() {
 
   const xirrResult = computeXIRR(xirrFlows);   // من utils.js
 
-  // annCapGrowth: XIRR إن توفّر، وإلا CAGR احتياطياً
-  const rawCapGrowth = (netCapital > 0 && currentValue > 0)
-    ? Math.pow(currentValue / netCapital, 1 / yearsActive) - 1
-    : 0.07;
-  const xirrRate = xirrResult != null ? xirrResult / 100 : null;
-  // خصم عائد الأرباح من XIRR للحصول على نمو رأس المال فقط
-  const annCapGrowth = Math.min(0.40, Math.max(0.02,
-    xirrRate != null
-      ? Math.max(0.01, xirrRate - safeDivYield)   // نمو السعر فقط
-      : rawCapGrowth
-  ));
-
   // عائد الأرباح السنوي: نستخدم آخر سنتين فعليتين من الأرباح ÷ القيمة السوقية الحالية
   // هذا أدق من المتوسط التاريخي الكلي لأنه يعكس الوضع الفعلي للمحفظة الحالية
+  // ملاحظة: يجب حساب safeDivYield قبل annCapGrowth لأنه يُستخدم في تفكيك XIRR
   const totalDivAll  = divRows.reduce((s,d) => s + +d.amount, 0);
   const divYears     = [...new Set(divRows.map(d => d.year))].length || 1;
 
@@ -122,6 +111,18 @@ async function loadHistoricalData() {
   const avgAnnualDiv = avgRecentDiv;
   const annDivYield  = currentValue > 0 ? avgRecentDiv / currentValue : 0.035;
   const safeDivYield = Math.min(0.15, Math.max(0, annDivYield));
+
+  // annCapGrowth: XIRR إن توفّر، وإلا CAGR احتياطياً
+  const rawCapGrowth = (netCapital > 0 && currentValue > 0)
+    ? Math.pow(currentValue / netCapital, 1 / yearsActive) - 1
+    : 0.07;
+  const xirrRate = xirrResult != null ? xirrResult / 100 : null;
+  // خصم عائد الأرباح من XIRR للحصول على نمو رأس المال فقط
+  const annCapGrowth = Math.min(0.40, Math.max(0.02,
+    xirrRate != null
+      ? Math.max(0.01, xirrRate - safeDivYield)   // نمو السعر فقط
+      : rawCapGrowth
+  ));
 
   // متوسط الإضافة الشهرية التاريخية
   const totalDeposited    = cfRows.filter(e => e.type==='deposit').reduce((s,e) => s + +e.amount, 0);

@@ -128,6 +128,7 @@
       <button class="perf-tab"        onclick="showPerfTab('closed')"  id="ptab-closed">📕 المراكز المغلقة</button>
       <button class="perf-tab"        onclick="showPerfTab('timeline')" id="ptab-timeline">📅 التايم لاين الشهري</button>
       <button class="perf-tab"        onclick="showPerfTab('monthly-chart')" id="ptab-monthly-chart">📈 الرسم البياني</button>
+      <button class="perf-tab"        onclick="showPerfTab('benchmark')"    id="ptab-benchmark">📊 مقارنة بالمؤشر</button>
     </div>
 
     <!-- ── TAB: Open positions ── -->
@@ -303,6 +304,63 @@
           💡 <strong>كيف تقرأ الرسم:</strong>
           الفرق بين الخط الأزرق (صافي الثروة) والخط الأصفر (رأس المال المُودَع) هو
           <strong>إجمالي أرباحك الرأسمالية + التوزيعات المُعاد استثمارها</strong> — كلما اتسعت الفجوة بينهما كان أداؤك أفضل.
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: Benchmark ── -->
+    <div id="pview-benchmark" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">📊 مقارنة أداء محفظتك بمؤشر تاسي</span>
+        <span class="small text-muted">كلا الخطّين مُنسَّبان إلى 100 عند أول نقطة مشتركة</span>
+      </div>
+
+      <!-- مدخلات قيم التاسي -->
+      <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:20px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px">
+          <strong style="font-size:.9rem">إضافة قيمة مؤشر تاسي</strong>
+          <button class="btn btn-secondary btn-sm" onclick="showBenchmarkInfo()">ⓘ كيف تستخدمه؟</button>
+        </div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label class="small text-muted">التاريخ</label>
+            <input type="date" id="bm-date" class="form-control" style="min-width:150px">
+          </div>
+          <div style="display:flex;flex-direction:column;gap:4px">
+            <label class="small text-muted">قيمة مؤشر تاسي</label>
+            <input type="number" id="bm-value" class="form-control" placeholder="مثال: 12450.5" step="0.01" style="min-width:170px">
+          </div>
+          <button class="btn btn-primary" onclick="addBenchmarkEntry()">+ إضافة</button>
+        </div>
+        <p class="small text-muted" style="margin-top:10px;margin-bottom:0">
+          💡 أدخل قيمة تاسي في نفس تواريخ تسجيل صافي ثروتك — كلما تطابقت التواريخ كان الرسم أدق
+        </p>
+      </div>
+
+      <!-- الرسم البياني -->
+      <div id="bm-chart-wrap" style="height:360px;margin-bottom:20px;display:none">
+        <canvas id="benchmark-chart"></canvas>
+      </div>
+      <div id="bm-empty" style="padding:40px;text-align:center;color:var(--text-muted)">
+        <div style="font-size:2rem;margin-bottom:8px">📊</div>
+        <p>أضف قيمتين على الأقل لمؤشر تاسي لعرض الرسم البياني<br>
+        <span class="small">يحتاج أيضاً وجود لقطات صافي الثروة من الداشبورد</span></p>
+      </div>
+
+      <!-- ملخص الأداء المقارن -->
+      <div id="bm-summary" style="display:none;margin-bottom:20px"></div>
+
+      <!-- جدول بيانات تاسي -->
+      <div id="bm-entries-wrap" style="display:none">
+        <div class="section-header" style="margin-top:8px">
+          <span class="section-title small">بيانات مؤشر تاسي المُدخلة</span>
+          <button class="btn btn-danger btn-sm" onclick="clearAllBenchmark()">حذف الكل</button>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>التاريخ</th><th>قيمة تاسي</th><th>التغيير</th><th></th></tr></thead>
+            <tbody id="bm-entries-tbody"></tbody>
+          </table>
         </div>
       </div>
     </div>

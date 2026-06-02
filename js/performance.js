@@ -44,12 +44,13 @@ async function init() {
 // ── Tab switcher ──────────────────────────────────────────────────────
 function showPerfTab(tab) {
   _activeTab = tab;
-  ['open','closed','timeline','monthly-chart'].forEach(t => {
+  ['open','closed','timeline','monthly-chart','benchmark'].forEach(t => {
     const view = document.getElementById(`pview-${t}`);
     const btn  = document.getElementById(`ptab-${t}`);
     if (view) view.style.display = t === tab ? '' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   });
+  if (tab === 'benchmark') initBenchmarkTab();
 }
 
 // ── Build position maps ───────────────────────────────────────────────
@@ -569,5 +570,325 @@ function exportPerformanceCSV() {
 const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
 function fmtN(n)       { return n == null ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 4 }); }
 function fmtShortK(v)  { if (v >= 1e6) return (v/1e6).toFixed(1)+'M'; if (v >= 1e3) return (v/1e3).toFixed(0)+'K'; return v; }
+
+// ══════════════════════════════════════════════════════════════
+// 📊 مقارنة بالمؤشر (TASI Benchmark)
+// مقارنة أداء محفظتك منسوباً بأداء مؤشر تاسي — كلاهما = 100 عند أول نقطة
+// البيانات: TASI مُدخلة يدوياً ← localStorage 'tharwa-benchmark_v1'
+//           المحفظة ← net_worth_snapshots (auto-captured من الداشبورد)
+// ══════════════════════════════════════════════════════════════
+
+const BM_KEY = 'tharwa-benchmark_v1';
+let _bmChart = null;
+
+// ── تحميل وحفظ بيانات التاسي ─────────────────────────────────
+function _loadBenchmark() {
+  try { return JSON.parse(localStorage.getItem(BM_KEY)) || []; } catch { return []; }
+}
+function _saveBenchmark(entries) {
+  localStorage.setItem(BM_KEY, JSON.stringify(entries));
+}
+
+// ── إضافة نقطة جديدة ─────────────────────────────────────────
+function addBenchmarkEntry() {
+  const date  = document.getElementById('bm-date')?.value?.trim();
+  const value = parseFloat(document.getElementById('bm-value')?.value);
+
+  if (!date)          { showToast('أدخل التاريخ', 'error'); return; }
+  if (isNaN(value) || value <= 0) { showToast('أدخل قيمة صحيحة لمؤشر تاسي', 'error'); return; }
+
+  const entries = _loadBenchmark();
+  const existing = entries.findIndex(e => e.date === date);
+  if (existing >= 0) {
+    // تحديث القيمة الموجودة لنفس التاريخ
+    entries[existing].value = value;
+    showToast('تم تحديث قيمة هذا التاريخ', 'success');
+  } else {
+    entries.push({ date, value });
+    showToast('تمت الإضافة ✓', 'success');
+  }
+  entries.sort((a, b) => a.date.localeCompare(b.date));
+  _saveBenchmark(entries);
+
+  if (document.getElementById('bm-date'))  document.getElementById('bm-date').value  = '';
+  if (document.getElementById('bm-value')) document.getElementById('bm-value').value = '';
+
+  renderBenchmarkTab();
+}
+
+// ── حذف نقطة ─────────────────────────────────────────────────
+function deleteBenchmarkEntry(date) {
+  const entries = _loadBenchmark().filter(e => e.date !== date);
+  _saveBenchmark(entries);
+  renderBenchmarkTab();
+}
+
+// ── حذف الكل ─────────────────────────────────────────────────
+function clearAllBenchmark() {
+  if (!confirm('حذف جميع بيانات تاسي المدخلة؟')) return;
+  _saveBenchmark([]);
+  renderBenchmarkTab();
+  showToast('تم المسح', 'success');
+}
+
+// ── رسم التبويب كاملاً ────────────────────────────────────────
+function renderBenchmarkTab() {
+  const bmEntries = _loadBenchmark();  // [{ date, value }] مرتبة
+  const snapshots = [..._snapshots].sort((a, b) => a.date.localeCompare(b.date));
+
+  // ── جدول بيانات تاسي ─────────────────────────────────────
+  const entriesWrap = document.getElementById('bm-entries-wrap');
+  const entriesTbody = document.getElementById('bm-entries-tbody');
+  if (entriesTbody) {
+    if (bmEntries.length) {
+      if (entriesWrap) entriesWrap.style.display = '';
+      entriesTbody.innerHTML = [...bmEntries].reverse().map((e, i, arr) => {
+        const prev = arr[i + 1];  // السابق (أقدم — الـ arr مقلوب)
+        let changeTd = '<td class="text-muted small">—</td>';
+        if (prev) {
+          const pct = (e.value - prev.value) / prev.value * 100;
+          const cls = pct >= 0 ? 'text-success' : 'text-danger';
+          changeTd = `<td class="num ${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</td>`;
+        }
+        return `<tr>
+          <td>${formatDate(e.date)}</td>
+          <td class="num bold">${e.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
+          ${changeTd}
+          <td><button class="btn btn-danger btn-sm" onclick="deleteBenchmarkEntry('${esc(e.date)}')">✕</button></td>
+        </tr>`;
+      }).join('');
+    } else {
+      if (entriesWrap) entriesWrap.style.display = 'none';
+    }
+  }
+
+  // ── ابنِ بيانات الرسم ─────────────────────────────────────
+  // نحتاج: أول تاريخ مشترك بين الـ snapshots والـ bmEntries
+  const chartWrap = document.getElementById('bm-chart-wrap');
+  const emptyEl   = document.getElementById('bm-empty');
+  const summaryEl = document.getElementById('bm-summary');
+
+  if (bmEntries.length < 2 || snapshots.length < 2) {
+    if (chartWrap)  chartWrap.style.display  = 'none';
+    if (emptyEl)    emptyEl.style.display    = '';
+    if (summaryEl)  summaryEl.style.display  = 'none';
+    if (_bmChart) { _bmChart.destroy(); _bmChart = null; }
+    return;
+  }
+
+  // ── مزج النقاط: التواريخ المشتركة أو الأقرب ──────────────
+  // نستخدم جميع التواريخ في كلا المصدرين ثم نطابق بالأقرب
+  const allDates = [...new Set([
+    ...bmEntries.map(e => e.date),
+    ...snapshots.map(s => s.date),
+  ])].sort();
+
+  // دالة مساعدة: قيمة تاسي عند تاريخ معين (أقرب نقطة سابقة أو مطابقة)
+  const getTasiAt = (date) => {
+    const prior = bmEntries.filter(e => e.date <= date);
+    return prior.length ? prior[prior.length - 1].value : null;
+  };
+
+  // دالة مساعدة: قيمة المحفظة عند تاريخ معين (أقرب snapshot سابق أو مطابق)
+  const getPortAt = (date) => {
+    const prior = snapshots.filter(s => s.date <= date);
+    return prior.length ? +prior[prior.length - 1].total_value : null;
+  };
+
+  // ابنِ نقاط الرسم: فقط الأيام التي تتوفر فيها كلا القيمتين
+  const points = allDates.map(d => ({ date: d, tasi: getTasiAt(d), port: getPortAt(d) }))
+    .filter(p => p.tasi != null && p.port != null);
+
+  if (points.length < 2) {
+    if (chartWrap)  chartWrap.style.display  = 'none';
+    if (emptyEl)    emptyEl.style.display    = '';
+    if (summaryEl)  summaryEl.style.display  = 'none';
+    if (_bmChart) { _bmChart.destroy(); _bmChart = null; }
+    return;
+  }
+
+  // ── تطبيع الى 100 عند أول نقطة ──────────────────────────
+  const base      = points[0];
+  const tasiBase  = base.tasi;
+  const portBase  = base.port;
+
+  const tasiNorm = points.map(p => +((p.tasi / tasiBase * 100).toFixed(2)));
+  const portNorm = points.map(p => +((p.port / portBase * 100).toFixed(2)));
+  const labels   = points.map(p => p.date);
+
+  // ── رسم الشارت ───────────────────────────────────────────
+  if (chartWrap)  chartWrap.style.display  = '';
+  if (emptyEl)    emptyEl.style.display    = 'none';
+  if (_bmChart) { _bmChart.destroy(); _bmChart = null; }
+
+  const canvas = document.getElementById('benchmark-chart');
+  if (!canvas) return;
+
+  _bmChart = new Chart(canvas, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label:           'محفظتك',
+          data:            portNorm,
+          borderColor:     '#3fb950',
+          backgroundColor: 'rgba(63,185,80,0.10)',
+          borderWidth:     2.5,
+          pointRadius:     3,
+          pointHoverRadius: 6,
+          tension:         0.35,
+          fill:            true,
+        },
+        {
+          label:           'مؤشر تاسي',
+          data:            tasiNorm,
+          borderColor:     '#58a6ff',
+          backgroundColor: 'rgba(88,166,255,0.06)',
+          borderWidth:     2,
+          pointRadius:     3,
+          pointHoverRadius: 6,
+          tension:         0.35,
+          fill:            false,
+          borderDash:      [5, 3],
+        },
+        {
+          label:           'خط القاعدة (100)',
+          data:            Array(labels.length).fill(100),
+          borderColor:     'rgba(139,148,158,0.3)',
+          backgroundColor: 'transparent',
+          borderWidth:     1,
+          borderDash:      [3, 4],
+          pointRadius:     0,
+          fill:            false,
+          tension:         0,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 14, usePointStyle: true },
+        },
+        tooltip: {
+          rtl: true,
+          callbacks: {
+            title: items => items[0].label,
+            label: ctx => {
+              const val = ctx.parsed.y;
+              const delta = val - 100;
+              if (ctx.dataset.label.includes('قاعدة')) return null;
+              return `  ${ctx.dataset.label}: ${val.toFixed(2)} (${delta >= 0 ? '+' : ''}${delta.toFixed(2)}%)`;
+            },
+          },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, maxTicksLimit: 14 },
+          grid:  { color: 'rgba(48,54,61,0.5)' },
+        },
+        y: {
+          ticks: {
+            color: '#8b949e',
+            font:  { family: 'Tajawal', size: 11 },
+            callback: v => v + '',
+          },
+          grid:  { color: 'rgba(48,54,61,0.3)' },
+        },
+      },
+    },
+  });
+
+  // ── ملخص الأداء ──────────────────────────────────────────
+  const lastPort  = portNorm[portNorm.length - 1];
+  const lastTasi  = tasiNorm[tasiNorm.length - 1];
+  const portDelta = lastPort - 100;
+  const tasiDelta = lastTasi - 100;
+  const alpha     = portDelta - tasiDelta;   // الزيادة على تاسي (Alpha)
+  const betterThan = alpha > 0;
+
+  const fmtPct = (v, sign = true) =>
+    `${sign && v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+
+  const alphaColor  = alpha >= 0 ? '#3fb950' : '#f85149';
+  const portColor   = portDelta >= 0 ? '#3fb950' : '#f85149';
+  const tasiColor   = tasiDelta >= 0 ? '#3fb950' : '#f85149';
+  const periodLabel = `${formatDate(points[0].date)} — ${formatDate(points[points.length - 1].date)}`;
+
+  if (summaryEl) {
+    summaryEl.style.display = '';
+    summaryEl.innerHTML = `
+      <div style="
+        display:flex;flex-wrap:wrap;gap:12px;
+        background:var(--bg-3);border:1px solid var(--border);
+        border-radius:var(--radius);padding:14px 16px;margin-bottom:12px
+      ">
+        <div style="flex:1;min-width:140px">
+          <div class="small text-muted">عائد محفظتك</div>
+          <div class="num bold" style="font-size:1.2rem;color:${portColor}">${fmtPct(portDelta)}</div>
+          <div class="small text-muted">${periodLabel}</div>
+        </div>
+        <div style="flex:1;min-width:140px">
+          <div class="small text-muted">عائد تاسي</div>
+          <div class="num bold" style="font-size:1.2rem;color:${tasiColor}">${fmtPct(tasiDelta)}</div>
+          <div class="small text-muted">نفس الفترة</div>
+        </div>
+        <div style="flex:1;min-width:140px;border-right:2px solid var(--border);padding-right:12px">
+          <div class="small text-muted">الأداء الزائد (Alpha)</div>
+          <div class="num bold" style="font-size:1.3rem;color:${alphaColor}">${fmtPct(alpha)}</div>
+          <div class="small" style="color:${alphaColor};font-weight:600">
+            ${betterThan ? '✅ محفظتك تتفوق على تاسي' : '⚠️ تاسي يتفوق على محفظتك'}
+          </div>
+        </div>
+        <div style="flex:1;min-width:140px">
+          <div class="small text-muted">عدد نقاط المقارنة</div>
+          <div class="num bold" style="font-size:1.2rem">${points.length}</div>
+          <div class="small text-muted">${bmEntries.length} نقطة تاسي · ${snapshots.length} لقطة محفظة</div>
+        </div>
+      </div>
+      <p class="small text-muted">
+        📌 الأرقام مبنية على <strong>صافي ثروتك المُسجَّل</strong> (net_worth_snapshots من الداشبورد) مقابل قيم تاسي التي أدخلتها يدوياً.
+        كلاهما مُنسَّب إلى 100 عند <strong>${formatDate(points[0].date)}</strong> — نقطة البداية المشتركة.
+      </p>`;
+  }
+}
+
+// ── معلومات الاستخدام ─────────────────────────────────────────
+function showBenchmarkInfo() {
+  alert([
+    '📊 مقارنة محفظتك بمؤشر تاسي',
+    '',
+    'كيف تعمل؟',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '• أدخل قيمة مؤشر تاسي في تواريخ محددة',
+    '• الرسم يقارن محفظتك بتاسي انطلاقاً من 100',
+    '• الفرق بينهما = Alpha (أداؤك الزائد/الناقص عن السوق)',
+    '',
+    'من أين أحصل على قيمة تاسي؟',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '• موقع تداول (tadawul.com.sa)',
+    '• تطبيق منصة تداول',
+    '• موقع investing.com (بحث عن TASI)',
+    '',
+    'نصيحة:',
+    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
+    '• سجّل قيمة تاسي مرة شهرياً في نفس يوم فتح الداشبورد',
+    '• الداشبورد يسجّل صافي ثروتك تلقائياً كل شهر',
+    '• كلما تطابقت التواريخ كان الرسم أدق',
+  ].join('\n'));
+}
+
+// ── تهيئة التبويب عند أول فتح ────────────────────────────────
+function initBenchmarkTab() {
+  // ضع تاريخ اليوم في حقل التاريخ
+  const dateInp = document.getElementById('bm-date');
+  if (dateInp && !dateInp.value) dateInp.value = todayISO();
+  renderBenchmarkTab();
+}
 
 init();

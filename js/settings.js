@@ -44,6 +44,8 @@ const LS_KEYS = [
   'school_kanda_v1',
   'nav_groups_v1',
   'retirement_goal_v1',
+  'tharwa-price-timestamps',
+  'tharwa-benchmark_v1',
 ];
 
 async function init() {
