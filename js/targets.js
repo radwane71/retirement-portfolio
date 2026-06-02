@@ -332,12 +332,47 @@ function renderSectorTargets() {
 
   const totalSecCurrentPct = sectors.reduce((s, sec) => s + getSectorWeight(sec), 0);
 
+  // ── حساب مجموع أهداف الأسهم لكل قطاع ───────────────────────
+  // يجمع target_pct من stockTargets لكل سهم ينتمي لهذا القطاع
+  const stockTargetBySector = {};
+  [...holdings, ...userStocks].forEach(s => {
+    const sec = (s.sector || '').trim() || 'غير مصنف';
+    const tgt = stockTargets[s.ticker] || 0;
+    if (tgt > 0) stockTargetBySector[sec] = (stockTargetBySector[sec] || 0) + tgt;
+  });
+
   tbody.innerHTML = sectors.map(sec => {
-    const target  = sectorTargets[sec] || 0;
-    const current = getSectorWeight(sec);
-    const al      = alertStatus(current, target);
-    const barPct  = Math.min(current / (target || 1) * 100, 200);
-    const barColor = al.cls === 'text-success' ? '#22c55e' : al.cls === 'text-accent' ? '#f0b429' : '#f85149';
+    const target       = sectorTargets[sec] || 0;
+    const current      = getSectorWeight(sec);
+    const stockSum     = stockTargetBySector[sec] || 0;   // مجموع أهداف الأسهم
+    const al           = alertStatus(current, target);
+    const barPct       = Math.min(current / (target || 1) * 100, 200);
+    const barColor     = al.cls === 'text-success' ? '#22c55e' : al.cls === 'text-accent' ? '#f0b429' : '#f85149';
+
+    // عمود "أهداف الأسهم vs القطاع"
+    let stockSumCell = '<td class="small text-muted">—</td>';
+    if (target > 0 && stockSum > 0) {
+      const unalloc = target - stockSum;
+      if (stockSum > target + 0.05) {
+        // أسهم تتجاوز هدف القطاع ← خطأ
+        stockSumCell = `<td class="small" style="color:#f85149" title="مجموع أهداف الأسهم (${stockSum.toFixed(1)}%) يتجاوز هدف القطاع (${target}%)">
+          ⛔ ${stockSum.toFixed(1)}% / ${target}%</td>`;
+      } else if (unalloc < -0.05) {
+        stockSumCell = `<td class="small" style="color:#f85149">⛔ ${stockSum.toFixed(1)}%<span class="text-muted"> / ${target}%</span></td>`;
+      } else if (unalloc > 0.5) {
+        // متبقي غير مخصص = مساحة للمستقبل
+        stockSumCell = `<td class="small" style="color:#f0b429" title="${stockSum.toFixed(1)}% مخصص للأسهم — ${unalloc.toFixed(1)}% متبقي للقطاع">
+          ${stockSum.toFixed(1)}%<span class="text-muted"> / ${target}%</span>
+          <span style="color:#f0b429;font-size:.7rem"> (${unalloc.toFixed(1)}% حر)</span></td>`;
+      } else {
+        // مكتمل تقريباً
+        stockSumCell = `<td class="small" style="color:#3fb950" title="أهداف الأسهم تغطي هدف القطاع بالكامل">
+          ✅ ${stockSum.toFixed(1)}%<span class="text-muted"> / ${target}%</span></td>`;
+      }
+    } else if (target > 0 && stockSum === 0) {
+      stockSumCell = `<td class="small text-muted" title="لا توجد أهداف أسهم لهذا القطاع بعد">— / ${target}%</td>`;
+    }
+
     return `<tr class="${al.rowCls || ''}">
       <td><strong>${esc(sec)}</strong></td>
       <td>
@@ -346,6 +381,7 @@ function renderSectorTargets() {
         <span class="small text-muted"> %</span>
       </td>
       <td class="num bold ${al.cls}">${current.toFixed(2)}%</td>
+      ${stockSumCell}
       <td>
         <div class="pct-bar-wrap">
           <div class="pct-bar" style="width:${Math.min(barPct,100)}%;background:${barColor}"></div>
@@ -362,6 +398,7 @@ function renderSectorTargets() {
     <td><strong class="small">الإجمالي</strong></td>
     <td class="small text-muted">الهدف: <span id="sector-target-sum">—</span></td>
     <td class="num bold ${secCurrCls}">${totalSecCurrentPct.toFixed(2)}%</td>
+    <td class="small text-muted" title="أهداف الأسهم / هدف القطاع">أسهم / قطاع</td>
     <td colspan="2"><span class="small text-muted">${Math.abs(totalSecCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalSecCurrentPct - 100) < 1 ? '≈ 100%' : totalSecCurrentPct < 100 ? 'بقي ' + (100 - totalSecCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalSecCurrentPct - 100).toFixed(2) + '%'}</span></td>
   </tr>`;
 

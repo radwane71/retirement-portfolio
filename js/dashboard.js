@@ -281,6 +281,7 @@ async function loadAllData() {
   });
   const sectorTargetMap = {};
   (rSecT.data || []).forEach(r => { sectorTargetMap[r.sector] = +r.target_pct; });
+  window._sectorTargetMap = sectorTargetMap;   // متاح لـ _renderSectorBars/_renderSectorCards
   const sectorList = Object.entries(sectorValMap)
     .map(([sec, val]) => ({
       sec,
@@ -1301,34 +1302,87 @@ function renderSectorChart() {
 }
 
 function _renderSectorBars(entries, total) {
+  // جمع أهداف القطاعات — من sectorTargets المُحمَّل في loadAllData
+  const hasSectorTargets = Object.keys(window._sectorTargetMap || {}).length > 0;
+
   const bars = entries.map(([sec, val], i) => {
-    const pct   = total > 0 ? (val / total * 100) : 0;
-    const color = CHART_COLORS[i % CHART_COLORS.length];
-    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    const pct    = total > 0 ? (val / total * 100) : 0;
+    const target = (window._sectorTargetMap || {})[sec] || 0;
+    const color  = CHART_COLORS[i % CHART_COLORS.length];
+
+    // تحديد لون حالة الانحراف
+    let statusColor = color;
+    let statusTip   = '';
+    if (target > 0) {
+      const diff = pct - target;
+      if (Math.abs(diff) <= 1)       { statusColor = '#3fb950'; statusTip = `✅ ضمن الهدف (${target}%)`; }
+      else if (diff > 1 && diff <= 3){ statusColor = '#f0b429'; statusTip = `⚠️ فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
+      else if (diff > 3)             { statusColor = '#f85149'; statusTip = `🔴 فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
+      else if (diff < -3)            { statusColor = '#f0b429'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`; }
+      else                           { statusColor = '#3fb950'; statusTip = `قريب من الهدف (${target}%)`; }
+    }
+
+    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px" title="${statusTip}">
       <div style="width:90px;font-size:0.82rem;color:var(--text);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(sec)}">${esc(sec)}</div>
-      <div style="flex:1;height:18px;background:rgba(255,255,255,0.06);border-radius:4px;position:relative">
-        <div style="height:100%;width:${pct.toFixed(1)}%;background:${color};border-radius:4px;min-width:2px"></div>
+      <div style="flex:1;position:relative">
+        <!-- شريط الهدف (خط عمودي) -->
+        ${target > 0 ? `<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(target,100)}%;width:2px;background:rgba(255,255,255,0.35);border-radius:1px;z-index:2" title="الهدف: ${target}%"></div>` : ''}
+        <!-- شريط الواقع -->
+        <div style="height:18px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:visible">
+          <div style="height:100%;width:${Math.min(pct,100).toFixed(1)}%;background:${statusColor};border-radius:4px;min-width:2px;transition:width .3s"></div>
+        </div>
       </div>
-      <div style="width:44px;font-size:0.82rem;font-weight:600;color:var(--text);text-align:left">${pct.toFixed(1)}%</div>
-      <div style="width:90px;font-size:0.78rem;color:var(--text-2);text-align:left">${formatSAR(val)}</div>
+      <div style="width:44px;font-size:0.82rem;font-weight:600;color:${statusColor};text-align:left">${pct.toFixed(1)}%</div>
+      ${target > 0
+        ? `<div style="width:38px;font-size:0.75rem;color:var(--text-muted);text-align:left" title="الهدف">${target}%🎯</div>`
+        : `<div style="width:38px"></div>`}
+      <div style="width:84px;font-size:0.78rem;color:var(--text-2);text-align:left">${formatSAR(val)}</div>
     </div>`;
   }).join('');
-  return `<div style="padding:8px 4px">${bars}</div>`;
+
+  const legend = hasSectorTargets
+    ? `<div style="display:flex;gap:16px;font-size:.72rem;color:var(--text-muted);padding:0 4px 8px;flex-wrap:wrap">
+        <span>🎯 = الوزن المستهدف (الخط الأبيض)</span>
+        <span style="color:#3fb950">● ضمن الهدف</span>
+        <span style="color:#f0b429">● انحراف بسيط</span>
+        <span style="color:#f85149">● انحراف حاد</span>
+       </div>` : '';
+
+  return `<div style="padding:8px 4px">${legend}${bars}</div>`;
 }
 
 function _renderSectorCards(entries, total) {
   const cards = entries.map(([sec, val], i) => {
-    const pct   = total > 0 ? (val / total * 100) : 0;
-    const color = CHART_COLORS[i % CHART_COLORS.length];
-    return `<div class="w-card" style="--card-accent:${color}">
+    const pct    = total > 0 ? (val / total * 100) : 0;
+    const target = (window._sectorTargetMap || {})[sec] || 0;
+    const diff   = target > 0 ? pct - target : null;
+    const color  = CHART_COLORS[i % CHART_COLORS.length];
+
+    // لون الحالة
+    let stateColor = color, stateLabel = '';
+    if (diff !== null) {
+      if (Math.abs(diff) <= 1)  { stateColor = '#3fb950'; stateLabel = '✅'; }
+      else if (diff > 1)        { stateColor = diff > 3 ? '#f85149' : '#f0b429'; stateLabel = `↑+${diff.toFixed(1)}%`; }
+      else                      { stateColor = '#f0b429'; stateLabel = `↓${diff.toFixed(1)}%`; }
+    }
+
+    return `<div class="w-card" style="--card-accent:${stateColor}">
       <div class="w-card-header">
-        <span class="w-card-ticker" style="color:${color};font-size:0.8rem">${esc(sec)}</span>
-        <span class="w-card-pct">${pct.toFixed(1)}%</span>
+        <span class="w-card-ticker" style="color:${stateColor};font-size:0.8rem">${esc(sec)}</span>
+        <span class="w-card-pct" style="color:${stateColor}">${pct.toFixed(1)}%</span>
       </div>
-      <div class="w-card-bar-wrap" style="margin:6px 0">
-        <div class="w-card-bar-track"><div class="w-card-bar-fill" style="width:${pct.toFixed(1)}%;background:${color}"></div></div>
+      <div class="w-card-bar-wrap" style="margin:6px 0;position:relative">
+        <div class="w-card-bar-track">
+          <div class="w-card-bar-fill" style="width:${Math.min(pct,100).toFixed(1)}%;background:${stateColor}"></div>
+        </div>
+        ${target > 0 ? `<div style="position:absolute;top:0;bottom:0;left:${Math.min(target,100)}%;width:2px;background:rgba(255,255,255,0.4);border-radius:1px" title="الهدف ${target}%"></div>` : ''}
       </div>
-      <div style="font-size:0.78rem;color:var(--text-2)">${formatSAR(val)}</div>
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <div style="font-size:0.78rem;color:var(--text-2)">${formatSAR(val)}</div>
+        ${target > 0
+          ? `<div style="font-size:0.72rem;color:${stateColor};font-weight:600">${stateLabel} <span style="color:var(--text-muted);font-weight:400">🎯${target}%</span></div>`
+          : ''}
+      </div>
     </div>`;
   }).join('');
   return `<div class="w-cards-grid" style="padding:8px 0">${cards}</div>`;
