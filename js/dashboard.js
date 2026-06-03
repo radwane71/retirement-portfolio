@@ -47,7 +47,7 @@ function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
 // إجمالي الصكوك المشترَك بها (من التخزين المحلي لصفحة الصكوك)
 function getSukukActiveTotal() {
   try {
-    const raw = localStorage.getItem('sukuk_planner_v1');
+    const raw = localStorage.getItem(userLsKey('sukuk_planner_v1')) || localStorage.getItem('sukuk_planner_v1');
     if (!raw) return 0;
     const data = JSON.parse(raw);
     return (data.opportunities || [])
@@ -57,16 +57,17 @@ function getSukukActiveTotal() {
 }
 
 // ── تتبع قِدم الأسعار ─────────────────────────────────────────
-const PRICE_TS_KEY = 'tharwa-price-timestamps';
+// User-scoped key — resolved after requireAuth() sets window._currentUserId
+const PRICE_TS_KEY = () => userLsKey('tharwa-price-timestamps');
 const STALE_DAYS   = 7;   // عدد الأيام التي بعدها يُعتبر السعر قديماً
 
 function _loadPriceTimestamps() {
-  try { _priceTimestamps = JSON.parse(localStorage.getItem(PRICE_TS_KEY) || '{}'); }
+  try { _priceTimestamps = JSON.parse(localStorage.getItem(PRICE_TS_KEY()) || '{}'); }
   catch (_) { _priceTimestamps = {}; }
 }
 
 function _savePriceTimestamps() {
-  try { localStorage.setItem(PRICE_TS_KEY, JSON.stringify(_priceTimestamps)); }
+  try { localStorage.setItem(PRICE_TS_KEY(), JSON.stringify(_priceTimestamps)); }
   catch (_) {}
 }
 
@@ -153,6 +154,16 @@ async function init() {
   renderAllocationChart();
   renderRetirementCard();
   startPriceAutoRefresh();
+
+  // أوقف العداد عند إخفاء الصفحة — استأنفه عند العودة
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      clearInterval(_priceRefreshTimer); _priceRefreshTimer = null;
+    } else if (!_priceRefreshTimer) {
+      startPriceAutoRefresh();
+    }
+  });
+
   // تسجيل قيمة المحفظة تلقائياً (مرة في الشهر) لبناء تاريخ أداء حقيقي
   _autoSnapshotPortfolio().catch(() => {});
 }
@@ -164,11 +175,13 @@ async function _autoSnapshotPortfolio() {
   const thisMonth = todayISO_.slice(0, 7); // YYYY-MM
 
   // هل يوجد snapshot هذا الشهر بالفعل؟
+  const nextMonthDate = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
+  const nextMonthStr  = nextMonthDate.toISOString().slice(0, 10);
   const { data: existing } = await supabaseClient
     .from('net_worth_snapshots')
     .select('id, date')
     .gte('date', thisMonth + '-01')
-    .lte('date', thisMonth + '-31')
+    .lt('date', nextMonthStr)
     .limit(1);
 
   if (existing?.length) return; // موجود — لا نكرر
@@ -324,14 +337,11 @@ async function loadAllData() {
   const today_d      = new Date();
   const daysElapsed  = Math.floor((today_d - new Date(yr, 0, 1)) / 86400000) + 1;
   const daysInYear   = ((yr % 4 === 0 && yr % 100 !== 0) || yr % 400 === 0) ? 366 : 365;
-  // إجمالي المشتريات والمبيعات قبل السنة الحالية = رأس المال أول يناير
-  const prevBuys     = txRows.filter(t => t.type === 'buy'  && new Date(t.date).getFullYear() < yr).reduce((s,t)=>s + +t.total,0);
-  const prevSells    = txRows.filter(t => t.type === 'sell' && new Date(t.date).getFullYear() < yr).reduce((s,t)=>s + +t.total,0);
-  const beginYearCap = Math.max(0, prevBuys - prevSells);
   // الأرباح المُسنواة للسنة الحالية
   const annualizedYearDiv = daysElapsed > 0 ? yearDiv * (daysInYear / daysElapsed) : yearDiv;
-  // المقام للعائد المُسنوى: رأس المال أول يناير (إن وُجد)، وإلا التكلفة الحالية
-  const denomAnn = beginYearCap > 0 ? beginYearCap : costBasis;
+  // المقام للعائد المُسنوى: costBasis (WAC × الأسهم الحالية) هو الأدق لأنه يعكس رأس المال الفعلي المُنشغل
+  // صافي التدفقات النقدية (شراء − بيع) قد يكون منخفضاً إذا ضُخّ معظم المال في نفس السنة
+  const denomAnn = costBasis > 0 ? costBasis : 1;
 
   // الطرق الثلاث
   const divYieldAnn    = denomAnn    > 0 ? annualizedYearDiv / denomAnn    * 100 : 0; // مُسنوى
@@ -421,7 +431,7 @@ async function loadAllData() {
     divYieldYear,    divYieldAll,
     divYieldAnn, divYieldYOC, divYieldMarket, divYieldFwd,
     fwdProjected, ttmDiv, xirr,
-    annualizedYearDiv, daysElapsed, daysInYear, beginYearCap, denomAnn,
+    annualizedYearDiv, daysElapsed, daysInYear, denomAnn,
     grantMap, totalGrantShares, totalGrantTickers,
     latestNW:        nwRows[0] ? +nwRows[0].total_value : null,
     latestNWDate:    nwRows[0] ? nwRows[0].date : null,
@@ -629,8 +639,8 @@ function renderRebalancingAlerts() {
   const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
   if (!totalVal) { el.style.display = 'none'; return; }
 
-  const green  = +(localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const yellow = +(localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const green  = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const yellow = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
 
   // حساب الانحرافات لكل سهم له هدف
   const deviations = [];
@@ -716,8 +726,8 @@ function renderPortfolioHealthCard() {
 
   const s    = window._ds || {};
   const goal = getRetirementGoal();
-  const gThr = +(localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const yThr = +(localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
 
   // ── 1. تنوع الأسهم والقطاعات ───────────────────────────────
   const stockCount = holdings.length;
@@ -1003,16 +1013,23 @@ function showHealthInfo() {
 const RET_GOAL_KEY = 'retirement_goal_v1';
 function getRetirementGoal() {
   try {
-    const o = JSON.parse(localStorage.getItem(RET_GOAL_KEY)) || {};
+    // Try user-scoped key first, fall back to legacy global key on first login
+    const scoped = localStorage.getItem(userLsKey(RET_GOAL_KEY));
+    const legacy = localStorage.getItem(RET_GOAL_KEY);
+    const o = JSON.parse(scoped || legacy || '{}') || {};
+    // Migrate legacy key to scoped key once user is known
+    if (!scoped && legacy && window._currentUserId) {
+      try { localStorage.setItem(userLsKey(RET_GOAL_KEY), legacy); localStorage.removeItem(RET_GOAL_KEY); } catch(_) {}
+    }
     return {
       monthly:     +o.monthly     || 0,
       swr:         +o.swr         || 4,
-      target_year: +o.target_year || 0,   // سنة التقاعد المستهدفة (اختياري)
+      target_year: +o.target_year || 0,
     };
   } catch (_) { return { monthly: 0, swr: 4, target_year: 0 }; }
 }
 function saveRetirementGoal(g) {
-  try { localStorage.setItem(RET_GOAL_KEY, JSON.stringify(g)); } catch (_) {}
+  try { localStorage.setItem(userLsKey(RET_GOAL_KEY), JSON.stringify(g)); } catch (_) {}
 }
 function editRetirementGoal() {
   const cur = getRetirementGoal();
@@ -2912,11 +2929,11 @@ function showCardInfo(key) {
 }
 
 // ── نقد المحفظة ───────────────────────────────────────────────
-const CASH_LS_KEY = 'portfolio_cash_v1';
+const CASH_LS_KEY = () => userLsKey('portfolio_cash_v1');
 
 function _loadCashFromLS() {
   try {
-    const raw = localStorage.getItem(CASH_LS_KEY);
+    const raw = localStorage.getItem(CASH_LS_KEY());
     if (!raw) return;
     const obj = JSON.parse(raw);
     portfolioCash = +obj.amount || 0;
@@ -2925,7 +2942,7 @@ function _loadCashFromLS() {
 }
 
 function _saveCashToLS(amount, updatedAt) {
-  try { localStorage.setItem(CASH_LS_KEY, JSON.stringify({ amount, updated_at: updatedAt })); } catch (_) {}
+  try { localStorage.setItem(CASH_LS_KEY(), JSON.stringify({ amount, updated_at: updatedAt })); } catch (_) {}
 }
 
 function startEditCash() {
@@ -2973,7 +2990,7 @@ async function saveCash() {
 }
 
 async function deleteHolding(id) {
-  if (!confirm('هل أنت متأكد من حذف هذا السهم؟')) return;
+  if (!await confirmAsync('هل أنت متأكد من حذف هذا السهم؟')) return;
   const { error } = await supabaseClient.from('holdings').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');

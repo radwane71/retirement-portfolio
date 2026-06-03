@@ -107,7 +107,41 @@ function esc(v) {
 }
 
 // ── ID generator ─────────────────────────────────────────────
-function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
+function uid() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'id_' + crypto.randomUUID().replace(/-/g, '');
+  return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 9);
+}
+
+// ── User-scoped localStorage key ──────────────────────────────
+// Call only after requireAuth() has run (sets window._currentUserId).
+// Falls back to global key so reads before auth still work for non-sensitive prefs.
+function userLsKey(key) {
+  return window._currentUserId ? `u:${window._currentUserId}:${key}` : key;
+}
+
+// ── Confirmation dialog (mobile-safe, replaces window.confirm) ─
+function confirmAsync(message) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:420px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+        <p style="margin:0 0 20px;color:var(--text-1,#e6edf3);font-size:.92rem;line-height:1.6">${esc(message)}</p>
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+          <button id="cdlg-cancel"  class="btn btn-secondary" style="min-width:80px">إلغاء</button>
+          <button id="cdlg-confirm" class="btn btn-danger"    style="min-width:80px">تأكيد</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    overlay.querySelector('#cdlg-confirm').onclick = () => cleanup(true);
+    overlay.querySelector('#cdlg-cancel').onclick  = () => cleanup(false);
+    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); });
+    document.addEventListener('keydown', function esc_key(e) {
+      if (e.key === 'Escape') { cleanup(false); document.removeEventListener('keydown', esc_key); }
+    });
+  });
+}
 
 // ── XIRR — معدل العائد الداخلي السنوي المعدَّل بالزمن ────────
 // Input: مصفوفة { date: Date, amount: number }
@@ -115,6 +149,8 @@ function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).sl
 // Output: النسبة المئوية السنوية، أو null إذا تعذّر الحساب
 function computeXIRR(flows) {
   if (!flows || flows.length < 2) return null;
+  // Guard: all entries must have a valid Date
+  if (flows.some(c => !(c.date instanceof Date) || isNaN(c.date.getTime()))) return null;
   const cf = flows.slice().sort((a, b) => a.date - b.date);
   const t0    = cf[0].date;
   const years = cf.map(c => (c.date - t0) / (365 * 86400000));
@@ -339,19 +375,37 @@ window.showNotePopup = function(btnEl) {
     if (existing._srcBtn === btnEl) { existing.remove(); return; }
     existing.remove();
   }
+  // Decode stored HTML entities back to plain text, then render safely via DOM
   const raw = btnEl.dataset.note || '';
   const txt = raw
     .replace(/&amp;/g, '&').replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+
   const popup = document.createElement('div');
   popup.id = 'note-popup';
   popup._srcBtn = btnEl;
-  popup.innerHTML = `
-    <div class="note-popup-header">
-      <span>📝 ملاحظة</span>
-      <button class="note-popup-close" onclick="document.getElementById('note-popup').remove()">✕</button>
-    </div>
-    <div class="note-popup-body">${txt.replace(/\n/g, '<br>')}</div>`;
+
+  const header = document.createElement('div');
+  header.className = 'note-popup-header';
+  const headerTitle = document.createElement('span');
+  headerTitle.textContent = '📝 ملاحظة';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'note-popup-close';
+  closeBtn.textContent = '✕';
+  closeBtn.onclick = () => popup.remove();
+  header.appendChild(headerTitle);
+  header.appendChild(closeBtn);
+
+  const body = document.createElement('div');
+  body.className = 'note-popup-body';
+  // Render plain text with line breaks — no innerHTML, no XSS
+  txt.split('\n').forEach((line, i) => {
+    if (i > 0) body.appendChild(document.createElement('br'));
+    body.appendChild(document.createTextNode(line));
+  });
+
+  popup.appendChild(header);
+  popup.appendChild(body);
   document.body.appendChild(popup);
   const rect = btnEl.getBoundingClientRect();
   const sY = window.scrollY || 0, sX = window.scrollX || 0;
@@ -480,6 +534,24 @@ window.closeMobileNav = function() {
 };
 
 // ── Inline Editing ────────────────────────────────────────────
+// Allowlist: only these table→field combinations may be written via inline edit.
+// Prevents a user manipulating data-* attributes to update arbitrary rows/fields.
+const INLINE_EDIT_ALLOWLIST = {
+  transactions:     new Set(['date','ticker','name','type','shares','price','notes']),
+  holdings:         new Set(['ticker','name','sector','shares','avg_price','current_price','target_weight','notes','price_manual']),
+  real_estate:      new Set(['current_value','status','notes','name','rent_amount','purchase_price','address']),
+  dividends:        new Set(['amount','date','year','month','ticker','name','notes']),
+  cashflow_entries: new Set(['amount','date','type','notes','description']),
+  stock_targets:    new Set(['target_pct','entry_price','exit_price','notes']),
+  sector_targets:   new Set(['target_pct']),
+  life_goals:       new Set(['title','target_amount','saved_amount','target_date','notes','status','priority']),
+  salary_entries:   new Set(['amount','date','notes','type','description']),
+  inventory_items:  new Set(['name','value','notes','category','status','purchase_date','purchase_price']),
+  tasks:            new Set(['title','status','priority','notes','due_date','description']),
+  review_logs:      new Set(['notes','rating','date']),
+  watchlist:        new Set(['ticker','name','target_price','notes','sector']),
+};
+
 function enableInlineEditing(tbody, postSaveFn) {
   if (tbody._ieEnabled) return;
   tbody._ieEnabled = true;
@@ -496,6 +568,12 @@ function enableInlineEditing(tbody, postSaveFn) {
 }
 
 async function _doInlineEdit(td, tbody, { table, id, field, type, raw, selectKey }, postSaveFn) {
+  // Security: reject unknown table or field to prevent DOM-attribute manipulation attacks
+  if (!INLINE_EDIT_ALLOWLIST[table] || !INLINE_EDIT_ALLOWLIST[table].has(field)) {
+    showToast('حقل غير مصرح به', 'error');
+    tbody._ieBusy = false;
+    return;
+  }
   const origHTML = td.innerHTML;
   const opts = selectKey ? INLINE_OPTS[selectKey] : null;
   let el;

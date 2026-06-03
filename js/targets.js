@@ -80,8 +80,8 @@ function getSectorWeight(sector) {
 // ── تحديد حالة التنبيه ─────────────────────────────────────
 function getAlertThresholds() {
   return {
-    green:  +(localStorage.getItem('tharwa-alert-green')  ?? 1),
-    yellow: +(localStorage.getItem('tharwa-alert-yellow') ?? 3),
+    green:  +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1),
+    yellow: +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3),
   };
 }
 

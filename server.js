@@ -16,7 +16,16 @@ const mime = {
 };
 
 http.createServer((req, res) => {
-  let filePath = path.join(BASE, req.url === '/' ? 'index.html' : req.url);
+  // Strip query string and normalize slashes to prevent path traversal
+  const safeUrl  = req.url.split('?')[0].replace(/\\/g, '/');
+  const relative = safeUrl === '/' ? 'index.html' : safeUrl.replace(/^\/+/, '');
+  const filePath = path.resolve(BASE, relative);
+
+  // Reject any path that escapes the project root
+  if (!filePath.startsWith(BASE + path.sep) && filePath !== BASE) {
+    res.writeHead(403); res.end('Forbidden'); return;
+  }
+
   const ext = path.extname(filePath);
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('Not found'); return; }

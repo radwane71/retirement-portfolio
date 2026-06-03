@@ -241,43 +241,54 @@ async function saveAllStaging() {
   const btn = document.getElementById('btn-save-all');
   if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحفظ…'; }
 
-  let saved = 0;
-  const failedRows = [];
-  for (const r of stagingRows) {
+  // Build all payloads first, then insert in one atomic request
+  const payloads = stagingRows.map(r => {
     recalcStaging(r);
-    const payload = {
+    return {
       user_id: user.id,
       date: r.date, ticker: r.ticker.toUpperCase(), name: r.name, type: r.type,
       shares: +r.shares, price: +r.price,
       commission: r.commission, vat: r.vat, total: r.total
     };
-    const { error } = await supabaseClient.from('transactions').insert([payload]);
-    if (!error) { await updateHolding(user.id, payload); saved++; }
-    else { failedRows.push(r.ticker + ' (' + r.date + '): ' + error.message); }
-  }
+  });
 
+  const { error } = await supabaseClient.from('transactions').insert(payloads);
   if (btn) btn.disabled = false;
-  if (failedRows.length) {
-    showToast(`تم إضافة ${saved} من ${stagingRows.length} — فشل: ${failedRows.join(' | ')}`, 'error');
-  } else {
-    showToast(`تم إضافة ${saved} معاملة بنجاح`, 'success');
+
+  if (error) {
+    showToast(`خطأ في الحفظ: ${error.message}`, 'error');
+    if (btn) btn.textContent = `إضافة معاملات (${stagingRows.length})`;
+    return;
   }
 
-  if (saved > 0) {
-    stagingRows = [];
-    _stagingId  = 0;
-    addStagingRow();
-    await loadTransactions();
-    renderTable();
-    document.getElementById('tx-tbody').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+  // Update holdings after successful bulk insert
+  for (const p of payloads) await updateHolding(user.id, p);
+
+  showToast(`تم إضافة ${payloads.length} معاملة بنجاح`, 'success');
+  stagingRows = [];
+  _stagingId  = 0;
+  addStagingRow();
+  await loadTransactions();
+  renderTable();
+  document.getElementById('tx-tbody').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 // ── DB helpers ────────────────────────────────────────────────
+const TX_PAGE_LIMIT = 3000;
+
 async function loadTransactions() {
-  const { data, error } = await supabaseClient.from('transactions').select('*').eq('is_archived', false).order('date', { ascending: false });
+  const { data, error, count } = await supabaseClient
+    .from('transactions')
+    .select('*', { count: 'exact' })
+    .eq('is_archived', false)
+    .order('date', { ascending: false })
+    .limit(TX_PAGE_LIMIT);
+
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   transactions = data || [];
+  if (count > TX_PAGE_LIMIT) {
+    showToast(`⚠️ يتم عرض ${TX_PAGE_LIMIT} معاملة فقط من أصل ${count} — أرشف المعاملات القديمة لتحسين الأداء`, 'warning');
+  }
 }
 
 async function updateHolding(userId, tx) {
@@ -335,9 +346,9 @@ async function recomputeHoldingFromTx(userId, ticker) {
       totalShares += +t.shares;   // منحة: تكلفة = صفر
     } else if (t.type === 'sell') {
       const sellShares = Math.min(+t.shares, totalShares);
-      // WAC لا يتغير عند البيع — فقط الأسهم تنقص
-      const pct = totalShares > 0 ? sellShares / totalShares : 0;
-      totalCost   -= totalCost * pct;
+      // WAC لا يتغير عند البيع — خصم التكلفة بشكل مباشر لتجنب تراكم أخطاء الفاصلة العائمة
+      const avgCostPerShare = totalShares > 0 ? totalCost / totalShares : 0;
+      totalCost   = Math.max(0, totalCost - avgCostPerShare * sellShares);
       totalShares -= sellShares;
     }
   });
@@ -580,7 +591,6 @@ async function onTxSaved(id, field, newVal) {
   row[field] = newVal;
   if (['shares', 'price', 'type'].includes(field)) {
     const isGrant = row.type === 'grant';
-    // منحة: السعر يُصبح 0 تلقائياً
     if (isGrant && field === 'type') {
       row.price = 0;
       await supabaseClient.from('transactions').update({ price: 0 }).eq('id', id);
@@ -589,13 +599,16 @@ async function onTxSaved(id, field, newVal) {
     const total = isGrant ? 0 : (row.type === 'sell' ? c.totalSell : c.totalBuy);
     await supabaseClient.from('transactions').update({ commission: c.commission, vat: c.vat, total }).eq('id', id);
     row.commission = c.commission; row.vat = c.vat; row.total = total;
-    showToast('⚠️ تغيير نوع/كمية المعاملة لا يُحدِّث المحفظة تلقائياً — استخدم "مزامنة من المعاملات" في لوحة التحكم', 'info');
+    // إعادة حساب المحفظة مباشرةً بعد تغيير الحقول المالية
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    await recomputeHoldingFromTx(user.id, row.ticker);
+    showToast('تم التحديث وإعادة حساب المحفظة ✓', 'success');
   }
   renderTable();
 }
 
 async function archiveTx(id) {
-  if (!confirm('أرشفة هذه المعاملة؟ ستُخفى من الحسابات والمحفظة لكنها تبقى في قاعدة البيانات كسجل تاريخي.')) return;
+  if (!await confirmAsync('أرشفة هذه المعاملة؟ ستُخفى من الحسابات والمحفظة لكنها تبقى في قاعدة البيانات كسجل تاريخي.')) return;
   const tx = transactions.find(t => t.id === id);
   if (!tx) return;
   const { data: { user } } = await supabaseClient.auth.getUser();
@@ -686,10 +699,8 @@ async function saveEditModal() {
   if (shares <= 0)                          { showToast('عدد الأسهم يجب أن يكون أكبر من صفر', 'error'); return; }
   if (type !== 'grant' && price <= 0)       { showToast('سعر السهم يجب أن يكون أكبر من صفر', 'error'); return; }
 
-  const c = type === 'grant'
-    ? { commission: 0, vat: 0, totalBuy: shares * price, totalSell: shares * price }
-    : calcCommission(shares, price);
-  const total = type === 'sell' ? c.totalSell : c.totalBuy;
+  const c     = type === 'grant' ? { commission: 0, vat: 0, totalBuy: 0, totalSell: 0 } : calcCommission(shares, price);
+  const total = type === 'grant' ? 0 : (type === 'sell' ? c.totalSell : c.totalBuy);
 
   const { error } = await supabaseClient.from('transactions').update({
     date, ticker, name, type, shares, price,

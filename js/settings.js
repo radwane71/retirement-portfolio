@@ -58,8 +58,8 @@ async function init() {
 
 // ── عتبات ألوان التنبيهات ─────────────────────────────────────
 function loadAlertThresholds() {
-  const g = +(localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const y = +(localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const g = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const y = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
   const gEl = document.getElementById('thresh-green');
   const yEl = document.getElementById('thresh-yellow');
   if (gEl) gEl.value = g;
@@ -74,16 +74,16 @@ function saveAlertThresholds() {
     document.getElementById('thresh-status').style.color = 'var(--danger)';
     return;
   }
-  localStorage.setItem('tharwa-alert-green',  g);
-  localStorage.setItem('tharwa-alert-yellow', y);
+  localStorage.setItem(userLsKey('tharwa-alert-green'),  g);
+  localStorage.setItem(userLsKey('tharwa-alert-yellow'), y);
   const el = document.getElementById('thresh-status');
   el.textContent = `✅ تم الحفظ — أخضر ≤ ${g}%، أصفر ≤ ${y}%، أحمر > ${y}%`;
   el.style.color = 'var(--success)';
 }
 
 function resetAlertThresholds() {
-  localStorage.setItem('tharwa-alert-green',  1);
-  localStorage.setItem('tharwa-alert-yellow', 3);
+  localStorage.setItem(userLsKey('tharwa-alert-green'),  1);
+  localStorage.setItem(userLsKey('tharwa-alert-yellow'), 3);
   loadAlertThresholds();
   const el = document.getElementById('thresh-status');
   el.textContent = '↩ تمت إعادة الضبط إلى الافتراضي (1% / 3%)';

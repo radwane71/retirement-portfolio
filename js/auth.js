@@ -3,6 +3,7 @@ async function requireAuth() {
   if (!session) { window.location.href = 'index.html'; return null; }
 
   const user = session.user;
+  window._currentUserId = user.id;   // used by userLsKey() in utils.js
 
   // تحديث آخر ظهور
   supabaseClient.from('user_profiles')

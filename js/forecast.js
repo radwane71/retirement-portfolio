@@ -46,17 +46,22 @@ async function init() {
 
 // ── Load historical data ───────────────────────────────────────────────
 async function loadHistoricalData() {
-  const [rTx, rDiv, rH, rCf] = await Promise.all([
+  const [rTx, rDiv, rH, rCf, rNw, rRe] = await Promise.all([
     supabaseClient.from('transactions').select('type,total,shares,price,date,ticker').eq('is_archived',false),
     supabaseClient.from('dividends').select('amount,year').eq('is_archived',false).order('year'),
     supabaseClient.from('holdings').select('shares,current_price,avg_price,ticker'),
     supabaseClient.from('cashflow_entries').select('type,amount,date').eq('is_archived',false),
+    supabaseClient.from('net_worth_snapshots').select('total_value').order('date',{ascending:false}).limit(1).maybeSingle(),
+    supabaseClient.from('real_estate').select('current_value,status').eq('is_active',true),
   ]);
 
   const txRows  = rTx.data  || [];
   const divRows = rDiv.data || [];
   const hRows   = rH.data   || [];
   const cfRows  = rCf.data  || [];
+  // صافي الثروة الفعلي: من آخر snapshot إن وُجد، وإلا أسهم + عقارات
+  const reTotal  = (rRe.data || []).filter(p => p.status !== 'sold').reduce((s,p) => s + +p.current_value, 0);
+  const snapshotNW = rNw.data?.total_value ? +rNw.data.total_value : null;
 
   // القيمة السوقية والتكلفة الحالية
   const currentValue = hRows.reduce((s,h) => s + +h.shares * +h.current_price, 0);
@@ -209,19 +214,20 @@ async function loadHistoricalData() {
     annCapGrowth * confWeight + MARKET_CAP_BENCHMARK * (1 - confWeight)
   ));
 
-  // ── هدف FIRE من الإعدادات المحلية ──────────────────────────────────
+  // ── هدف FIRE من الإعدادات المحلية (مُقيَّد بالمستخدم) ────────────────
   let fireGoal = { monthly: 0, swr: 4, target_year: 0 };
   try {
-    const fg = JSON.parse(localStorage.getItem('retirement_goal_v1') || '{}');
-    fireGoal = {
-      monthly:     +fg.monthly     || 0,
-      swr:         +fg.swr         || 4,
-      target_year: +fg.target_year || 0,
-    };
+    const scopedKey = userLsKey('retirement_goal_v1');
+    const raw = localStorage.getItem(scopedKey) || localStorage.getItem('retirement_goal_v1') || '{}';
+    const fg = JSON.parse(raw);
+    fireGoal = { monthly: +fg.monthly || 0, swr: +fg.swr || 4, target_year: +fg.target_year || 0 };
   } catch(_) {}
 
+  // صافي الثروة الشامل للحساب الدقيق لتقدم FIRE
+  const totalNW = snapshotNW ?? (currentValue + reTotal);
+
   return {
-    currentValue, costBasis, netCapital,
+    currentValue, costBasis, netCapital, totalNW,
     annCapGrowth,                          // الأداء الشخصي الخام
     blendedCapGrowth,                      // المستخدم فعلياً في السيناريوهات
     safeDivYield, avgAnnualDiv,
@@ -245,7 +251,6 @@ function applyFireGoal() {
   const fg = _hist?.fireGoal;
   if (!fg?.monthly || !fg?.target_year) return;
   const fireNumber = (fg.monthly * 12) / (fg.swr / 100);
-  // ضع قيمة المحفظة المستهدفة
   const goalInp = document.getElementById('inp-goal-amount');
   if (goalInp) { goalInp.value = Math.round(fireNumber); }
   setGoalType('portfolio_value');
@@ -486,7 +491,8 @@ function renderFireBanner(h) {
 
   const fireNumber   = (fg.monthly * 12) / (fg.swr / 100);
   const yearsLeft    = fg.target_year - new Date().getFullYear();
-  const currentNW    = h.currentValue;
+  // استخدم صافي الثروة الكامل (أسهم + عقارات + snapshot) لا الأسهم وحدها
+  const currentNW    = h.totalNW || h.currentValue;
   const progress     = fireNumber > 0 ? Math.min(100, currentNW / fireNumber * 100) : 0;
   const remaining    = Math.max(0, fireNumber - currentNW);
   const barColor     = progress >= 100 ? '#3fb950' : progress >= 50 ? '#f0b429' : '#3b82f6';
