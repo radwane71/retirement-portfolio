@@ -704,33 +704,161 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 .modal-close:hover { background: var(--bg-3); color: var(--text); }
 
 /* ===================== TOAST ===================== */
-.toast {
+
+/* الحاوية الرئيسية — يسار الشاشة */
+#toast-stack {
   position: fixed;
   bottom: 28px;
-  left: 28px;
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 12px 20px;
-  color: var(--text);
-  font-size: 0.875rem;
-  z-index: 1000;
-  transform: translateY(80px);
-  opacity: 0;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  left: 20px;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  z-index: 9999;
   pointer-events: none;
-  max-width: 320px;
-  font-weight: 500;
 }
 
-.toast.show {
-  transform: translateY(0);
+/* كل إشعار */
+.toast-item {
+  pointer-events: all;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  cursor: pointer;
+  /* في البداية: مطوي = بُقعة صغيرة */
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  overflow: hidden;
+  transition: width 0.35s cubic-bezier(0.34, 1.3, 0.64, 1),
+              height 0.35s cubic-bezier(0.34, 1.3, 0.64, 1),
+              border-radius 0.35s ease,
+              opacity 0.3s ease,
+              transform 0.3s ease;
+  opacity: 0;
+  transform: translateX(-20px);
+  position: relative;
+  white-space: nowrap;
+}
+
+/* ظهور */
+.toast-item.visible {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* مفتوح بالهوفر أو اللمس */
+.toast-item:hover,
+.toast-item.expanded {
+  width: 260px;
+  height: auto;
+  min-height: 42px;
+  border-radius: 10px;
+  overflow: visible;
+}
+
+/* خط لون على اليمين حسب النوع */
+.toast-item::before {
+  content: '';
+  display: block;
+  flex-shrink: 0;
+  width: 14px;
+  min-width: 14px;
+  height: 100%;
+  min-height: 42px;
+  border-radius: 10px 0 0 10px;
+  transition: border-radius 0.35s ease;
+}
+.toast-item:not(:hover):not(.expanded)::before {
+  border-radius: 50%;
+  min-height: 14px;
+}
+.toast-item.success::before { background: var(--success); }
+.toast-item.error::before   { background: var(--danger); }
+.toast-item.warning::before { background: var(--accent); }
+.toast-item.info::before    { background: var(--primary); }
+
+/* جسم الرسالة — مخفي حتى يتسع */
+.toast-item .toast-body {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 10px 8px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-right: none;
+  border-radius: 0 10px 10px 0;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text);
+  width: 100%;
+  opacity: 0;
+  transition: opacity 0.2s ease 0.15s;
+  overflow: hidden;
+}
+.toast-item:hover .toast-body,
+.toast-item.expanded .toast-body {
   opacity: 1;
 }
 
-.toast.success { border-color: var(--success); color: var(--success); }
-.toast.error   { border-color: var(--danger);  color: var(--danger); }
-.toast.warning { border-color: var(--accent);  color: var(--accent); }
+.toast-item.success .toast-body { border-color: var(--success); color: var(--success); }
+.toast-item.error   .toast-body { border-color: var(--danger);  color: var(--danger); }
+.toast-item.warning .toast-body { border-color: var(--accent);  color: var(--accent); }
+.toast-item.info    .toast-body { border-color: var(--primary); color: var(--primary); }
+
+/* زر الإغلاق */
+.toast-item .toast-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 2px;
+  color: inherit;
+}
+.toast-item .toast-close:hover { opacity: 1; }
+
+/* شريط تقدم الوقت */
+.toast-item .toast-timer {
+  position: absolute;
+  bottom: 0;
+  left: 14px;
+  right: 0;
+  height: 2px;
+  background: currentColor;
+  opacity: 0.25;
+  transform-origin: left;
+  animation: toast-shrink 20s linear forwards;
+  border-radius: 0 0 10px 0;
+}
+@keyframes toast-shrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+/* خروج */
+.toast-item.hiding {
+  opacity: 0;
+  transform: translateX(-30px);
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+/* الموبايل */
+@media (max-width: 768px) {
+  #toast-stack {
+    bottom: 16px;
+    left: 12px;
+  }
+  .toast-item:hover,
+  .toast-item.expanded {
+    width: calc(100vw - 40px);
+  }
+}
+
+/* ── الـ toast القديم (مؤقتاً للتوافق) ── */
+.toast { display: none; }
 
 /* ===================== TARGETS TOTAL BAR ===================== */
 .targets-total-bar {
@@ -1033,18 +1161,6 @@ tr:hover td { background: rgba(255,255,255,0.02); }
   /* ── Section header ─────────────────────────────────────── */
   .section-header { flex-wrap: wrap; gap: 8px; }
 
-  /* ── Info / toast ───────────────────────────────────────── */
-  #toast-container {
-    bottom: 16px !important;
-    left: 12px !important;
-    right: 12px !important;
-    transform: none !important;
-    width: auto !important;
-  }
-  #toast-container .toast {
-    width: 100% !important;
-    max-width: none !important;
-  }
 }
 
 /* ── 520px: single column ──────────────────────────────────── */

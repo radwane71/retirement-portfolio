@@ -153,12 +153,54 @@ function computeXIRR(flows) {
 
 // ── UI helpers ────────────────────────────────────────────────
 function showToast(msg, type = 'info') {
-  const t = document.getElementById('toast');
-  if (!t) return;
-  t.textContent = msg;
-  t.className = `toast ${type} show`;
-  clearTimeout(t._tm);
-  t._tm = setTimeout(() => { t.className = 'toast'; }, 3000);
+  // أنشئ الحاوية إن لم تكن موجودة
+  let stack = document.getElementById('toast-stack');
+  if (!stack) {
+    stack = document.createElement('div');
+    stack.id = 'toast-stack';
+    document.body.appendChild(stack);
+  }
+
+  // أنشئ عنصر الإشعار
+  const item = document.createElement('div');
+  item.className = `toast-item ${type}`;
+  item.innerHTML = `
+    <div class="toast-body">
+      <span>${msg}</span>
+      <button class="toast-close" title="إغلاق">✕</button>
+    </div>
+    <div class="toast-timer"></div>
+  `;
+
+  // على الموبايل أو اللمس: فتح بالنقر
+  item.addEventListener('click', (e) => {
+    if (!e.target.classList.contains('toast-close')) {
+      item.classList.toggle('expanded');
+    }
+  });
+
+  // زر الإغلاق
+  item.querySelector('.toast-close').addEventListener('click', (e) => {
+    e.stopPropagation();
+    dismissToast(item);
+  });
+
+  stack.appendChild(item);
+
+  // ظهور
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => item.classList.add('visible'));
+  });
+
+  // اختفاء تلقائي بعد 20 ثانية
+  const timer = setTimeout(() => dismissToast(item), 20000);
+  item._timer = timer;
+}
+
+function dismissToast(item) {
+  clearTimeout(item._timer);
+  item.classList.add('hiding');
+  setTimeout(() => item.remove(), 350);
 }
 
 function setActiveNav(linkId) {
