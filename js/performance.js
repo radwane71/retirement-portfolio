@@ -658,8 +658,24 @@ function clearAllBenchmark() {
 // يحسب العائد المُعدَّل بالزمن بمعزل عن الإيداعات والسحوبات
 // المعيار الدولي (GIPS) لمقارنة أداء المحافظ ببعضها أو بمؤشر
 // الخوارزمية: Modified Dietz لكل فترة بين لقطتين → تجميع مضروب
+// يُبقي آخر لقطة فقط لكل يوم — يُزيل تكرارات نفس اليوم التي تُشوّه TWR
+function _deduplicateSnapsByDay(snapshots) {
+  const byDate = {};
+  for (const s of snapshots) {
+    // نفضّل اللقطات اليدوية على التلقائية عند التعادل
+    const existing = byDate[s.date];
+    if (!existing) { byDate[s.date] = s; continue; }
+    const isManual    = s.notes      && !s.notes.startsWith('auto');
+    const wasManual   = existing.notes && !existing.notes.startsWith('auto');
+    if (isManual && !wasManual) { byDate[s.date] = s; continue; }
+    if (!wasManual && !isManual) byDate[s.date] = s; // keep latest
+  }
+  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+}
+
 function _computeTWR(snapshots, cashflows) {
-  const sorted = snapshots.slice().sort((a, b) => a.date.localeCompare(b.date));
+  // خطوة أولى: نُحافظ على لقطة واحدة فقط لكل يوم لتجنب تشويه الحسابات
+  const sorted = _deduplicateSnapsByDay(snapshots);
   if (!sorted.length) return { twrMap: {}, sortedSnaps: sorted };
 
   const cfs = cashflows.slice().sort((a, b) => a.date.localeCompare(b.date));
@@ -687,7 +703,26 @@ function _computeTWR(snapshots, cashflows) {
     twrMap[sorted[i].date] = +(factor * 100).toFixed(3);
   }
 
-  return { twrMap, sortedSnaps: sorted };
+  // فترات مشبوهة: تغيّر > 10% في فترة واحدة بدون cashflow يُفسّره
+  const suspiciousPeriods = [];
+  for (let i = 1; i < sorted.length; i++) {
+    const startDate = sorted[i - 1].date;
+    const endDate   = sorted[i].date;
+    const startVal  = +sorted[i - 1].total_value;
+    const endVal    = +sorted[i].total_value;
+    const netCF     = cfs
+      .filter(c => c.date > startDate && c.date <= endDate)
+      .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
+    const denom = startVal + netCF / 2;
+    if (denom > 0) {
+      const r = (endVal - startVal - netCF) / denom;
+      if (Math.abs(r) > 0.10) {
+        suspiciousPeriods.push({ startDate, endDate, r: +(r * 100).toFixed(1), netCF, startVal, endVal });
+      }
+    }
+  }
+
+  return { twrMap, sortedSnaps: sorted, suspiciousPeriods };
 }
 
 // ── رسم التبويب كاملاً ────────────────────────────────────────
@@ -770,7 +805,7 @@ function renderBenchmarkTab() {
 
   // ── حساب TWR للمحفظة ────────────────────────────────────
   // نستخدم _cf (cashflow_entries) المُحمَّل في init() لتصحيح الإيداعات
-  const { twrMap, sortedSnaps } = _computeTWR(snapshots, _cf || []);
+  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(snapshots, _cf || []);
 
   const getTwrAt = (date) => {
     const prior = sortedSnaps.filter(s => s.date <= date);
@@ -933,7 +968,39 @@ function renderBenchmarkTab() {
       <p class="small" style="color:var(--warning,#f0b429);background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.25);border-radius:6px;padding:8px 10px;margin-top:6px">
         ⚠️ <strong>ملاحظة منهجية:</strong> المقارنة هنا مع <strong>تاسي السعري</strong> (Price Index) الذي لا يشمل إعادة استثمار التوزيعات.
         مؤشر تاسي للعائد الإجمالي (TRI) يكون أعلى بـ ~3-4% سنوياً. Alpha الحقيقي = عائد محفظتك − TRI.
-      </p>`;
+      </p>
+      ${suspiciousPeriods.length ? `
+      <div style="margin-top:10px;padding:10px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.25);border-radius:8px">
+        <div class="small" style="color:#f85149;font-weight:700;margin-bottom:8px">
+          🔍 ${suspiciousPeriods.length} فترة بها تغيّر كبير غير مُفسَّر — قد تُشوّه الـ TWR
+        </div>
+        <div class="small text-muted" style="margin-bottom:6px">
+          السبب الأكثر شيوعاً: إيداع أو سحب لم يُسجَّل في <strong>صفحة التدفقات النقدية</strong>.
+          سجّل هذه الحركات لتصحيح الحساب تلقائياً.
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:.78rem">
+          <thead>
+            <tr style="color:var(--text-muted)">
+              <th style="text-align:right;padding:3px 6px">الفترة</th>
+              <th style="text-align:right;padding:3px 6px">التغيّر</th>
+              <th style="text-align:right;padding:3px 6px">التدفق المسجَّل</th>
+              <th style="text-align:right;padding:3px 6px">قيمة البداية</th>
+              <th style="text-align:right;padding:3px 6px">قيمة النهاية</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${suspiciousPeriods.map(p => `
+            <tr style="border-top:1px solid var(--border)">
+              <td style="padding:4px 6px">${formatDate(p.startDate)} ← ${formatDate(p.endDate)}</td>
+              <td style="padding:4px 6px;font-weight:700;color:${p.r >= 0 ? '#3fb950' : '#f85149'}">${p.r >= 0 ? '+' : ''}${p.r}%</td>
+              <td style="padding:4px 6px;color:var(--text-muted)">${p.netCF !== 0 ? formatSAR(p.netCF, true) : '—'}</td>
+              <td style="padding:4px 6px">${formatSAR(p.startVal)}</td>
+              <td style="padding:4px 6px">${formatSAR(p.endVal)}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>` : ''}
+      `;
   }
 }
 
