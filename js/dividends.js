@@ -843,6 +843,18 @@ async function addDividend(e) {
   if (!name)        { showToast('أدخل اسم السهم', 'error'); return; }
   if (amount <= 0)  { showToast('مبلغ الأرباح يجب أن يكون أكبر من صفر', 'error'); return; }
 
+  // تحذير إذا كان المبلغ أكبر من 10x متوسط توزيعات نفس السهم
+  const sameTickerDivs = dividends.filter(d => d.ticker === ticker && +d.amount > 0);
+  if (sameTickerDivs.length >= 2) {
+    const avg = sameTickerDivs.reduce((s, d) => s + +d.amount, 0) / sameTickerDivs.length;
+    if (amount > avg * 10) {
+      const confirmed = await confirmAsync(
+        `تحذير: المبلغ المُدخَل (${formatSAR(amount)}) يتجاوز 10 أضعاف متوسط توزيعات ${name} (${formatSAR(avg)}).\n\nهل أنت متأكد؟`
+      );
+      if (!confirmed) return;
+    }
+  }
+
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     user_id: user.id,

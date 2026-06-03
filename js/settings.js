@@ -146,11 +146,12 @@ async function exportBackup() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
 
-    const totalRows = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
+    const totalRows     = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
     const tablesSummary = TABLES.map(t => `${t} (${backup[t]?.length || 0})`).join(' | ');
+    const sizeKB        = (new Blob([json]).size / 1024).toFixed(1);
     setStatus('export-status', 'success',
-      `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جداول\n${tablesSummary}`);
-    showToast(`✓ تم تصدير ${totalRows} سجل بنجاح`, 'success');
+      `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جداول | حجم الملف: ${sizeKB} KB\n${tablesSummary}`);
+    showToast(`✓ تم تصدير ${totalRows} سجل — ${sizeKB} KB`, 'success');
 
   } catch (err) {
     setStatus('export-status', 'error', '✗ ' + err.message);
@@ -159,6 +160,31 @@ async function exportBackup() {
     btn.disabled = false;
     btn.textContent = 'تصدير النسخة الاحتياطية';
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// Dry Run: يتحقق من صحة ملف الباكب دون حذف أي شيء
+// يعيد مصفوفة رسائل الخطأ (فارغة = الملف سليم)
+// ══════════════════════════════════════════════════════════════
+function dryRunRestore(backup) {
+  const errors = [];
+  if (!backup || typeof backup !== 'object') { errors.push('الملف فارغ أو تالف'); return errors; }
+  if (!backup.version) errors.push('حقل version مفقود');
+  const tablesFound = TABLES.filter(t => t in backup && Array.isArray(backup[t]));
+  if (tablesFound.length < 3) errors.push(`عدد الجداول الموجودة (${tablesFound.length}) أقل من الحد الأدنى (3)`);
+  // تحقق من أن holdings تحتوي على الحقول الأساسية
+  const h = backup.holdings;
+  if (h?.length) {
+    const sample = h[0];
+    if (!('ticker' in sample) || !('shares' in sample)) errors.push('جدول holdings يفتقر لحقول أساسية (ticker, shares)');
+  }
+  // تحقق من أن transactions تحتوي على الحقول الأساسية
+  const tx = backup.transactions;
+  if (tx?.length) {
+    const sample = tx[0];
+    if (!('type' in sample) || !('total' in sample)) errors.push('جدول transactions يفتقر لحقول أساسية (type, total)');
+  }
+  return errors;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -183,11 +209,11 @@ async function restoreBackup(input) {
     return;
   }
 
-  // ── التحقق من البنية ──────────────────────────────────────
-  const tablesFound = TABLES.filter(t => t in backup && Array.isArray(backup[t]));
-  if (!backup.version || tablesFound.length < 3) {
-    showToast('هذا الملف لا يبدو نسخة احتياطية صالحة', 'error');
-    setStatus('restore-status', 'error', '✗ تنسيق غير صالح');
+  // ── Dry Run: التحقق من صحة البنية قبل أي حذف ───────────────
+  const dryRunErrors = dryRunRestore(backup);
+  if (dryRunErrors.length > 0) {
+    showToast('ملف النسخة غير صالح: ' + dryRunErrors[0], 'error');
+    setStatus('restore-status', 'error', '✗ ' + dryRunErrors.join(' | '));
     return;
   }
 

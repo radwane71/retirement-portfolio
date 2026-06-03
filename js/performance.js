@@ -98,7 +98,8 @@ function buildPositionData() {
     // المقابل في holdings للسعر الحالي
     const h       = _holdings.find(x => x.ticker === p.ticker);
     p.currentPrice = h ? +h.current_price : null;
-    p.avgCost      = h ? +h.avg_price : (p.buyShares > 0 ? p.buyCost / p.buyShares : 0);
+    // دائماً احسب من المعاملات (buyCost يشمل العمولة) لضمان الاتساق
+    p.avgCost      = p.buyShares > 0 ? p.buyCost / p.buyShares : 0;
 
     if (remaining <= 0.001) {
       // مغلق بالكامل

@@ -170,39 +170,46 @@ async function init() {
 
 // ── Auto-snapshot: يحفظ قيمة المحفظة الحالية في net_worth_snapshots ─────
 // يعمل مرة واحدة لكل شهر — يوفر بيانات تاريخية تدريجية لصفحة الأداء
+let _snapshotInProgress = false;
 async function _autoSnapshotPortfolio() {
-  const todayISO_ = new Date().toISOString().slice(0, 10);
-  const thisMonth = todayISO_.slice(0, 7); // YYYY-MM
+  // guard ضد الاستدعاء المتزامن (race condition)
+  if (_snapshotInProgress) return;
+  _snapshotInProgress = true;
+  try {
+    const todayISO_ = new Date().toISOString().slice(0, 10);
+    const thisMonth = todayISO_.slice(0, 7); // YYYY-MM
+    const monthKey  = `auto-${thisMonth}`;   // مفتاح فريد للشهر
 
-  // هل يوجد snapshot هذا الشهر بالفعل؟
-  const nextMonthDate = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 1);
-  const nextMonthStr  = nextMonthDate.toISOString().slice(0, 10);
-  const { data: existing } = await supabaseClient
-    .from('net_worth_snapshots')
-    .select('id, date')
-    .gte('date', thisMonth + '-01')
-    .lt('date', nextMonthStr)
-    .limit(1);
+    // هل يوجد snapshot تلقائي لهذا الشهر بالفعل؟
+    // نفلتر بـ notes يبدأ بـ monthKey لتجنب عد اللقطات اليدوية
+    const { data: existing } = await supabaseClient
+      .from('net_worth_snapshots')
+      .select('id')
+      .ilike('notes', `${monthKey}%`)
+      .limit(1);
 
-  if (existing?.length) return; // موجود — لا نكرر
+    if (existing?.length) return; // موجود — لا نكرر
 
-  // احسب القيمة الكلية الحالية
-  const stocksValue  = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
-  if (stocksValue <= 0) return; // لا يوجد أسهم — لا نسجل
+    // احسب القيمة الكلية الحالية
+    const stocksValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+    if (stocksValue <= 0) return; // لا يوجد أسهم — لا نسجل
 
-  const { data: { user } } = await supabaseClient.auth.getUser();
-  const s = window._ds || {};
-  const reVal = s.reTotal || 0;
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    const s    = window._ds || {};
+    const reVal = s.reTotal || 0;
 
-  // صافي الثروة = أسهم + نقد + عقارات
-  const totalNW = stocksValue + portfolioCash + reVal;
+    // صافي الثروة = أسهم + نقد + عقارات
+    const totalNW = stocksValue + portfolioCash + reVal;
 
-  await supabaseClient.from('net_worth_snapshots').insert({
-    user_id:    user.id,
-    date:       todayISO_,
-    total_value: totalNW,
-    notes:      `auto — أسهم: ${stocksValue.toFixed(0)} | نقد: ${portfolioCash.toFixed(0)} | عقارات: ${reVal.toFixed(0)}`,
-  });
+    await supabaseClient.from('net_worth_snapshots').insert({
+      user_id:     user.id,
+      date:        todayISO_,
+      total_value: totalNW,
+      notes:       `${monthKey} — أسهم: ${stocksValue.toFixed(0)} | نقد: ${portfolioCash.toFixed(0)} | عقارات: ${reVal.toFixed(0)}`,
+    });
+  } finally {
+    _snapshotInProgress = false;
+  }
 }
 
 // ── Data ──────────────────────────────────────────────────────

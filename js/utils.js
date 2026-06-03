@@ -143,6 +143,19 @@ function confirmAsync(message) {
   });
 }
 
+// ── Error boundary موحّد لاستعلامات Supabase ─────────────────
+async function supaQuery(queryFn, errorMsg = 'خطأ في تحميل البيانات') {
+  try {
+    const { data, error } = await queryFn();
+    if (error) throw error;
+    return data;
+  } catch (e) {
+    showToast(errorMsg, 'error');
+    console.error('[supaQuery]', errorMsg, e);
+    return null;
+  }
+}
+
 // ── XIRR — معدل العائد الداخلي السنوي المعدَّل بالزمن ────────
 // Input: مصفوفة { date: Date, amount: number }
 // الشراء = سالب، البيع/التوزيع/القيمة الحالية = موجب
@@ -184,6 +197,8 @@ function computeXIRR(flows) {
     }
   }
   if (!isFinite(r) || r <= -0.9999 || r > 100) return null;
+  // تحقق أخير: النتيجة يجب أن تقرّب NPV من الصفر
+  if (Math.abs(npv(r)) > 1) return null;
   return r * 100;
 }
 
@@ -297,15 +312,19 @@ function initNavGroups() {
 
 // ── Finance ───────────────────────────────────────────────────
 function calcCommission(shares, price) {
-  const tradeValue = parseFloat(shares) * parseFloat(price);
-  const commission = Math.min(tradeValue * 0.0015, 100);
-  const vat = commission * 0.15;
+  // نضرب بـ 10000 ونقسم لاحقاً لتجنب أخطاء الفاصلة العائمة في العمليات الحسابية
+  const tv10k      = Math.round(parseFloat(shares) * parseFloat(price) * 10000);
+  const comm10k    = Math.min(Math.round(tv10k * 0.0015), 1000000); // max 100 SAR × 10000
+  const vat10k     = Math.round(comm10k * 0.15);
+  const tradeValue = tv10k   / 10000;
+  const commission = comm10k / 10000;
+  const vat        = vat10k  / 10000;
   return {
     tradeValue,
     commission: +commission.toFixed(4),
     vat:        +vat.toFixed(4),
-    totalBuy:   +(tradeValue + commission + vat).toFixed(4),
-    totalSell:  +(tradeValue - commission - vat).toFixed(4)
+    totalBuy:   +((tv10k + comm10k + vat10k) / 10000).toFixed(4),
+    totalSell:  +((tv10k - comm10k - vat10k) / 10000).toFixed(4)
   };
 }
 
