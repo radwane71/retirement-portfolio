@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>تقييم أمان المحفظة - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .calc-input-group { margin-bottom: 16px; }
+    .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
+    .calc-input-group input,
+    .calc-input-group select { width: 100%; padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; font-family: 'Tajawal', sans-serif; }
+    .calc-input-group input:focus,
+    .calc-input-group select:focus { outline: none; border-color: var(--primary); }
+    .calc-input-group select option { background: var(--bg-2); }
+    .field-hint { font-size: 0.77rem; color: var(--text-muted); margin-top: 4px; line-height: 1.5; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .rule-section { background: var(--bg-2); border: 1px solid var(--border); border-right: 3px solid var(--accent); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 14px; }
+    .rule-section.warning-section { border-right-color: var(--danger); background: rgba(239,68,68,0.06); }
+    .rule-section h3 { color: var(--accent); font-size: 0.95rem; margin-bottom: 16px; }
+    .rule-section.warning-section h3 { color: var(--danger); }
+    .leverage-warning { display: none; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.4); border-radius: 8px; padding: 12px 14px; margin-top: 10px; color: #f0b429; font-weight: 600; line-height: 1.6; font-size: 0.88rem; }
+    .conflict-warning { display: none; background: rgba(239,68,68,0.1); border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px; margin-top: 10px; color: var(--danger); font-size: 0.85rem; font-weight: 600; }
+    .etf-notice { display: none; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.35); border-radius: 8px; padding: 10px 12px; margin-top: 10px; color: #818cf8; font-size: 0.85rem; }
+    /* نتائج */
+    .results-section { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 14px; text-align: center; }
+    .results-section h3 { color: var(--accent); margin-bottom: 18px; font-size: 0.95rem; }
+    .progress-container { background: var(--bg-1); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin: 14px 0; }
+    .progress-bar { height: 28px; background: var(--bg-3); border-radius: 10px; overflow: hidden; position: relative; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--danger), #dc2626); border-radius: 10px; width: 0%; transition: width 0.6s cubic-bezier(0.4,0,0.2,1); position: relative; }
+    .progress-text { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%); color: #fff; font-weight: 700; font-size: 1rem; z-index: 10; }
+    .score-info { display: flex; justify-content: space-between; align-items: center; margin-top: 16px; gap: 16px; }
+    .score-display { font-size: 2.6rem; font-weight: 900; color: var(--accent); }
+    .percentage-display { font-size: 1.6rem; font-weight: 700; padding: 8px 16px; border-radius: 8px; min-width: 100px; }
+    .evaluation-text { font-size: 0.92rem; margin: 12px 0; line-height: 1.6; color: var(--text); background: rgba(255,255,255,0.04); padding: 12px 14px; border-radius: 8px; border-right: 3px solid var(--accent); text-align: right; }
+    .score-breakdown { background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-top: 12px; text-align: right; display: none; }
+    .score-breakdown h4 { color: var(--accent); margin-bottom: 10px; border-bottom: 1px solid var(--border); padding-bottom: 8px; font-size: 0.9rem; }
+    .breakdown-item { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.04); font-size: 0.82rem; color: var(--text-muted); }
+    .breakdown-item:last-child { border-bottom: none; }
+    .breakdown-value.positive { color: var(--success); }
+    .breakdown-value.negative { color: var(--danger); }
+    .breakdown-value.neutral  { color: var(--text-muted); }
+    .reset-btn { background: var(--danger); color: #fff; border: none; padding: 11px 22px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 16px auto; display: block; font-family: 'Tajawal', sans-serif; }
+    /* Modal */
+    .legal-modal { position: fixed; top:0; left:0; width:100%; height:100%; background: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 99999; }
+    .modal-box { background: var(--bg-2); border: 1px solid var(--accent); border-radius: var(--radius); padding: 28px; max-width: 480px; width: 90%; text-align: center; }
+    .modal-box h2 { color: var(--accent); margin-bottom: 16px; }
+    .modal-box p  { color: var(--text-muted); line-height: 1.7; margin-bottom: 12px; font-size: 0.9rem; }
+    .modal-check  { color: var(--accent); margin: 14px 0; font-size: 0.9rem; }
+    .modal-check input { margin-left: 8px; transform: scale(1.2); cursor: pointer; }
+    .modal-btn { background: var(--accent); color: #0f172a; border: none; padding: 11px 22px; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 700; font-family: 'Tajawal', sans-serif; }
+    .modal-btn:disabled { background: var(--bg-3); color: var(--text-muted); cursor: not-allowed; }
+    @media(max-width:768px) { .two-col { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+
+  <!-- Legal Modal -->
+  <div class="legal-modal" id="legalModal">
+    <div class="modal-box">
+      <h2>⚠️ إخلاء مسؤولية قانوني</h2>
+      <p>جميع المحتويات لأغراض تعليمية وإرشادية فقط، ولا تعد توصية بالبيع أو الشراء أو دعوة للاستثمار في أي أوراق مالية.</p>
+      <p>الاستثمار ينطوي على مخاطر. هذه الأداة تقدّم مؤشراً عاماً فقط — قرار الاستثمار يقع على عاتق المستخدم وحده.</p>
+      <div class="modal-check"><label><input type="checkbox" id="acceptCheckbox"> أقر بأنني فهمت الشروط وأوافق عليها</label></div>
+      <button class="modal-btn" id="enterBtn" disabled>دخول الحاسبة</button>
+    </div>
+  </div>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')"><span class="icon">📈</span><span>محفظة التقاعد</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')"><span class="icon">💼</span><span>الإدارة المالية</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')"><span class="icon">🏗️</span><span>استثمارات أخرى</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')"><span class="icon">🌱</span><span>إدارة الحياة</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html" class="nav-link nav-sub" id="nav-life-goals"><span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"  class="nav-link nav-sub" id="nav-inventory"><span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html"     class="nav-link nav-sub" id="nav-school">  <span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-learn')"><span class="icon">📚</span><span>تعليم الاستثمار</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-learn">
+          <a href="invest-tips.html"      class="nav-link nav-sub" id="nav-invest-tips">      <span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="emergency-fund.html"   class="nav-link nav-sub" id="nav-emergency-fund">   <span class="icon">🛡️</span><span>صندوق الطوارئ</span></a>
+          <a href="avg-calculator.html"   class="nav-link nav-sub" id="nav-avg-calc">         <span class="icon">📊</span><span>متوسط سعر الشراء</span></a>
+          <a href="portfolio-rating.html" class="nav-link nav-sub" id="nav-portfolio-rating"> <span class="icon">🛡️</span><span>تقييم أمان المحفظة</span></a>
+          <a href="stock-valuation.html"  class="nav-link nav-sub" id="nav-stock-valuation">  <span class="icon">💹</span><span>القيمة العادلة للأسهم</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>🛡️ تقييم أمان المحفظة</h1>
+        <p>تقييم شامل ومحايد لمستوى تنويع وأمان محفظتك الاستثمارية</p>
+      </div>
+    </div>
+
+    <div style="max-width:720px;">
+
+      <!-- 1. مكونات -->
+      <div class="rule-section">
+        <h3>📦 مكونات المحفظة</h3>
+        <div class="two-col">
+          <div class="calc-input-group"><label>عدد الأسهم المنفردة</label><input type="number" id="individualStocks" placeholder="مثال: 15" min="0" max="100"></div>
+          <div class="calc-input-group">
+            <label>عدد صناديق المؤشرات (ETFs)</label>
+            <input type="number" id="etfCount" placeholder="مثال: 3" min="0" max="50">
+            <p class="field-hint">كل ETF يعادل تنويعاً في عشرات إلى مئات الأسهم</p>
+          </div>
+          <div class="calc-input-group"><label>عدد صناديق الريت (REITs)</label><input type="number" id="reitCount" placeholder="مثال: 2" min="0" max="20"></div>
+          <div class="calc-input-group"><label>عدد الصكوك أو السندات</label><input type="number" id="bondCount" placeholder="مثال: 1" min="0" max="20"></div>
+        </div>
+        <div class="etf-notice" id="etfNotice">ℹ️ محفظتك تعتمد على صناديق المؤشرات — هذا يُعادل تنويعاً واسعاً جداً. سيُحتسب ذلك بشكل مناسب في التقييم.</div>
+      </div>
+
+      <!-- 2. التركيز -->
+      <div class="rule-section">
+        <h3>🎯 التركيز</h3>
+        <div class="two-col">
+          <div class="calc-input-group">
+            <label>نسبة أكبر سهم / صندوق فردي (%)</label>
+            <input type="number" id="largestStockPercentage" placeholder="مثال: 15" min="0" max="100" step="0.1">
+            <p class="field-hint">الموصى به: أقل من 10% لكل ورقة مالية منفردة</p>
+          </div>
+          <div class="calc-input-group">
+            <label>نسبة أكبر قطاع (%)</label>
+            <input type="number" id="largestSectorPercentage" placeholder="مثال: 30" min="0" max="100" step="0.1">
+            <p class="field-hint">الموصى به: أقل من 30% في قطاع واحد</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. القطاعات -->
+      <div class="rule-section">
+        <h3>🏭 تنويع القطاعات</h3>
+        <div class="calc-input-group">
+          <label>عدد القطاعات في محفظتك</label>
+          <select id="sectorDiversification">
+            <option value="">اختر</option>
+            <option value="single-sector">قطاع واحد</option>
+            <option value="2-4-sectors">2–4 قطاعات</option>
+            <option value="5-7-sectors">5–7 قطاعات</option>
+            <option value="8-plus-sectors">8 قطاعات فأكثر</option>
+          </select>
+        </div>
+        <div class="conflict-warning" id="sectorConflict">⚠️ تناقض: اخترت تنويعاً قطاعياً عالياً لكن نسبة القطاع الأكبر مرتفعة جداً. سيُطبَّق خصم إضافي.</div>
+      </div>
+
+      <!-- 4. الجغرافي -->
+      <div class="rule-section">
+        <h3>🌍 التوزيع الجغرافي</h3>
+        <div class="calc-input-group">
+          <label>النطاق الغالب لمحفظتك</label>
+          <select id="geographicDistribution">
+            <option value="">اختر</option>
+            <option value="local-only">محلية فقط (السعودية)</option>
+            <option value="regional">إقليمية (خليج / عربي)</option>
+            <option value="international">دولية (أسواق عالمية فقط)</option>
+            <option value="diversified">متنوعة (محلي + دولي)</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 5. أصول الحماية -->
+      <div class="rule-section">
+        <h3>🛡️ أصول الحماية</h3>
+        <div class="two-col">
+          <div class="calc-input-group">
+            <label>نسبة الذهب في المحفظة</label>
+            <select id="goldPercentage">
+              <option value="">اختر</option>
+              <option value="none">لا يوجد</option>
+              <option value="low">أقل من 5%</option>
+              <option value="medium">5% – 10%</option>
+              <option value="high">أكثر من 10%</option>
+            </select>
+          </div>
+          <div class="calc-input-group">
+            <label>كاش احتياطي (5–10%)</label>
+            <select id="hasCash">
+              <option value="">اختر</option>
+              <option value="yes">نعم</option>
+              <option value="no">لا</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. أفق -->
+      <div class="rule-section">
+        <h3>⏳ أفق الاستثمار</h3>
+        <div class="calc-input-group">
+          <label>متى تتوقع سحب استثماراتك؟</label>
+          <select id="investmentHorizon">
+            <option value="">اختر</option>
+            <option value="short">أقل من 3 سنوات</option>
+            <option value="medium">3 – 10 سنوات</option>
+            <option value="long">أكثر من 10 سنوات</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- 7. الرافعة -->
+      <div class="rule-section warning-section">
+        <h3>⚠️ الرافعة المالية</h3>
+        <div class="two-col">
+          <div class="calc-input-group">
+            <label>هل تستخدم مارجن أو قرضاً؟</label>
+            <select id="usesLeverage">
+              <option value="">اختر</option>
+              <option value="no">لا، مالي الخاص فقط</option>
+              <option value="yes">نعم، مارجن أو قرض</option>
+            </select>
+          </div>
+          <div class="calc-input-group" id="leverageRatioGroup" style="display:none;">
+            <label>نسبة الرافعة من إجمالي المحفظة (%)</label>
+            <input type="number" id="leverageRatio" placeholder="مثال: 20" min="0" max="300" step="1">
+            <p class="field-hint">10% مارجن ≠ 100% مارجن — كل نسبة لها خصم مختلف</p>
+          </div>
+        </div>
+        <div class="leverage-warning" id="leverageWarning">⚠️ الرافعة المالية تُضاعف الخسائر في السوق الهابط. الخصم يتناسب مع نسبة الرافعة.</div>
+      </div>
+
+      <!-- النتائج -->
+      <div class="results-section">
+        <h3>📊 النتيجة النهائية</h3>
+        <div class="progress-container" id="progressContainer">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"><span class="progress-text" id="progressText">0%</span></div>
+          </div>
+          <div class="score-info">
+            <div class="score-display" id="safetyScore">0/10</div>
+            <div class="percentage-display" id="percentageDisplay">0%</div>
+          </div>
+        </div>
+        <div class="evaluation-text" id="evaluationText">أدخل البيانات للحصول على التقييم</div>
+        <div class="evaluation-text" id="smartFeedback" style="display:none;border-right-color:#3b82f6;"></div>
+        <div class="score-breakdown" id="scoreBreakdown">
+          <h4>📋 تفاصيل النقاط</h4>
+          <div id="breakdownItems"></div>
+        </div>
+      </div>
+
+      <button class="reset-btn" onclick="resetCalculator()">🔄 إعادة تعيين</button>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script>
+    async function init() {
+      const user = await requireAuth();
+      if (!user) return;
+      setActiveNav('nav-portfolio-rating');
+    }
+
+    // ===== Legal Modal =====
+    document.getElementById('acceptCheckbox').addEventListener('change', function () {
+      document.getElementById('enterBtn').disabled = !this.checked;
+    });
+    document.getElementById('enterBtn').addEventListener('click', function () {
+      if (!this.disabled) document.getElementById('legalModal').style.display = 'none';
+    });
+
+    // ===== Leverage Toggle =====
+    document.getElementById('usesLeverage').addEventListener('change', function () {
+      const isYes = this.value === 'yes';
+      document.getElementById('leverageWarning').style.display    = isYes ? 'block' : 'none';
+      document.getElementById('leverageRatioGroup').style.display = isYes ? 'block' : 'none';
+      if (!isYes) document.getElementById('leverageRatio').value = '';
+    });
+
+    function checkSectorConflict() {
+      const sec   = document.getElementById('sectorDiversification').value;
+      const lsecp = parseFloat(document.getElementById('largestSectorPercentage').value) || 0;
+      const highDiv = sec === '8-plus-sectors' || sec === '5-7-sectors';
+      document.getElementById('sectorConflict').style.display = (highDiv && lsecp > 50) ? 'block' : 'none';
+    }
+
+    function checkEtfNotice() {
+      const ec = parseInt(document.getElementById('etfCount').value) || 0;
+      const is = parseInt(document.getElementById('individualStocks').value) || 0;
+      document.getElementById('etfNotice').style.display = (ec > 0 && is === 0) ? 'block' : 'none';
+    }
+
+    function calculateSafetyRating() {
+      let score = 0;
+      let breakdown = [];
+      const is    = parseInt(document.getElementById('individualStocks').value)         || 0;
+      const rc    = parseInt(document.getElementById('reitCount').value)                || 0;
+      const ec    = parseInt(document.getElementById('etfCount').value)                 || 0;
+      const bc    = parseInt(document.getElementById('bondCount').value)                || 0;
+      const lsp   = parseFloat(document.getElementById('largestStockPercentage').value) || 0;
+      const lsecp = parseFloat(document.getElementById('largestSectorPercentage').value)|| 0;
+      const geo   = document.getElementById('geographicDistribution').value;
+      const gold  = document.getElementById('goldPercentage').value;
+      const cash  = document.getElementById('hasCash').value;
+      const sec   = document.getElementById('sectorDiversification').value;
+      const hor   = document.getElementById('investmentHorizon').value;
+      const lev   = document.getElementById('usesLeverage').value;
+      const levRatio = parseFloat(document.getElementById('leverageRatio').value) || 0;
+
+      const effectiveUnits = is + (ec * 30) + (rc * 5) + (bc * 3);
+      let ds;
+      if      (effectiveUnits === 0)  ds = 0;
+      else if (effectiveUnits >= 60)  ds = 2.5;
+      else if (effectiveUnits >= 30)  ds = 2.0;
+      else if (effectiveUnits >= 15)  ds = 1.5;
+      else if (effectiveUnits >= 5)   ds = 1.0;
+      else                            ds = 0.5;
+      score += ds;
+      breakdown.push({ label: `التنويع الفعلي (${effectiveUnits} وحدة)`, value: ds, max: 2.5 });
+
+      const assetClasses = (is>0?1:0)+(ec>0?1:0)+(rc>0?1:0)+(bc>0?1:0);
+      const asScore = assetClasses >= 3 ? 1.0 : assetClasses === 2 ? 0.6 : assetClasses === 1 ? 0.3 : 0;
+      score += asScore;
+      breakdown.push({ label: `فئات الأصول (${assetClasses} فئة)`, value: asScore, max: 1 });
+
+      const geoMap = { diversified: 1.5, international: 1.0, regional: 0.75, 'local-only': 0.4 };
+      const gs = geoMap[geo] || 0;
+      score += gs;
+      breakdown.push({ label: 'التوزيع الجغرافي', value: gs, max: 1.5 });
+
+      const cs = cash === 'yes' ? 0.5 : 0;
+      score += cs;
+      breakdown.push({ label: 'احتياطي الكاش', value: cs, max: 0.5 });
+
+      const goldMap = { high: 1.0, medium: 0.75, low: 0.4, none: 0 };
+      const gls = goldMap[gold] || 0;
+      score += gls;
+      breakdown.push({ label: 'الذهب كأصل تحوط', value: gls, max: 1 });
+
+      const secMap = { 'single-sector': 0, '2-4-sectors': 0.6, '5-7-sectors': 1.1, '8-plus-sectors': 1.5 };
+      const scs = secMap[sec] || 0;
+      score += scs;
+      breakdown.push({ label: 'التنوع القطاعي', value: scs, max: 1.5 });
+
+      const horMap = { long: 1.0, medium: 0.65, short: 0.3 };
+      const hs = horMap[hor] || 0;
+      score += hs;
+      breakdown.push({ label: 'أفق الاستثمار', value: hs, max: 1 });
+
+      let stockConc;
+      if      (lsp === 0)  stockConc = 0;
+      else if (lsp < 10)   stockConc = 1.0;
+      else if (lsp <= 15)  stockConc = 0.7;
+      else if (lsp <= 25)  stockConc = 0.3;
+      else                 stockConc = 0;
+      score += stockConc;
+      breakdown.push({ label: 'تركيز السهم الأكبر', value: stockConc, max: 1 });
+
+      let sconc;
+      if      (lsecp === 0)  sconc = 0;
+      else if (lsecp < 20)   sconc = 1.0;
+      else if (lsecp <= 30)  sconc = 0.6;
+      else if (lsecp <= 45)  sconc = 0.3;
+      else                   sconc = 0;
+      score += sconc;
+      breakdown.push({ label: 'تركيز القطاع الأكبر', value: sconc, max: 1 });
+
+      if      (lsp > 40) { const p=2.5; score=Math.max(0,score-p); breakdown.push({ label:`⛔ خصم: سهم واحد > 40% (خطر حاد)`, value:-p, isPenalty:true }); }
+      else if (lsp > 25) { const p=1.5; score=Math.max(0,score-p); breakdown.push({ label:`خصم: سهم واحد بين 25-40%`,          value:-p, isPenalty:true }); }
+      else if (lsp > 15) { const p=0.75;score=Math.max(0,score-p); breakdown.push({ label:`خصم: سهم واحد بين 15-25%`,          value:-p, isPenalty:true }); }
+
+      if      (lsecp > 70) { const p=2.0; score=Math.max(0,score-p); breakdown.push({ label:`⛔ خصم: قطاع واحد > 70% (خطر حاد)`, value:-p, isPenalty:true }); }
+      else if (lsecp > 50) { const p=1.0; score=Math.max(0,score-p); breakdown.push({ label:`خصم: قطاع واحد بين 50-70%`,         value:-p, isPenalty:true }); }
+
+      const highDiv = sec === '8-plus-sectors' || sec === '5-7-sectors';
+      if (highDiv && lsecp > 50) { const p=0.75; score=Math.max(0,score-p); breakdown.push({ label:`خصم: تناقض (تنويع عالٍ + قطاع مهيمن)`, value:-p, isPenalty:true }); }
+
+      if (lev === 'yes') {
+        let levPen;
+        if      (levRatio > 100) levPen = 3.5;
+        else if (levRatio > 50)  levPen = 2.5;
+        else if (levRatio > 20)  levPen = 1.5;
+        else if (levRatio > 0)   levPen = 0.75;
+        else                     levPen = 1.0;
+        score = Math.max(0, score - levPen);
+        breakdown.push({ label:`⛔ خصم: رافعة مالية ${levRatio>0?levRatio+'%':'(غير محددة)'}`, value:-levPen, isPenalty:true });
+      }
+
+      return { score: Math.min(parseFloat(score.toFixed(1)), 10), breakdown };
+    }
+
+    function getEvaluation(score) {
+      let ev;
+      if      (score >= 8.5) ev = '🟢 محفظة نموذجية ومتزنة جداً — مستوى أمان عالٍ';
+      else if (score >= 7.0) ev = '🟢 محفظة جيدة — يمكن تعزيز بعض جوانب التنويع';
+      else if (score >= 5.5) ev = '🟡 محفظة متوسطة — تحتاج مراجعة هيكلية';
+      else if (score >= 3.5) ev = '🟠 محفظة مركزة — مخاطر فوق المتوسط';
+      else                   ev = '🔴 محفظة عالية المخاطر — مراجعة عاجلة مطلوبة';
+
+      const lsp   = parseFloat(document.getElementById('largestStockPercentage').value) || 0;
+      const lsecp = parseFloat(document.getElementById('largestSectorPercentage').value)|| 0;
+      const gold  = document.getElementById('goldPercentage').value;
+      const cash  = document.getElementById('hasCash').value;
+      const sec   = document.getElementById('sectorDiversification').value;
+      const lev   = document.getElementById('usesLeverage').value;
+      const hor   = document.getElementById('investmentHorizon').value;
+      const geo   = document.getElementById('geographicDistribution').value;
+      const is    = parseInt(document.getElementById('individualStocks').value) || 0;
+      const ec    = parseInt(document.getElementById('etfCount').value) || 0;
+
+      let fb = [];
+      if (lev === 'yes')           fb.push('• ⛔ <strong>خطر حاد:</strong> الرافعة تُضاعف الخسائر — قلّصها أو أزلها');
+      if (lsecp > 50)              fb.push('• ⛔ تركيز قطاعي خطير — لا تضع أكثر من 30% في قطاع واحد');
+      if (lsp > 25)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — خفّضه تحت 10-15%');
+      if (gold === 'none')         fb.push('• أضف ذهباً (5-10%) كأصل تحوط في الأزمات وأوقات التضخم');
+      if (cash === 'no')           fb.push('• احتفظ بـ 5-10% كاش — للطوارئ وللفرص السوقية');
+      if (sec === 'single-sector') fb.push('• ⚠️ قطاع واحد = رهان على عامل خارجي واحد — وسّع نطاقك');
+      if (hor === 'short')         fb.push('• أفق قصير: ارفع نسبة الكاش والسندات، قلّل التعرض للأسهم');
+      if (geo === 'local-only')    fb.push('• تعرضك كله للسوق المحلي — أضف ETF دولي للحماية من المخاطر البلدية');
+      if (is > 0 && ec === 0)      fb.push('• فكّر في إضافة ETF واحد على الأقل لتخفيف مخاطر الأسهم الفردية');
+
+      return { evaluation: ev, feedback: fb.length ? fb.join('<br>') : null };
+    }
+
+    function updateResults() {
+      checkEtfNotice();
+      checkSectorConflict();
+      const { score, breakdown } = calculateSafetyRating();
+      const { evaluation, feedback } = getEvaluation(score);
+      const pct = (score / 10) * 100;
+
+      document.getElementById('safetyScore').textContent  = score.toFixed(1) + '/10';
+      document.getElementById('evaluationText').textContent = evaluation;
+
+      const pFill = document.getElementById('progressFill');
+      const pText = document.getElementById('progressText');
+      const pDisp = document.getElementById('percentageDisplay');
+      const pCont = document.getElementById('progressContainer');
+
+      pFill.style.width    = pct + '%';
+      pText.textContent    = Math.round(pct) + '%';
+      pDisp.textContent    = Math.round(pct) + '%';
+
+      let fillGrad, bgColor, textColor;
+      if      (score >= 8.5) { fillGrad='linear-gradient(90deg,#22c55e,#16a34a)'; bgColor='rgba(22,163,74,0.08)';  textColor='#4ade80'; }
+      else if (score >= 7.0) { fillGrad='linear-gradient(90deg,#84cc16,#65a30d)'; bgColor='rgba(101,163,13,0.08)'; textColor='#bef264'; }
+      else if (score >= 5.5) { fillGrad='linear-gradient(90deg,#eab308,#ca8a04)'; bgColor='rgba(202,138,4,0.08)';  textColor='#fde047'; }
+      else if (score >= 3.5) { fillGrad='linear-gradient(90deg,#f97316,#ea580c)'; bgColor='rgba(234,88,12,0.08)';  textColor='#fb923c'; }
+      else                   { fillGrad='linear-gradient(90deg,#ef4444,#dc2626)'; bgColor='rgba(220,38,38,0.08)';  textColor='#f87171'; }
+
+      pFill.style.background = fillGrad;
+      pCont.style.background = bgColor;
+      pDisp.style.background = textColor;
+      pDisp.style.color      = '#0f172a';
+
+      const fbEl = document.getElementById('smartFeedback');
+      if (feedback) { fbEl.innerHTML = '<strong>💡 توصيات مخصصة:</strong><br>' + feedback; fbEl.style.display='block'; }
+      else           { fbEl.style.display = 'none'; }
+
+      document.getElementById('breakdownItems').innerHTML = breakdown.map(i=>`
+        <div class="breakdown-item">
+          <span>${i.label}</span>
+          <span class="breakdown-value ${i.isPenalty?'negative':i.value>0?'positive':'neutral'}">
+            ${!i.isPenalty&&i.value>0?'+':''}${i.value.toFixed(2)}${i.max?' / '+i.max:''}
+          </span>
+        </div>`).join('');
+      document.getElementById('scoreBreakdown').style.display = 'block';
+    }
+
+    function resetCalculator() {
+      ['individualStocks','reitCount','etfCount','bondCount','largestStockPercentage','largestSectorPercentage','leverageRatio']
+        .forEach(id => document.getElementById(id).value = '');
+      ['geographicDistribution','goldPercentage','hasCash','sectorDiversification','investmentHorizon','usesLeverage']
+        .forEach(id => document.getElementById(id).value = '');
+      document.getElementById('smartFeedback').style.display     = 'none';
+      document.getElementById('scoreBreakdown').style.display    = 'none';
+      document.getElementById('leverageWarning').style.display   = 'none';
+      document.getElementById('leverageRatioGroup').style.display= 'none';
+      document.getElementById('sectorConflict').style.display    = 'none';
+      document.getElementById('etfNotice').style.display         = 'none';
+      document.getElementById('safetyScore').textContent         = '0/10';
+      document.getElementById('evaluationText').textContent      = 'أدخل البيانات للحصول على التقييم';
+      document.getElementById('progressFill').style.width        = '0%';
+      document.getElementById('progressText').textContent        = '0%';
+      document.getElementById('percentageDisplay').textContent   = '0%';
+    }
+
+    document.querySelectorAll('input[type="number"], select').forEach(el => {
+      el.addEventListener('input',  updateResults);
+      el.addEventListener('change', updateResults);
+    });
+
+    init();
+  </script>
+</body>
+</html>

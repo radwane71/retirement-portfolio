@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>صندوق الطوارئ - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .calc-input-group { margin-bottom: 16px; }
+    .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
+    .calc-input-group input,
+    .calc-input-group select { width: 100%; padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; font-family: 'Tajawal', sans-serif; transition: border-color 0.2s; }
+    .calc-input-group input:focus,
+    .calc-input-group select:focus { outline: none; border-color: var(--primary); }
+    .savings-input { border-color: var(--success) !important; }
+    .savings-input:focus { border-color: var(--success) !important; box-shadow: 0 0 0 2px rgba(46,213,115,0.15); }
+    .info-box { background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.3); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; }
+    .info-box h4 { color: var(--primary); font-size: 0.88rem; margin-bottom: 6px; }
+    .info-box p  { color: var(--text-muted); font-size: 0.85rem; line-height: 1.6; margin: 0; }
+    .error-box { background: rgba(239,68,68,0.1); border: 1px solid var(--danger); border-radius: 8px; padding: 12px 14px; color: var(--danger); font-weight: 600; margin-bottom: 14px; display: none; font-size: 0.88rem; }
+    .calc-btn { width: 100%; padding: 13px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer; font-family: 'Tajawal', sans-serif; transition: opacity 0.2s; margin-top: 8px; }
+    .calc-btn:hover { opacity: 0.9; }
+    /* نتائج */
+    .results-section { display: none; }
+    .result-card { color: #fff; padding: 24px; border-radius: var(--radius); text-align: center; margin-bottom: 16px; }
+    .result-card.result-positive { background: linear-gradient(135deg, #22c55e, #16a34a); }
+    .result-card.result-warning  { background: linear-gradient(135deg, #f59e0b, #d97706); }
+    .result-card.result-negative { background: linear-gradient(135deg, #ef4444, #dc2626); }
+    .result-card h2        { font-size: 1rem; opacity: 0.9; margin-bottom: 10px; }
+    .result-amount         { font-size: 2.4rem; font-weight: 900; margin-bottom: 6px; }
+    .result-period         { font-size: 0.92rem; opacity: 0.85; }
+    .mini-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 16px; }
+    .mini-card  { padding: 16px; border-radius: var(--radius); text-align: center; }
+    .mini-card.blue   { background: rgba(99,102,241,0.15);  border: 1px solid rgba(99,102,241,0.3); }
+    .mini-card.green  { background: rgba(46,213,115,0.12);  border: 1px solid rgba(46,213,115,0.3); }
+    .mini-card.orange { background: rgba(251,146,60,0.12);  border: 1px solid rgba(251,146,60,0.3); }
+    .mini-card h4   { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 8px; }
+    .mini-card .val { font-size: 1.2rem; font-weight: 700; color: var(--text); }
+    .progress-section { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; margin-bottom: 16px; }
+    .progress-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; color: var(--text); font-weight: 600; font-size: 0.9rem; }
+    .progress-bar-outer { background: var(--bg-3); border-radius: 20px; height: 20px; overflow: hidden; margin-bottom: 8px; }
+    .progress-bar-inner { height: 100%; border-radius: 20px; background: linear-gradient(90deg, var(--success), #16a34a); transition: width 0.6s ease; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; color: #fff; font-weight: 700; min-width: 2px; }
+    .progress-meta { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--text-muted); }
+    .chart-box { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; height: 300px; margin-bottom: 16px; }
+    .chart-box h3 { color: var(--text); font-size: 0.95rem; margin-bottom: 12px; }
+    .advice-card { background: rgba(251,146,60,0.1); border: 1px solid rgba(251,146,60,0.3); border-radius: var(--radius); padding: 20px; margin-bottom: 16px; }
+    .advice-card h3 { color: #fb923c; font-size: 1rem; margin-bottom: 12px; }
+    .advice-card ul { list-style: none; padding: 0; }
+    .advice-card li { color: var(--text-muted); margin-bottom: 10px; padding-right: 20px; position: relative; line-height: 1.7; font-size: 0.88rem; }
+    .advice-card li::before { content: "✓"; position: absolute; right: 0; color: #fb923c; font-weight: 700; }
+    .breakdown-table-wrap { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; overflow-x: auto; }
+    .table-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
+    .table-hdr h3 { color: var(--text); font-size: 0.95rem; margin: 0; }
+    .calc-tbl { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+    .calc-tbl th { background: var(--bg-3); color: var(--text); padding: 10px 12px; text-align: right; font-weight: 600; border-bottom: 1px solid var(--border); }
+    .calc-tbl td { padding: 9px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); text-align: right; }
+    .calc-tbl tr:last-child td { border-bottom: none; }
+    .calc-tbl .total-row td { color: var(--text); font-weight: 700; }
+    .percentage-bar { background: var(--bg-3); border-radius: 10px; height: 6px; overflow: hidden; margin-top: 4px; }
+    .percentage-fill { height: 100%; background: var(--primary); transition: width 0.5s ease; }
+    .export-btn { padding: 7px 14px; background: var(--primary); color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 0.82rem; font-family: 'Tajawal', sans-serif; }
+    @media(max-width:768px) { .calc-grid { grid-template-columns: 1fr; } .mini-cards { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')"><span class="icon">📈</span><span>محفظة التقاعد</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')"><span class="icon">💼</span><span>الإدارة المالية</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')"><span class="icon">🏗️</span><span>استثمارات أخرى</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')"><span class="icon">🌱</span><span>إدارة الحياة</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals"><span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory"><span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html"       class="nav-link nav-sub" id="nav-school">  <span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-learn')"><span class="icon">📚</span><span>تعليم الاستثمار</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-learn">
+          <a href="invest-tips.html"      class="nav-link nav-sub" id="nav-invest-tips">      <span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="emergency-fund.html"   class="nav-link nav-sub" id="nav-emergency-fund">   <span class="icon">🛡️</span><span>صندوق الطوارئ</span></a>
+          <a href="avg-calculator.html"   class="nav-link nav-sub" id="nav-avg-calc">         <span class="icon">📊</span><span>متوسط سعر الشراء</span></a>
+          <a href="portfolio-rating.html" class="nav-link nav-sub" id="nav-portfolio-rating"> <span class="icon">🛡️</span><span>تقييم أمان المحفظة</span></a>
+          <a href="stock-valuation.html"  class="nav-link nav-sub" id="nav-stock-valuation">  <span class="icon">💹</span><span>القيمة العادلة للأسهم</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>🛡️ حاسبة صندوق الطوارئ</h1>
+        <p>احسب المبلغ الذي تحتاجه للطوارئ بناءً على مصاريفك الشهرية</p>
+      </div>
+    </div>
+
+    <div class="calc-grid" style="margin-bottom:20px;">
+      <div class="card">
+        <h2 class="section-title" style="font-size:1rem;padding-bottom:10px;border-bottom:2px solid var(--primary);margin-bottom:18px;">📊 المصاريف الشهرية</h2>
+        <div class="calc-input-group"><label for="housing">🏠 السكن</label><input type="number" id="housing" value="3000" min="0" step="100"></div>
+        <div class="calc-input-group"><label for="utilities">💡 الفواتير</label><input type="number" id="utilities" value="500" min="0" step="50"></div>
+        <div class="calc-input-group"><label for="living">🛒 المعيشة</label><input type="number" id="living" value="1500" min="0" step="100"></div>
+        <div class="calc-input-group"><label for="transport">🚗 النقل</label><input type="number" id="transport" value="800" min="0" step="50"></div>
+        <div class="calc-input-group"><label for="commitments">💳 الالتزامات</label><input type="number" id="commitments" value="600" min="0" step="50"></div>
+        <div class="calc-input-group"><label for="others">📚 أخرى</label><input type="number" id="others" value="400" min="0" step="50"></div>
+      </div>
+      <div class="card">
+        <h2 class="section-title" style="font-size:1rem;padding-bottom:10px;border-bottom:2px solid var(--primary);margin-bottom:18px;">⚙️ إعدادات الهدف</h2>
+        <div class="calc-input-group">
+          <label for="coveragePeriod">مدة التغطية</label>
+          <select id="coveragePeriod" onchange="updateSecurityLevel()">
+            <option value="3">3 أشهر</option>
+            <option value="6" selected>6 أشهر</option>
+            <option value="9">9 أشهر</option>
+            <option value="12">12 شهراً</option>
+          </select>
+        </div>
+        <div class="info-box"><h4>📋 مستوى الأمان</h4><p id="securityLevelInfo">6 أشهر - مناسب للعمل الحر والقطاعات المتذبذبة</p></div>
+        <div class="calc-input-group"><label for="currentSavings" style="color:var(--success);">💰 ما وفّرته حتى الآن</label><input type="number" id="currentSavings" class="savings-input" value="0" min="0" step="500" placeholder="0"></div>
+        <div class="calc-input-group"><label for="monthlySavings" style="color:var(--success);">📥 قدرتك على الادخار شهرياً</label><input type="number" id="monthlySavings" class="savings-input" value="1000" min="0" step="100"></div>
+        <div class="info-box"><h4>💡 نصيحة</h4><p>احتفظ بصندوق الطوارئ في حساب بنكي منفصل، سهل الوصول إليه.</p></div>
+        <div id="errorBox" class="error-box">⚠️ يرجى إدخال مصروف شهري واحد على الأقل.</div>
+        <button class="calc-btn" onclick="calculateEmergencyFund()">احسب صندوق الطوارئ</button>
+      </div>
+    </div>
+
+    <div class="results-section" id="resultsSection">
+      <div class="result-card result-negative" id="mainResultCard">
+        <h2>💰 المبلغ المستهدف لصندوق الطوارئ</h2>
+        <div class="result-amount" id="targetAmount">-</div>
+        <div class="result-period" id="coverageInfo">-</div>
+      </div>
+
+      <div class="mini-cards">
+        <div class="mini-card blue"><h4>المصروف الشهري</h4><div class="val" id="miniMonthly">-</div></div>
+        <div class="mini-card green"><h4>وفّرت حتى الآن</h4><div class="val" id="miniSaved">-</div></div>
+        <div class="mini-card orange" id="miniTimeCard"><h4>الوقت للوصول للهدف</h4><div class="val" id="miniTimeToGoal">-</div></div>
+      </div>
+
+      <div class="progress-section">
+        <div class="progress-header"><span>📈 التقدم نحو الهدف</span><span id="progressPercent">0%</span></div>
+        <div class="progress-bar-outer"><div class="progress-bar-inner" id="progressBar" style="width:0%"></div></div>
+        <div class="progress-meta"><span id="progressSaved">وفّرت: -</span><span id="progressRemaining">المتبقي: -</span></div>
+      </div>
+
+      <div class="card">
+        <div class="chart-box"><h3>📊 توزيع المصاريف الشهرية</h3><canvas id="expensesChart"></canvas></div>
+      </div>
+
+      <div class="advice-card"><h3>🎯 نصائح مالية ذكية</h3><ul id="adviceList"></ul></div>
+
+      <div class="breakdown-table-wrap">
+        <div class="table-hdr">
+          <h3>📋 تفصيل المصاريف</h3>
+          <button class="export-btn" onclick="exportToCSV()">تصدير CSV</button>
+        </div>
+        <table class="calc-tbl">
+          <thead><tr><th>البند</th><th>المبلغ الشهري</th><th>النسبة المئوية</th><th>التمثيل البصري</th></tr></thead>
+          <tbody id="breakdownBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script>
+    async function init() {
+      const user = await requireAuth();
+      if (!user) return;
+      setActiveNav('nav-emergency-fund');
+      updateSecurityLevel();
+      calculateEmergencyFund();
+    }
+
+    let expensesChart = null;
+    const EXPENSE_LABELS = { housing:'🏠 السكن', utilities:'💡 الفواتير', living:'🛒 المعيشة', transport:'🚗 النقل', commitments:'💳 الالتزامات', others:'📚 أخرى' };
+    const CHART_COLORS  = ['#6366f1','#ef4444','#f59e0b','#22c55e','#8b5cf6','#64748b'];
+
+    function formatCurrency(a) { return new Intl.NumberFormat('ar-SA',{style:'currency',currency:'SAR',minimumFractionDigits:0,maximumFractionDigits:0}).format(a); }
+
+    function updateSecurityLevel() {
+      const m = {'3':'3 أشهر — مناسب للموظف المستقر','6':'6 أشهر — مناسب للعمل الحر','9':'9 أشهر — للدخل غير المنتظم','12':'12 شهراً — لأصحاب الأعمال'};
+      document.getElementById('securityLevelInfo').textContent = m[document.getElementById('coveragePeriod').value];
+    }
+
+    function calculateEmergencyFund() {
+      const expenses = {
+        housing:     Math.max(parseFloat(document.getElementById('housing').value)||0,0),
+        utilities:   Math.max(parseFloat(document.getElementById('utilities').value)||0,0),
+        living:      Math.max(parseFloat(document.getElementById('living').value)||0,0),
+        transport:   Math.max(parseFloat(document.getElementById('transport').value)||0,0),
+        commitments: Math.max(parseFloat(document.getElementById('commitments').value)||0,0),
+        others:      Math.max(parseFloat(document.getElementById('others').value)||0,0)
+      };
+      const totalMonthly   = Object.values(expenses).reduce((s,v)=>s+v,0);
+      const coveragePeriod = parseInt(document.getElementById('coveragePeriod').value);
+      const currentSavings = Math.max(parseFloat(document.getElementById('currentSavings').value)||0,0);
+      const monthlySavings = Math.max(parseFloat(document.getElementById('monthlySavings').value)||0,0);
+      const errorBox       = document.getElementById('errorBox');
+      if (totalMonthly === 0) { errorBox.style.display='block'; document.getElementById('resultsSection').style.display='none'; return; }
+      errorBox.style.display = 'none';
+      const targetAmount = totalMonthly * coveragePeriod;
+      const remaining    = Math.max(targetAmount - currentSavings, 0);
+      document.getElementById('targetAmount').textContent = formatCurrency(targetAmount);
+      document.getElementById('coverageInfo').textContent = `لتغطية ${coveragePeriod} أشهر (${formatCurrency(totalMonthly)} / شهر)`;
+      document.getElementById('miniMonthly').textContent  = formatCurrency(totalMonthly);
+      document.getElementById('miniSaved').textContent    = formatCurrency(currentSavings);
+      if (currentSavings >= targetAmount) {
+        document.getElementById('miniTimeToGoal').textContent = '✅ حققت الهدف!';
+      } else if (monthlySavings <= 0) {
+        document.getElementById('miniTimeToGoal').textContent = 'حدد قدرة الادخار';
+      } else {
+        const mo = Math.ceil(remaining/monthlySavings);
+        const yr = Math.floor(mo/12); const mn = mo%12;
+        let t = ''; if(yr>0)t+=yr+' سنة '; if(mn>0)t+=mn+' شهر';
+        document.getElementById('miniTimeToGoal').textContent = t||'أقل من شهر';
+      }
+      const progressPct = Math.min((currentSavings/targetAmount)*100,100).toFixed(1);
+      document.getElementById('progressPercent').textContent       = progressPct+'%';
+      document.getElementById('progressBar').style.width           = progressPct+'%';
+      document.getElementById('progressBar').textContent           = progressPct>8 ? progressPct+'%' : '';
+      document.getElementById('progressSaved').textContent         = 'وفّرت: '+formatCurrency(currentSavings);
+      document.getElementById('progressRemaining').textContent     = 'المتبقي: '+formatCurrency(remaining);
+      createExpensesChart(expenses);
+      generateAdvice(totalMonthly, targetAmount, coveragePeriod, currentSavings, monthlySavings, expenses);
+      createBreakdownTable(expenses, totalMonthly);
+      const card = document.getElementById('mainResultCard');
+      card.classList.remove('result-positive','result-negative','result-warning');
+      const pct = parseFloat(progressPct);
+      if (pct>=100) card.classList.add('result-positive');
+      else if (pct>=50) card.classList.add('result-warning');
+      else card.classList.add('result-negative');
+      document.getElementById('resultsSection').style.display = 'block';
+      document.getElementById('resultsSection').scrollIntoView({behavior:'smooth'});
+    }
+
+    function createExpensesChart(expenses) {
+      const ctx      = document.getElementById('expensesChart').getContext('2d');
+      const filtered = Object.entries(expenses).filter(([,v])=>v>0);
+      const labels   = filtered.map(([k])=>EXPENSE_LABELS[k]);
+      const data     = filtered.map(([,v])=>v);
+      const colors   = filtered.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]);
+      if (expensesChart) expensesChart.destroy();
+      expensesChart = new Chart(ctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'rgba(255,255,255,0.1)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#8b949e',font:{size:12},padding:14}},tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((s,v)=>s+v,0);const pct=((ctx.parsed/total)*100).toFixed(1);return ctx.label+': '+formatCurrency(ctx.parsed)+' ('+pct+'%)';}}}}}});
+    }
+
+    function generateAdvice(monthly, target, period, saved, monthlySavings, expenses) {
+      const advice = [];
+      const remaining = Math.max(target-saved,0);
+      advice.push(`احتفظ بصندوق الطوارئ (${formatCurrency(target)}) في حساب بنكي منفصل تماماً.`);
+      if (saved>=target) advice.push('🎉 ممتاز! حققت الهدف. أعد مراجعته سنوياً.');
+      else if (monthlySavings>0) { const months=Math.ceil(remaining/monthlySavings); advice.push(`بادخارك ${formatCurrency(monthlySavings)} شهرياً، ستصل للهدف خلال ${months} شهر.`); }
+      else advice.push('حدد مبلغاً ثابتاً تدخره كل شهر.');
+      if (monthly>0&&expenses.housing/monthly>0.40) advice.push(`السكن يمثل ${((expenses.housing/monthly)*100).toFixed(0)}% — مرتفع. حاول إبقاؤه دون 30%.`);
+      if (monthly>0&&expenses.commitments/monthly>0.30) advice.push(`الالتزامات (${((expenses.commitments/monthly)*100).toFixed(0)}%) مرتفعة — ترفع احتياجك للطوارئ.`);
+      if (target>50000&&saved<target) advice.push(`المبلغ كبير. فكر في وديعة قصيرة الأجل لجزء منه.`);
+      if (period<=3) advice.push('3 أشهر حد أدنى — فكر في الوصول لـ 6 أشهر.');
+      advice.push('إذا سحبت من الصندوق، أعد تعبئته قبل أي استثمار آخر.');
+      document.getElementById('adviceList').innerHTML = advice.map(a=>'<li>'+a+'</li>').join('');
+    }
+
+    function createBreakdownTable(expenses, total) {
+      const tbody = document.getElementById('breakdownBody');
+      let rows = '';
+      for (const [key, value] of Object.entries(expenses)) {
+        const pct = total>0 ? ((value/total)*100).toFixed(1) : '0.0';
+        rows += `<tr><td><strong>${EXPENSE_LABELS[key]}</strong></td><td>${formatCurrency(value)}</td><td>${pct}%</td><td><div class="percentage-bar"><div class="percentage-fill" style="width:${pct}%"></div></div></td></tr>`;
+      }
+      rows += `<tr class="total-row"><td>الإجمالي</td><td>${formatCurrency(total)}</td><td>100%</td><td><div class="percentage-bar"><div class="percentage-fill" style="width:100%"></div></div></td></tr>`;
+      tbody.innerHTML = rows;
+    }
+
+    function exportToCSV() {
+      const expenses = {housing:parseFloat(document.getElementById('housing').value)||0,utilities:parseFloat(document.getElementById('utilities').value)||0,living:parseFloat(document.getElementById('living').value)||0,transport:parseFloat(document.getElementById('transport').value)||0,commitments:parseFloat(document.getElementById('commitments').value)||0,others:parseFloat(document.getElementById('others').value)||0};
+      const total    = Object.values(expenses).reduce((s,v)=>s+v,0);
+      const period   = document.getElementById('coveragePeriod').value;
+      const target   = total * parseInt(period);
+      const BOM = '﻿';
+      let csv = BOM+'البند,المبلغ الشهري,النسبة المئوية\n';
+      for (const [key,value] of Object.entries(expenses)) { const pct=total>0?((value/total)*100).toFixed(1):'0.0'; csv+=`${EXPENSE_LABELS[key].replace(/[🏠💡🛒🚗💳📚]/gu,'').trim()},${value},${pct}%\n`; }
+      csv += `إجمالي شهري,${total},100%\nالهدف (${period} أشهر),${target},\n`;
+      const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
+      const link = document.createElement('a');
+      link.href  = URL.createObjectURL(blob);
+      link.download = 'emergency_fund.csv';
+      link.style.display = 'none';
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    }
+
+    init();
+  </script>
+</body>
+</html>

@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>متوسط سعر الشراء - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .calc-input-group { margin-bottom: 16px; }
+    .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
+    .calc-input-group input { width: 100%; padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; font-family: 'Tajawal', sans-serif; transition: border-color 0.2s; }
+    .calc-input-group input:focus { outline: none; border-color: var(--primary); }
+    .input-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 14px; align-items: end; }
+    .input-field { display: flex; flex-direction: column; }
+    .input-field label { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 6px; font-weight: 500; }
+    .input-field input { padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; font-family: 'Tajawal', sans-serif; transition: border-color 0.2s; }
+    .input-field input:focus { outline: none; border-color: var(--primary); }
+    .operation-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; margin-bottom: 14px; align-items: end; }
+    .remove-btn { background: var(--danger); color: #fff; border: none; padding: 10px 14px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; height: 42px; align-self: flex-end; font-family: 'Tajawal', sans-serif; transition: opacity 0.2s; }
+    .remove-btn:hover { opacity: 0.85; }
+    .add-btn { background: var(--primary); color: #fff; border: none; padding: 10px 20px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin-top: 8px; font-family: 'Tajawal', sans-serif; transition: opacity 0.2s; }
+    .add-btn:hover { opacity: 0.85; }
+    .results-box { background: linear-gradient(135deg, rgba(251,146,60,0.15), rgba(245,158,11,0.1)); border: 1px solid rgba(251,146,60,0.35); border-radius: var(--radius); padding: 24px; margin: 20px 0; text-align: center; }
+    .results-box h3 { color: #fb923c; font-size: 1rem; margin-bottom: 18px; }
+    .result-item { margin: 12px 0; }
+    .result-item > div { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 4px; }
+    .result-value { font-weight: 700; font-size: 1.35rem; color: var(--text); display: inline-block; }
+    .result-value.zero { opacity: 0.4; font-size: 1.1rem; }
+    .clear-btn { background: var(--bg-3); color: var(--text-muted); border: 1px solid var(--border); padding: 10px 24px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 8px auto; display: block; font-family: 'Tajawal', sans-serif; transition: all 0.2s; }
+    .clear-btn:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
+    .legal-note { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; color: #f0b429; font-size: 0.82rem; text-align: center; }
+    @media(max-width:768px) { .operation-row { grid-template-columns: 1fr; } .remove-btn { height: auto; width: 100%; } }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')"><span class="icon">📈</span><span>محفظة التقاعد</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')"><span class="icon">💼</span><span>الإدارة المالية</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')"><span class="icon">🏗️</span><span>استثمارات أخرى</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')"><span class="icon">🌱</span><span>إدارة الحياة</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html" class="nav-link nav-sub" id="nav-life-goals"><span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"  class="nav-link nav-sub" id="nav-inventory"><span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html"     class="nav-link nav-sub" id="nav-school">  <span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-learn')"><span class="icon">📚</span><span>تعليم الاستثمار</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-learn">
+          <a href="invest-tips.html"      class="nav-link nav-sub" id="nav-invest-tips">      <span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="emergency-fund.html"   class="nav-link nav-sub" id="nav-emergency-fund">   <span class="icon">🛡️</span><span>صندوق الطوارئ</span></a>
+          <a href="avg-calculator.html"   class="nav-link nav-sub" id="nav-avg-calc">         <span class="icon">📊</span><span>متوسط سعر الشراء</span></a>
+          <a href="portfolio-rating.html" class="nav-link nav-sub" id="nav-portfolio-rating"> <span class="icon">🛡️</span><span>تقييم أمان المحفظة</span></a>
+          <a href="stock-valuation.html"  class="nav-link nav-sub" id="nav-stock-valuation">  <span class="icon">💹</span><span>القيمة العادلة للأسهم</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>📊 حاسبة متوسط سعر الشراء</h1>
+        <p>احسب متوسط تكلفة الشراء عند التراكم على سهم واحد</p>
+      </div>
+    </div>
+
+    <div class="card" style="max-width:700px;">
+      <div class="legal-note">⚠️ إقرار: جميع المحتويات لأغراض تعليمية فقط. الاستثمار ينطوي على مخاطر. قرار الاستخدام على عاتقك.</div>
+
+      <!-- البيانات الحالية -->
+      <h3 style="color:var(--text);font-size:0.95rem;margin-bottom:14px;padding-right:10px;border-right:3px solid var(--primary);">📋 البيانات الحالية</h3>
+      <div class="input-pair">
+        <div class="input-field">
+          <label for="currentAvgCost">متوسط التكلفة الحالية</label>
+          <input type="number" id="currentAvgCost" placeholder="0.00" step="0.01" min="0">
+        </div>
+        <div class="input-field">
+          <label for="currentShares">إجمالي عدد الأسهم المملوكة</label>
+          <input type="number" id="currentShares" placeholder="0" step="1" min="0">
+        </div>
+      </div>
+
+      <!-- العمليات الجديدة -->
+      <h3 style="color:var(--text);font-size:0.95rem;margin:18px 0 14px;padding-right:10px;border-right:3px solid var(--accent);">➕ العمليات الجديدة</h3>
+      <div id="operationsContainer">
+        <div class="operation-row">
+          <div class="input-field"><label>سعر الشراء الجديد</label><input type="number" class="new-price" placeholder="0.00" step="0.01" min="0" oninput="calculateAverage()"></div>
+          <div class="input-field"><label>كمية الأسهم الجديدة</label><input type="number" class="new-shares" placeholder="0" step="1" min="0" oninput="calculateAverage()"></div>
+          <button class="remove-btn" onclick="removeOperation(this)">🗑 حذف</button>
+        </div>
+      </div>
+      <button class="add-btn" onclick="addOperation()">➕ إضافة عملية شراء</button>
+
+      <!-- النتائج -->
+      <div class="results-box">
+        <h3>📈 النتائج</h3>
+        <div class="result-item">
+          <div>المتوسط السعري الجديد</div>
+          <span class="result-value zero" id="newAverage">0.00</span>
+        </div>
+        <div class="result-item">
+          <div>إجمالي القيمة المستثمرة</div>
+          <span class="result-value zero" id="totalValue">0.00</span>
+        </div>
+        <div class="result-item">
+          <div>إجمالي عدد الأسهم</div>
+          <span class="result-value zero" id="totalShares">0</span>
+        </div>
+      </div>
+
+      <button class="clear-btn" onclick="confirmClear()">🔄 مسح كل البيانات</button>
+    </div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/config.js"></script>
+  <script src="js/utils.js"></script>
+  <script>
+    async function init() {
+      const user = await requireAuth();
+      if (!user) return;
+      setActiveNav('nav-avg-calc');
+      calculateAverage();
+    }
+
+    function addOperation() {
+      const container = document.getElementById('operationsContainer');
+      const row = document.createElement('div');
+      row.className = 'operation-row';
+      row.innerHTML = `
+        <div class="input-field"><label>سعر الشراء الجديد</label><input type="number" class="new-price" placeholder="0.00" step="0.01" min="0" oninput="calculateAverage()"></div>
+        <div class="input-field"><label>كمية الأسهم الجديدة</label><input type="number" class="new-shares" placeholder="0" step="1" min="0" oninput="calculateAverage()"></div>
+        <button class="remove-btn" onclick="removeOperation(this)">🗑 حذف</button>`;
+      container.appendChild(row);
+      row.querySelector('.new-price').focus();
+    }
+
+    function removeOperation(btn) {
+      const container = document.getElementById('operationsContainer');
+      if (container.querySelectorAll('.operation-row').length <= 1) {
+        btn.closest('.operation-row').querySelectorAll('input').forEach(i => i.value = '');
+        calculateAverage(); return;
+      }
+      btn.closest('.operation-row').remove();
+      calculateAverage();
+    }
+
+    function calculateAverage() {
+      const currentAvgCost = Math.max(0, parseFloat(document.getElementById('currentAvgCost').value) || 0);
+      const currentShares  = Math.max(0, parseInt(document.getElementById('currentShares').value)  || 0);
+      const prices = document.querySelectorAll('.new-price');
+      const shares = document.querySelectorAll('.new-shares');
+      let totalValue  = currentAvgCost * currentShares;
+      let totalShares = currentShares;
+      for (let i = 0; i < prices.length; i++) {
+        const p = Math.max(0, parseFloat(prices[i].value) || 0);
+        const s = Math.max(0, parseInt(shares[i].value)   || 0);
+        totalValue  += p * s;
+        totalShares += s;
+      }
+      const newAverage = totalShares > 0 ? totalValue / totalShares : 0;
+      setResult('newAverage',  newAverage.toFixed(2),      newAverage  === 0);
+      setResult('totalValue',  totalValue.toFixed(2),      totalValue  === 0);
+      setResult('totalShares', totalShares.toString(),     totalShares === 0);
+    }
+
+    function setResult(id, value, isZero) {
+      const el = document.getElementById(id);
+      el.textContent = value;
+      el.classList.toggle('zero', isZero);
+    }
+
+    function confirmClear() {
+      if (!confirm('هل تريد مسح كافة البيانات؟ لا يمكن التراجع.')) return;
+      clearAll();
+    }
+
+    function clearAll() {
+      document.getElementById('currentAvgCost').value = '';
+      document.getElementById('currentShares').value  = '';
+      const container = document.getElementById('operationsContainer');
+      container.innerHTML = `
+        <div class="operation-row">
+          <div class="input-field"><label>سعر الشراء الجديد</label><input type="number" class="new-price" placeholder="0.00" step="0.01" min="0" oninput="calculateAverage()"></div>
+          <div class="input-field"><label>كمية الأسهم الجديدة</label><input type="number" class="new-shares" placeholder="0" step="1" min="0" oninput="calculateAverage()"></div>
+          <button class="remove-btn" onclick="removeOperation(this)">🗑 حذف</button>
+        </div>`;
+      calculateAverage();
+    }
+
+    document.getElementById('currentAvgCost').addEventListener('input', calculateAverage);
+    document.getElementById('currentShares').addEventListener('input', calculateAverage);
+
+    init();
+  </script>
+</body>
+</html>
