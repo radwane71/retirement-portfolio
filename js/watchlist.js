@@ -43,7 +43,7 @@ function renderTable() {
   if (!tbody) return;
 
   if (!watchlist.length) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">
       <div class="icon">👁️</div>
       <p>لا توجد أسهم تحت المراقبة — أضف أول سهم</p>
     </div></td></tr>`;
@@ -60,6 +60,7 @@ function renderTable() {
       <td class="num">${tpStr}</td>
       <td class="num text-accent">${ppStr}</td>
       <td class="small text-muted">${esc(w.notes || '—')}</td>
+      <td class="small text-muted">${w.created_at ? new Date(w.created_at).toLocaleDateString('ar-SA-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'}</td>
       <td>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" onclick="openModal('${esc(w.id)}')">تعديل</button>
@@ -144,8 +145,8 @@ async function deleteItem(id) {
 function exportWatchlistCSV() {
   if (!watchlist.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
   exportCSV(`قائمة_مراقبة_${todayISO()}.csv`,
-    ['الرمز', 'الاسم', 'القطاع', 'سعر الدخول المستهدف', 'النسبة المخططة %', 'ملاحظات'],
-    watchlist.map(w => [w.ticker, w.name, w.sector || '', w.target_price || 0, w.planned_pct || 0, w.notes || ''])
+    ['الرمز', 'الاسم', 'القطاع', 'سعر الدخول المستهدف', 'النسبة المخططة %', 'ملاحظات', 'تاريخ الإضافة'],
+    watchlist.map(w => [w.ticker, w.name, w.sector || '', w.target_price || 0, w.planned_pct || 0, w.notes || '', w.created_at ? new Date(w.created_at).toLocaleDateString('ar-SA-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''])
   );
   showToast(`✓ تم تصدير ${watchlist.length} سهم`, 'success');
 }
