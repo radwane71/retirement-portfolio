@@ -1328,13 +1328,17 @@ function showDivQualityInfo() {
 let archivedDividends = [];
 
 async function loadArchivedDividends() {
-  const { data, error } = await supabaseClient
-    .from('dividends')
-    .select('*')
-    .eq('is_archived', true)
-    .order('date', { ascending: false });
-  if (error) { showToast('خطأ في تحميل الأرشيف', 'error'); return; }
-  archivedDividends = data || [];
+  try {
+    const { data, error } = await supabaseClient
+      .from('dividends')
+      .select('*')
+      .eq('is_archived', true)
+      .order('date', { ascending: false });
+    if (error) { console.warn('archived dividends error:', error.message); }
+    else { archivedDividends = data || []; }
+  } catch (e) {
+    console.warn('loadArchivedDividends exception:', e);
+  }
   renderArchivedTable();
 }
 
