@@ -525,6 +525,7 @@
       document.getElementById('percentageDisplay').textContent   = '0%';
     }
 
+    // ربط الـ listeners مرة واحدة فقط عند تحميل الصفحة
     document.querySelectorAll('input[type="number"], select').forEach(el => {
       el.addEventListener('input',  updateResults);
       el.addEventListener('change', updateResults);

@@ -22,7 +22,8 @@
     .ig select option { background: var(--bg-2); }
     .ig .hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
     .cg label { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 0.88rem; cursor: pointer; }
-    .cg input[type="checkbox"] { cursor: pointer; transform: scale(1.15); }
+    .cg input[type="checkbox"] { cursor: pointer; transform: scale(1.15);   accent-color: var(--accent);
+}
     .section-hdr { font-size: 0.95rem; font-weight: 700; color: var(--text); padding-right: 10px; border-right: 3px solid var(--primary); margin: 16px 0 12px; }
     .calc-btn { width: 100%; padding: 12px; background: var(--primary); color: #fff; border: none; border-radius: 8px; font-size: 1rem; font-weight: 700; cursor: pointer; font-family: 'Tajawal', sans-serif; margin-top: 10px; transition: opacity 0.2s; }
     .calc-btn:hover { opacity: 0.9; }
@@ -78,7 +79,8 @@
     .legal-box .title { font-weight: 700; font-size: 1rem; color: #f0b429; margin-bottom: 14px; }
     .legal-box .body  { color: var(--text-muted); line-height: 1.7; font-size: 0.88rem; margin-bottom: 16px; }
     .legal-check { color: #f0b429; font-size: 0.9rem; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
-    .legal-check input { cursor: pointer; transform: scale(1.2); }
+    .legal-check input { cursor: pointer; transform: scale(1.2);   accent-color: var(--accent);
+}
     #enterButton { background: var(--bg-3); color: var(--text-muted); border: none; padding: 11px 24px; border-radius: 8px; cursor: not-allowed; font-size: 0.95rem; font-weight: 700; font-family: 'Tajawal', sans-serif; }
     #enterButton.enabled { background: var(--primary); color: #fff; cursor: pointer; }
     /* sensitivity table */
@@ -336,6 +338,7 @@
     }
 
     let modelsChart = null;
+    const C = s => getComputedStyle(document.documentElement).getPropertyValue(s).trim();
 
     // ===== Help System =====
     const helpContent = {
@@ -612,7 +615,7 @@
       const labels = Object.keys(values);
       const data   = Object.values(values);
       const currentPrice = parseFloat(document.getElementById('currentPrice').value) || 0;
-      const colors = data.map(v => v >= currentPrice * 0.85 ? 'rgba(46,213,115,0.7)' : 'rgba(239,68,68,0.7)');
+      const colors = data.map(v => v >= currentPrice * 0.85 ? 'rgba(63,185,80,0.55)' : 'rgba(248,81,73,0.55)');
       if (modelsChart) modelsChart.destroy();
       modelsChart = new Chart(ctx, {
         type: 'bar',
@@ -623,7 +626,7 @@
             ...(currentPrice>0?[{label:'السعر الحالي',data:new Array(labels.length).fill(currentPrice),type:'line',borderColor:'#ef4444',borderDash:[6,3],borderWidth:2,pointRadius:0,fill:false}]:[])
           ]
         },
-        options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:'#8b949e',font:{family:'Tajawal'}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+formatCurrency(ctx.parsed.y)}}}, scales:{y:{beginAtZero:false,ticks:{color:'#8b949e',callback:v=>formatCurrency(v)},grid:{color:'rgba(255,255,255,0.06)'}},x:{ticks:{color:'#8b949e'},grid:{color:'rgba(255,255,255,0.06)'}}} }
+        options: { responsive:true, maintainAspectRatio:false, plugins:{legend:{labels:{color:C('--text-2'),font:{family:'Tajawal'}}},tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+formatCurrency(ctx.parsed.y)}}}, scales:{y:{beginAtZero:false,ticks:{color:C('--text-2'),callback:v=>formatCurrency(v),font:{family:'Tajawal'}},grid:{color:'rgba(255,255,255,0.05)'}},x:{ticks:{color:C('--text-2'),font:{family:'Tajawal'}},grid:{color:'rgba(255,255,255,0.05)'}}} }
       });
     }
 
@@ -645,7 +648,7 @@
           const res = calculate_dcf(fcf, g, growth_perp, d, net_debt || 0);
           const v   = res ? res.equityValue : null;
           let color = 'transparent';
-          if (v && currentPrice > 0) { color = v>currentPrice*1.15?'rgba(46,213,115,0.15)':v<currentPrice*0.85?'rgba(239,68,68,0.15)':'rgba(245,158,11,0.15)'; }
+          if (v && currentPrice > 0) { color = v>currentPrice*1.15?'rgba(63,185,80,0.15)':v<currentPrice*0.85?'rgba(248,81,73,0.15)':'rgba(240,180,41,0.12)'; }
           html += `<td style="background:${color}">${v?formatCurrency(v):'—'}</td>`;
         });
         html += '</tr>';

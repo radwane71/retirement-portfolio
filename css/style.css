@@ -18,6 +18,11 @@
   --sidebar: 260px;
   --radius: 8px;
   --radius-lg: 12px;
+  /* ── aliases للتوافق مع الصفحات التعليمية ── */
+  --bg-1: #0d1117;
+  --text-muted: #8b949e;
+  --primary: #6366f1;
+  --warning: #f0b429;
 }
 
 html, body {
@@ -1642,4 +1647,56 @@ body.light-mode .btn-primary { color: #fff; }
 @media (max-width: 520px) {
   .rl-form-grid { grid-template-columns: 1fr !important; }
   .scenario-grid { grid-template-columns: 1fr !important; }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   GLOBAL INPUT PLACEHOLDER — dark theme
+   ══════════════════════════════════════════════════════════════ */
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-2);
+  opacity: 0.55;
+}
+
+/* ══════════════════════════════════════════════════════════════
+   EDUCATIONAL PAGES — shared calculator styles
+   ══════════════════════════════════════════════════════════════ */
+
+/* inputs موحّدة dark theme لجميع الصفحات التعليمية */
+.calc-input-group input,
+.calc-input-group select,
+.ig input,
+.ig select {
+  background: var(--bg) !important;
+  border: 1px solid var(--border) !important;
+  color: var(--text) !important;
+  border-radius: 8px;
+}
+.calc-input-group input:focus,
+.calc-input-group select:focus,
+.ig input:focus,
+.ig select:focus {
+  border-color: var(--accent) !important;
+  outline: none;
+}
+.calc-input-group select option,
+.ig select option {
+  background: var(--bg-2);
+  color: var(--text);
+}
+
+/* chart boxes — responsive heights */
+.chart-box canvas,
+.chart-box > canvas { display: block; }
+
+@media (max-width: 768px) {
+  .chart-box { height: 220px !important; }
+  .calc-grid  { grid-template-columns: 1fr !important; }
+  .two-col    { grid-template-columns: 1fr !important; }
+  .dashboard-grid { grid-template-columns: 1fr 1fr !important; }
+  .method-grid { grid-template-columns: 1fr !important; }
+  .quotes-grid { grid-template-columns: 1fr !important; }
+  .matrix-grid { grid-template-columns: 1fr 1fr !important; }
+  .operation-row { grid-template-columns: 1fr !important; gap: 8px !important; }
+  .remove-btn { width: 100% !important; height: auto !important; }
 }

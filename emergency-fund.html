@@ -288,8 +288,9 @@
       const labels   = filtered.map(([k])=>EXPENSE_LABELS[k]);
       const data     = filtered.map(([,v])=>v);
       const colors   = filtered.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]);
+      const C = s => getComputedStyle(document.documentElement).getPropertyValue(s).trim();
       if (expensesChart) expensesChart.destroy();
-      expensesChart = new Chart(ctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'rgba(255,255,255,0.1)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:'#8b949e',font:{size:12},padding:14}},tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((s,v)=>s+v,0);const pct=((ctx.parsed/total)*100).toFixed(1);return ctx.label+': '+formatCurrency(ctx.parsed)+' ('+pct+'%)';}}}}}});
+      expensesChart = new Chart(ctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'rgba(255,255,255,0.08)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:C('--text-2'),font:{size:12,family:'Tajawal'},padding:14}},tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((s,v)=>s+v,0);const pct=((ctx.parsed/total)*100).toFixed(1);return ctx.label+': '+formatCurrency(ctx.parsed)+' ('+pct+'%)';}}}}}});
     }
 
     function generateAdvice(monthly, target, period, saved, monthlySavings, expenses) {

@@ -592,6 +592,7 @@
       // رسم منحنى التنويع
       const canvas = document.getElementById('diversificationChart');
       if (!canvas) return;
+      const C = s => getComputedStyle(document.documentElement).getPropertyValue(s).trim();
       new Chart(canvas.getContext('2d'), {
         type: 'line',
         data: {
@@ -599,26 +600,26 @@
           datasets: [{
             label: 'المخاطرة غير النظامية (%)',
             data: [100,72,55,38,32,25,22,21,20.5,20.2,20.1],
-            borderColor: '#e74c3c',
-            backgroundColor: 'rgba(231,76,60,0.08)',
+            borderColor: C('--danger'),
+            backgroundColor: C('--danger-dim'),
             fill: true, tension: 0.4,
-            pointRadius: 4, pointBackgroundColor: '#e74c3c'
+            pointRadius: 4, pointBackgroundColor: C('--danger')
           }]
         },
         options: {
           responsive: true, maintainAspectRatio: false,
           plugins: {
-            legend: { labels: { color: 'var(--text-muted)', font: { family: 'Tajawal' } } },
+            legend: { labels: { color: C('--text-2'), font: { family: 'Tajawal', size: 12 } } },
             tooltip: { callbacks: { label: c => ` ${c.parsed.y}% مخاطرة` } }
           },
           scales: {
             y: { beginAtZero: true, max: 110,
-                 ticks: { color: 'var(--text-muted)' },
-                 grid:  { color: 'rgba(255,255,255,0.06)' },
-                 title: { display: true, text: 'درجة المخاطرة (%)', color: 'var(--text-muted)' } },
-            x: { ticks: { color: 'var(--text-muted)' },
-                 grid:  { color: 'rgba(255,255,255,0.06)' },
-                 title: { display: true, text: 'عدد الأسهم في المحفظة', color: 'var(--text-muted)' } }
+                 ticks: { color: C('--text-2'), font: { family: 'Tajawal' } },
+                 grid:  { color: 'rgba(255,255,255,0.05)' },
+                 title: { display: true, text: 'درجة المخاطرة (%)', color: C('--text-2'), font: { family: 'Tajawal' } } },
+            x: { ticks: { color: C('--text-2'), font: { family: 'Tajawal' } },
+                 grid:  { color: 'rgba(255,255,255,0.05)' },
+                 title: { display: true, text: 'عدد الأسهم في المحفظة', color: C('--text-2'), font: { family: 'Tajawal' } } }
           }
         }
       });
