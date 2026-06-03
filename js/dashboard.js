@@ -1773,19 +1773,16 @@ function checkPriceZones(ticker, price) {
 }
 
 function showPriceZoneAlert({ ticker, label, color, price, zone, name }) {
-  const id = 'pz-alert-' + ticker + '-' + label;
-  if (document.getElementById(id)) return;
-  const banner = document.createElement('div');
-  banner.id = id;
-  banner.style.cssText = `position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:9999;
-    background:${color};color:#fff;padding:12px 20px;border-radius:8px;font-size:0.95rem;
-    display:flex;align-items:center;gap:12px;box-shadow:0 4px 16px rgba(0,0,0,0.3);min-width:300px`;
-  banner.innerHTML = `<span style="font-size:1.2rem">${label === 'منطقة شراء' ? '🟢' : '🔴'}</span>
-    <span><strong>${ticker}</strong>${name ? ` (${name})` : ''} — ${label === 'منطقة شراء' ? 'السهم الآن في منطقة شراء' : 'السهم الآن في منطقة بيع'}! السعر الحالي <strong>${price}</strong> ${label === 'منطقة شراء' ? 'وصل الحد' : 'تجاوز الحد'} ${zone}</span>
-    <button onclick="this.parentElement.remove()" style="margin-right:auto;background:rgba(255,255,255,0.3);border:none;color:#fff;
-      border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:0.9rem">✕</button>`;
-  document.body.appendChild(banner);
-  setTimeout(() => banner.remove(), 10000);
+  // منع تكرار نفس الإشعار
+  const dedupKey = 'pz-shown-' + ticker + '-' + label;
+  if (sessionStorage.getItem(dedupKey)) return;
+  sessionStorage.setItem(dedupKey, '1');
+
+  const icon = label === 'منطقة شراء' ? '🟢' : '🔴';
+  const action = label === 'منطقة شراء' ? 'وصل الحد' : 'تجاوز الحد';
+  const msg = `${icon} <strong>${ticker}</strong>${name ? ` (${name})` : ''} — ${label}! السعر الحالي <strong>${price}</strong> ${action} ${zone}`;
+  const type = label === 'منطقة شراء' ? 'success' : 'error';
+  showToast(msg, type);
 }
 
 function renderPriceZonesCard() {

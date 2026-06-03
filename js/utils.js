@@ -172,10 +172,29 @@ function showToast(msg, type = 'info') {
     <div class="toast-timer"></div>
   `;
 
-  // على الموبايل أو اللمس: فتح بالنقر
+  // ── دالة مساعدة: ابدأ العداد التلقائي ──
+  function startTimer(delay) {
+    clearTimeout(item._timer);
+    item._timer = setTimeout(() => dismissToast(item), delay);
+  }
+
+  // ── ديسكتوب: pause عند hover، resume عند leave فقط لو غير مفتوح يدوياً ──
+  item.addEventListener('mouseenter', () => { clearTimeout(item._timer); });
+  item.addEventListener('mouseleave', () => {
+    if (!item.classList.contains('expanded')) startTimer(5000);
+  });
+
+  // ── موبايل / نقر: toggle expanded ──
   item.addEventListener('click', (e) => {
     if (!e.target.classList.contains('toast-close')) {
-      item.classList.toggle('expanded');
+      const isExpanded = item.classList.toggle('expanded');
+      if (isExpanded) {
+        // مفتوح يدوياً → أوقف العداد
+        clearTimeout(item._timer);
+      } else {
+        // أُغلق يدوياً → ابدأ عداد قصير
+        startTimer(5000);
+      }
     }
   });
 
@@ -192,9 +211,8 @@ function showToast(msg, type = 'info') {
     requestAnimationFrame(() => item.classList.add('visible'));
   });
 
-  // اختفاء تلقائي بعد 20 ثانية
-  const timer = setTimeout(() => dismissToast(item), 20000);
-  item._timer = timer;
+  // اختفاء تلقائي بعد 20 ثانية (إذا لم يُفتح)
+  startTimer(20000);
 }
 
 function dismissToast(item) {
