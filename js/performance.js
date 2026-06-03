@@ -654,6 +654,42 @@ function clearAllBenchmark() {
   showToast('تم المسح', 'success');
 }
 
+// ── Time-Weighted Return (TWR) ────────────────────────────────
+// يحسب العائد المُعدَّل بالزمن بمعزل عن الإيداعات والسحوبات
+// المعيار الدولي (GIPS) لمقارنة أداء المحافظ ببعضها أو بمؤشر
+// الخوارزمية: Modified Dietz لكل فترة بين لقطتين → تجميع مضروب
+function _computeTWR(snapshots, cashflows) {
+  const sorted = snapshots.slice().sort((a, b) => a.date.localeCompare(b.date));
+  if (!sorted.length) return { twrMap: {}, sortedSnaps: sorted };
+
+  const cfs = cashflows.slice().sort((a, b) => a.date.localeCompare(b.date));
+  const twrMap = {};
+  let factor = 1.0;
+  twrMap[sorted[0].date] = 100;
+
+  for (let i = 1; i < sorted.length; i++) {
+    const startDate = sorted[i - 1].date;
+    const endDate   = sorted[i].date;
+    const startVal  = +sorted[i - 1].total_value;
+    const endVal    = +sorted[i].total_value;
+
+    // مجموع التدفقات النقدية الصافية خلال الفترة (إيداع+، سحب−)
+    const netCF = cfs
+      .filter(c => c.date > startDate && c.date <= endDate)
+      .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
+
+    // Modified Dietz: مقام = قيمة البداية + نصف التدفق (افتراض منتصف الفترة)
+    const denom = startVal + netCF / 2;
+    if (denom > 0) {
+      const r = (endVal - startVal - netCF) / denom;
+      factor *= (1 + r);
+    }
+    twrMap[sorted[i].date] = +(factor * 100).toFixed(3);
+  }
+
+  return { twrMap, sortedSnaps: sorted };
+}
+
 // ── رسم التبويب كاملاً ────────────────────────────────────────
 function renderBenchmarkTab() {
   const bmEntries = _loadBenchmark();  // [{ date, value }] مرتبة
@@ -732,13 +768,27 @@ function renderBenchmarkTab() {
     return;
   }
 
-  // ── تطبيع الى 100 عند أول نقطة ──────────────────────────
+  // ── حساب TWR للمحفظة ────────────────────────────────────
+  // نستخدم _cf (cashflow_entries) المُحمَّل في init() لتصحيح الإيداعات
+  const { twrMap, sortedSnaps } = _computeTWR(snapshots, _cf || []);
+
+  const getTwrAt = (date) => {
+    const prior = sortedSnaps.filter(s => s.date <= date);
+    if (!prior.length) return null;
+    return twrMap[prior[prior.length - 1].date] ?? null;
+  };
+
+  // ── تطبيع الى 100 عند أول نقطة مشتركة ──────────────────
   const base      = points[0];
   const tasiBase  = base.tasi;
-  const portBase  = base.port;
+  const baseTwr   = getTwrAt(base.date) ?? 100;
 
   const tasiNorm = points.map(p => +((p.tasi / tasiBase * 100).toFixed(2)));
-  const portNorm = points.map(p => +((p.port / portBase * 100).toFixed(2)));
+  // portNorm = TWR مُعدَّل عند نقطة البداية المشتركة (يُزيل أثر الإيداعات)
+  const portNorm = points.map(p => {
+    const twr = getTwrAt(p.date);
+    return twr != null ? +((twr / baseTwr * 100).toFixed(2)) : null;
+  });
   const labels   = points.map(p => p.date);
 
   // ── رسم الشارت ───────────────────────────────────────────
@@ -755,7 +805,7 @@ function renderBenchmarkTab() {
       labels,
       datasets: [
         {
-          label:           'محفظتك',
+          label:           'محفظتك (TWR)',
           data:            portNorm,
           borderColor:     '#3fb950',
           backgroundColor: 'rgba(63,185,80,0.10)',
@@ -877,8 +927,8 @@ function renderBenchmarkTab() {
         </div>
       </div>
       <p class="small text-muted">
-        📌 الأرقام مبنية على <strong>صافي ثروتك المُسجَّل</strong> (net_worth_snapshots من الداشبورد) مقابل قيم تاسي التي أدخلتها يدوياً.
-        كلاهما مُنسَّب إلى 100 عند <strong>${formatDate(points[0].date)}</strong> — نقطة البداية المشتركة.
+        📌 عائد محفظتك محسوب بطريقة <strong>TWR (Time-Weighted Return)</strong> — يُزيل أثر الإيداعات والسحوبات لعزل أداء قراراتك الاستثمارية فقط.
+        مؤشر تاسي مُدخَّل يدوياً. كلاهما مُنسَّب إلى 100 عند <strong>${formatDate(points[0].date)}</strong>.
       </p>
       <p class="small" style="color:var(--warning,#f0b429);background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.25);border-radius:6px;padding:8px 10px;margin-top:6px">
         ⚠️ <strong>ملاحظة منهجية:</strong> المقارنة هنا مع <strong>تاسي السعري</strong> (Price Index) الذي لا يشمل إعادة استثمار التوزيعات.
