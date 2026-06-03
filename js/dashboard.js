@@ -1799,9 +1799,15 @@ function renderPriceZonesCard() {
     const price = +h.current_price;
     let entryStatus = '', exitStatus = '';
     if (zone.entry_price != null) {
-      if (price <= zone.entry_price)
-        entryStatus = `<span style="color:#22c55e;font-weight:bold">🟢 في منطقة شراء — السعر ${price} وصل الحد ${zone.entry_price}</span>`;
-      else
+      if (price <= zone.entry_price) {
+        const currentW = totalValue > 0 ? (+h.shares * price) / totalValue * 100 : 0;
+        const targetW  = stockTargets[h.ticker] || 0;
+        const isFull   = targetW > 0 && currentW >= targetW * 0.95;
+        const fullBadge = isFull
+          ? ` <span style="background:rgba(240,180,41,0.18);color:#f0b429;border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:700">⚠️ الهدف مكتمل</span>`
+          : '';
+        entryStatus = `<span style="color:#22c55e;font-weight:bold">🟢 في منطقة شراء — السعر ${price} وصل الحد ${zone.entry_price}</span>${fullBadge}`;
+      } else
         entryStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.entry_price}</span>`;
     }
     if (zone.exit_price != null) {
