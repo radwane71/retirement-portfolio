@@ -152,6 +152,28 @@ function renderKPIs() {
   if (rpEl) { rpEl.textContent = formatSAR(totalReal, true); rpEl.className = 'value num ' + (totalReal >= 0 ? 'text-success' : 'text-danger'); }
   const urEl = document.getElementById('pk-unrealized');
   if (urEl) { urEl.textContent = formatSAR(totalUnreal, true); urEl.className = 'value num ' + (totalUnreal >= 0 ? 'text-success' : 'text-danger'); }
+
+  // Max Drawdown من سجل صافي الثروة
+  const ddEl = document.getElementById('pk-max-drawdown');
+  if (ddEl && _snapshots.length >= 2) {
+    const sorted = _snapshots.slice().sort((a, b) => a.date.localeCompare(b.date));
+    let peak = sorted[0].total_value;
+    let maxDD = 0;
+    let peakDate = sorted[0].date;
+    let ddPeakDate = '', ddTroughDate = '';
+    for (const s of sorted) {
+      const v = +s.total_value;
+      if (v > peak) { peak = v; peakDate = s.date; }
+      const dd = peak > 0 ? (v - peak) / peak * 100 : 0;
+      if (dd < maxDD) { maxDD = dd; ddPeakDate = peakDate; ddTroughDate = s.date; }
+    }
+    ddEl.textContent  = maxDD.toFixed(2) + '%';
+    ddEl.className    = 'value num ' + (maxDD < -15 ? 'text-danger' : maxDD < -8 ? 'text-warning' : 'text-success');
+    ddEl.title        = ddPeakDate ? `من ${formatDate(ddPeakDate)} إلى ${formatDate(ddTroughDate)}` : '';
+  } else if (ddEl) {
+    ddEl.textContent = '— (بيانات غير كافية)';
+    ddEl.className   = 'value num text-muted';
+  }
 }
 
 // ── Open positions table ──────────────────────────────────────────────
@@ -857,6 +879,10 @@ function renderBenchmarkTab() {
       <p class="small text-muted">
         📌 الأرقام مبنية على <strong>صافي ثروتك المُسجَّل</strong> (net_worth_snapshots من الداشبورد) مقابل قيم تاسي التي أدخلتها يدوياً.
         كلاهما مُنسَّب إلى 100 عند <strong>${formatDate(points[0].date)}</strong> — نقطة البداية المشتركة.
+      </p>
+      <p class="small" style="color:var(--warning,#f0b429);background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.25);border-radius:6px;padding:8px 10px;margin-top:6px">
+        ⚠️ <strong>ملاحظة منهجية:</strong> المقارنة هنا مع <strong>تاسي السعري</strong> (Price Index) الذي لا يشمل إعادة استثمار التوزيعات.
+        مؤشر تاسي للعائد الإجمالي (TRI) يكون أعلى بـ ~3-4% سنوياً. Alpha الحقيقي = عائد محفظتك − TRI.
       </p>`;
   }
 }

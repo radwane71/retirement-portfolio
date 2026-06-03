@@ -198,6 +198,9 @@ function renderDivStats() {
   const ttm      = _ttmDividends();
   const netCapital = _currentCostBasis();
 
+  // Current Yield = الدخل المتوقع ÷ القيمة السوقية الحالية
+  const currentMarketVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+
   // TTM YOC — مفيد لكنه متأثر بنمو المحفظة (المقام الحالي أكبر من متوسط الفترة)
   const ttmYoc    = netCapital > 0 ? ttm / netCapital * 100 : 0;
   const ttmYocCls = ttmYoc >= 5 ? 'text-success' : ttmYoc >= 3 ? 'text-accent' : 'text-muted';
@@ -257,6 +260,14 @@ function renderDivStats() {
       <div class="tx-stat-sub" style="color:var(--success,#3fb950)">≈ ${formatSAR(fwd.total/12)} / شهر</div>
     </div>
     <div class="tx-stat-divider"></div>
+    ${currentMarketVal > 0 ? `
+    <div class="tx-stat-item"
+      title="Current Yield = الدخل المتوقع ÷ القيمة السوقية الحالية&#10;هذا ما يدفعه السوق الآن مقابل محفظتك&#10;اقارنه بـ YOC لمعرفة تكلفة الفرصة البديلة">
+      <div class="tx-stat-val ${fwd.total/currentMarketVal*100 >= 5 ? 'text-success' : fwd.total/currentMarketVal*100 >= 3 ? 'text-accent' : 'text-muted'}">${(fwd.total / currentMarketVal * 100).toFixed(2)}%</div>
+      <div class="tx-stat-lbl">العائد السوقي الحالي</div>
+      <div class="tx-stat-sub">Forward ÷ القيمة السوقية</div>
+    </div>
+    <div class="tx-stat-divider"></div>` : ''}
     <div class="tx-stat-item">
       <div class="tx-stat-val">${formatSAR(netCapital)}</div>
       <div class="tx-stat-lbl">تكلفة الحيازات الحالية</div>

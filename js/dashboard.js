@@ -678,10 +678,20 @@ function renderRebalancingAlerts() {
     : `⚠️ ${yellows.length} سهم خارج النطاق الأمثل (> ${green}%)`;
 
   const chips = top.map(d => {
-    const isRed  = Math.abs(d.diff) > yellow;
-    const color  = isRed ? '#f85149' : '#f0b429';
-    const arrow  = d.diff > 0 ? '↑' : '↓';
-    const sign   = d.diff > 0 ? '+' : '';
+    const isRed     = Math.abs(d.diff) > yellow;
+    const color     = isRed ? '#f85149' : '#f0b429';
+    const arrow     = d.diff > 0 ? '↑' : '↓';
+    const sign      = d.diff > 0 ? '+' : '';
+    const isUnder   = d.diff < 0; // ناقص الوزن → اقتراح شراء
+    const h         = holdings.find(x => x.ticker === d.ticker);
+    const curPrice  = h ? +h.current_price : null;
+    const zone      = stockZones[d.ticker];
+    const entryPx   = zone?.entry_price ?? null;
+    // تحذير: السهم ناقص الوزن لكن سعره فوق هدف الشراء
+    const aboveEntry = isUnder && entryPx != null && curPrice != null && curPrice > entryPx;
+    const warningTag = aboveEntry
+      ? `<span title="السعر الحالي ${curPrice} فوق هدف الشراء ${entryPx} — تحقق من القيمة العادلة قبل الشراء" style="font-size:.7rem;background:rgba(248,81,73,.15);color:#f85149;border-radius:4px;padding:1px 5px;margin-right:2px">⚠️ فوق الهدف</span>`
+      : '';
     return `<span style="
       display:inline-flex;align-items:center;gap:4px;
       background:${color}18;border:1px solid ${color}40;
@@ -689,6 +699,7 @@ function renderRebalancingAlerts() {
       color:${color};white-space:nowrap
     ">${esc(d.ticker)} ${arrow}${sign}${d.diff.toFixed(1)}%
       <span style="font-weight:400;color:var(--text-muted)">${d.current.toFixed(1)}%→${d.target}%</span>
+      ${warningTag}
     </span>`;
   }).join('');
 
@@ -2311,6 +2322,26 @@ function renderRetirementCard() {
     ${row('المتبقي للوصول للهدف', formatSAR(remaining), remaining > 0 ? 'text-danger' : 'text-success')}
     ${row('السحب الآمن الحالي', formatSAR(safeMonthly) + '/شهر', '')}
     ${row('تغطية مصاريفك الآن', (goal.monthly > 0 ? (safeMonthly / goal.monthly * 100).toFixed(1) : 0) + '%', safeMonthly >= goal.monthly ? 'text-success' : 'text-muted')}
+    ${goal.swr !== 4 ? (() => {
+      const fire4 = annualExpenses / 0.04;
+      const prog4 = Math.min(netWorth / fire4 * 100, 100);
+      const rem4  = Math.max(0, fire4 - netWorth);
+      return `<div style="margin-top:10px;padding:10px 12px;background:rgba(240,180,41,.06);border:1px solid rgba(240,180,41,.2);border-radius:8px">
+        <div class="small" style="color:var(--warning,#f0b429);font-weight:600;margin-bottom:6px">📐 مقارنة بقاعدة 4% (Trinity Study)</div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
+          <span class="small text-muted">رقم FIRE عند 4%</span>
+          <span class="num bold small">${formatSAR(fire4)}</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
+          <span class="small text-muted">نسبة الإنجاز</span>
+          <span class="num small" style="color:${prog4>=100?'var(--success)':prog4>=50?'var(--warning)':'var(--accent)'}">${prog4.toFixed(1)}%</span>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
+          <span class="small text-muted">المتبقي</span>
+          <span class="num small ${rem4>0?'text-danger':'text-success'}">${formatSAR(rem4)}</span>
+        </div>
+      </div>`;
+    })() : ''}
     <div style="text-align:center;margin-top:12px">
       <button class="btn btn-secondary btn-sm" onclick="editRetirementGoal()">تعديل المصاريف / نسبة السحب</button>
     </div>`;
