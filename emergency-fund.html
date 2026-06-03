@@ -224,7 +224,7 @@
 
     let expensesChart = null;
     const EXPENSE_LABELS = { housing:'🏠 السكن', utilities:'💡 الفواتير', living:'🛒 المعيشة', transport:'🚗 النقل', commitments:'💳 الالتزامات', others:'📚 أخرى' };
-    const CHART_COLORS  = ['#6366f1','#ef4444','#f59e0b','#22c55e','#8b5cf6','#64748b'];
+    const EF_COLORS = ['#6366f1','#ef4444','#f59e0b','#22c55e','#8b5cf6','#64748b'];
 
     function formatCurrency(a) { return new Intl.NumberFormat('ar-SA',{style:'currency',currency:'SAR',minimumFractionDigits:0,maximumFractionDigits:0}).format(a); }
 
@@ -289,7 +289,7 @@
       const filtered = Object.entries(expenses).filter(([,v])=>v>0);
       const labels   = filtered.map(([k])=>EXPENSE_LABELS[k]);
       const data     = filtered.map(([,v])=>v);
-      const colors   = filtered.map((_,i)=>CHART_COLORS[i%CHART_COLORS.length]);
+      const colors   = filtered.map((_,i)=>EF_COLORS[i%EF_COLORS.length]);
       const C = s => getComputedStyle(document.documentElement).getPropertyValue(s).trim();
       if (expensesChart) expensesChart.destroy();
       expensesChart = new Chart(ctx,{type:'pie',data:{labels,datasets:[{data,backgroundColor:colors,borderWidth:2,borderColor:'rgba(255,255,255,0.08)'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{position:'right',labels:{color:C('--text-2'),font:{size:12,family:'Tajawal'},padding:14}},tooltip:{callbacks:{label:ctx=>{const total=ctx.dataset.data.reduce((s,v)=>s+v,0);const pct=((ctx.parsed/total)*100).toFixed(1);return ctx.label+': '+formatCurrency(ctx.parsed)+' ('+pct+'%)';}}}}}});
