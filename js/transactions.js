@@ -444,25 +444,40 @@ function renderTxStats() {
   const sells  = transactions.filter(t => t.type === 'sell');
   const grants = transactions.filter(t => t.type === 'grant');
 
-  // حساب متوسط تكلفة الشراء لكل رمز (ترتيب تاريخي)
+  // حساب الربح/الخسارة الحقيقي بطريقة WAC شاملة العمولة والضريبة
+  // نمشي على المعاملات ترتيباً تاريخياً ونتتبع التكلفة الكاملة لكل رمز
   const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
-  const buyMap = {};
-  sorted.forEach(t => {
-    if (t.type === 'buy') {
-      if (!buyMap[t.ticker]) buyMap[t.ticker] = { cost: 0, shares: 0 };
-      buyMap[t.ticker].cost   += +t.shares * +t.price;
-      buyMap[t.ticker].shares += +t.shares;
-    }
-  });
+  const costMap = {}; // ticker → { shares, totalCost (شاملة عمولة + ضريبة) }
 
   let profitSells = 0, profitAmount = 0;
   let lossSells   = 0, lossAmount   = 0;
-  sells.forEach(t => {
-    const avgCost = buyMap[t.ticker]?.shares > 0
-      ? buyMap[t.ticker].cost / buyMap[t.ticker].shares : 0;
-    const pnl = (+t.price - avgCost) * +t.shares;
-    if (pnl >= 0) { profitSells++;  profitAmount += pnl; }
-    else          { lossSells++;    lossAmount   += Math.abs(pnl); }
+
+  sorted.forEach(t => {
+    if (!costMap[t.ticker]) costMap[t.ticker] = { shares: 0, totalCost: 0 };
+    const m = costMap[t.ticker];
+
+    if (t.type === 'buy') {
+      // total الشراء = أسهم × سعر + عمولة + ضريبة
+      m.totalCost += +t.total;
+      m.shares    += +t.shares;
+    } else if (t.type === 'grant') {
+      m.shares += +t.shares; // منحة: تكلفة صفر
+    } else if (t.type === 'sell') {
+      // متوسط التكلفة الكاملة للسهم الواحد (شاملة العمولة والضريبة عند الشراء)
+      const avgCostPerShare = m.shares > 0 ? m.totalCost / m.shares : 0;
+      const costOfSold      = avgCostPerShare * +t.shares;
+      // صافي عائد البيع (total البيع = أسهم × سعر − عمولة − ضريبة)
+      const netProceeds     = +t.total;
+      const pnl             = netProceeds - costOfSold;
+
+      if (pnl >= 0) { profitSells++;  profitAmount += pnl; }
+      else          { lossSells++;    lossAmount   += Math.abs(pnl); }
+
+      // اخصم التكلفة والأسهم المباعة بنسبتها
+      const pct    = m.shares > 0 ? +t.shares / m.shares : 0;
+      m.totalCost  = Math.max(0, m.totalCost - m.totalCost * pct);
+      m.shares     = Math.max(0, m.shares - +t.shares);
+    }
   });
 
   const totalBuyAmt  = buys.reduce((s, t)  => s + +t.total, 0);
