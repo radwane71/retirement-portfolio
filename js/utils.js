@@ -225,7 +225,7 @@ function toggleNavGroup(id) {
 }
 
 function initNavGroups() {
-  const GROUPS = ['grp-portfolio', 'grp-finance', 'grp-other', 'grp-life'];
+  const GROUPS = ['grp-portfolio', 'grp-finance', 'grp-other', 'grp-life', 'grp-learn'];
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem('nav_groups_v1') || '{}'); } catch(e) {}
 
