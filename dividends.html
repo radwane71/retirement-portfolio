@@ -210,6 +210,29 @@
         </table>
       </div>
     </div>
+    <!-- ═══ التوزيعات المؤرشفة ═══ -->
+    <div class="card" id="archived-div-card" style="margin-top:0;">
+      <div class="section-header">
+        <div>
+          <h2 style="font-size:1rem;color:var(--text-muted);">🗃️ التوزيعات المؤرشفة</h2>
+          <p class="small text-muted">سجلات تم أرشفتها — لا تدخل في أي حسابات. الحذف هنا نهائي ولا يمكن التراجع عنه.</p>
+        </div>
+        <button class="btn btn-secondary btn-sm" onclick="toggleArchivedSection()">إخفاء / إظهار</button>
+      </div>
+      <div id="archived-div-wrap">
+        <div class="table-wrapper">
+          <table>
+            <thead>
+              <tr><th>التاريخ</th><th>الرمز</th><th>الاسم</th><th>المبلغ</th><th>الشهر</th><th>السنة</th><th></th></tr>
+            </thead>
+            <tbody id="archived-div-tbody">
+              <tr><td colspan="7"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <footer class="site-footer">
     ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
     أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية

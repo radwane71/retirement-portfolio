@@ -28,6 +28,7 @@ async function init() {
 
   await loadData();
   renderAll();
+  await loadArchivedDividends();
 }
 
 function onDivTickerInput() {
@@ -869,6 +870,7 @@ async function archiveDiv(id) {
   showToast('تمت الأرشفة', 'success');
   await loadData();
   renderAll();
+  await loadArchivedDividends();
 }
 
 // ── تصدير CSV ─────────────────────────────────────────────────
@@ -1317,6 +1319,63 @@ function showDivQualityInfo() {
     'ملاحظة: يتطلب وجود سجل معاملات للرمز لحساب DPS.',
     'إذا لم تُسجَّل معاملات، تُستخدم المبالغ الخام.',
   ].join('\n'));
+}
+
+// ══════════════════════════════════════════════════════════════
+// 🗃️ التوزيعات المؤرشفة — عرض + حذف نهائي
+// ══════════════════════════════════════════════════════════════
+
+let archivedDividends = [];
+
+async function loadArchivedDividends() {
+  const { data, error } = await supabaseClient
+    .from('dividends')
+    .select('*')
+    .eq('is_archived', true)
+    .order('date', { ascending: false });
+  if (error) { showToast('خطأ في تحميل الأرشيف', 'error'); return; }
+  archivedDividends = data || [];
+  renderArchivedTable();
+}
+
+function renderArchivedTable() {
+  const tbody = document.getElementById('archived-div-tbody');
+  const card  = document.getElementById('archived-div-card');
+  if (!tbody) return;
+
+  // أخفِ البطاقة كاملاً إذا لا يوجد أرشيف
+  if (!archivedDividends.length) {
+    if (card) card.style.display = 'none';
+    return;
+  }
+  if (card) card.style.display = '';
+
+  tbody.innerHTML = archivedDividends.map(d => `<tr style="opacity:0.75;">
+    <td class="small text-muted">${formatDate(d.date)}</td>
+    <td><strong class="text-muted">${esc(d.ticker)}</strong></td>
+    <td class="small text-muted">${esc(d.name)}</td>
+    <td class="num text-muted">${formatSAR(d.amount)}</td>
+    <td class="small text-muted">${MONTHS_AR[(d.month||1)-1]}</td>
+    <td class="num text-muted">${d.year}</td>
+    <td>
+      <button class="btn btn-danger btn-sm" onclick="permanentDeleteDiv('${esc(d.id)}')">🗑 حذف نهائي</button>
+    </td>
+  </tr>`).join('');
+}
+
+async function permanentDeleteDiv(id) {
+  if (!confirm('⚠️ حذف نهائي — لا يمكن التراجع عن هذا الإجراء. هل أنت متأكد؟')) return;
+  const { error } = await supabaseClient.from('dividends').delete().eq('id', id);
+  if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
+  showToast('تم الحذف النهائي ✓', 'success');
+  archivedDividends = archivedDividends.filter(d => d.id !== id);
+  renderArchivedTable();
+}
+
+function toggleArchivedSection() {
+  const wrap = document.getElementById('archived-div-wrap');
+  if (!wrap) return;
+  wrap.style.display = wrap.style.display === 'none' ? '' : 'none';
 }
 
 init();
