@@ -73,17 +73,6 @@
     .help-icon { background: none; border: none; cursor: pointer; font-size: 13px; margin-right: 3px; transition: transform 0.2s; }
     .help-icon:hover { transform: scale(1.25); }
     #growthPerpWarning { color: var(--danger); font-size: 0.78rem; margin-top: 4px; display: none; }
-    /* Legal Modal */
-    .legal-modal { position: fixed; top:0;left:0;width:100%;height:100%; background: rgba(0,0,0,0.85); display: flex; justify-content: center; align-items: center; z-index: 99999; }
-    .legal-modal.hidden { display: none; }
-    .legal-box { background: rgba(251,191,36,0.12); border: 2px solid #f0b429; border-radius: var(--radius); padding: 28px; max-width: 600px; width: 90%; max-height: 85vh; overflow-y: auto; }
-    .legal-box .title { font-weight: 700; font-size: 1rem; color: #f0b429; margin-bottom: 14px; }
-    .legal-box .body  { color: var(--text-muted); line-height: 1.7; font-size: 0.88rem; margin-bottom: 16px; }
-    .legal-check { color: #f0b429; font-size: 0.9rem; margin-bottom: 14px; display: flex; align-items: center; gap: 8px; cursor: pointer; }
-    .legal-check input { cursor: pointer; transform: scale(1.2);   accent-color: var(--accent);
-}
-    #enterButton { background: var(--bg-3); color: var(--text-muted); border: none; padding: 11px 24px; border-radius: 8px; cursor: not-allowed; font-size: 0.95rem; font-weight: 700; font-family: 'Tajawal', sans-serif; }
-    #enterButton.enabled { background: var(--primary); color: #fff; cursor: pointer; }
     /* sensitivity table */
     #sensitivityTable { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
     #sensitivityTable th, #sensitivityTable td { padding: 9px 11px; border: 1px solid var(--border); text-align: center; color: var(--text-muted); }
@@ -101,16 +90,6 @@
     <div class="help-modal-content">
       <button class="help-modal-close" onclick="closeHelp()">×</button>
       <div id="helpContent"></div>
-    </div>
-  </div>
-
-  <!-- Legal Modal -->
-  <div id="legalModal" class="legal-modal">
-    <div class="legal-box">
-      <div class="title">⚠️ إقرار قانوني ومسؤولية فنية</div>
-      <div class="body">هذه الحاسبة أداة تعليمية لمحاكاة النماذج المالية الرياضية فقط. النتائج مخرجات لعمليات حسابية بناءً على مدخلاتك، ولا تعكس السعر السوقي أو توصية استثمارية. المصمم غير مرخص من هيئة السوق المالية (CMA)، والاستخدام يقع تحت مسؤوليتك الكاملة. لا تتخذ قراراً بالبيع أو الشراء بناءً على هذه الأرقام دون استشارة مستشار مالي مرخص.</div>
-      <label class="legal-check"><input type="checkbox" id="legalAccept"> أقر بأنني فهمت وأوافق على جميع الشروط والمسؤوليات المذكورة أعلاه</label>
-      <button id="enterButton" disabled>موافق — دخول الحاسبة</button>
     </div>
   </div>
 
@@ -397,16 +376,6 @@
     document.addEventListener('click', e => {
       const modal = document.getElementById('helpModal');
       if (e.target === modal) closeHelp();
-    });
-
-    // ===== Legal Modal =====
-    document.getElementById('legalAccept').addEventListener('change', function() {
-      const btn = document.getElementById('enterButton');
-      btn.disabled = !this.checked;
-      btn.classList.toggle('enabled', this.checked);
-    });
-    document.getElementById('enterButton').addEventListener('click', function() {
-      if (!this.disabled) document.getElementById('legalModal').classList.add('hidden');
     });
 
     // ===== Utilities =====
