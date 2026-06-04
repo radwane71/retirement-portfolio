@@ -672,7 +672,13 @@ async function exportMonthlyReviewMD() {
     ]);
 
     // ── بيانات localStorage ──────────────────────────────────
-    const lsGet = (key, def) => { try { return JSON.parse(localStorage.getItem(key)) || def; } catch { return def; } };
+    // M-2: use userLsKey so we read this user's data on shared devices
+    const lsGet = (key, def) => {
+      try {
+        const v = localStorage.getItem(userLsKey(key)) ?? localStorage.getItem(key);
+        return JSON.parse(v) || def;
+      } catch { return def; }
+    };
     const retGoal    = lsGet('retirement_goal_v1', { monthly: 0, swr: 4 });
     const salaryData = lsGet('salary_planner_v1',  { categories: [], entries: [] });
     const sukukData  = lsGet('sukuk_planner_v1',   { opportunities: [] });
@@ -1115,12 +1121,16 @@ async function exportMonthlyReviewMD() {
     const totalCostBasis  = holdings.reduce((s, h) => s + +h.shares * +h.avg_price, 0);
     const totalMktValue   = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
     const totalUnrealPnL  = totalMktValue - totalCostBasis;
+    // Use t.total for buy cost (includes commission+VAT) — consistent with performance.js buildPositionData
     const totalRealPnL    = (() => {
       const closedMap = {};
       transactions.forEach(t => {
         const tk = t.ticker;
         if (!closedMap[tk]) closedMap[tk] = { buyShares: 0, buyCost: 0, sellRev: 0, sellShares: 0 };
-        if (t.type === 'buy') { closedMap[tk].buyCost += +t.price * +t.shares; closedMap[tk].buyShares += +t.shares; }
+        if (t.type === 'buy' || t.type === 'grant') {
+          closedMap[tk].buyCost  += +t.total;   // total = price×shares + commission + VAT (grant = 0)
+          closedMap[tk].buyShares += +t.shares;
+        }
         if (t.type === 'sell') { closedMap[tk].sellRev += +t.total; closedMap[tk].sellShares += +t.shares; }
       });
       return Object.values(closedMap).reduce((s, v) => {
@@ -1140,13 +1150,14 @@ async function exportMonthlyReviewMD() {
     const totalNetWorth    = totalMktValue + reCurrentVal + activeAssetVal - activeLiabVal;
 
     // ── XIRR: معدل العائد الداخلي الحقيقي ──────────────────────
+    // M-6: use parseDateLocal to avoid UTC-midnight off-by-one on date strings
     const xirrFlows = [];
     transactions.forEach(t => {
-      if (t.type === 'buy')  xirrFlows.push({ date: new Date(t.date), amount: -(+t.total) });
-      if (t.type === 'sell') xirrFlows.push({ date: new Date(t.date), amount: +(+t.total) });
+      if (t.type === 'buy')  xirrFlows.push({ date: parseDateLocal(t.date), amount: -(+t.total) });
+      if (t.type === 'sell') xirrFlows.push({ date: parseDateLocal(t.date), amount: +(+t.total) });
     });
     dividends.forEach(d => {
-      const dDate = d.date ? new Date(d.date) : new Date((d.year || today.getFullYear()) + '-06-01');
+      const dDate = d.date ? parseDateLocal(d.date) : new Date((d.year || today.getFullYear()), 5, 1);
       xirrFlows.push({ date: dDate, amount: +d.amount });
     });
     if (totalMktValue > 0) xirrFlows.push({ date: new Date(), amount: totalMktValue });
@@ -1288,9 +1299,10 @@ async function exportMonthlyReviewMD() {
         const e = stockPerf[t.ticker];
         if (!e) return;
         e.name = e.name || t.name || '';
-        if (t.type === 'buy')   { e.buyShares += +t.shares; e.buyCostTotal += +t.price * +t.shares; }
+        // Use t.total for buy cost (includes commission+VAT) — consistent with performance.js
+        if (t.type === 'buy')   { e.buyShares += +t.shares; e.buyCostTotal += +t.total; }
         if (t.type === 'sell')  { e.sellShares += +t.shares; e.sellRevTotal += +t.total; }
-        if (t.type === 'grant') { e.grantShares += +t.shares; }
+        if (t.type === 'grant') { e.grantShares += +t.shares; /* total=0, no cost */ }
       });
 
       dividends.forEach(d => {
@@ -1662,7 +1674,9 @@ async function exportMonthlyReviewMD() {
     a.href = url;
     a.download = `tharwa_review_${dateStr}.md`;
     document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
+    document.body.removeChild(a);
+    // L-4: defer revoke so browser finishes consuming the blob URL
+    setTimeout(() => URL.revokeObjectURL(url), 100);
 
     const totalLines = md.split('\n').length;
     setStatus('md-export-status', 'success',
