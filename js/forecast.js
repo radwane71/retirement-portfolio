@@ -120,8 +120,10 @@ async function loadHistoricalData() {
   const safeDivYield = Math.min(0.15, Math.max(0, annDivYield));
 
   // annCapGrowth: XIRR إن توفّر، وإلا CAGR احتياطياً
-  const rawCapGrowth = (netCapital > 0 && currentValue > 0)
-    ? Math.pow(currentValue / netCapital, 1 / yearsActive) - 1
+  // L-5: use costBasis (WAC × current shares) not netCapital — costBasis better
+  // represents actual deployed capital when proceeds are reinvested
+  const rawCapGrowth = (costBasis > 0 && currentValue > 0)
+    ? Math.pow(currentValue / costBasis, 1 / yearsActive) - 1
     : 0.07;
   const xirrRate = xirrResult != null ? xirrResult / 100 : null;
   // H-8: floor lowered from 2% → -5% so truly negative portfolios are not masked.

@@ -14,6 +14,7 @@ let _positionCache = null; // H-4: cache to avoid triple recomputation per rende
 let _monthlyChart     = null;
 let _activeTab        = 'open';
 let _monthlyChartMode = 'combined'; // 'combined' | 'lines' | 'stacked' | 'divonly'
+let _monthlyDataCache = null;       // I-3: built once per data load, reused across tabs
 
 // ── Init ──────────────────────────────────────────────────────────────
 async function init() {
@@ -35,7 +36,8 @@ async function init() {
   _divs      = rDiv.data  || [];
   _cf        = rCf.data   || [];
   _snapshots = rSnap.data || [];
-  _positionCache = null; // invalidate cache on fresh load
+  _positionCache    = null; // invalidate cache on fresh load
+  _monthlyDataCache = null; // I-3: invalidate monthly data cache
 
   renderKPIs();
   renderOpenPositions();
@@ -327,6 +329,11 @@ function calcCumulativeCapital(cutoffYr, cutoffMo) {
   return total;
 }
 
+function getMonthlyData() {
+  if (!_monthlyDataCache) _monthlyDataCache = buildMonthlyData();
+  return _monthlyDataCache;
+}
+
 function buildMonthlyData() {
   if (!_tx.length && !_divs.length) return [];
 
@@ -380,7 +387,8 @@ function buildMonthlyData() {
 
     // قيمة المحفظة من أقرب snapshot في نفس الشهر أو قبله
     // نأخذ آخر snapshot حتى نهاية هذا الشهر
-    const monthEnd = `${yr}-${String(mo).padStart(2,'0')}-31`;
+    // L-4: use actual last day of month — "day 0" of next month = last day of this month
+    const monthEnd = new Date(yr, mo, 0).toISOString().split('T')[0];
     const relevantSnaps = _snapshots.filter(s => s.date && s.date <= monthEnd);
     const latestSnap = relevantSnaps.length
       ? relevantSnaps[relevantSnaps.length - 1]
@@ -397,7 +405,7 @@ function renderMonthlyTimeline() {
   if (!tbody) return;
 
   const filterYr = document.getElementById('timeline-year-filter')?.value;
-  let data = buildMonthlyData();
+  let data = getMonthlyData();
 
   // بناء فلتر السنوات
   const years = [...new Set(data.map(r => r.yr))].sort((a,b) => b-a);
@@ -480,7 +488,7 @@ function setMonthlyChartMode(mode) {
 function renderMonthlyChart() {
   const canvas = document.getElementById('monthly-chart');
   if (!canvas) return;
-  const data = buildMonthlyData();
+  const data = getMonthlyData();
   if (!data.length) return;
   if (_monthlyChart) { _monthlyChart.destroy(); _monthlyChart = null; }
 
@@ -643,11 +651,32 @@ const BM_KEY = 'tharwa-benchmark_v1';
 let _bmChart = null;
 
 // ── تحميل وحفظ بيانات التاسي ─────────────────────────────────
+// S-4: localStorage is the read cache; Supabase user_settings is the durable store.
+// _saveBenchmark writes both; _loadBenchmark reads from localStorage (fast path).
 function _loadBenchmark() {
   try { return JSON.parse(localStorage.getItem(BM_KEY)) || []; } catch { return []; }
 }
 function _saveBenchmark(entries) {
   localStorage.setItem(BM_KEY, JSON.stringify(entries));
+  // async Supabase sync — fire-and-forget, localStorage remains the read source
+  saveUserSetting(BM_KEY, entries).catch(() => {});
+}
+
+// على أول فتح للتبويب: اجلب من Supabase وحدّث localStorage إن كانت هناك بيانات أحدث
+async function _syncBenchmarkFromSupabase() {
+  try {
+    const remote = await loadUserSetting(BM_KEY);
+    if (!remote?.length) return;
+    const local = _loadBenchmark();
+    // دمج: الأحدث تاريخياً يفوز — نفس منطق _mergeBenchmark
+    const map = {};
+    local.forEach(e  => { map[e.date] = e.value; });
+    remote.forEach(e => { map[e.date] = e.value; });
+    const merged = Object.entries(map)
+      .map(([date, value]) => ({ date, value }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    localStorage.setItem(BM_KEY, JSON.stringify(merged));
+  } catch (_) {}
 }
 
 // ── إضافة نقطة جديدة ─────────────────────────────────────────
@@ -685,8 +714,9 @@ function deleteBenchmarkEntry(date) {
 }
 
 // ── حذف الكل ─────────────────────────────────────────────────
-function clearAllBenchmark() {
-  if (!confirm('حذف جميع بيانات تاسي المدخلة؟')) return;
+async function clearAllBenchmark() {
+  // S-3: replace confirm() with confirmAsync() — consistent with the rest of the codebase
+  if (!await confirmAsync('حذف جميع بيانات تاسي المدخلة؟')) return;
   _saveBenchmark([]);
   renderBenchmarkTab();
   showToast('تم المسح', 'success');
@@ -1044,30 +1074,42 @@ function renderBenchmarkTab() {
 
 // ── معلومات الاستخدام ─────────────────────────────────────────
 function showBenchmarkInfo() {
-  alert([
-    '📊 مقارنة محفظتك بمؤشر تاسي',
-    '',
-    'كيف تعمل؟',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• كلا الخطين مُنسَّبان إلى 100 عند أول نقطة مشتركة',
-    '• الفرق = Alpha (أداؤك الزائد/الناقص عن السوق)',
-    '',
-    'استيراد CSV:',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• الصيغة المقبولة: Date,OPEN,CLOSE  أو  Date,CLOSE',
-    '• التاريخ: MM/DD/YYYY  أو  YYYY-MM-DD',
-    '• الأرقام يمكن أن تحتوي فواصل (مثل "10,991.09")',
-    '• الاستيراد يدمج مع الموجود (upsert بالتاريخ)',
-    '',
-    'تصدير CSV:',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• ينتج ملف بنفس الصيغة يمكن استيراده مستقبلاً',
-    '',
-    'المحفظة:',
-    '━━━━━━━━━━━━━━━━━━━━━━━━━━',
-    '• مصدرها net_worth_snapshots (من الداشبورد)',
-    '• الداشبورد يسجّل لقطة تلقائياً كل شهر',
-  ].join('\n'));
+  // S-3: replace alert() with DOM modal
+  const lines = [
+    ['📊 مقارنة محفظتك بمؤشر تاسي', true],
+    ['كيف تعمل؟', false],
+    ['• كلا الخطين مُنسَّبان إلى 100 عند أول نقطة مشتركة', false],
+    ['• الفرق = Alpha (أداؤك الزائد/الناقص عن السوق)', false],
+    ['استيراد CSV:', false],
+    ['• الصيغة المقبولة: Date,OPEN,CLOSE أو Date,CLOSE', false],
+    ['• التاريخ: MM/DD/YYYY أو YYYY-MM-DD', false],
+    ['• الأرقام يمكن أن تحتوي فواصل (مثل "10,991.09")', false],
+    ['• الاستيراد يدمج مع الموجود (upsert بالتاريخ)', false],
+    ['تصدير CSV:', false],
+    ['• ينتج ملف بنفس الصيغة يمكن استيراده مستقبلاً', false],
+    ['المحفظة:', false],
+    ['• مصدرها net_worth_snapshots (من الداشبورد)', false],
+    ['• الداشبورد يسجّل لقطة تلقائياً كل شهر', false],
+  ];
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  const content = lines.map(([l, bold]) =>
+    `<p style="margin:0 0 7px;font-size:${bold?'.88':'0.8'}rem;${bold?'font-weight:700;color:var(--text-1)':'color:var(--text-2)'}">${esc(l)}</p>`
+  ).join('');
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:460px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-height:85vh;display:flex;flex-direction:column">
+      <div style="overflow-y:auto;flex:1">${content}</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px">
+        <button id="bi-close" class="btn btn-secondary" style="min-width:80px">إغلاق</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#bi-close').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function escKey(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escKey); }
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1228,6 +1270,9 @@ function initBenchmarkTab() {
     localStorage.setItem(BM_SEEDED_KEY, '1');
     showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي تلقائياً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
   }
+
+  // S-4: sync from Supabase (covers device-switch / cleared browser data)
+  _syncBenchmarkFromSupabase().then(() => renderBenchmarkTab());
 
   renderBenchmarkTab();
 }

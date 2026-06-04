@@ -120,11 +120,16 @@ async function refreshPrices(silent = false) {
         showToast(`⚠️ لم يُحدَّث سعر: ${json.failed.join(', ')}`, 'warning');
       }
       if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
-      // مزامنة خلفية مع Supabase
-      loadAllData().then(() => {
-        renderStats(); renderTable(); renderPriceZonesCard();
-        renderBreakEvenCard(); renderAllocationChart(); renderRetirementCard();
-      });
+      // R-4: background DB sync with error handling
+      loadAllData()
+        .then(() => {
+          renderStats(); renderTable(); renderPriceZonesCard();
+          renderBreakEvenCard(); renderAllocationChart(); renderRetirementCard();
+        })
+        .catch(e => {
+          console.warn('Background sync after price refresh failed:', e);
+          showToast('⚠️ تعذّرت مزامنة الأسعار مع قاعدة البيانات — ستظهر عند إعادة التحميل', 'warning');
+        });
     } else {
       if (btn) btn.textContent = json?.message ? `⚠️ ${json.message}` : '⚠️ لم يتحدث';
     }
@@ -208,12 +213,16 @@ async function _autoSnapshotPortfolio() {
     // صافي الثروة = أسهم + نقد + عقارات
     const totalNW = stocksValue + portfolioCash + reVal;
 
-    await supabaseClient.from('net_worth_snapshots').insert({
-      user_id:     user.id,
-      date:        todayISO_,
-      total_value: totalNW,
-      notes:       `${monthKey} — أسهم: ${stocksValue.toFixed(0)} | نقد: ${portfolioCash.toFixed(0)} | عقارات: ${reVal.toFixed(0)}`,
-    });
+    // R-2: use upsert on (user_id, date) to prevent duplicate rows from concurrent tabs
+    await supabaseClient.from('net_worth_snapshots').upsert(
+      {
+        user_id:     user.id,
+        date:        todayISO_,
+        total_value: totalNW,
+        notes:       `${monthKey} — أسهم: ${stocksValue.toFixed(0)} | نقد: ${portfolioCash.toFixed(0)} | عقارات: ${reVal.toFixed(0)}`,
+      },
+      { onConflict: 'user_id,date', ignoreDuplicates: true }
+    );
   } finally {
     _snapshotInProgress = false;
   }
@@ -370,21 +379,31 @@ async function loadAllData() {
   // ── Forward Projected Income — الأدق للمحافظ النامية ─────────
   // لكل سهم في الحيازات: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية
   const fwdProjected = (() => {
-    // مساعدة: بناء تاريخ مرجعي من سجل أرباح (date أو year+month)
     const divDate = d => {
       if (d.date) return d.date;
       const mo = String(d.month || 1).padStart(2, '0');
       return `${d.year || new Date().getFullYear()}-${mo}-01`;
     };
-    // أسهم محتفظ بها في تاريخ معين
+
+    // I-2: build sorted shares timeline per ticker once (O(N)) — avoid O(N×M) sharesAt calls
+    const tickerTimeline = {};
+    txRows.forEach(t => {
+      if (!t.date) return;
+      if (!tickerTimeline[t.ticker]) tickerTimeline[t.ticker] = [];
+      tickerTimeline[t.ticker].push({ date: t.date, type: t.type, shares: +t.shares });
+    });
+    Object.values(tickerTimeline).forEach(arr =>
+      arr.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    );
+
     const sharesAt = (ticker, dateStr) => {
-      const cutoff = new Date(dateStr);
+      const rows = tickerTimeline[ticker] || [];
       let s = 0;
-      txRows.forEach(t => {
-        if (t.ticker !== ticker || !t.date || new Date(t.date) > cutoff) return;
-        if (t.type === 'buy' || t.type === 'grant') s += +t.shares;
-        else if (t.type === 'sell') s -= +t.shares;
-      });
+      for (const r of rows) {
+        if (r.date > dateStr) break;
+        if (r.type === 'buy' || r.type === 'grant') s += r.shares;
+        else if (r.type === 'sell') s -= r.shares;
+      }
       return Math.max(0, s);
     };
 
@@ -396,25 +415,30 @@ async function loadAllData() {
         .sort((a, b) => divDate(a).localeCompare(divDate(b)));
       if (!tickerDivs.length) return;
 
-      // ابحث عن أحدث توزيعة كان يملك فيها أسهماً
-      let dps = 0, refShares = 0;
+      let dps = 0;
       for (let i = tickerDivs.length - 1; i >= 0; i--) {
         const s = sharesAt(h.ticker, divDate(tickerDivs[i]));
-        if (s >= 0.001) { dps = +tickerDivs[i].amount / s; refShares = s; break; }
+        if (s >= 0.001) { dps = +tickerDivs[i].amount / s; break; }
       }
-      // احتياطي: إجمالي الأرباح ÷ الأسهم الحالية
       if (dps < 0.0001) {
         const tot = tickerDivs.reduce((s, d) => s + +d.amount, 0);
         dps = tot / +h.shares;
       }
       if (dps < 0.0001) return;
 
-      // الدورية
+      // L-3: use median inter-dividend gap for frequency — robust to skipped dividends
       let freq = 1;
       if (tickerDivs.length >= 2) {
-        const g = Math.floor((new Date(divDate(tickerDivs[tickerDivs.length - 1])) - new Date(divDate(tickerDivs[tickerDivs.length - 2]))) / 86400000);
-        if (g <= 105) freq = 4;
-        else if (g <= 210) freq = 2;
+        const gaps = [];
+        for (let i = 1; i < tickerDivs.length; i++) {
+          gaps.push(Math.floor(
+            (new Date(divDate(tickerDivs[i])) - new Date(divDate(tickerDivs[i - 1]))) / 86400000
+          ));
+        }
+        gaps.sort((a, b) => a - b);
+        const medGap = gaps[Math.floor(gaps.length / 2)];
+        if (medGap <= 105)      freq = 4;
+        else if (medGap <= 210) freq = 2;
       }
       total += dps * freq * +h.shares;
     });
@@ -993,50 +1017,54 @@ function renderPortfolioHealthCard() {
 
 // ── معلومات منهجية محلل الصحة ───────────────────────────────
 function showHealthInfo() {
-  alert([
-    '🏥 محلل صحة المحفظة — المنهجية والمصادر',
-    '',
-    '── عدد الأسهم (Graham) ──',
-    '  < 5    : خطر تركيز عالٍ',
-    '  5–9   : تنوع محدود',
-    '  10–20 : النطاق الأمثل (Graham: 10–30)',
-    '  21–25 : جيد مع المراقبة',
-    '  > 25  : مراقبة diworsification (Lynch)',
-    '',
-    '── القطاعات ──',
-    '  1–2 : غير محمي',
-    '  3   : أولي',
-    '  4+  : حماية جيدة',
-    '',
-    '── تركيز أكبر سهم ──',
-    '  > 30% : مرتفع جداً',
-    '  20–30%: مرتفع',
-    '  < 20% : مقبول',
-    '',
-    '── تركيز أكبر قطاع ──',
-    '  > 50% : مرتفع جداً',
-    '  38–50%: مرتفع',
-    '  < 38% : متوازن',
-    '',
-    '── التوزيعات vs الهدف ──',
-    '  Forward Income الشهري مقارنة بهدف FIRE',
-    '  المصدر: صفحة الأرباح الموزعة (Forward YOC)',
-    '',
-    '── هدف الاستقلال المالي ──',
-    '  نسبة الإنجاز = صافي الثروة ÷ (مصاريف سنوية ÷ SWR)',
-    '  مثال: 15,000/شهر × 12 ÷ 4% = 4,500,000 ر.س',
-    '',
-    '⚠️ ما لا يقيسه هذا المحلل (لعدم توفر البيانات):',
-    '  Beta، Sharpe Ratio، Volatility، ارتباط الأسهم',
-    '  (تحتاج أسعار إغلاق تاريخية يومية)',
-    '',
-    'لتفعيل "هدف 2043" أو أي سنة: افتح بطاقة FIRE وأدخل',
-    '"سنة التقاعد المستهدفة" (حقل جديد).',
-  ].join('\n'));
+  // S-3: replace alert() with DOM modal — alert() blocks the main thread and is
+  // unavailable in some iframe/CSP environments.
+  const lines = [
+    ['🏥 محلل صحة المحفظة — المنهجية والمصادر', true],
+    ['── عدد الأسهم (Graham) ──', false],
+    ['&nbsp;&nbsp;< 5 : خطر تركيز عالٍ', false],
+    ['&nbsp;&nbsp;5–9 : تنوع محدود', false],
+    ['&nbsp;&nbsp;10–20 : النطاق الأمثل (Graham: 10–30)', false],
+    ['&nbsp;&nbsp;21–25 : جيد مع المراقبة', false],
+    ['&nbsp;&nbsp;> 25 : مراقبة diworsification (Lynch)', false],
+    ['── القطاعات ──', false],
+    ['&nbsp;&nbsp;1–2 : غير محمي &nbsp; 3 : أولي &nbsp; 4+ : حماية جيدة', false],
+    ['── تركيز أكبر سهم ──', false],
+    ['&nbsp;&nbsp;> 30% : مرتفع جداً &nbsp; 20–30% : مرتفع &nbsp; < 20% : مقبول', false],
+    ['── تركيز أكبر قطاع ──', false],
+    ['&nbsp;&nbsp;> 50% : مرتفع جداً &nbsp; 38–50% : مرتفع &nbsp; < 38% : متوازن', false],
+    ['── التوزيعات vs الهدف ──', false],
+    ['&nbsp;&nbsp;Forward Income الشهري مقارنة بهدف FIRE', false],
+    ['── هدف الاستقلال المالي ──', false],
+    ['&nbsp;&nbsp;نسبة الإنجاز = صافي الثروة ÷ (مصاريف سنوية ÷ SWR)', false],
+    ['&nbsp;&nbsp;مثال: 15,000/شهر × 12 ÷ 4% = 4,500,000 ر.س', false],
+    ['⚠️ ما لا يقيسه هذا المحلل (لعدم توفر البيانات):', false],
+    ['&nbsp;&nbsp;Beta، Sharpe Ratio، Volatility — تحتاج أسعار إغلاق تاريخية يومية', false],
+  ];
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  const content = lines.map(([l, bold]) =>
+    `<p style="margin:0 0 6px;font-size:${bold?'.88':'0.8'}rem;${bold?'font-weight:700;color:var(--text-1)':'color:var(--text-2)'}">${l}</p>`
+  ).join('');
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:480px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-height:85vh;display:flex;flex-direction:column">
+      <div style="overflow-y:auto;flex:1">${content}</div>
+      <div style="display:flex;justify-content:flex-end;margin-top:16px">
+        <button id="hi-close" class="btn btn-secondary" style="min-width:80px">إغلاق</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#hi-close').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function escKey(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escKey); }
+  });
 }
 
 // ── إعدادات هدف الاستقلال المالي — Supabase + localStorage cache ──
-const RET_GOAL_KEY = 'retirement_goal_v1';
+// TD-3: key defined in utils.js as RET_GOAL_LS_KEY — use that constant here
+const RET_GOAL_KEY = RET_GOAL_LS_KEY;
 
 function _retGoalFromObj(o) {
   return { monthly: +o?.monthly || 0, swr: +o?.swr || 4, target_year: +o?.target_year || 0 };
@@ -1068,16 +1096,48 @@ function saveRetirementGoal(goal) {
 }
 function editRetirementGoal() {
   const cur = getRetirementGoal();
-  const m = prompt('كم مصاريفك الشهرية المتوقعة بعد التقاعد؟ (ر.س)', cur.monthly || '');
-  if (m === null) return;
-  const swr = prompt('نسبة السحب الآمنة السنوية % (الافتراضي 4% — قاعدة 25 ضعف)', cur.swr || 4);
-  if (swr === null) return;
-  const yr = prompt('سنة التقاعد المستهدفة (مثال: 2043) — اتركها فارغة إذا لم تحددها', cur.target_year || '');
-  if (yr === null) return;
-  saveRetirementGoal({ monthly: +m || 0, swr: +swr || 4, target_year: +yr || 0 });
-  renderStats();
-  renderRetirementCard();
-  renderPortfolioHealthCard();
+  // S-3: replace prompt() with DOM modal — prompt() is blocked in some CSP/iframe contexts
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:440px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+      <h3 style="margin:0 0 18px;font-size:1rem;color:var(--text-1,#e6edf3)">🎯 هدف التقاعد</h3>
+      <label style="display:block;margin-bottom:12px;font-size:.85rem;color:var(--text-2)">
+        المصاريف الشهرية المتوقعة بعد التقاعد (ر.س)
+        <input id="rg-monthly" type="number" min="0" step="500" class="input" style="display:block;width:100%;margin-top:5px" value="${esc(cur.monthly || '')}">
+      </label>
+      <label style="display:block;margin-bottom:12px;font-size:.85rem;color:var(--text-2)">
+        نسبة السحب الآمنة السنوية % (الافتراضي 4% — قاعدة 25 ضعف)
+        <input id="rg-swr" type="number" min="1" max="10" step="0.5" class="input" style="display:block;width:100%;margin-top:5px" value="${esc(cur.swr || 4)}">
+      </label>
+      <label style="display:block;margin-bottom:20px;font-size:.85rem;color:var(--text-2)">
+        سنة التقاعد المستهدفة (مثال: 2043 — اتركها فارغة إن لم تحددها)
+        <input id="rg-year" type="number" min="2024" max="2100" step="1" class="input" style="display:block;width:100%;margin-top:5px" value="${esc(cur.target_year || '')}">
+      </label>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button id="rg-cancel" class="btn btn-secondary" style="min-width:80px">إلغاء</button>
+        <button id="rg-save"   class="btn btn-primary"   style="min-width:80px">حفظ</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#rg-monthly').focus();
+  const cleanup = () => overlay.remove();
+  overlay.querySelector('#rg-cancel').onclick = cleanup;
+  overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(); });
+  overlay.querySelector('#rg-save').onclick = () => {
+    const monthly    = +overlay.querySelector('#rg-monthly').value || 0;
+    const swr        = +overlay.querySelector('#rg-swr').value    || 4;
+    const target_year = +overlay.querySelector('#rg-year').value  || 0;
+    cleanup();
+    saveRetirementGoal({ monthly, swr, target_year });
+    renderStats();
+    renderRetirementCard();
+    renderPortfolioHealthCard();
+  };
+  overlay.querySelector('#rg-save').addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#rg-save').click(); });
+  document.addEventListener('keydown', function escKey(e) {
+    if (e.key === 'Escape') { cleanup(); document.removeEventListener('keydown', escKey); }
+  });
 }
 
 // ── Insights (الصف التحليلي الإضافي) ─────────────────────────

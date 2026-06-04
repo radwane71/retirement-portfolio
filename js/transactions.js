@@ -6,11 +6,37 @@ let sortDir      = 'desc';
 let _editId      = null;
 let _filterType  = 'all';   // 'all' | 'buy' | 'sell' | 'grant'
 
+// ── Dirty-ticker recovery (R-1) ───────────────────────────────
+// If the page closed mid-recompute after a successful insert, the dirty-tickers
+// flag ensures we finish the holding recompute on next load.
+const DIRTY_TICKERS_KEY = 'tharwa-dirty-tickers';
+
+function _markDirtyTickers(userId, tickers) {
+  try {
+    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
+    if (!tickers.length) { localStorage.removeItem(key); return; }
+    const prev = JSON.parse(localStorage.getItem(key) || '[]');
+    const next = [...new Set([...prev, ...tickers])];
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch (_) {}
+}
+
+async function _flushDirtyTickers(userId) {
+  try {
+    const key   = `${DIRTY_TICKERS_KEY}:${userId}`;
+    const dirty = JSON.parse(localStorage.getItem(key) || '[]');
+    if (!dirty.length) return;
+    localStorage.removeItem(key);
+    for (const ticker of dirty) await recomputeHoldingFromTx(userId, ticker);
+  } catch (_) {}
+}
+
 // ── Init ──────────────────────────────────────────────────────
 async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-transactions');
+  await _flushDirtyTickers(user.id);   // R-1: finish any interrupted recomputes
   setupSingleForm();
   addStagingRow();
   await loadTransactions();
@@ -128,8 +154,10 @@ async function addSingleTransaction(e) {
   };
   const { error } = await supabaseClient.from('transactions').insert([payload]);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  // M-17: full rebuild instead of delta to prevent WAC drift from accumulated floating-point errors
+  // R-1: mark dirty before recompute so a crash/close can't leave holdings stale
+  _markDirtyTickers(user.id, [payload.ticker]);
   await recomputeHoldingFromTx(user.id, payload.ticker);
+  _markDirtyTickers(user.id, []);   // recompute done — clear the flag
   showToast('تمت إضافة المعاملة', 'success');
   document.getElementById('tx-form').reset();
   document.getElementById('t-date').value = todayISO();
@@ -275,9 +303,11 @@ async function saveAllStaging() {
     return;
   }
 
-  // M-17: full rebuild per affected ticker (deduped) instead of delta updates
+  // R-1: mark dirty before loop so a crash mid-loop still recovers on next load
   const affectedTickers = [...new Set(payloads.map(p => p.ticker))];
+  _markDirtyTickers(user.id, affectedTickers);
   for (const ticker of affectedTickers) await recomputeHoldingFromTx(user.id, ticker);
+  _markDirtyTickers(user.id, []);   // all recomputes done — clear the flag
 
   showToast(`تم إضافة ${payloads.length} معاملة بنجاح`, 'success');
   stagingRows = [];
@@ -306,41 +336,14 @@ async function loadTransactions() {
   }
 }
 
-async function updateHolding(userId, tx) {
-  const { data: existing } = await supabaseClient
-    .from('holdings').select('*').eq('user_id', userId).eq('ticker', tx.ticker).maybeSingle();
-
-  if (tx.type === 'buy' || tx.type === 'grant') {
-    if (existing) {
-      const newShares   = existing.shares + tx.shares;
-      const newAvgPrice = tx.type === 'grant'
-        ? existing.avg_price  // منحة لا تغير متوسط التكلفة
-        : (existing.shares * existing.avg_price + tx.shares * tx.price) / newShares;
-      await supabaseClient.from('holdings').update({ shares: newShares, avg_price: +newAvgPrice.toFixed(4) }).eq('id', existing.id);
-    } else {
-      await supabaseClient.from('holdings').insert([{
-        user_id: userId, ticker: tx.ticker, name: tx.name, sector: '',
-        shares: tx.shares, avg_price: tx.type === 'grant' ? 0 : tx.price,
-        current_price: tx.type === 'grant' ? 0 : tx.price, target_weight: 0
-      }]);
-      if (tx.type === 'grant') {
-        showToast('تمت إضافة المنحة — يرجى تحديث السعر الحالي للسهم ' + tx.ticker + ' في المحفظة', 'info');
-      }
-    }
-  } else if (tx.type === 'sell' && existing) {
-    const newShares = Math.max(0, existing.shares - tx.shares);
-    if (newShares === 0) await supabaseClient.from('holdings').delete().eq('id', existing.id);
-    else                 await supabaseClient.from('holdings').update({ shares: newShares }).eq('id', existing.id);
-  }
-}
-
 // ── إعادة حساب كاملة لسهم واحد من صفر بناءً على جميع معاملاته ─
-// هذا أدق من reverseHolding الذي يطبّق دلتا قد تتراكم أخطاؤها
-// بعد كل حذف أو تعديل معاملة يُستدعى هذا بدلاً من reverseHolding
+// بعد كل إضافة أو تعديل أو أرشفة معاملة يُستدعى هذا لضمان دقة WAC
 async function recomputeHoldingFromTx(userId, ticker) {
+  // S-2: filter by user_id — defence in depth if RLS is ever misconfigured
   const { data: txAll } = await supabaseClient
     .from('transactions')
     .select('type, shares, price, total, name')
+    .eq('user_id', userId)
     .eq('ticker', ticker)
     .eq('is_archived', false)
     .order('date', { ascending: true });
@@ -396,27 +399,6 @@ async function recomputeHoldingFromTx(userId, ticker) {
       current_price: +avgPrice.toFixed(4),
       target_weight: 0,
     }]);
-  }
-}
-
-async function reverseHolding(userId, tx) {
-  const { data: existing } = await supabaseClient
-    .from('holdings').select('*').eq('user_id', userId).eq('ticker', tx.ticker).maybeSingle();
-
-  if (tx.type === 'buy' || tx.type === 'grant') {
-    if (!existing) return;
-    const newShares = Math.max(0, existing.shares - tx.shares);
-    if (newShares === 0) await supabaseClient.from('holdings').delete().eq('id', existing.id);
-    else                 await supabaseClient.from('holdings').update({ shares: newShares }).eq('id', existing.id);
-  } else if (tx.type === 'sell') {
-    if (existing) {
-      await supabaseClient.from('holdings').update({ shares: existing.shares + tx.shares }).eq('id', existing.id);
-    } else {
-      await supabaseClient.from('holdings').insert([{
-        user_id: userId, ticker: tx.ticker, name: tx.name, sector: '',
-        shares: tx.shares, avg_price: tx.price, current_price: tx.price, target_weight: 0
-      }]);
-    }
   }
 }
 
@@ -499,9 +481,8 @@ function renderTxStats() {
       if (pnl >= 0) { profitSells++;  profitAmount += pnl; }
       else          { lossSells++;    lossAmount   += Math.abs(pnl); }
 
-      // اخصم التكلفة والأسهم المباعة بنسبتها
-      const pct    = m.shares > 0 ? +t.shares / m.shares : 0;
-      m.totalCost  = Math.max(0, m.totalCost - m.totalCost * pct);
+      // L-2: deduct cost by share count (matches recomputeHoldingFromTx) not percentage
+      m.totalCost  = Math.max(0, m.totalCost - avgCostPerShare * +t.shares);
       m.shares     = Math.max(0, m.shares - +t.shares);
     }
   });
@@ -603,8 +584,10 @@ function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
 async function onTxSaved(id, field, newVal) {
   const row = transactions.find(t => t.id === id);
   if (!row) { await loadTransactions(); renderTable(); return; }
+  // I-1: capture old ticker BEFORE mutation so we can recompute it if ticker changed
+  const oldTicker = row.ticker;
   row[field] = newVal;
-  if (['shares', 'price', 'type'].includes(field)) {
+  if (['shares', 'price', 'type', 'ticker'].includes(field)) {
     const isGrant = row.type === 'grant';
     if (isGrant && field === 'type') {
       row.price = 0;
@@ -614,9 +597,11 @@ async function onTxSaved(id, field, newVal) {
     const total = isGrant ? 0 : (row.type === 'sell' ? c.totalSell : c.totalBuy);
     await supabaseClient.from('transactions').update({ commission: c.commission, vat: c.vat, total }).eq('id', id);
     row.commission = c.commission; row.vat = c.vat; row.total = total;
-    // إعادة حساب المحفظة مباشرةً بعد تغيير الحقول المالية
     const { data: { user } } = await supabaseClient.auth.getUser();
-    await recomputeHoldingFromTx(user.id, row.ticker);
+    // recompute both old and new ticker when ticker field changes
+    const tickers = new Set([row.ticker]);
+    if (field === 'ticker' && oldTicker && oldTicker !== row.ticker) tickers.add(oldTicker);
+    for (const t of tickers) await recomputeHoldingFromTx(user.id, t);
     showToast('تم التحديث وإعادة حساب المحفظة ✓', 'success');
   }
   renderTable();

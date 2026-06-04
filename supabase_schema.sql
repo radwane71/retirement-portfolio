@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS transactions (
   date       DATE NOT NULL,
   ticker     TEXT NOT NULL,
   name       TEXT NOT NULL,
-  type       TEXT NOT NULL CHECK (type IN ('buy', 'sell')),
+  type       TEXT NOT NULL CHECK (type IN ('buy', 'sell', 'grant')),
   shares     NUMERIC(18, 4) NOT NULL,
   price      NUMERIC(18, 4) NOT NULL,
   commission NUMERIC(18, 4) NOT NULL DEFAULT 0,
@@ -153,3 +153,12 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER holdings_updated_at
   BEFORE UPDATE ON holdings
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- ============================================================
+-- 5. فهرس فريد للقطات التلقائية (R-2)
+-- يمنع إنشاء أكثر من لقطة واحدة في اليوم لكل مستخدم
+-- (الداشبورد يُنشئها تلقائياً كل شهر — upsert يعتمد على هذا الفهرس)
+-- ============================================================
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_nw_snapshots_user_date
+  ON net_worth_snapshots (user_id, date);
