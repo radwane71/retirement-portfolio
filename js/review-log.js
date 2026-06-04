@@ -250,7 +250,7 @@ function resetForm() {
 
 // ── Delete entry ───────────────────────────────────────────────────────────
 async function deleteEntry(id) {
-  if (!confirm('هل تريد حذف هذه المراجعة وجميع مرفقاتها نهائياً؟')) return;
+  if (!await confirmAsync('هل تريد حذف هذه المراجعة وجميع مرفقاتها نهائياً؟')) return;
 
   // احذف المرفقات أولاً (FK children) قبل الإدخال الأصل
   const { error: attErr } = await supabaseClient

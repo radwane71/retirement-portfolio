@@ -178,7 +178,8 @@ async function addEntry(ev) {
 }
 
 async function archiveEntry(id) {
-  if (!confirm('أرشفة هذا القيد؟ سيُخفى من الحسابات لكنه يبقى في قاعدة البيانات.')) return;
+  // AUDIT-FIX: replace blocking confirm() with async modal (mobile-safe, CSP-safe)
+  if (!await confirmAsync('أرشفة هذا القيد؟ سيُخفى من الحسابات لكنه يبقى في قاعدة البيانات.')) return;
   const { error } = await supabaseClient.from('cashflow_entries').update({ is_archived: true }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تمت الأرشفة', 'success');

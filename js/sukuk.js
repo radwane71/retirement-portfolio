@@ -270,7 +270,7 @@ function closeOppModal() {
   editOppId = null;
 }
 
-function saveOpp() {
+async function saveOpp() {
   const name     = document.getElementById('opp-name').value.trim();
   const platform = document.getElementById('opp-platform').value.trim();
   const sukuk    = parseInt(document.getElementById('opp-sukuk').value);
@@ -306,7 +306,7 @@ function saveOpp() {
           `المحصّل فعلياً:        ${formatSAR(paidSAR)}\n` +
           `الفرق (${shortOrOver}): ${formatSAR(Math.abs(diff))}\n\n` +
           `هل تريد الإغلاق رغم وجود فرق في التوزيعات؟`;
-        if (!confirm(msg)) return;
+        if (!await confirmAsync(msg)) return;
       }
     }
 

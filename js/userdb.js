@@ -113,7 +113,7 @@ function resetForm() {
 }
 
 async function deleteStock(id, ticker) {
-  if (!confirm(`هل تريد حذف ${ticker} من قاعدة بياناتك؟`)) return;
+  if (!await confirmAsync(`هل تريد حذف ${esc(ticker)} من قاعدة بياناتك؟`)) return;
   const { error } = await supabaseClient.from('user_stocks').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');

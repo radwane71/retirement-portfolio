@@ -187,15 +187,20 @@ function _projectedAnnualIncome() {
       usedFallback   = true;
     }
 
-    // الدورية: ربع سنوي / نصف سنوي / سنوي
+    // AUDIT-FIX: use median inter-dividend gap (matches dashboard.js) — robust to skipped payments
     let freq = 1;
     let freqLabel = 'سنوي';
     if (tickerDivs.length >= 2) {
-      const d1 = _divSortDate(tickerDivs[tickerDivs.length - 1]);
-      const d2 = _divSortDate(tickerDivs[tickerDivs.length - 2]);
-      const gapDays = Math.floor((new Date(d1) - new Date(d2)) / 86400000);
-      if (gapDays <= 105)      { freq = 4; freqLabel = 'ربع سنوي'; }
-      else if (gapDays <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
+      const gaps = [];
+      for (let i = 1; i < tickerDivs.length; i++) {
+        gaps.push(Math.floor(
+          (new Date(_divSortDate(tickerDivs[i])) - new Date(_divSortDate(tickerDivs[i - 1]))) / 86400000
+        ));
+      }
+      gaps.sort((a, b) => a - b);
+      const medGap = gaps[Math.floor(gaps.length / 2)];
+      if (medGap <= 105)      { freq = 4; freqLabel = 'ربع سنوي'; }
+      else if (medGap <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
     }
 
     const currentShares = +holding.shares;
@@ -466,7 +471,8 @@ function _tickerCostBasisAtYear(ticker, upToYear) {
     if (!t.date) return;
     if ((parseDateLocal(t.date) || new Date(0)).getFullYear() > upToYear) return;
     if (t.type === 'buy') {
-      buyCost   += +t.price * +t.shares;   // price per share × shares (بدون عمولة)
+      // AUDIT-FIX: use t.total (commission-inclusive) to match recomputeHoldingFromTx WAC
+      buyCost   += +t.total;
       buyShares += +t.shares;
     } else if (t.type === 'grant') {
       buyShares += +t.shares;              // منحة: تضيف أسهم بتكلفة صفر
@@ -919,7 +925,8 @@ async function addDividend(e) {
 }
 
 async function archiveDiv(id) {
-  if (!confirm('أرشفة هذه الأرباح؟ ستُخفى من الحسابات لكنها تبقى في قاعدة البيانات.')) return;
+  // AUDIT-FIX: replace blocking confirm() with async modal (mobile-safe, CSP-safe)
+  if (!await confirmAsync('أرشفة هذه الأرباح؟ ستُخفى من الحسابات لكنها تبقى في قاعدة البيانات.')) return;
   const { error } = await supabaseClient.from('dividends').update({ is_archived: true }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تمت الأرشفة', 'success');
@@ -1423,7 +1430,7 @@ function renderArchivedTable() {
 }
 
 async function permanentDeleteDiv(id) {
-  if (!confirm('⚠️ حذف نهائي — لا يمكن التراجع عن هذا الإجراء. هل أنت متأكد؟')) return;
+  if (!await confirmAsync('⚠️ حذف نهائي — لا يمكن التراجع عن هذا الإجراء. هل أنت متأكد؟')) return;
   const { error } = await supabaseClient.from('dividends').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف النهائي ✓', 'success');

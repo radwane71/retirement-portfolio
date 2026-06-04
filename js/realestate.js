@@ -146,7 +146,7 @@ async function saveProperty(e) {
 }
 
 async function deleteProp(id) {
-  if (!confirm('سيتم أرشفة هذا العقار (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
+  if (!await confirmAsync('سيتم أرشفة هذا العقار (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
   const { error } = await supabaseClient.from('real_estate')
     .update({ is_active: false, archived_at: new Date().toISOString() }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }

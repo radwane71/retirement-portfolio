@@ -387,7 +387,7 @@ async function saveTask() {
 
 async function closeTask(id, newStatus) {
   const lbl = newStatus === 'done' ? 'إغلاق كمنجزة' : 'إلغاء';
-  if (!confirm(`هل تريد ${lbl} هذه المهمة؟`)) return;
+  if (!await confirmAsync(`هل تريد ${lbl} هذه المهمة؟`)) return;
   const { error } = await supabaseClient.from('portfolio_tasks').update({
     status:     newStatus,
     closed_at:  new Date().toISOString(),

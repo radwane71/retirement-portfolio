@@ -188,7 +188,9 @@ async function _autoSnapshotPortfolio() {
   if (_snapshotInProgress) return;
   _snapshotInProgress = true;
   try {
-    const todayISO_ = new Date().toISOString().slice(0, 10);
+    // AUDIT-FIX: use local date to avoid UTC-shift placing snapshot in wrong month for UTC+3
+    const _now = new Date();
+    const todayISO_ = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
     const thisMonth = todayISO_.slice(0, 7); // YYYY-MM
     const monthKey  = `auto-${thisMonth}`;   // مفتاح فريد للشهر
 
@@ -257,6 +259,15 @@ async function loadAllData() {
   );
 
   holdings = rH.data || [];
+
+  // AUDIT-FIX: seed _priceTimestamps from DB's price_updated_at so staleness check
+  // survives localStorage clearing without showing all prices as stale
+  holdings.forEach(h => {
+    if (h.price_updated_at && !_priceTimestamps[h.ticker]) {
+      _priceTimestamps[h.ticker] = h.price_updated_at;
+    }
+  });
+  _savePriceTimestamps();
 
   // نقد المحفظة — Supabase أولاً، localStorage كـ fallback
   // ملاحظة: maybeSingle() يُرجع { data: { amount, updated_at } | null }

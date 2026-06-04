@@ -133,7 +133,7 @@ async function saveItem(e) {
 }
 
 async function deleteItem(id) {
-  if (!confirm('هل أنت متأكد من الحذف؟')) return;
+  if (!await confirmAsync('هل أنت متأكد من الحذف؟')) return;
   const { error } = await supabaseClient.from('watchlist').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');

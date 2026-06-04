@@ -443,6 +443,8 @@ function renderSectorTargets() {
   }).join('');
 
   // صف الإجمالي للقطاعات
+  // AUDIT-FIX: totalSecCurrentPct was undefined — compute it from sector weights
+  const totalSecCurrentPct = sectors.reduce((s, sec) => s + getSectorWeight(sec), 0);
   const secCurrCls = Math.abs(totalSecCurrentPct - 100) < 0.5 ? 'text-success' : 'text-accent';
   const stfoot = tbody.closest('table').querySelector('tfoot') || tbody.closest('table').createTFoot();
   stfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
@@ -560,13 +562,13 @@ async function saveAllTargets() {
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
 
-  // مزامنة: حدّث target_weight في holdings أيضاً
-  for (const ticker of holdingTickers) {
+  // AUDIT-FIX: parallel updates instead of sequential loop — O(1 RTT) vs O(N RTT)
+  await Promise.all([...holdingTickers].map(ticker => {
     const h = holdings.find(x => x.ticker === ticker);
-    if (!h) continue;
+    if (!h) return Promise.resolve();
     const tw = +(document.getElementById('st-' + ticker)?.value || 0);
-    await supabaseClient.from('holdings').update({ target_weight: tw }).eq('id', h.id);
-  }
+    return supabaseClient.from('holdings').update({ target_weight: tw }).eq('id', h.id);
+  }));
 
   if (stockSum >= 99.9) showToast('تم حفظ أهداف الأسهم ✓', 'success');
   await loadAll();
@@ -812,7 +814,8 @@ function runRebalancing() {
 }
 
 function showRebInfo() {
-  alert([
+  // AUDIT-FIX: replace blocking alert() with DOM modal
+  const lines = [
     '⚖️ محرك إعادة التوازن',
     '',
     'يحسب الأسهم الأنسب للشراء بمبلغ محدد لتقريب محفظتك من الأوزان المستهدفة.',
@@ -824,7 +827,21 @@ function showRebInfo() {
     '',
     'عدد الأسهم يُقرَّب للأسفل دائماً (floor) — لا كسور في السهم.',
     'المتبقي = ما لم يُنفق بعد التقريب.',
-  ].join('\n'));
+  ];
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:440px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
+      <div style="white-space:pre-wrap;font-size:.85rem;color:var(--text-2);line-height:1.7;margin-bottom:16px">${lines.join('\n')}</div>
+      <div style="display:flex;justify-content:flex-end">
+        <button id="_reb-info-close" class="btn btn-secondary" style="min-width:80px">إغلاق</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#_reb-info-close').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); } });
 }
 
 init();

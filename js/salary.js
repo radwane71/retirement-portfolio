@@ -209,10 +209,10 @@ function startRenameCategory(catId, el) {
   });
 }
 
-function confirmDeleteCategory(catId) {
+async function confirmDeleteCategory(catId) {
   const cat = store.categories.find(c => c.id === catId);
   if (!cat) return;
-  if (!confirm(`⚠️ حذف فئة "${cat.name}"؟\nسيتم حذفها من جميع السجلات الشهرية.`)) return;
+  if (!await confirmAsync(`⚠️ حذف فئة "${esc(cat.name)}"؟\nسيتم حذفها من جميع السجلات الشهرية.`)) return;
   store.categories = store.categories.filter(c => c.id !== catId);
   store.entries.forEach(e => {
     e.allocations = (e.allocations || []).filter(a => a.catId !== catId);

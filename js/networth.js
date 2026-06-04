@@ -452,7 +452,9 @@ async function saveSnapshot() {
     snapshot_json: snapshotJson
   };
 
-  const { error } = await supabaseClient.from('net_worth_snapshots').insert([payload]);
+  // AUDIT-FIX: upsert on (user_id, date) prevents duplicate snapshots for same calendar day
+  const { error } = await supabaseClient.from('net_worth_snapshots')
+    .upsert([payload], { onConflict: 'user_id,date' });
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم حفظ اللقطة الكاملة ✓', 'success');
   const rSnap = await supabaseClient.from('net_worth_snapshots').select('*').order('date', { ascending: true });
@@ -461,7 +463,8 @@ async function saveSnapshot() {
 }
 
 async function deleteSnapshot(id) {
-  if (!confirm('هل أنت متأكد من الحذف؟')) return;
+  // AUDIT-FIX: replace blocking confirm() with async modal
+  if (!await confirmAsync('هل أنت متأكد من حذف هذه اللقطة؟')) return;
   const { error } = await supabaseClient.from('net_worth_snapshots').delete().eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
@@ -510,7 +513,7 @@ async function saveAsset(e) {
 }
 
 async function deleteAsset(id) {
-  if (!confirm('سيتم أرشفة هذا الأصل (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
+  if (!await confirmAsync('سيتم أرشفة هذا الأصل (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
   const { error } = await supabaseClient.from('nw_assets')
     .update({ is_active: false, archived_at: new Date().toISOString() }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
@@ -560,7 +563,7 @@ async function saveLiab(e) {
 }
 
 async function deleteLiab(id) {
-  if (!confirm('سيتم أرشفة هذا الالتزام (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
+  if (!await confirmAsync('سيتم أرشفة هذا الالتزام (لن يُحذف نهائياً — يمكن استعادته من الأرشيف)')) return;
   const { error } = await supabaseClient.from('nw_liabilities')
     .update({ is_active: false, archived_at: new Date().toISOString() }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }

@@ -157,10 +157,10 @@ function saveChild() {
   renderProfile();
 }
 
-function deleteCurrentChild() {
+async function deleteCurrentChild() {
   const c = getChild();
   if (!c) return;
-  if (!confirm(`هل أنت متأكد من حذف ملف "${c.name}" وكل بياناته؟ لا يمكن التراجع.`)) return;
+  if (!await confirmAsync(`هل أنت متأكد من حذف ملف "${esc(c.name)}" وكل بياناته؟ لا يمكن التراجع.`)) return;
   store.children = store.children.filter(x => x.id !== activeChildId);
   persist();
   activeChildId = store.children[0]?.id || null;
@@ -366,8 +366,8 @@ function saveGoal() {
   showToast('تم الحفظ ✓','success');
 }
 
-function deleteGoal(type, gid) {
-  if (!confirm('حذف هذا الهدف؟')) return;
+async function deleteGoal(type, gid) {
+  if (!await confirmAsync('حذف هذا الهدف؟')) return;
   const c = getChild();
   if (type === 'life') c.lifeGoals   = c.lifeGoals.filter(x => x.id !== gid);
   else                 c.schoolGoals = c.schoolGoals.filter(x => x.id !== gid);
@@ -435,10 +435,10 @@ function saveYear() {
   showToast('تم الحفظ ✓','success');
 }
 
-function deleteYear(yid) {
+async function deleteYear(yid) {
   const c = getChild();
   const y = c.years.find(x => x.id === yid);
-  if (!confirm(`حذف السنة "${y?.label}"؟ ستُحذف درجاتها أيضاً.`)) return;
+  if (!await confirmAsync(`حذف السنة "${esc(y?.label)}"؟ ستُحذف درجاتها أيضاً.`)) return;
   c.years = c.years.filter(x => x.id !== yid);
   delete c.grades[yid];
   persist();
@@ -501,10 +501,10 @@ function saveSubject() {
   showToast('تمت إضافة المادة ✓','success');
 }
 
-function deleteSubject(sid) {
+async function deleteSubject(sid) {
   const c = getChild();
   const s = c.subjects.find(x => x.id === sid);
-  if (!confirm(`حذف مادة "${s?.name}"؟ ستُحذف درجاتها أيضاً.`)) return;
+  if (!await confirmAsync(`حذف مادة "${esc(s?.name)}"؟ ستُحذف درجاتها أيضاً.`)) return;
   c.subjects = c.subjects.filter(x => x.id !== sid);
   // Remove from grades
   Object.values(c.grades).forEach(yr => Object.values(yr).forEach(tr => delete tr[sid]));

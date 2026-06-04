@@ -133,8 +133,8 @@ function updateGoalStatus(type, id, sel) {
   sel.className = `gs-badge ${stC}`;
 }
 
-function deleteGoal(type, id) {
-  if (!confirm('حذف هذا الهدف؟')) return;
+async function deleteGoal(type, id) {
+  if (!await confirmAsync('حذف هذا الهدف؟')) return;
   if (type === 'life') data.lifeGoals   = data.lifeGoals.filter(g => g.id !== id);
   else                 data.schoolGoals = data.schoolGoals.filter(g => g.id !== id);
   saveData();

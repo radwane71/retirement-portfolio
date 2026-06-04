@@ -194,10 +194,19 @@ async function loadErasureRequests() {
 async function executeErasure(requestId, userId) {
   if (!confirm('⚠️ هذا الإجراء نهائي وغير قابل للتراجع. هل تريد حذف جميع بيانات هذا المستخدم؟')) return;
 
-  // حذف تسلسلي من جميع الجداول
-  const tables = ['holdings','transactions','dividends','cashflow_entries','net_worth_snapshots','nw_assets','nw_liabilities','real_estate'];
+  // AUDIT-FIX: was only deleting 8/16 tables — GDPR violation; now deletes all 16 user tables
+  // FK children first to avoid constraint violations
+  const tables = [
+    'review_log_attachments',   // FK → review_log
+    'review_log',
+    'holdings', 'transactions', 'dividends', 'cashflow_entries',
+    'net_worth_snapshots', 'nw_assets', 'nw_liabilities', 'real_estate',
+    'user_stocks', 'stock_targets', 'sector_targets', 'watchlist',
+    'portfolio_cash', 'portfolio_tasks',
+  ];
   for (const tbl of tables) {
-    await supabaseClient.from(tbl).delete().eq('user_id', userId);
+    const { error } = await supabaseClient.from(tbl).delete().eq('user_id', userId);
+    if (error && error.code !== '42P01') console.warn(`erasure: ${tbl}`, error.message);
   }
 
   // تحديث حالة الطلب
