@@ -46,9 +46,11 @@ async function init() {
 
 // ── Load historical data ───────────────────────────────────────────────
 async function loadHistoricalData() {
+  // M-15: explicit high limit — Supabase default is 1000 rows which silently truncates
+  //        large portfolios and corrupts XIRR / CWA / cap-growth calculations
   const [rTx, rDiv, rH, rCf, rNw, rRe] = await Promise.all([
-    supabaseClient.from('transactions').select('type,total,shares,price,date,ticker').eq('is_archived',false),
-    supabaseClient.from('dividends').select('amount,year').eq('is_archived',false).order('year'),
+    supabaseClient.from('transactions').select('type,total,shares,price,date,ticker').eq('is_archived',false).limit(100000),
+    supabaseClient.from('dividends').select('amount,year,date').eq('is_archived',false).order('year').limit(100000),
     supabaseClient.from('holdings').select('shares,current_price,avg_price,ticker'),
     supabaseClient.from('cashflow_entries').select('type,amount,date').eq('is_archived',false),
     supabaseClient.from('net_worth_snapshots').select('total_value').order('date',{ascending:false}).limit(1).maybeSingle(),
@@ -69,7 +71,7 @@ async function loadHistoricalData() {
 
   // مدة النشاط
   const buyDates    = txRows.filter(t => t.type==='buy' && t.date).map(t => t.date).sort();
-  const firstDate   = buyDates[0] ? new Date(buyDates[0]) : null;
+  const firstDate   = buyDates[0] ? parseDateLocal(buyDates[0]) : null; // M-13
   const today       = new Date();
   const yearsActive = firstDate
     ? Math.max(0.5, (today - firstDate) / (365.25 * 86400000))
@@ -82,14 +84,14 @@ async function loadHistoricalData() {
 
   // ── معدل النمو السنوي: XIRR الحقيقي (أدق من CAGR) ──────────
   // XIRR يأخذ توقيت كل معاملة في الحسبان — لا يُضلَّل بإيداعات متأخرة
+  // M-13: use parseDateLocal to avoid UTC-midnight off-by-one on all date strings
   const xirrFlows = [];
   txRows.forEach(t => {
-    if (t.type === 'buy')  xirrFlows.push({ date: new Date(t.date), amount: -(+t.total) });
-    if (t.type === 'sell') xirrFlows.push({ date: new Date(t.date), amount: +(+t.total) });
+    if (t.type === 'buy')  xirrFlows.push({ date: parseDateLocal(t.date), amount: -(+t.total) });
+    if (t.type === 'sell') xirrFlows.push({ date: parseDateLocal(t.date), amount: +(+t.total) });
   });
   divRows.forEach(d => {
-    // نستخدم السنة فقط إن لم يكن هناك تاريخ
-    const dDate = d.date ? new Date(d.date) : new Date(d.year + '-06-01');
+    const dDate = d.date ? parseDateLocal(d.date) : new Date(+d.year, 5, 1); // June local
     xirrFlows.push({ date: dDate, amount: +d.amount });
   });
   if (currentValue > 0) xirrFlows.push({ date: new Date(), amount: currentValue });
@@ -122,10 +124,11 @@ async function loadHistoricalData() {
     ? Math.pow(currentValue / netCapital, 1 / yearsActive) - 1
     : 0.07;
   const xirrRate = xirrResult != null ? xirrResult / 100 : null;
-  // خصم عائد الأرباح من XIRR للحصول على نمو رأس المال فقط
-  const annCapGrowth = Math.min(0.40, Math.max(0.02,
+  // H-8: floor lowered from 2% → -5% so truly negative portfolios are not masked.
+  // The cap of 40% prevents unrealistic runaway projections.
+  const annCapGrowth = Math.min(0.40, Math.max(-0.05,
     xirrRate != null
-      ? Math.max(0.01, xirrRate - safeDivYield)   // نمو السعر فقط
+      ? xirrRate - safeDivYield   // نمو السعر فقط = XIRR − عائد الأرباح
       : rawCapGrowth
   ));
 
@@ -148,7 +151,7 @@ async function loadHistoricalData() {
     let weightedSum    = 0;
 
     sorted.forEach(cf => {
-      const monthsAgo = (today - new Date(cf.date)) / (30.44 * 86400000);
+      const monthsAgo = (today - parseDateLocal(cf.date)) / (30.44 * 86400000);
       const amt       = +cf.amount || 0;
 
       if (cf.type === 'deposit') {
@@ -171,7 +174,7 @@ async function loadHistoricalData() {
         .sort((a, b) => a.date.localeCompare(b.date));
       let wb = 0, ws = 0;
       buysSorted.forEach(t => {
-        const m = (today - new Date(t.date)) / (30.44 * 86400000);
+        const m = (today - parseDateLocal(t.date)) / (30.44 * 86400000);
         ws += +t.total * m;
         wb += +t.total;
       });
@@ -292,7 +295,8 @@ function projectScenario(scenario, params) {
   } = params;
 
   const monthlyCapRate = Math.pow(1 + scenario.capRate, 1/12) - 1;
-  const monthlyDivRate = scenario.divRate / 12;
+  // M-16: use compound formula instead of simple division — more accurate over long horizons
+  const monthlyDivRate = Math.pow(1 + scenario.divRate, 1/12) - 1;
   const totalMonths    = horizonYears * 12;
   const monthlyInfl    = Math.pow(1 + inflationRate, 1/12) - 1;
 
@@ -420,6 +424,10 @@ function renderHistSummary() {
   if (badge) {
     const from = h.firstDate ? h.firstDate.getFullYear() : '—';
     badge.textContent = `${h.yearsActive.toFixed(1)} سنة بيانات (${from}–${h.currentYear})`;
+  }
+  // H-8: warn when historical performance is genuinely negative
+  if (h.annCapGrowth < 0) {
+    showToast('⚠️ أداؤك التاريخي سلبي — الإسقاطات قد تُظهر تراجعاً في القيمة مع الوقت', 'warning');
   }
 
   // XIRR: المصدر الأصدق للعائد التاريخي الحقيقي

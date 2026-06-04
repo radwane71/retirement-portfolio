@@ -21,12 +21,13 @@ async function init() {
   if (!user) return;
   setActiveNav('nav-performance');
 
+  // M-15: explicit high limit on all large tables — Supabase default 1000 truncates silently
   const [rTx, rH, rDiv, rCf, rSnap] = await Promise.all([
-    supabaseClient.from('transactions').select('*').eq('is_archived', false).order('date'),
-    supabaseClient.from('holdings').select('*'),
-    supabaseClient.from('dividends').select('*').eq('is_archived', false).order('date'),
-    supabaseClient.from('cashflow_entries').select('date,type,amount').eq('is_archived', false).order('date'),
-    supabaseClient.from('net_worth_snapshots').select('date,total_value,notes').order('date'),
+    supabaseClient.from('transactions').select('*').eq('is_archived', false).order('date').limit(100000),
+    supabaseClient.from('holdings').select('*').limit(10000),
+    supabaseClient.from('dividends').select('*').eq('is_archived', false).order('date').limit(100000),
+    supabaseClient.from('cashflow_entries').select('date,type,amount').eq('is_archived', false).order('date').limit(100000),
+    supabaseClient.from('net_worth_snapshots').select('date,total_value,notes').order('date').limit(10000),
   ]);
 
   _tx        = rTx.data   || [];

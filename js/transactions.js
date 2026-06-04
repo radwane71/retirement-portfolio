@@ -128,7 +128,8 @@ async function addSingleTransaction(e) {
   };
   const { error } = await supabaseClient.from('transactions').insert([payload]);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  await updateHolding(user.id, payload);
+  // M-17: full rebuild instead of delta to prevent WAC drift from accumulated floating-point errors
+  await recomputeHoldingFromTx(user.id, payload.ticker);
   showToast('تمت إضافة المعاملة', 'success');
   document.getElementById('tx-form').reset();
   document.getElementById('t-date').value = todayISO();
@@ -237,6 +238,19 @@ async function saveAllStaging() {
   const invalid = stagingRows.filter(r => !r.date || !r.ticker.trim() || !r.name.trim() || !+r.shares || (r.type !== 'grant' && !+r.price));
   if (invalid.length) { showToast(`${invalid.length} صف بحقول ناقصة`, 'error'); return; }
 
+  // M-18: warn when any ticker is not in the known database (same check as single form)
+  const unknownTickers = [...new Set(
+    stagingRows
+      .map(r => r.ticker.trim().toUpperCase())
+      .filter(tk => tk && !TICKER_DB[tk] && !(typeof lookupTicker === 'function' && lookupTicker(tk)))
+  )];
+  if (unknownTickers.length) {
+    const ok = await confirmAsync(
+      `الرموز التالية غير موجودة في قاموس الأسهم السعودية:\n${unknownTickers.join('  ،  ')}\n\nهل تريد المتابعة؟`
+    );
+    if (!ok) return;
+  }
+
   const { data: { user } } = await supabaseClient.auth.getUser();
   const btn = document.getElementById('btn-save-all');
   if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحفظ…'; }
@@ -261,8 +275,9 @@ async function saveAllStaging() {
     return;
   }
 
-  // Update holdings after successful bulk insert
-  for (const p of payloads) await updateHolding(user.id, p);
+  // M-17: full rebuild per affected ticker (deduped) instead of delta updates
+  const affectedTickers = [...new Set(payloads.map(p => p.ticker))];
+  for (const ticker of affectedTickers) await recomputeHoldingFromTx(user.id, ticker);
 
   showToast(`تم إضافة ${payloads.length} معاملة بنجاح`, 'success');
   stagingRows = [];

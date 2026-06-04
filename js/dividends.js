@@ -52,6 +52,7 @@ async function loadData() {
   holdings     = rH.data  || [];
   txBuyRows    = allTx.filter(t => t.type === 'buy' || t.type === 'grant');
   txSellRows   = allTx.filter(t => t.type === 'sell');
+  _invalidateSharesCache(); // M-19: rebuild ticker-tx map on next _sharesAtDate call
 }
 
 async function loadDividends() {
@@ -86,16 +87,39 @@ function _currentCostBasis() {
   return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
 }
 
+// M-19: pre-compute a sorted transaction list once per ticker for _sharesAtDate
+// avoids O(N×M) by building a map {ticker → sorted rows} on first call
+let _sharesAtDateCache = null;
+function _getTickerTxMap() {
+  if (_sharesAtDateCache) return _sharesAtDateCache;
+  const map = {};
+  [...txBuyRows, ...txSellRows].forEach(t => {
+    if (!t.ticker || !t.date) return;
+    if (!map[t.ticker]) map[t.ticker] = [];
+    map[t.ticker].push(t);
+  });
+  // sort each ticker's rows once
+  Object.values(map).forEach(rows =>
+    rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+  );
+  _sharesAtDateCache = map;
+  return map;
+}
+// invalidate cache when data reloads
+function _invalidateSharesCache() { _sharesAtDateCache = null; }
+
 // عدد الأسهم المحتفظ بها لرمز معين في تاريخ معين
+// M-12: use parseDateLocal to avoid UTC-midnight off-by-one
 function _sharesAtDate(ticker, dateStr) {
-  const cutoff = new Date(dateStr);
+  const cutoff = parseDateLocal(dateStr);
+  if (!cutoff) return 0;
   let shares = 0;
-  [...txBuyRows, ...txSellRows]
-    .filter(t => t.ticker === ticker && t.date && new Date(t.date) <= cutoff)
-    .forEach(t => {
-      if (t.type === 'buy' || t.type === 'grant') shares += +t.shares;
-      else if (t.type === 'sell') shares -= +t.shares;
-    });
+  const rows = _getTickerTxMap()[ticker] || [];
+  for (const t of rows) {
+    if (parseDateLocal(t.date) > cutoff) break; // sorted — early exit
+    if (t.type === 'buy' || t.type === 'grant') shares += +t.shares;
+    else if (t.type === 'sell') shares -= +t.shares;
+  }
   return Math.max(0, shares);
 }
 
@@ -147,13 +171,20 @@ function _projectedAnnualIncome() {
       lastDivDate  = _divSortDate(refDiv);
       dps          = +refDiv.amount / sharesAtRefDiv;
     } else {
-      // احتياطي: أرباح السنة الأخيرة المسجّلة ÷ الأسهم الحالية
-      const lastDiv     = tickerDivs[tickerDivs.length - 1];
-      lastDivDate       = _divSortDate(lastDiv);
-      const totalForTicker = tickerDivs.reduce((s, d) => s + +d.amount, 0);
-      dps               = totalForTicker / +holding.shares;
-      sharesAtRefDiv    = +holding.shares;
-      usedFallback      = true;
+      // H-9 fallback: use last recorded year's dividends ÷ current shares
+      // (NOT all-time total which inflates DPS by multi-year accumulation)
+      const lastDiv  = tickerDivs[tickerDivs.length - 1];
+      lastDivDate    = _divSortDate(lastDiv);
+      const lastYear = Math.max(...tickerDivs.map(d => +d.year || new Date(lastDivDate).getFullYear()));
+      const lastYearTotal = tickerDivs
+        .filter(d => (+d.year || new Date(_divSortDate(d)).getFullYear()) === lastYear)
+        .reduce((s, d) => s + +d.amount, 0);
+      // if last year has recorded divs use those; otherwise fall back to single last payment
+      dps            = lastYearTotal > 0
+        ? lastYearTotal / +holding.shares
+        : +lastDiv.amount / +holding.shares;
+      sharesAtRefDiv = +holding.shares;
+      usedFallback   = true;
     }
 
     // الدورية: ربع سنوي / نصف سنوي / سنوي
@@ -292,7 +323,8 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
   // ── عمر التقويمي وعمر رأس المال الفعلي ───────────────────────────
   const today     = new Date();
   const allDates  = [...txBuyRows, ...txSellRows].map(t => t.date).filter(Boolean).sort();
-  const firstDate = allDates[0] ? new Date(allDates[0]) : null;
+  // M-14: use parseDateLocal to avoid UTC-midnight off-by-one
+  const firstDate = allDates[0] ? parseDateLocal(allDates[0]) : null;
   const calMonths = firstDate
     ? Math.floor((today - firstDate) / (30.44 * 86400000))
     : 0;
@@ -304,7 +336,7 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
       .sort((a, b) => a.date.localeCompare(b.date));
     let wb = 0, ws = 0;
     sorted.forEach(t => {
-      const m = (today - new Date(t.date)) / (30.44 * 86400000);
+      const m = (today - parseDateLocal(t.date)) / (30.44 * 86400000);
       ws += +t.total * m;
       wb += +t.total;
     });
@@ -432,7 +464,7 @@ function _tickerCostBasisAtYear(ticker, upToYear) {
   let buyShares = 0, buyCost = 0, sellShares = 0;
   allTx.forEach(t => {
     if (!t.date) return;
-    if (new Date(t.date).getFullYear() > upToYear) return;
+    if ((parseDateLocal(t.date) || new Date(0)).getFullYear() > upToYear) return;
     if (t.type === 'buy') {
       buyCost   += +t.price * +t.shares;   // price per share × shares (بدون عمولة)
       buyShares += +t.shares;
@@ -455,8 +487,8 @@ function buildCostMaps() {
   ])];
 
   const txAllYears = [...new Set([
-    ...txBuyRows.map(t => new Date(t.date).getFullYear()),
-    ...txSellRows.map(t => new Date(t.date).getFullYear()),
+    ...txBuyRows.map(t => (parseDateLocal(t.date) || new Date()).getFullYear()),
+    ...txSellRows.map(t => (parseDateLocal(t.date) || new Date()).getFullYear()),
   ])].sort((a, b) => a - b);
 
   if (!txAllYears.length) {
