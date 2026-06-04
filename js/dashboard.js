@@ -115,6 +115,10 @@ async function refreshPrices(silent = false) {
       // تحقق تنبيهات مناطق الشراء/البيع بعد كل تحديث أسعار
       holdings.forEach(h => checkPriceZones(h.ticker, +h.current_price));
       renderAllocationChart(); renderRetirementCard();
+      // H-6: warn about tickers Yahoo didn't return (delisted / corporate action)
+      if (json.failed?.length) {
+        showToast(`⚠️ لم يُحدَّث سعر: ${json.failed.join(', ')}`, 'warning');
+      }
       if (btn) btn.textContent = `✅ تم (${json.updated} سهم)`;
       // مزامنة خلفية مع Supabase
       loadAllData().then(() => {

@@ -1,6 +1,9 @@
+// M-4: restrict CORS to your production domain — update ALLOWED_ORIGIN if you have a custom domain
+const ALLOWED_ORIGIN = Deno.env.get('APP_ORIGIN') ?? '*'
+
 Deno.serve(async (req) => {
   const cors = {
-    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
     'Access-Control-Allow-Headers': 'authorization, content-type, x-client-info, apikey',
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
   }
@@ -49,7 +52,8 @@ Deno.serve(async (req) => {
       headers: { 'User-Agent': UA, Cookie: cookie }
     })
     crumb = await crumbRes.text()
-    console.log('crumb:', crumb || 'empty')
+    // M-5: don't log the actual crumb value — it's a session token
+    console.log('crumb:', crumb ? '[set]' : 'empty')
   } catch(e) {
     console.log('crumb fetch error:', String(e))
   }
@@ -78,7 +82,8 @@ Deno.serve(async (req) => {
   for (const q of quotes) {
     const ticker = q.symbol?.replace('.SR', '')
     const price  = q.regularMarketPrice
-    if (!ticker || price == null) continue
+    // M-11: reject missing, zero, negative, or implausibly large prices (data errors / pending splits)
+    if (!ticker || price == null || price <= 0 || price > 1_000_000) continue
     prices[ticker] = price
     const r = await fetch(
       `${SUPABASE_URL}/rest/v1/holdings?user_id=eq.${userId}&ticker=eq.${ticker}`,
@@ -94,8 +99,12 @@ Deno.serve(async (req) => {
     if (r.ok) updated++
   }
 
-  console.log('updated:', updated)
-  return new Response(JSON.stringify({ updated, total: quotes.length, prices }), {
+  // H-6: report which tickers were not returned by Yahoo so the client can show stale warnings
+  const allTickers   = holdings.map((h: any) => h.ticker)
+  const failedTickers = allTickers.filter((t: string) => !(t in prices))
+
+  console.log('updated:', updated, 'failed:', failedTickers.length)
+  return new Response(JSON.stringify({ updated, total: quotes.length, prices, failed: failedTickers }), {
     headers: { ...cors, 'Content-Type': 'application/json' }
   })
 })

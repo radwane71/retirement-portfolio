@@ -10,6 +10,7 @@ let _holdings = [];
 let _divs     = [];
 let _cf       = [];   // cashflow_entries — للرأسمال التراكمي الفعلي
 let _snapshots = []; // net_worth_snapshots — لقيمة المحفظة التاريخية
+let _positionCache = null; // H-4: cache to avoid triple recomputation per render
 let _monthlyChart     = null;
 let _activeTab        = 'open';
 let _monthlyChartMode = 'combined'; // 'combined' | 'lines' | 'stacked' | 'divonly'
@@ -33,6 +34,7 @@ async function init() {
   _divs      = rDiv.data  || [];
   _cf        = rCf.data   || [];
   _snapshots = rSnap.data || [];
+  _positionCache = null; // invalidate cache on fresh load
 
   renderKPIs();
   renderOpenPositions();
@@ -51,6 +53,12 @@ function showPerfTab(tab) {
     if (btn)  btn.classList.toggle('active', t === tab);
   });
   if (tab === 'benchmark') initBenchmarkTab();
+}
+
+// H-4: single entry point — computes once per data load, cached for all callers
+function getPositionData() {
+  if (!_positionCache) _positionCache = buildPositionData();
+  return _positionCache;
 }
 
 // ── Build position maps ───────────────────────────────────────────────
@@ -108,9 +116,9 @@ function buildPositionData() {
       p.realizedPct  = p.buyCost > 0 ? realizedPnL / p.buyCost * 100 : 0;
       p.totalReturn  = realizedPnL + p.divReceived;
       p.totalReturnPct = p.buyCost > 0 ? p.totalReturn / p.buyCost * 100 : 0;
-      // مدة الاحتفاظ
+      // مدة الاحتفاظ — M-6: use parseDateLocal to avoid UTC-midnight off-by-one
       if (p.firstBuyDate && p.lastSellDate) {
-        const days = Math.floor((new Date(p.lastSellDate) - new Date(p.firstBuyDate)) / 86400000);
+        const days = Math.floor((parseDateLocal(p.lastSellDate) - parseDateLocal(p.firstBuyDate)) / 86400000);
         p.holdDays = days;
       }
       closed.push(p);
@@ -141,7 +149,7 @@ function buildPositionData() {
 
 // ── KPIs ──────────────────────────────────────────────────────────────
 function renderKPIs() {
-  const { open, closed } = buildPositionData();
+  const { open, closed } = getPositionData();
   const totalUnreal  = open.reduce((s, p) => s + (p.unrealizedPnL || 0), 0);
   const totalReal    = closed.reduce((s, p) => s + (p.realizedPnL  || 0), 0) +
                        open.reduce((s, p) => s + (p.partialRealizedPnL || 0), 0);
@@ -156,7 +164,8 @@ function renderKPIs() {
   // Max Drawdown من سجل صافي الثروة
   const ddEl = document.getElementById('pk-max-drawdown');
   if (ddEl && _snapshots.length >= 2) {
-    const sorted = _snapshots.slice().sort((a, b) => a.date.localeCompare(b.date));
+    // M-7: direct string comparison — locale-independent, deterministic for ISO dates
+    const sorted = _snapshots.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     let peak = sorted[0].total_value;
     let maxDD = 0;
     let peakDate = sorted[0].date;
@@ -178,7 +187,7 @@ function renderKPIs() {
 
 // ── Open positions table ──────────────────────────────────────────────
 function renderOpenPositions() {
-  const { open } = buildPositionData();
+  const { open } = getPositionData();
   const tbody = document.getElementById('open-tbody');
   const tfoot = document.getElementById('open-tfoot');
   if (!tbody) return;
@@ -228,7 +237,7 @@ function renderOpenPositions() {
 
 // ── Closed positions table ────────────────────────────────────────────
 function renderClosedPositions() {
-  const { closed } = buildPositionData();
+  const { closed } = getPositionData();
   const tbody = document.getElementById('closed-tbody');
   const tfoot = document.getElementById('closed-tfoot');
   if (!tbody) return;
@@ -281,13 +290,34 @@ function renderClosedPositions() {
 
 // ── Monthly timeline ──────────────────────────────────────────────────
 
+// M-8: build a cumulative-capital map once (O(M)) instead of re-scanning per month (O(N×M))
+// Returns an object keyed by "YYYY-MM" → running total up to end of that month
+function buildCumulativeCapitalMap() {
+  const map = {};
+  // sort cashflows chronologically using ISO string comparison
+  const sorted = _cf.filter(e => e.date).slice().sort((a, b) =>
+    (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)
+  );
+  let running = 0;
+  for (const e of sorted) {
+    const d = parseDateLocal(e.date);
+    if (!d) continue;
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    if (e.type === 'deposit')    running += +e.amount;
+    if (e.type === 'withdrawal') running -= +e.amount;
+    map[ym] = running; // last entry for this month wins
+  }
+  return map;
+}
+
 // رأس المال المُودَع التراكمي حتى نهاية الشهر — مأخوذ من cashflow_entries مباشرةً
 // (إيداعات تراكمية − سحوبات تراكمية) → يطابق صفحة التدفقات النقدية دائماً
 function calcCumulativeCapital(cutoffYr, cutoffMo) {
   let total = 0;
   _cf.forEach(e => {
     if (!e.date) return;
-    const d = new Date(e.date);
+    const d = parseDateLocal(e.date);
+    if (!d) return;
     const yr = d.getFullYear(), mo = d.getMonth() + 1;
     if (yr > cutoffYr || (yr === cutoffYr && mo > cutoffMo)) return;
     if (e.type === 'deposit')    total += +e.amount;
@@ -317,19 +347,25 @@ function buildMonthlyData() {
     cur.setMonth(cur.getMonth()+1);
   }
 
+  // M-8: build prefix-sum map once for all months (O(M) instead of O(N×M))
+  const capitalMap = buildCumulativeCapitalMap();
+  // For months with no cashflow entry, carry forward the last known total
+  let lastCapital = 0;
+
   return months.map(ym => {
     const [yr, mo] = ym.split('-').map(Number);
 
     const monthTx  = _tx.filter(t => {
       if (!t.date) return false;
-      const d = new Date(t.date);
-      return d.getFullYear() === yr && d.getMonth() + 1 === mo;
+      // M-6: use parseDateLocal for consistent local-timezone month matching
+      const d = parseDateLocal(t.date);
+      return d && d.getFullYear() === yr && d.getMonth() + 1 === mo;
     });
 
     const monthDiv = _divs.filter(d => {
       if (!d.date) return false;
-      const dt = new Date(d.date);
-      return dt.getFullYear() === yr && dt.getMonth() + 1 === mo;
+      const dt = parseDateLocal(d.date);
+      return dt && dt.getFullYear() === yr && dt.getMonth() + 1 === mo;
     });
 
     const buys  = monthTx.filter(t => t.type === 'buy' || t.type === 'grant').reduce((s,t) => s + +t.total, 0);
@@ -337,8 +373,9 @@ function buildMonthlyData() {
     const divs  = monthDiv.reduce((s,d) => s + +d.amount, 0);
     const netMove = buys - sells;
 
-    // رأس المال المُودَع التراكمي = إيداعات − سحوبات من cashflow_entries حتى نهاية الشهر
-    const cumulativeCapital = calcCumulativeCapital(yr, mo);
+    // رأس المال المُودَع التراكمي — from prefix-sum map, carry forward if no entry this month
+    if (capitalMap[ym] !== undefined) lastCapital = capitalMap[ym];
+    const cumulativeCapital = lastCapital;
 
     // قيمة المحفظة من أقرب snapshot في نفس الشهر أو قبله
     // نأخذ آخر snapshot حتى نهاية هذا الشهر
@@ -560,7 +597,7 @@ function renderMonthlyChart() {
 
 // ── CSV export ────────────────────────────────────────────────────────
 function exportPerformanceCSV() {
-  const { open, closed } = buildPositionData();
+  const { open, closed } = getPositionData();
   const BOM = '﻿';
   const lines = [];
   lines.push('== مراكز مفتوحة ==');

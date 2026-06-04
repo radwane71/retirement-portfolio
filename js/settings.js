@@ -128,9 +128,10 @@ async function exportBackup() {
     }
 
     // ── إعدادات localStorage (theme, zoom, portfolio_cash) ────
+    // M-3: prefer user-scoped key so backup reflects this user's data on shared devices
     backup._local_settings = {};
     LS_KEYS.forEach(k => {
-      const v = localStorage.getItem(k);
+      const v = localStorage.getItem(userLsKey(k)) ?? localStorage.getItem(k);
       if (v !== null) backup._local_settings[k] = v;
     });
 
@@ -144,7 +145,8 @@ async function exportBackup() {
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    // L-4: defer revoke so browser finishes consuming the blob URL
+    setTimeout(() => URL.revokeObjectURL(url), 100);
 
     const totalRows     = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
     const tablesSummary = TABLES.map(t => `${t} (${backup[t]?.length || 0})`).join(' | ');

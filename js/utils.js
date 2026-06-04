@@ -46,7 +46,8 @@ const INLINE_OPTS = {
 function formatSAR(amount, showSign = false) {
   const num = parseFloat(amount) || 0;
   const abs = Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const sign = showSign ? (num >= 0 ? '+' : '-') : (num < 0 ? '-' : '');
+  // L-3: treat -0 as zero so we never render "+0.00 ر.س" or "-0.00 ر.س"
+  const sign = showSign ? (num > 0 ? '+' : num < 0 ? '-' : '') : (num < 0 ? '-' : '');
   return `${sign}${abs} ر.س`;
 }
 
@@ -72,6 +73,14 @@ function todayISO() {
   return new Date().toISOString().split('T')[0];
 }
 
+// M-6: parse a YYYY-MM-DD string as local midnight — avoids UTC-shift date-off-by-one
+function parseDateLocal(s) {
+  if (!s) return null;
+  const [y, m, d] = s.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d);
+}
+
 // ── تصدير CSV ─────────────────────────────────────────────────
 // headers: مصفوفة أسماء الأعمدة بالعربي
 // rows:    مصفوفة مصفوفات (كل صف = مصفوفة قيم مرتبة بنفس ترتيب headers)
@@ -95,7 +104,8 @@ function exportCSV(filename, headers, rows) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // L-4: defer revoke so browser finishes consuming the blob URL before it's released
+  setTimeout(() => URL.revokeObjectURL(url), 100);
 }
 
 // HTML-attribute-safe escape
@@ -160,8 +170,11 @@ async function saveUserSetting(key, value) {
 
 async function loadUserSetting(key) {
   try {
+    // H-2: always filter by user_id so RLS misconfiguration can never return another user's setting
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user?.id) return null;
     const { data } = await supabaseClient.from('user_settings')
-      .select('value').eq('key', key).maybeSingle();
+      .select('value').eq('user_id', user.id).eq('key', key).maybeSingle();
     if (!data?.value) return null;
     return JSON.parse(data.value);
   } catch { return null; }
@@ -194,6 +207,10 @@ function computeXIRR(flows) {
   const amts  = cf.map(c => c.amount);
   if (!amts.some(a => a > 0) || !amts.some(a => a < 0)) return null;
 
+  // H-3: relative tolerance — 0.01% of total absolute flow magnitude
+  const flowScale = amts.reduce((s, a) => s + Math.abs(a), 0) || 1;
+  const REL_TOL   = flowScale * 1e-4;
+
   const npv  = r => amts.reduce((s, a, i) => s + a / Math.pow(1 + r, years[i]), 0);
   const dNpv = r => amts.reduce((s, a, i) => s - years[i] * a / Math.pow(1 + r, years[i] + 1), 0);
 
@@ -209,20 +226,20 @@ function computeXIRR(flows) {
     if (r <= -0.9999) r = -0.9999;
   }
   // fallback: بحث ثنائي
-  if (!isFinite(r) || Math.abs(npv(r)) > 1) {
+  if (!isFinite(r) || Math.abs(npv(r)) > REL_TOL) {
     let lo = -0.9999, hi = 10;
     if (npv(lo) * npv(hi) > 0) return null;
     for (let i = 0; i < 200; i++) {
       const mid = (lo + hi) / 2;
       const fm  = npv(mid);
-      if (Math.abs(fm) < 1e-6) { r = mid; break; }
+      if (Math.abs(fm) < REL_TOL) { r = mid; break; }
       if (npv(lo) * fm < 0) hi = mid; else lo = mid;
       r = mid;
     }
   }
   if (!isFinite(r) || r <= -0.9999 || r > 100) return null;
-  // تحقق أخير: النتيجة يجب أن تقرّب NPV من الصفر
-  if (Math.abs(npv(r)) > 1) return null;
+  // تحقق أخير: النتيجة يجب أن تقرّب NPV من الصفر بالنسبة لحجم التدفقات
+  if (Math.abs(npv(r)) > REL_TOL) return null;
   return r * 100;
 }
 
@@ -239,13 +256,15 @@ function showToast(msg, type = 'info') {
   // أنشئ عنصر الإشعار
   const item = document.createElement('div');
   item.className = `toast-item ${type}`;
+  // H-1: build toast DOM safely — never inject msg as innerHTML to prevent XSS
   item.innerHTML = `
     <div class="toast-body">
-      <span>${msg}</span>
+      <span class="toast-msg"></span>
       <button class="toast-close" title="إغلاق">✕</button>
     </div>
     <div class="toast-timer"></div>
   `;
+  item.querySelector('.toast-msg').textContent = msg;
 
   // ── دالة مساعدة: ابدأ العداد التلقائي ──
   function startTimer(delay) {
@@ -335,10 +354,14 @@ function initNavGroups() {
 }
 
 // ── Finance ───────────────────────────────────────────────────
+// C-1: commission rate as a named constant — verify against your broker agreement.
+// Common Tadawul rates: Aljazira/SNB = 0.15% (0.0015), Mubasher/Albilad = 0.25% (0.0025).
+const COMMISSION_RATE = 0.0015; // 1.5‰ — update if your broker charges differently
+
 function calcCommission(shares, price) {
   // نضرب بـ 10000 ونقسم لاحقاً لتجنب أخطاء الفاصلة العائمة في العمليات الحسابية
   const tv10k      = Math.round(parseFloat(shares) * parseFloat(price) * 10000);
-  const comm10k    = Math.min(Math.round(tv10k * 0.0015), 1000000); // max 100 SAR × 10000
+  const comm10k    = Math.min(Math.round(tv10k * COMMISSION_RATE), 1000000); // max 100 SAR × 10000
   const vat10k     = Math.round(comm10k * 0.15);
   const tradeValue = tv10k   / 10000;
   const commission = comm10k / 10000;
@@ -656,7 +679,20 @@ async function _doInlineEdit(td, tbody, { table, id, field, type, raw, selectKey
       return;
     }
 
-    const updateVal = type === 'number' ? (parseFloat(newVal) || 0) : newVal;
+    // H-7: reject empty/NaN for numeric fields instead of silently writing 0
+    let updateVal;
+    if (type === 'number') {
+      const n = parseFloat(newVal);
+      if (isNaN(n)) {
+        showToast('قيمة غير صالحة — أدخل رقماً', 'error');
+        td.innerHTML = origHTML;
+        tbody._ieBusy = false;
+        return;
+      }
+      updateVal = n;
+    } else {
+      updateVal = newVal;
+    }
     td.innerHTML = '<span class="text-muted small">يتم الحفظ…</span>';
 
     const { error } = await supabaseClient.from(table).update({ [field]: updateVal }).eq('id', id);
