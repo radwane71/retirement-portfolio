@@ -140,6 +140,19 @@ async function addSingleTransaction(e) {
   if (type !== 'grant' && price <= 0)   { showToast('سعر السهم يجب أن يكون أكبر من صفر', 'error'); return; }
 
   const { data: { user } } = await supabaseClient.auth.getUser();
+
+  // warn if selling more shares than currently held (system will cap; user may have made a typo)
+  if (type === 'sell') {
+    const { data: holding } = await supabaseClient.from('holdings')
+      .select('shares').eq('user_id', user.id).eq('ticker', ticker).maybeSingle();
+    const heldShares = holding ? +holding.shares : 0;
+    if (shares > heldShares + 0.0001) {
+      const ok = await confirmAsync(
+        `أنت تبيع ${formatShares(shares)} سهم لكن حيازتك من ${ticker} هي ${formatShares(heldShares)} فقط.\nهل تريد المتابعة؟ (ستُحسب العملية بالأسهم المتاحة)`
+      );
+      if (!ok) return;
+    }
+  }
   const c = type === 'grant'
     ? { commission: 0, vat: 0, totalBuy: 0, totalSell: 0 }
     : calcCommission(shares, price);
@@ -358,7 +371,8 @@ async function recomputeHoldingFromTx(userId, ticker) {
   rows.forEach(t => {
     if (!stockName && t.name) stockName = t.name;
     if (t.type === 'buy') {
-      totalCost   += +t.shares * +t.price;
+      // use t.total (shares×price + commission + VAT) — consistent with performance.js P&L
+      totalCost   += +t.total;
       totalShares += +t.shares;
     } else if (t.type === 'grant') {
       totalShares += +t.shares;   // منحة: تكلفة = صفر

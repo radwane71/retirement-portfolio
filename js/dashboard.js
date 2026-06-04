@@ -851,16 +851,18 @@ function renderPortfolioHealthCard() {
   }
 
   // بُعد B: التركيز
+  const _top1NameE = esc(top1Name);
+  const _largSecE  = esc(largestSectorName);
   let bScore, bLabel, bDetail;
   if (top1Pct > 30 || top3Pct > 65 || largestSectorPct > 50) {
     bScore = 'red';    bLabel = 'تركيز مرتفع جداً';
-    bDetail = `أكبر سهم (${top1Name}): ${top1Pct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}% · أكبر قطاع: ${largestSectorPct.toFixed(1)}%`;
+    bDetail = `أكبر سهم (${_top1NameE}): ${top1Pct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}% · أكبر قطاع: ${largestSectorPct.toFixed(1)}%`;
   } else if (top1Pct > 20 || top3Pct > 50 || largestSectorPct > 38) {
     bScore = 'yellow'; bLabel = 'تركيز مرتفع';
-    bDetail = `أكبر سهم (${top1Name}): ${top1Pct.toFixed(1)}% · أكبر قطاع (${largestSectorName}): ${largestSectorPct.toFixed(1)}%`;
+    bDetail = `أكبر سهم (${_top1NameE}): ${top1Pct.toFixed(1)}% · أكبر قطاع (${_largSecE}): ${largestSectorPct.toFixed(1)}%`;
   } else {
     bScore = 'green';  bLabel = 'توزيع متوازن';
-    bDetail = `أكبر سهم: ${top1Pct.toFixed(1)}% · أكبر قطاع (${largestSectorName}): ${largestSectorPct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}%`;
+    bDetail = `أكبر سهم: ${top1Pct.toFixed(1)}% · أكبر قطاع (${_largSecE}): ${largestSectorPct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}%`;
   }
 
   // بُعد C: التوزيعات vs الهدف
@@ -916,7 +918,7 @@ function renderPortfolioHealthCard() {
 
   // T2: عدد القطاعات
   if (sectorCount === 1)
-    tips.push({ lvl:'red',    txt: `قطاع واحد فقط (${largestSectorName}) — أزمة في هذا القطاع ستضرب 100% من محفظتك. أضف قطاعات مختلفة` });
+    tips.push({ lvl:'red',    txt: `قطاع واحد فقط (${_largSecE}) — أزمة في هذا القطاع ستضرب 100% من محفظتك. أضف قطاعات مختلفة` });
   else if (sectorCount === 2)
     tips.push({ lvl:'red',    txt: `قطاعان فقط — غير كافٍ للحماية من الصدمات القطاعية. الهدف: 4–5 قطاعات` });
   else if (sectorCount === 3)
@@ -924,15 +926,15 @@ function renderPortfolioHealthCard() {
 
   // T3: تركيز أكبر سهم
   if (top1Pct > 30)
-    tips.push({ lvl:'red',    txt: `${top1Name} يشكل ${top1Pct.toFixed(1)}% — تراجع حاد في هذا السهم وحده يُضعف المحفظة بشكل كبير. الهدف: لا سهم > 20%` });
+    tips.push({ lvl:'red',    txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — تراجع حاد في هذا السهم وحده يُضعف المحفظة بشكل كبير. الهدف: لا سهم > 20%` });
   else if (top1Pct > 20)
-    tips.push({ lvl:'yellow', txt: `${top1Name} يشكل ${top1Pct.toFixed(1)}% — تركيز مرتفع. خفّضه تدريجياً لأقل من 20% عند أي فرصة إعادة توازن` });
+    tips.push({ lvl:'yellow', txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — تركيز مرتفع. خفّضه تدريجياً لأقل من 20% عند أي فرصة إعادة توازن` });
 
   // T4: تركيز قطاعي
   if (largestSectorPct > 50)
-    tips.push({ lvl:'red',    txt: `قطاع ${largestSectorName} يشكل ${largestSectorPct.toFixed(1)}% — تركيز قطاعي مرتفع جداً. أضف أسهماً من قطاعات دفاعية` });
+    tips.push({ lvl:'red',    txt: `قطاع ${_largSecE} يشكل ${largestSectorPct.toFixed(1)}% — تركيز قطاعي مرتفع جداً. أضف أسهماً من قطاعات دفاعية` });
   else if (largestSectorPct > 38)
-    tips.push({ lvl:'yellow', txt: `قطاع ${largestSectorName} (${largestSectorPct.toFixed(1)}%) — حاول إبقاؤه دون 35% وزيادة القطاعات الأخرى` });
+    tips.push({ lvl:'yellow', txt: `قطاع ${_largSecE} (${largestSectorPct.toFixed(1)}%) — حاول إبقاؤه دون 35% وزيادة القطاعات الأخرى` });
 
   // T5: الأوزان
   if (hasTargets && redDev > 0)

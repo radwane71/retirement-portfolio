@@ -1,5 +1,6 @@
-// M-4: restrict CORS to your production domain — update ALLOWED_ORIGIN if you have a custom domain
-const ALLOWED_ORIGIN = Deno.env.get('APP_ORIGIN') ?? '*'
+// M-4: restrict CORS to your production domain — set APP_ORIGIN env var in Supabase dashboard
+// Falls back to localhost for local dev; '*' is never used as a default
+const ALLOWED_ORIGIN = Deno.env.get('APP_ORIGIN') ?? 'http://localhost:8080'
 
 Deno.serve(async (req) => {
   const cors = {
@@ -76,28 +77,35 @@ Deno.serve(async (req) => {
   const quotes = (await yRes.json())?.quoteResponse?.result ?? []
   console.log('quotes:', quotes.length)
 
-  // ── تحديث الأسعار ────────────────────────────────────────────
-  let updated = 0
+  // ── تحديث الأسعار — parallel PATCHes instead of sequential ──
   const prices: Record<string, number> = {}
+  const nowISO = new Date().toISOString()
+
   for (const q of quotes) {
     const ticker = q.symbol?.replace('.SR', '')
     const price  = q.regularMarketPrice
     // M-11: reject missing, zero, negative, or implausibly large prices (data errors / pending splits)
     if (!ticker || price == null || price <= 0 || price > 1_000_000) continue
     prices[ticker] = price
-    const r = await fetch(
-      `${SUPABASE_URL}/rest/v1/holdings?user_id=eq.${userId}&ticker=eq.${ticker}`,
-      {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY,
-          'Content-Type': 'application/json', Prefer: 'return=minimal'
-        },
-        body: JSON.stringify({ current_price: price, price_updated_at: new Date().toISOString() })
-      }
-    )
-    if (r.ok) updated++
   }
+
+  // Fire all PATCHes in parallel — reduces latency from O(N×RTT) to O(1×RTT)
+  const patchResults = await Promise.all(
+    Object.entries(prices).map(([ticker, price]) =>
+      fetch(
+        `${SUPABASE_URL}/rest/v1/holdings?user_id=eq.${userId}&ticker=eq.${ticker}`,
+        {
+          method: 'PATCH',
+          headers: {
+            Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY,
+            'Content-Type': 'application/json', Prefer: 'return=minimal'
+          },
+          body: JSON.stringify({ current_price: price, price_updated_at: nowISO })
+        }
+      )
+    )
+  )
+  const updated = patchResults.filter(r => r.ok).length
 
   // H-6: report which tickers were not returned by Yahoo so the client can show stale warnings
   const allTickers   = holdings.map((h: any) => h.ticker)

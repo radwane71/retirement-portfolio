@@ -700,7 +700,8 @@ async function _doInlineEdit(td, tbody, { table, id, field, type, raw, selectKey
     }
     td.innerHTML = '<span class="text-muted small">يتم الحفظ…</span>';
 
-    const { error } = await supabaseClient.from(table).update({ [field]: updateVal }).eq('id', id);
+    const { error } = await supabaseClient.from(table).update({ [field]: updateVal })
+      .eq('id', id).eq('user_id', window._currentUserId);
     tbody._ieBusy = false;
 
     if (error) {
