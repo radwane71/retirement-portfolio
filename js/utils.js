@@ -143,6 +143,30 @@ function confirmAsync(message) {
   });
 }
 
+// ── مزامنة إعدادات المستخدم عبر الأجهزة (user_settings table) ──
+// يُخزَّن كل إعداد كـ JSON في Supabase ويُستخدم localStorage كـ cache
+
+async function saveUserSetting(key, value) {
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user?.id) return false;
+    const { error } = await supabaseClient.from('user_settings').upsert(
+      { user_id: user.id, key, value: JSON.stringify(value), updated_at: new Date().toISOString() },
+      { onConflict: 'user_id,key' }
+    );
+    return !error;
+  } catch { return false; }
+}
+
+async function loadUserSetting(key) {
+  try {
+    const { data } = await supabaseClient.from('user_settings')
+      .select('value').eq('key', key).maybeSingle();
+    if (!data?.value) return null;
+    return JSON.parse(data.value);
+  } catch { return null; }
+}
+
 // ── Error boundary موحّد لاستعلامات Supabase ─────────────────
 async function supaQuery(queryFn, errorMsg = 'خطأ في تحميل البيانات') {
   try {

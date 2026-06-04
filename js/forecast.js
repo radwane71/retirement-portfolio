@@ -214,7 +214,7 @@ async function loadHistoricalData() {
     annCapGrowth * confWeight + MARKET_CAP_BENCHMARK * (1 - confWeight)
   ));
 
-  // ── هدف FIRE من الإعدادات المحلية (مُقيَّد بالمستخدم) ────────────────
+  // ── هدف FIRE — localStorage cache (يُحدَّث من Supabase عند تحميل الداشبورد) ──
   let fireGoal = { monthly: 0, swr: 4, target_year: 0 };
   try {
     const scopedKey = userLsKey('retirement_goal_v1');

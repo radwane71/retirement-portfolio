@@ -164,6 +164,9 @@ async function init() {
     }
   });
 
+  // مزامنة هدف FIRE من Supabase (للتزامن بين الأجهزة)
+  _loadRetirementGoalFromSupabase().catch(() => {});
+
   // تسجيل قيمة المحفظة تلقائياً (مرة في الشهر) لبناء تاريخ أداء حقيقي
   _autoSnapshotPortfolio().catch(() => {});
 }
@@ -243,12 +246,13 @@ async function loadAllData() {
   holdings = rH.data || [];
 
   // نقد المحفظة — Supabase أولاً، localStorage كـ fallback
-  if (rCash?.amount != null) {
-    portfolioCash = +rCash.amount;
-    cashUpdatedAt = rCash.updated_at || null;
+  // ملاحظة: maybeSingle() يُرجع { data: { amount, updated_at } | null }
+  if (rCash?.data?.amount != null) {
+    portfolioCash = +rCash.data.amount;
+    cashUpdatedAt = rCash.data.updated_at || null;
     _saveCashToLS(portfolioCash, cashUpdatedAt); // حدّث الـ cache
   } else {
-    _loadCashFromLS(); // استخدم المحفوظ محلياً
+    _loadCashFromLS(); // fallback للـ localStorage (أو قيمة صفر إن لم يوجد)
   }
 
   // بناء خريطة الأهداف — stock_targets هو المصدر الأساسي
@@ -1027,27 +1031,36 @@ function showHealthInfo() {
   ].join('\n'));
 }
 
-// ── إعدادات هدف الاستقلال المالي (محلي) ──────────────────────
+// ── إعدادات هدف الاستقلال المالي — Supabase + localStorage cache ──
 const RET_GOAL_KEY = 'retirement_goal_v1';
+
+function _retGoalFromObj(o) {
+  return { monthly: +o?.monthly || 0, swr: +o?.swr || 4, target_year: +o?.target_year || 0 };
+}
+
 function getRetirementGoal() {
+  // قراءة من الـ cache المحلي — يُحدَّث عند كل تحميل من Supabase
   try {
-    // Try user-scoped key first, fall back to legacy global key on first login
     const scoped = localStorage.getItem(userLsKey(RET_GOAL_KEY));
     const legacy = localStorage.getItem(RET_GOAL_KEY);
-    const o = JSON.parse(scoped || legacy || '{}') || {};
-    // Migrate legacy key to scoped key once user is known
-    if (!scoped && legacy && window._currentUserId) {
-      try { localStorage.setItem(userLsKey(RET_GOAL_KEY), legacy); localStorage.removeItem(RET_GOAL_KEY); } catch(_) {}
-    }
-    return {
-      monthly:     +o.monthly     || 0,
-      swr:         +o.swr         || 4,
-      target_year: +o.target_year || 0,
-    };
-  } catch (_) { return { monthly: 0, swr: 4, target_year: 0 }; }
+    return _retGoalFromObj(JSON.parse(scoped || legacy || '{}'));
+  } catch (_) { return _retGoalFromObj({}); }
 }
-function saveRetirementGoal(g) {
-  try { localStorage.setItem(userLsKey(RET_GOAL_KEY), JSON.stringify(g)); } catch (_) {}
+
+async function _loadRetirementGoalFromSupabase() {
+  const remote = await loadUserSetting(RET_GOAL_KEY);
+  if (!remote) return;
+  // حدّث الـ cache المحلي
+  try { localStorage.setItem(userLsKey(RET_GOAL_KEY), JSON.stringify(remote)); } catch (_) {}
+  // أعِد رسم بطاقة FIRE إذا تغيّرت القيمة
+  renderRetirementCard();
+}
+
+function saveRetirementGoal(goal) {
+  // حفظ فوري في localStorage
+  try { localStorage.setItem(userLsKey(RET_GOAL_KEY), JSON.stringify(goal)); } catch (_) {}
+  // حفظ غير متزامن في Supabase (يمنع الفقدان على الجوال)
+  saveUserSetting(RET_GOAL_KEY, goal).catch(() => {});
 }
 function editRetirementGoal() {
   const cur = getRetirementGoal();

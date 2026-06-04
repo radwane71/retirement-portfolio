@@ -1,11 +1,18 @@
-// ─── Storage ──────────────────────────────────────────────────────────────────
+// ─── Storage — Supabase (primary) + localStorage (cache/fallback) ─────────────
 const SUKUK_KEY = 'sukuk_planner_v1';
 
 function getStore() {
-  try { return JSON.parse(localStorage.getItem(SUKUK_KEY)) || defaultStore(); }
-  catch { return defaultStore(); }
+  try {
+    const raw = localStorage.getItem(userLsKey(SUKUK_KEY)) || localStorage.getItem(SUKUK_KEY);
+    return JSON.parse(raw) || defaultStore();
+  } catch { return defaultStore(); }
 }
-function saveStore(data) { localStorage.setItem(SUKUK_KEY, JSON.stringify(data)); }
+
+function saveStore(data) {
+  store = data;
+  try { localStorage.setItem(userLsKey(SUKUK_KEY), JSON.stringify(data)); } catch {}
+  saveUserSetting(SUKUK_KEY, data).catch(() => {});
+}
 
 function defaultStore() {
   return {
@@ -60,7 +67,13 @@ async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-sukuk');
-  store = getStore();
+  const remote = await loadUserSetting(SUKUK_KEY);
+  if (remote) {
+    store = remote;
+    try { localStorage.setItem(userLsKey(SUKUK_KEY), JSON.stringify(remote)); } catch {}
+  } else {
+    store = getStore();
+  }
   renderDashboard();
   renderOpportunities();
 }

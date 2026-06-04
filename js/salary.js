@@ -1,11 +1,21 @@
-// ─── Storage ──────────────────────────────────────────────────────────────────
+// ─── Storage — Supabase (primary) + localStorage (cache/fallback) ─────────────
 const STORE_KEY = 'salary_planner_v1';
 
 function getStore() {
-  try { return JSON.parse(localStorage.getItem(STORE_KEY)) || defaultStore(); }
-  catch { return defaultStore(); }
+  // قراءة من cache المحلي — يُحدَّث عند init() من Supabase
+  try {
+    const raw = localStorage.getItem(userLsKey(STORE_KEY)) || localStorage.getItem(STORE_KEY);
+    return JSON.parse(raw) || defaultStore();
+  } catch { return defaultStore(); }
 }
-function saveStore(data) { localStorage.setItem(STORE_KEY, JSON.stringify(data)); }
+
+function saveStore(data) {
+  store = data;
+  // حفظ فوري في localStorage
+  try { localStorage.setItem(userLsKey(STORE_KEY), JSON.stringify(data)); } catch {}
+  // حفظ غير متزامن في Supabase
+  saveUserSetting(STORE_KEY, data).catch(() => {});
+}
 
 function defaultStore() {
   return {
@@ -44,7 +54,14 @@ async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-salary');
-  store = getStore();
+  // تحميل من Supabase أولاً للتزامن بين الأجهزة، fallback للـ localStorage
+  const remote = await loadUserSetting(STORE_KEY);
+  if (remote) {
+    store = remote;
+    try { localStorage.setItem(userLsKey(STORE_KEY), JSON.stringify(remote)); } catch {}
+  } else {
+    store = getStore();
+  }
   buildYearSelects();
   renderAll();
 }
