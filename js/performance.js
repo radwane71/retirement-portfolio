@@ -49,13 +49,15 @@ async function init() {
 // ── Tab switcher ──────────────────────────────────────────────────────
 function showPerfTab(tab) {
   _activeTab = tab;
-  ['open','closed','timeline','monthly-chart','benchmark'].forEach(t => {
+  ['open','closed','timeline','monthly-chart','benchmark','div-metrics','behavioral'].forEach(t => {
     const view = document.getElementById(`pview-${t}`);
     const btn  = document.getElementById(`ptab-${t}`);
     if (view) view.style.display = t === tab ? '' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   });
-  if (tab === 'benchmark') initBenchmarkTab();
+  if (tab === 'benchmark')   initBenchmarkTab();
+  if (tab === 'div-metrics') renderDividendMetrics();
+  if (tab === 'behavioral')  renderBehavioralAudit();
 }
 
 // H-4: single entry point — computes once per data load, cached for all callers
@@ -64,10 +66,47 @@ function getPositionData() {
   return _positionCache;
 }
 
+// ── XIRR لكل مركز منفرداً ─────────────────────────────────────────────
+// terminalValue = القيمة السوقية الحالية للمراكز المفتوحة، null للمغلقة
+function _calcPositionXIRR(p, tickerDivs, terminalValue) {
+  if (!p.allBuys?.length) return null;
+  const flows = [];
+  // مشتريات (سالبة)
+  p.allBuys.forEach(t => {
+    const d = parseDateLocal(t.date);
+    if (d) flows.push({ date: d, amount: -(+t.total) });
+  });
+  // مبيعات (موجبة)
+  (p.allSells || []).forEach(t => {
+    const d = parseDateLocal(t.date);
+    if (d) flows.push({ date: d, amount: +(+t.total) });
+  });
+  // أرباح موزعة (موجبة)
+  tickerDivs.forEach(d => {
+    const dt = parseDateLocal(d.date);
+    if (dt) flows.push({ date: dt, amount: +(+d.amount) });
+  });
+  // القيمة النهائية (للمراكز المفتوحة)
+  if (terminalValue != null && terminalValue > 0) {
+    flows.push({ date: new Date(), amount: terminalValue });
+  }
+  // XIRR يحتاج على الأقل تدفقين بإشارات مختلفة
+  const hasNeg = flows.some(f => f.amount < 0);
+  const hasPos = flows.some(f => f.amount > 0);
+  if (!hasNeg || !hasPos || flows.length < 2) return null;
+  try { return computeXIRR(flows); } catch { return null; }
+}
+
 // ── Build position maps ───────────────────────────────────────────────
 function buildPositionData() {
   // تجميع مشتريات وبيوعات لكل رمز
   const posMap = {};
+  // فهرسة أرباح كل رمز (للـ XIRR الفردي)
+  const divsByTicker = {};
+  _divs.forEach(d => {
+    if (!divsByTicker[d.ticker]) divsByTicker[d.ticker] = [];
+    divsByTicker[d.ticker].push(d);
+  });
 
   _tx.forEach(t => {
     const ticker = t.ticker;
@@ -124,6 +163,8 @@ function buildPositionData() {
         const days = Math.floor((parseDateLocal(p.lastSellDate) - parseDateLocal(p.firstBuyDate)) / 86400000);
         p.holdDays = days;
       }
+      // XIRR للمراكز المغلقة
+      p.xirr = _calcPositionXIRR(p, divsByTicker[p.ticker] || [], null);
       closed.push(p);
     } else {
       // مفتوح (كلياً أو جزئياً)
@@ -137,6 +178,8 @@ function buildPositionData() {
       p.partialRealizedPnL = p.sellRevenue - costOfSold;
       p.totalReturn        = (p.unrealizedPnL || 0) + p.partialRealizedPnL + p.divReceived;
       p.totalReturnPct     = costOfRemaining > 0 ? p.totalReturn / (costOfRemaining + costOfSold) * 100 : 0;
+      // XIRR للمراكز المفتوحة (القيمة الحالية كتدفق نهائي)
+      p.xirr = _calcPositionXIRR(p, divsByTicker[p.ticker] || [], p.marketValue);
       if (p.sellShares > 0.001) partial.push(p);
       else open.push(p);
     }
@@ -163,6 +206,20 @@ function renderKPIs() {
   if (rpEl) { rpEl.textContent = formatSAR(totalReal, true); rpEl.className = 'value num ' + (totalReal >= 0 ? 'text-success' : 'text-danger'); }
   const urEl = document.getElementById('pk-unrealized');
   if (urEl) { urEl.textContent = formatSAR(totalUnreal, true); urEl.className = 'value num ' + (totalUnreal >= 0 ? 'text-success' : 'text-danger'); }
+
+  // HHI — مؤشر تركز المحفظة (Herfindahl-Hirschman Index)
+  const hhiEl  = document.getElementById('pk-hhi');
+  const hhiSub = document.getElementById('pk-hhi-sub');
+  if (hhiEl && _holdings.length) {
+    const totalMkt = _holdings.reduce((s,h) => s + +h.shares * +h.current_price, 0);
+    const hhi = totalMkt > 0
+      ? _holdings.reduce((s,h) => { const w = (+h.shares * +h.current_price) / totalMkt; return s + w*w; }, 0)
+      : 0;
+    const effectiveN = hhi > 0 ? (1 / hhi).toFixed(1) : '—';
+    hhiEl.innerHTML   = `${hhi.toFixed(4)} <span style="font-size:.7rem;color:var(--text-2)" title="العدد الفعلي للمراكز المستقلة = 1 ÷ HHI">(N=${effectiveN})</span>`;
+    hhiEl.className   = 'value num ' + (hhi < 0.18 ? 'text-success' : hhi < 0.25 ? '' : 'text-danger');
+    if (hhiSub) hhiSub.textContent = hhi < 0.10 ? 'تنويع ممتاز' : hhi < 0.18 ? 'تنويع معقول' : hhi < 0.25 ? 'تركز متوسط ⚠️' : 'تركز عالٍ ❌';
+  }
 
   // Max Drawdown من سجل صافي الثروة
   const ddEl = document.getElementById('pk-max-drawdown');
@@ -216,7 +273,8 @@ function renderOpenPositions() {
       <td class="num ${pnlCls} bold">${p.unrealizedPnL != null ? formatSAR(p.unrealizedPnL, true) : '—'}</td>
       <td class="num ${pnlCls}">${p.unrealizedPct != null ? p.unrealizedPct.toFixed(2) + '%' : '—'}</td>
       <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
-      <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}</td>
+      <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}<br><span class="small" style="font-weight:400">${p.totalReturnPct != null ? p.totalReturnPct.toFixed(2)+'%' : ''}</span></td>
+      <td class="num ${p.xirr == null ? 'text-muted' : p.xirr >= 0 ? 'text-success' : 'text-danger'}" title="XIRR الفردي لهذا المركز — يشمل مشتريات وأرباح والقيمة الحالية">${p.xirr != null ? (p.xirr >= 0 ? '+' : '') + p.xirr.toFixed(2) + '%' : '—'}</td>
     </tr>`;
   }).join('');
 
@@ -227,6 +285,7 @@ function renderOpenPositions() {
   const totalDiv    = open.reduce((s, p) => s + p.divReceived, 0);
   const totalRet    = open.reduce((s, p) => s + p.totalReturn, 0);
   const totalUPct   = totalCost > 0 ? totalUPnL / totalCost * 100 : 0;
+  const totalRetPct = totalCost > 0 ? totalRet / totalCost * 100 : 0;
   tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
     <td colspan="5"><strong class="small">الإجمالي</strong></td>
     <td class="num bold">${formatSAR(totalCost)}</td>
@@ -234,7 +293,8 @@ function renderOpenPositions() {
     <td class="num bold ${totalUPnL>=0?'text-success':'text-danger'}">${formatSAR(totalUPnL,true)}</td>
     <td class="num ${totalUPnL>=0?'text-success':'text-danger'}">${totalUPct.toFixed(2)}%</td>
     <td class="num text-success">${formatSAR(totalDiv)}</td>
-    <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}</td>
+    <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}<br><span class="small" style="font-weight:400">${totalRetPct.toFixed(2)}%</span></td>
+    <td></td>
   </tr>`;
 }
 
@@ -639,6 +699,288 @@ function exportPerformanceCSV() {
 const setText = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
 function fmtN(n)       { return n == null ? '—' : Number(n).toLocaleString('en-US', { maximumFractionDigits: 4 }); }
 function fmtShortK(v)  { if (v >= 1e6) return (v/1e6).toFixed(1)+'M'; if (v >= 1e3) return (v/1e3).toFixed(0)+'K'; return v; }
+
+// ══════════════════════════════════════════════════════════════
+// 💰 تبويب: مؤشرات التوزيعات المتقدمة
+// YoC · Dividend ROI · Break-Even Years · Portfolio Efficiency
+// ══════════════════════════════════════════════════════════════
+function renderDividendMetrics() {
+  const tbody = document.getElementById('dv-tbody');
+  const kpiEl = document.getElementById('dv-kpi-strip');
+  if (!tbody) return;
+
+  const { open } = getPositionData();
+  if (!open.length) {
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><p>لا توجد مراكز مفتوحة</p></div></td></tr>`;
+    return;
+  }
+
+  // ── بناء خريطة أرباح كل رمز (مُفصَّلة بالتواريخ لحساب الفوروارد) ──
+  const divMap = {}; // ticker → [{ date, amount }]
+  _divs.forEach(d => {
+    if (!divMap[d.ticker]) divMap[d.ticker] = [];
+    divMap[d.ticker].push({ date: d.date, amount: +d.amount });
+  });
+
+  // حساب التوزيع السنوي المتوقع لكل رمز (آخر 12 شهر)
+  const now = new Date();
+  const yr12Ago = new Date(now); yr12Ago.setFullYear(yr12Ago.getFullYear() - 1);
+  function forwardAnnualDiv(ticker, remainingShares) {
+    const entries = divMap[ticker] || [];
+    const recent  = entries.filter(e => e.date && parseDateLocal(e.date) >= yr12Ago);
+    const total12 = recent.reduce((s, e) => s + e.amount, 0);
+    // إذا لا يوجد توزيعات في آخر 12 شهر، استخدم المعدل التاريخي
+    if (total12 > 0) return total12;
+    const allTotal = entries.reduce((s, e) => s + e.amount, 0);
+    const oldest   = entries.reduce((mn, e) => e.date < mn ? e.date : mn, entries[0]?.date || '');
+    if (!oldest) return 0;
+    const yrs = Math.max(0.5, (now - parseDateLocal(oldest)) / (365.25 * 86400000));
+    return allTotal / yrs;
+  }
+
+  // ── Portfolio Efficiency Ratio (عمولات vs أرباح) ──
+  const totalCommissions = _tx.reduce((s, t) => s + (+t.commission || 0) + (+t.vat || 0), 0);
+  const { closed } = getPositionData();
+  const totalRealGains = closed.reduce((s, p) => s + (p.totalReturn || 0), 0)
+                       + open.reduce((s, p) => s + (p.totalReturn || 0), 0);
+  const effRatio = totalCommissions > 0 ? totalRealGains / totalCommissions : null;
+
+  // ── KPI شريط الملخص ──
+  const portfolioFwdDiv = open.reduce((s, p) => {
+    return s + forwardAnnualDiv(p.ticker, p.remainingShares);
+  }, 0);
+  const portfolioCost = open.reduce((s, p) => s + p.avgCost * p.remainingShares, 0);
+  const portfolioMktVal = open.reduce((s, p) => s + (p.marketValue || 0), 0);
+  const portfolioYoC = portfolioCost > 0 ? portfolioFwdDiv / portfolioCost * 100 : 0;
+  const portfolioCurYield = portfolioMktVal > 0 ? portfolioFwdDiv / portfolioMktVal * 100 : 0;
+  const totalDivReceived = open.reduce((s, p) => s + p.divReceived, 0);
+  const portfolioDivROI  = portfolioCost > 0 ? totalDivReceived / portfolioCost * 100 : 0;
+
+  if (kpiEl) {
+    kpiEl.innerHTML = [
+      { lbl: 'YoC المحفظة', val: portfolioYoC.toFixed(2) + '%', sub: 'عائد على تكلفتك', cls: 'text-success' },
+      { lbl: 'Current Yield', val: portfolioCurYield.toFixed(2) + '%', sub: 'عائد على سعر السوق', cls: '' },
+      { lbl: 'Div ROI', val: portfolioDivROI.toFixed(2) + '%', sub: 'استرددت من رأس مالك', cls: portfolioDivROI >= 20 ? 'text-success' : '' },
+      { lbl: 'التوزيعات السنوية المتوقعة', val: formatSAR(portfolioFwdDiv), sub: 'Forward 12M', cls: 'text-success' },
+      effRatio != null
+        ? { lbl: 'كفاءة رأس المال', val: effRatio.toFixed(1) + '×', sub: 'ربح / عمولة', cls: effRatio >= 20 ? 'text-success' : effRatio >= 10 ? '' : 'text-danger', title: `إجمالي العمولات: ${formatSAR(totalCommissions)}` }
+        : { lbl: 'كفاءة رأس المال', val: '—', sub: 'ربح / عمولة', cls: 'text-muted' },
+    ].map(k => `<div class="stat-card" ${k.title ? `title="${k.title}"` : ''}>
+      <div class="label">${k.lbl}</div>
+      <div class="value num ${k.cls}">${k.val}</div>
+      <div class="sub">${k.sub}</div>
+    </div>`).join('');
+  }
+
+  // ── جدول التفاصيل لكل سهم ──
+  const rows = open.map(p => {
+    const costBasis     = p.avgCost * p.remainingShares;
+    const fwdAnnDiv     = forwardAnnualDiv(p.ticker, p.remainingShares);
+    const yoc           = costBasis > 0 && fwdAnnDiv > 0 ? fwdAnnDiv / costBasis * 100 : null;
+    const curYield      = p.marketValue && p.marketValue > 0 && fwdAnnDiv > 0 ? fwdAnnDiv / p.marketValue * 100 : null;
+    // Div ROI = مجموع التوزيعات المستلمة ÷ إجمالي ما أُنفق على هذا الرمز (شراء − مبيعات)
+    const totalSpent    = p.buyCost; // تكلفة الشراء الأصلية الكلية
+    const divROI        = totalSpent > 0 ? p.divReceived / totalSpent * 100 : null;
+    // Break-Even = تكلفة الحيازة الحالية ÷ التوزيع السنوي المتوقع
+    const breakEvenYrs  = fwdAnnDiv > 0 && costBasis > 0 ? costBasis / fwdAnnDiv : null;
+
+    const yocCls   = yoc == null ? 'text-muted' : yoc >= 8 ? 'text-success' : yoc >= 4 ? '' : 'text-danger';
+    const divROICls = divROI == null ? 'text-muted' : divROI >= 50 ? 'text-success' : divROI >= 20 ? '' : 'text-muted';
+    const beCls    = breakEvenYrs == null ? 'text-muted' : breakEvenYrs <= 10 ? 'text-success' : breakEvenYrs <= 18 ? '' : 'text-danger';
+
+    return `<tr>
+      <td><strong class="text-accent">${esc(p.ticker)}</strong></td>
+      <td>${esc(p.name)}</td>
+      <td class="num bold ${yocCls}" title="التوزيع السنوي ${formatSAR(fwdAnnDiv)} ÷ تكلفة ${formatSAR(costBasis)}">${yoc != null ? yoc.toFixed(2) + '%' : '—'}</td>
+      <td class="num ${curYield != null ? '' : 'text-muted'}">${curYield != null ? curYield.toFixed(2) + '%' : '—'}</td>
+      <td class="num ${divROICls}" title="استردّ ${formatSAR(p.divReceived)} من ${formatSAR(totalSpent)}">${divROI != null ? divROI.toFixed(2) + '%' : '—'}</td>
+      <td class="num ${beCls}" title="عند ${formatSAR(fwdAnnDiv)} / سنة">${breakEvenYrs != null ? breakEvenYrs.toFixed(1) + ' سنة' : '—'}</td>
+      <td class="num text-success">${fwdAnnDiv > 0 ? formatSAR(fwdAnnDiv) : '—'}</td>
+      <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
+      <td class="num text-muted">${formatSAR(costBasis)}</td>
+    </tr>`;
+  }).join('');
+
+  tbody.innerHTML = rows || `<tr><td colspan="9" class="text-muted small text-center">لا توجد بيانات كافية للحساب</td></tr>`;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 🧠 تبويب: تحليل السلوك الاستثماري — Behavioral Audit
+// Win Rate · Hold Days (Winners vs Losers) · Profit Factor
+// Monthly Trade Frequency · Best/Worst Trades
+// ══════════════════════════════════════════════════════════════
+function renderBehavioralAudit() {
+  const el = document.getElementById('behavioral-body');
+  if (!el) return;
+
+  const { closed } = getPositionData();
+  if (closed.length < 2) {
+    el.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>تحتاج 2 صفقة مغلقة على الأقل للتحليل السلوكي</p></div>`;
+    return;
+  }
+
+  // ── حسابات السلوك ──
+  const winners = closed.filter(p => p.totalReturn > 0);
+  const losers  = closed.filter(p => p.totalReturn <= 0);
+
+  const winRate     = closed.length > 0 ? winners.length / closed.length * 100 : 0;
+  const totalGains  = winners.reduce((s, p) => s + p.totalReturn, 0);
+  const totalLosses = Math.abs(losers.reduce((s, p) => s + p.totalReturn, 0));
+  const profitFactor = totalLosses > 0 ? totalGains / totalLosses : totalGains > 0 ? Infinity : 0;
+
+  const avgHoldWinners = winners.length > 0
+    ? winners.reduce((s, p) => s + (p.holdDays || 0), 0) / winners.length : 0;
+  const avgHoldLosers  = losers.length > 0
+    ? losers.reduce((s, p) => s + (p.holdDays || 0), 0) / losers.length : 0;
+
+  // متوسط الربح في الصفقة الرابحة vs متوسط الخسارة
+  const avgWin  = winners.length > 0 ? totalGains / winners.length : 0;
+  const avgLoss = losers.length  > 0 ? totalLosses / losers.length  : 0;
+  const riskReward = avgLoss > 0 ? avgWin / avgLoss : null;
+
+  // عدد الصفقات شهرياً
+  const firstBuyDate = _tx.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0];
+  const monthsActive = firstBuyDate
+    ? Math.max(1, (new Date() - parseDateLocal(firstBuyDate)) / (30.44 * 86400000))
+    : 1;
+  const buyCount  = _tx.filter(t => t.type === 'buy').length;
+  const sellCount = _tx.filter(t => t.type === 'sell').length;
+  const tradesPerMonth = (buyCount + sellCount) / monthsActive;
+
+  // توزيع الصفقات على أشهر السنة
+  const MONTHS_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
+  const monthDist = Array(12).fill(0);
+  _tx.filter(t => t.date && (t.type === 'buy' || t.type === 'sell')).forEach(t => {
+    const d = parseDateLocal(t.date);
+    if (d) monthDist[d.getMonth()]++;
+  });
+  const maxMonth = Math.max(...monthDist);
+
+  // أفضل وأسوأ 3 صفقات
+  const sortedByReturn = [...closed].sort((a, b) => b.totalReturn - a.totalReturn);
+  const top3    = sortedByReturn.slice(0, 3);
+  const bottom3 = sortedByReturn.slice(-3).reverse();
+
+  // ── التشخيص السلوكي ──
+  const holdBias = avgHoldLosers > avgHoldWinners * 1.3
+    ? { icon: '⚠️', text: `تُمسك بخاسريك ${(avgHoldLosers / avgHoldWinners).toFixed(1)}× أطول من رابحيك — Loss Aversion نمطي. الخاسرون يستهلكون وقتاً أكثر مما يستحقون.`, cls: 'text-danger' }
+    : avgHoldWinners > avgHoldLosers * 1.3
+    ? { icon: '✅', text: `تُمسك برابحيك أطول من خاسريك — هذا النمط الصحيح "دع أرباحك تجري".`, cls: 'text-success' }
+    : { icon: '🟡', text: `مدة الاحتفاظ بالرابحين والخاسرين متقاربة — النمط السلوكي محايد.`, cls: '' };
+
+  const winRateDiag = winRate >= 60
+    ? { icon: '✅', text: `معدل الربح ${winRate.toFixed(0)}% ممتاز — أكثر من نصف صفقاتك تنتهي بربح.` }
+    : winRate >= 40
+    ? { icon: '🟡', text: `معدل الربح ${winRate.toFixed(0)}% معقول — مقبول إذا كانت أرباحك أكبر من خسائرك.` }
+    : { icon: '⚠️', text: `معدل الربح ${winRate.toFixed(0)}% منخفض — أكثر من نصف صفقاتك تنتهي بخسارة.` };
+
+  const pfDiag = profitFactor === Infinity
+    ? { icon: '✅', text: 'لا خسائر محققة حتى الآن.' }
+    : profitFactor >= 2
+    ? { icon: '✅', text: `Profit Factor ${profitFactor.toFixed(2)} — ممتاز. كل ريال خسرته تعوّضه بـ ${profitFactor.toFixed(1)} ريال ربح.` }
+    : profitFactor >= 1
+    ? { icon: '🟡', text: `Profit Factor ${profitFactor.toFixed(2)} — مقبول. الأرباح تفوق الخسائر لكن الهامش ضيق.` }
+    : { icon: '⚠️', text: `Profit Factor ${profitFactor.toFixed(2)} — خطر. خسائرك أكبر من أرباحك إجمالاً.` };
+
+  const tradingFreqDiag = tradesPerMonth > 8
+    ? { icon: '⚠️', text: `${tradesPerMonth.toFixed(1)} صفقة / شهر — مرتفع جداً. كل صفقة إضافية تُكلّف عمولة وتُعرّضك لقرارات متسرعة.` }
+    : tradesPerMonth > 4
+    ? { icon: '🟡', text: `${tradesPerMonth.toFixed(1)} صفقة / شهر — متوسط. راقب أن كل صفقة لها مبرر واضح.` }
+    : { icon: '✅', text: `${tradesPerMonth.toFixed(1)} صفقة / شهر — منضبط. هذا نمط المستثمر لا المضارب.` };
+
+  const fmtDays = d => d >= 365
+    ? `${(d/365).toFixed(1)} سنة`
+    : d >= 30
+    ? `${Math.round(d/30)} شهر`
+    : `${Math.round(d)} يوم`;
+
+  // ── بناء HTML ──
+  el.innerHTML = `
+    <!-- KPIs السلوكية -->
+    <div class="stats-grid" style="margin-bottom:20px">
+      <div class="stat-card">
+        <div class="label">معدل الربح <span class="eng-label">Win Rate</span></div>
+        <div class="value num ${winRate>=55?'text-success':winRate>=40?'':'text-danger'}">${winRate.toFixed(1)}%</div>
+        <div class="sub">${winners.length} / ${closed.length} صفقة</div>
+      </div>
+      <div class="stat-card" title="مجموع أرباح الصفقات الرابحة ÷ مجموع خسائر الصفقات الخاسرة">
+        <div class="label">Profit Factor</div>
+        <div class="value num ${profitFactor>=2?'text-success':profitFactor>=1?'':'text-danger'}">${profitFactor === Infinity ? '∞' : profitFactor.toFixed(2)}</div>
+        <div class="sub">ربح/خسارة</div>
+      </div>
+      <div class="stat-card" title="متوسط أيام الاحتفاظ بالصفقات الرابحة">
+        <div class="label">مدة الرابحين</div>
+        <div class="value num text-success">${fmtDays(avgHoldWinners)}</div>
+        <div class="sub">متوسط الاحتفاظ</div>
+      </div>
+      <div class="stat-card" title="متوسط أيام الاحتفاظ بالصفقات الخاسرة">
+        <div class="label">مدة الخاسرين</div>
+        <div class="value num ${avgHoldLosers > avgHoldWinners*1.3 ? 'text-danger' : 'text-muted'}">${fmtDays(avgHoldLosers)}</div>
+        <div class="sub">متوسط الاحتفاظ</div>
+      </div>
+      <div class="stat-card" title="متوسط الربح في صفقة رابحة ÷ متوسط الخسارة في صفقة خاسرة">
+        <div class="label">Risk/Reward</div>
+        <div class="value num ${riskReward!=null&&riskReward>=1.5?'text-success':riskReward!=null&&riskReward>=1?'':'text-danger'}">${riskReward != null ? riskReward.toFixed(2)+'×' : '—'}</div>
+        <div class="sub">ربح/خسارة متوسط</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">وتيرة التداول</div>
+        <div class="value num ${tradesPerMonth>8?'text-danger':tradesPerMonth>4?'':'text-success'}">${tradesPerMonth.toFixed(1)}</div>
+        <div class="sub">صفقة / شهر</div>
+      </div>
+    </div>
+
+    <!-- التشخيصات السلوكية -->
+    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
+      <div class="section-title" style="font-size:.85rem;margin-bottom:4px">🔍 التشخيصات السلوكية</div>
+      ${[holdBias, winRateDiag, pfDiag, tradingFreqDiag].map(d => `
+        <div style="padding:10px 14px;background:var(--bg-3);border-radius:var(--radius);border:1px solid var(--border);font-size:.83rem;line-height:1.6">
+          <span style="margin-left:6px">${d.icon}</span><span class="${d.cls || 'text-muted'}">${d.text}</span>
+        </div>`).join('')}
+    </div>
+
+    <!-- توزيع الصفقات على الشهور -->
+    <div style="margin-bottom:20px">
+      <div class="section-title" style="font-size:.85rem;margin-bottom:10px">📅 توزيع نشاطك الشهري (كل الصفقات)</div>
+      <div style="display:flex;gap:6px;align-items:flex-end;height:80px;padding:0 4px">
+        ${monthDist.map((cnt, i) => {
+          const h = maxMonth > 0 ? Math.max(4, cnt / maxMonth * 70) : 4;
+          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:default" title="${MONTHS_AR[i]}: ${cnt} صفقة">
+            <div style="font-size:.6rem;color:var(--text-2)">${cnt > 0 ? cnt : ''}</div>
+            <div style="width:100%;height:${h}px;background:${cnt === maxMonth ? 'var(--accent)' : 'rgba(88,166,255,0.4)'};border-radius:3px 3px 0 0;transition:height .3s"></div>
+            <div style="font-size:.6rem;color:var(--text-2)">${MONTHS_AR[i].substring(0,3)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${maxMonth > 0 ? `<p class="small text-muted" style="margin-top:6px">⚡ أعلى نشاط في: <strong>${MONTHS_AR[monthDist.indexOf(maxMonth)]}</strong></p>` : ''}
+    </div>
+
+    <!-- أفضل وأسوأ الصفقات -->
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+      <div>
+        <div class="section-title" style="font-size:.85rem;margin-bottom:8px">🏆 أفضل 3 صفقات</div>
+        ${top3.map(p => `
+          <div style="padding:8px 12px;background:rgba(63,185,80,.07);border:1px solid rgba(63,185,80,.2);border-radius:var(--radius);margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong class="text-accent" style="font-size:.88rem">${esc(p.ticker)}</strong>
+              <span class="num text-success" style="font-weight:700">${formatSAR(p.totalReturn, true)}</span>
+            </div>
+            <div class="small text-muted">${p.holdDays != null ? fmtDays(p.holdDays) : '—'} · ${p.totalReturnPct?.toFixed(1) || '—'}%</div>
+          </div>`).join('')}
+      </div>
+      <div>
+        <div class="section-title" style="font-size:.85rem;margin-bottom:8px">📉 أسوأ 3 صفقات</div>
+        ${bottom3.map(p => `
+          <div style="padding:8px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.18);border-radius:var(--radius);margin-bottom:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <strong class="text-muted" style="font-size:.88rem">${esc(p.ticker)}</strong>
+              <span class="num text-danger" style="font-weight:700">${formatSAR(p.totalReturn, true)}</span>
+            </div>
+            <div class="small text-muted">${p.holdDays != null ? fmtDays(p.holdDays) : '—'} · ${p.totalReturnPct?.toFixed(1) || '—'}%</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
 
 // ══════════════════════════════════════════════════════════════
 // 📊 مقارنة بالمؤشر (TASI Benchmark)

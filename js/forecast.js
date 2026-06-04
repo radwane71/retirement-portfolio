@@ -501,10 +501,19 @@ function renderFireBanner(h) {
 
   const fireNumber   = (fg.monthly * 12) / (fg.swr / 100);
   const yearsLeft    = fg.target_year - new Date().getFullYear();
+  // الهدف المعدَّل بالتضخم: المصاريف الشهرية ستكون أعلى بعد yearsLeft سنة
+  // الصيغة الصحيحة: الهدف يرتفع مع كل سنة تأخير (تضخم 2.5% افتراضي)
+  const INFLATION_RATE = 0.025;
+  const inflMonthly  = yearsLeft > 0 ? fg.monthly * Math.pow(1 + INFLATION_RATE, yearsLeft) : fg.monthly;
+  const fireInflated = (inflMonthly * 12) / (fg.swr / 100);
+  const showInfl     = yearsLeft > 0 && Math.abs(fireInflated - fireNumber) > 1000;
   // استخدم صافي الثروة الكامل (أسهم + عقارات + snapshot) لا الأسهم وحدها
   const currentNW    = h.totalNW || h.currentValue;
   const progress     = fireNumber > 0 ? Math.min(100, currentNW / fireNumber * 100) : 0;
+  // نسبة الإنجاز الحقيقية: مقارنة بالهدف المعدَّل بالتضخم
+  const progressReal = fireInflated > 0 ? Math.min(100, currentNW / fireInflated * 100) : 0;
   const remaining    = Math.max(0, fireNumber - currentNW);
+  const remainingReal = Math.max(0, fireInflated - currentNW);
   const barColor     = progress >= 100 ? '#3fb950' : progress >= 50 ? '#f0b429' : '#3b82f6';
 
   el.innerHTML = `
@@ -521,12 +530,21 @@ function renderFireBanner(h) {
       <div style="display:flex;flex-wrap:wrap;gap:16px;font-size:.8rem;margin-bottom:10px">
         <div><span style="color:var(--text-muted)">الدخل الشهري المستهدف</span><br><strong>${fmt(fg.monthly)}</strong></div>
         <div><span style="color:var(--text-muted)">نسبة السحب الآمن</span><br><strong>${fg.swr}%</strong></div>
-        <div><span style="color:var(--text-muted)">المحفظة المطلوبة</span><br><strong>${fmt(fireNumber)}</strong></div>
-        <div><span style="color:var(--text-muted)">المتبقي</span><br><strong style="color:${barColor}">${fmt(remaining)}</strong></div>
+        <div>
+          <span style="color:var(--text-muted)">المحفظة المطلوبة (اليوم)</span><br>
+          <strong>${fmt(fireNumber)}</strong>
+          ${showInfl ? `<br><span style="font-size:.72rem;color:#f0b429" title="بعد تعديل التضخم ${(INFLATION_RATE*100).toFixed(1)}% × ${yearsLeft} سنة&#10;دخل ${fmt(inflMonthly)}/شهر عند التقاعد">📈 معدَّل ${fmt(fireInflated)}</span>` : ''}
+        </div>
+        <div>
+          <span style="color:var(--text-muted)">المتبقي</span><br>
+          <strong style="color:${barColor}">${fmt(remaining)}</strong>
+          ${showInfl ? `<br><span style="font-size:.72rem;color:#f0b429">${fmt(remainingReal)} معدَّل</span>` : ''}
+        </div>
       </div>
       <div style="margin-bottom:4px">
         <div style="display:flex;justify-content:space-between;font-size:.72rem;color:var(--text-muted);margin-bottom:4px">
-          <span>نسبة الإنجاز نحو FIRE</span><span style="color:${barColor};font-weight:700">${progress.toFixed(1)}%</span>
+          <span>نسبة الإنجاز نحو FIRE ${showInfl ? `<span style="font-size:.66rem;color:#f0b429" title="الرقم الأول: بدون تضخم | الثاني: بعد تعديل التضخم">(${progressReal.toFixed(1)}% معدَّل)</span>` : ''}</span>
+          <span style="color:${barColor};font-weight:700">${progress.toFixed(1)}%</span>
         </div>
         <div style="background:var(--border);border-radius:99px;height:7px;overflow:hidden">
           <div style="height:100%;border-radius:99px;background:${barColor};width:${Math.min(progress,100)}%;transition:width .4s"></div>

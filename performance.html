@@ -134,6 +134,11 @@
       <div class="stat-card"><div class="label">إجمالي ر/خ محقق <span class="eng-label">Realized P&amp;L</span></div><div class="value num" id="pk-realized">—</div><div class="sub">من صفقات البيع</div></div>
       <div class="stat-card"><div class="label">ر/خ غير محقق <span class="eng-label">Unrealized P&amp;L</span></div><div class="value num" id="pk-unrealized">—</div><div class="sub">على المراكز الحالية</div></div>
       <div class="stat-card"><div class="label">أقصى تراجع <span class="eng-label">Max Drawdown</span></div><div class="value num text-muted" id="pk-max-drawdown">—</div><div class="sub">من قمة إلى قاع</div></div>
+      <div class="stat-card" title="Herfindahl-Hirschman Index — يقيس تركز المحفظة&#10;قريب من 0 = تنويع جيد | فوق 0.25 = تركز عالٍ">
+        <div class="label">تركز المحفظة <span class="eng-label">HHI</span></div>
+        <div class="value num" id="pk-hhi">—</div>
+        <div class="sub" id="pk-hhi-sub">مقياس التنويع</div>
+      </div>
     </div>
 
     <!-- Tabs -->
@@ -143,6 +148,8 @@
       <button class="perf-tab"        onclick="showPerfTab('timeline')" id="ptab-timeline">📅 التايم لاين الشهري</button>
       <button class="perf-tab"        onclick="showPerfTab('monthly-chart')" id="ptab-monthly-chart">📈 الرسم البياني</button>
       <button class="perf-tab"        onclick="showPerfTab('benchmark')"    id="ptab-benchmark">📊 مقارنة بالمؤشر</button>
+      <button class="perf-tab"        onclick="showPerfTab('div-metrics')"  id="ptab-div-metrics">💰 مؤشرات التوزيعات</button>
+      <button class="perf-tab"        onclick="showPerfTab('behavioral')"   id="ptab-behavioral">🧠 تحليل السلوك</button>
     </div>
 
     <!-- ── TAB: Open positions ── -->
@@ -165,10 +172,11 @@
               <th>ر/خ % <span class="eng-label">Return%</span></th>
               <th>أرباح مستلمة <span class="eng-label">Dividends</span></th>
               <th>إجمالي العائد <span class="eng-label">Total Return</span></th>
+              <th title="العائد الداخلي السنوي لهذا المركز منفرداً — يشمل سعر الشراء/البيع والأرباح والقيمة الحالية">XIRR <span class="eng-label">/ سنة</span></th>
             </tr>
           </thead>
           <tbody id="open-tbody">
-            <tr><td colspan="11"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+            <tr><td colspan="12"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
           <tfoot id="open-tfoot"></tfoot>
         </table>
@@ -400,6 +408,56 @@
       ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
       أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
     </footer>
+
+    <!-- ── TAB: Dividend Metrics ── -->
+    <div id="pview-div-metrics" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">💰 مؤشرات التوزيعات المتقدمة</span>
+        <span class="small text-muted">YoC · Dividend ROI · سنوات الاسترداد</span>
+      </div>
+      <p class="small text-muted" style="margin-bottom:12px">
+        <strong>YoC</strong> = عائد التوزيعات على تكلفتك الأصلية (لا سعر السوق) ·
+        <strong>Div ROI</strong> = نسبة ما استردّه من توزيعات من رأس مالك ·
+        <strong>سنوات الاسترداد</strong> = متى تسترد تكلفتك من التوزيعات وحدها
+      </p>
+      <!-- KPI شريط الملخص -->
+      <div class="stats-grid" id="dv-kpi-strip" style="margin-bottom:16px"></div>
+      <!-- جدول التفاصيل -->
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الرمز</th><th>الاسم</th>
+              <th title="التوزيعات السنوية المتوقعة ÷ تكلفة حيازتك الأصلية">YoC % <span class="eng-label">Yield on Cost</span></th>
+              <th title="العائد الحالي على سعر السوق">Current Yield %</th>
+              <th title="مجموع التوزيعات المستلمة ÷ إجمالي ما أنفقته">Div ROI % <span class="eng-label">استرداد رأس المال</span></th>
+              <th title="كم سنة حتى تسترد تكلفتك من التوزيعات وحدها — بدون نمو">سنوات الاسترداد <span class="eng-label">Break-Even</span></th>
+              <th>التوزيعات السنوية المتوقعة</th>
+              <th>إجمالي التوزيعات المستلمة</th>
+              <th>تكلفة الحيازة</th>
+            </tr>
+          </thead>
+          <tbody id="dv-tbody">
+            <tr><td colspan="9"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── TAB: Behavioral Audit ── -->
+    <div id="pview-behavioral" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">🧠 تحليل السلوك الاستثماري</span>
+        <span class="small text-muted">مرآة تكشف أنماطك الفعلية في الشراء والبيع</span>
+      </div>
+      <p class="small text-muted" style="margin-bottom:16px">
+        مبني على صفقاتك المغلقة. الهدف: اكتشاف التحيزات السلوكية قبل أن تتكرر.
+      </p>
+      <div id="behavioral-body">
+        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحليل…</p></div>
+      </div>
+    </div>
+
   </main>
 
   <div class="toast" id="toast"></div>

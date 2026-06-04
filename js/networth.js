@@ -462,6 +462,54 @@ async function saveSnapshot() {
   renderChart(); renderSnapshotTable();
 }
 
+// ── تنظيف اللقطات المكررة ─────────────────────────────────────────────
+// لكل يوم يحتوي أكثر من لقطة: احتفظ بالأفضل (يدوية > تلقائية، ثم الأحدث id)
+// وجود المئات من اللقطات المكررة يُشوّه حساب TWR وMax Drawdown
+async function deduplicateSnapshots() {
+  if (!snapshots.length) { showToast('لا توجد لقطات', 'error'); return; }
+
+  // تجميع حسب التاريخ
+  const byDate = {};
+  snapshots.forEach(s => {
+    if (!byDate[s.date]) byDate[s.date] = [];
+    byDate[s.date].push(s);
+  });
+
+  // ابحث عن الأيام بها أكثر من لقطة
+  const toDelete = [];
+  Object.values(byDate).forEach(group => {
+    if (group.length <= 1) return;
+    // افضل لقطة: يدوية أولاً (ليست auto)، ثم الأعلى id (الأحدث إضافةً)
+    const sorted = [...group].sort((a, b) => {
+      const aManual = a.notes && !a.notes.startsWith('auto') ? 1 : 0;
+      const bManual = b.notes && !b.notes.startsWith('auto') ? 1 : 0;
+      if (bManual !== aManual) return bManual - aManual; // يدوية أولاً
+      return b.id > a.id ? 1 : -1; // ثم الأحدث
+    });
+    // احذف كل شيء ما عدا الأول
+    sorted.slice(1).forEach(s => toDelete.push(s.id));
+  });
+
+  if (!toDelete.length) { showToast('✓ لا توجد تكرارات — المحفظة نظيفة', 'success'); return; }
+
+  if (!await confirmAsync(`سيتم حذف ${toDelete.length} لقطة مكررة (يُبقى أفضل لقطة لكل يوم). هل تتابع؟`)) return;
+
+  // حذف على دفعات لتجنب تجاوز حدود Supabase
+  const BATCH = 50;
+  let deleted = 0;
+  for (let i = 0; i < toDelete.length; i += BATCH) {
+    const chunk = toDelete.slice(i, i + BATCH);
+    const { error } = await supabaseClient.from('net_worth_snapshots').delete().in('id', chunk);
+    if (error) { showToast('خطأ أثناء الحذف: ' + error.message, 'error'); return; }
+    deleted += chunk.length;
+  }
+
+  showToast(`✓ تم حذف ${deleted} لقطة مكررة — تبقّى ${snapshots.length - deleted} لقطة`, 'success');
+  const rSnap = await supabaseClient.from('net_worth_snapshots').select('*').order('date', { ascending: true });
+  snapshots = rSnap.data || [];
+  renderChart(); renderSnapshotTable();
+}
+
 async function deleteSnapshot(id) {
   // AUDIT-FIX: replace blocking confirm() with async modal
   if (!await confirmAsync('هل أنت متأكد من حذف هذه اللقطة؟')) return;
