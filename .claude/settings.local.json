@@ -7,7 +7,21 @@
       "Bash(findstr /n \"syncHoldingsFromTx\" \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\dashboard.js\")",
       "Bash(findstr /n \"sync\" \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\dashboard.html\")",
       "Bash(node -e ' *)",
-      "mcp__Claude_Preview__preview_start"
+      "mcp__Claude_Preview__preview_start",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(ls .claude/ 2>/dev/null || mkdir -p .claude)",
+      "Bash(node --check js/dashboard.js)",
+      "Bash(git commit -m 'fix\\(health-card\\): always show edit button for retirement goal *)",
+      "Bash(grep '\\\\${')",
+      "Bash(grep -rn \"'\\\\\\([^']*\\\\\\)\\\\${\" \"C:/Users/User/retirement-portfolio/js/forecast.js\" \"C:/Users/User/retirement-portfolio/js/dividends.js\" \"C:/Users/User/retirement-portfolio/js/dashboard.js\")",
+      "Bash(python3 -)",
+      "Bash(git commit *)",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__computer",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "Bash(grep -E \"\\\\.sql$\")"
     ]
   }
 }
