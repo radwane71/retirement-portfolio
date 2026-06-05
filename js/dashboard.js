@@ -253,7 +253,6 @@ async function loadAllData() {
     showToast(`⚠️ تعذّر تحميل ${failed.length} مصدر بيانات — قد تكون بعض الأرقام غير مكتملة`, 'warning');
   }
 
-  const safe = (i) => results[i].status === 'fulfilled' ? results[i].value : { data: null, error: null };
   const [rH, rTx, rDiv, rCf, rNw, rRe, rSt, rSecT, rCash] = results.map(r =>
     r.status === 'fulfilled' ? r.value : { data: null, error: null }
   );

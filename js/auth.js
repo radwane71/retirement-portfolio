@@ -12,7 +12,8 @@ async function requireAuth() {
     .then(() => {});
 
   // إظهار رابط لوحة الإدارة للمدير فقط
-  if (user.user_metadata?.is_admin) {
+  // AUDIT-FIX: read admin flag from app_metadata (server-set) not user_metadata (user-writable)
+  if (user.app_metadata?.is_admin) {
     const adminLink = document.getElementById('nav-admin');
     if (adminLink) adminLink.style.display = '';
   }
@@ -20,7 +21,7 @@ async function requireAuth() {
   // فحص وضع الصيانة — await لمنع تحميل الصفحة قبل التحقق
   const { data: maintData } = await supabaseClient
     .from('site_config').select('value').eq('key', 'maintenance_mode').maybeSingle();
-  if (maintData?.value === 'true' && !user.user_metadata?.is_admin) {
+  if (maintData?.value === 'true' && !user.app_metadata?.is_admin) {
     window.location.href = 'maintenance.html';
     return null;
   }

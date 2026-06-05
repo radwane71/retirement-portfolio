@@ -13,7 +13,8 @@ let currentAdmin  = null;
   if (!session) { window.location.href = 'index.html'; return; }
 
   const { data: { user } } = await supabaseClient.auth.getUser();
-  if (!user?.user_metadata?.is_admin) {
+  // AUDIT-FIX: gate on app_metadata (server-set) not user_metadata (user-writable). UI gate only — real enforcement is RLS via public.is_admin().
+  if (!user?.app_metadata?.is_admin) {
     document.body.innerHTML = `
       <div style="display:flex;align-items:center;justify-content:center;min-height:100vh;flex-direction:column;gap:16px">
         <div style="font-size:2rem">🚫</div>
@@ -205,6 +206,7 @@ async function executeErasure(requestId, userId) {
     'net_worth_snapshots', 'nw_assets', 'nw_liabilities', 'real_estate',
     'user_stocks', 'stock_targets', 'sector_targets', 'watchlist',
     'portfolio_cash', 'portfolio_tasks',
+    'user_settings',   // AUDIT-FIX: synced user prefs (utils.js saveUserSetting) were left behind on erasure — GDPR completeness
   ];
   for (const tbl of tables) {
     const { error } = await supabaseClient.from(tbl).delete().eq('user_id', userId);
