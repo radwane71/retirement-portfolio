@@ -29,6 +29,10 @@
     .leverage-warning { display: none; background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.4); border-radius: 8px; padding: 12px 14px; margin-top: 10px; color: #f0b429; font-weight: 600; line-height: 1.6; font-size: 0.88rem; }
     .conflict-warning { display: none; background: rgba(239,68,68,0.1); border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px; margin-top: 10px; color: var(--danger); font-size: 0.85rem; font-weight: 600; }
     .etf-notice { display: none; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.35); border-radius: 8px; padding: 10px 12px; margin-top: 10px; color: #818cf8; font-size: 0.85rem; }
+    /* تخطيط عمودين */
+    .rating-layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 22px; align-items: start; max-width: 1100px; margin: 0 auto; }
+    .rating-form-col {}
+    .rating-result-col { position: sticky; top: 20px; }
     /* نتائج */
     .results-section { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 14px; text-align: center; }
     .results-section h3 { color: var(--accent); margin-bottom: 18px; font-size: 0.95rem; }
@@ -48,6 +52,8 @@
     .breakdown-value.negative { color: var(--danger); }
     .breakdown-value.neutral  { color: var(--text-muted); }
     .reset-btn { background: var(--danger); color: #fff; border: none; padding: 11px 22px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 16px auto; display: block; font-family: 'Tajawal', sans-serif; }
+    .chart-container-rating { position: relative; height: 260px; margin-top: 16px; }
+    @media(max-width: 960px) { .rating-layout { grid-template-columns: 1fr; } .rating-result-col { position: static; } }
     @media(max-width:768px) { .two-col { grid-template-columns: 1fr; } }
   </style>
 </head>
@@ -120,7 +126,9 @@
       </div>
     </div>
 
-    <div style="max-width:720px;">
+    <div class="rating-layout">
+    <!-- عمود اليمين: النموذج -->
+    <div class="rating-form-col">
 
       <!-- 1. مكونات -->
       <div class="rule-section">
@@ -246,43 +254,55 @@
         <div class="leverage-warning" id="leverageWarning">⚠️ الرافعة المالية تُضاعف الخسائر في السوق الهابط. الخصم يتناسب مع نسبة الرافعة.</div>
       </div>
 
-      <!-- النتائج -->
+      <button class="reset-btn" onclick="resetCalculator()">🔄 إعادة تعيين</button>
+
+    </div><!-- /rating-form-col -->
+
+    <!-- عمود اليسار: النتائج والشارت -->
+    <div class="rating-result-col">
       <div class="results-section">
         <h3>📊 النتيجة النهائية</h3>
         <div class="progress-container" id="progressContainer">
           <div class="progress-bar">
-            <div class="progress-fill" id="progressFill"><span class="progress-text" id="progressText">0%</span></div>
+            <div class="progress-fill" id="progressFill"><span class="progress-text" id="progressText">—</span></div>
           </div>
           <div class="score-info">
-            <div class="score-display" id="safetyScore">0/10</div>
-            <div class="percentage-display" id="percentageDisplay">0%</div>
+            <div class="score-display" id="safetyScore">—</div>
+            <div class="percentage-display" id="percentageDisplay" style="background:var(--bg-3);color:var(--text-muted)">—</div>
           </div>
         </div>
         <div class="evaluation-text" id="evaluationText">أدخل البيانات للحصول على التقييم</div>
         <div class="evaluation-text" id="smartFeedback" style="display:none;border-right-color:#3b82f6;"></div>
+
+        <!-- شارت تفاصيل النقاط -->
         <div class="score-breakdown" id="scoreBreakdown">
-          <h4>📋 تفاصيل النقاط</h4>
-          <div id="breakdownItems"></div>
+          <h4>📋 تفاصيل الأبعاد</h4>
+          <div class="chart-container-rating">
+            <canvas id="breakdownChart"></canvas>
+          </div>
+          <div id="breakdownItems" style="margin-top:12px"></div>
         </div>
       </div>
+    </div><!-- /rating-result-col -->
 
-      <button class="reset-btn" onclick="resetCalculator()">🔄 إعادة تعيين</button>
-    </div>
+    </div><!-- /rating-layout -->
   </main>
 
   <div id="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
   <script src="js/supabase.js"></script>
   <script src="js/auth.js"></script>
   <script src="js/utils.js"></script>
   <script>
+    let breakdownChartInst = null;
+
     async function init() {
       const user = await requireAuth();
       if (!user) return;
       setActiveNav('nav-portfolio-rating');
     }
 
-    // ===== Leverage Toggle =====
     document.getElementById('usesLeverage').addEventListener('change', function () {
       const isYes = this.value === 'yes';
       document.getElementById('leverageWarning').style.display    = isYes ? 'block' : 'none';
@@ -303,115 +323,128 @@
       document.getElementById('etfNotice').style.display = (ec > 0 && is === 0) ? 'block' : 'none';
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // نظام التقييم الواقعي — معايير عملية لا مثالية
+    // ──────────────────────────────────────────────────────────────
+    // مجموع النقاط الإيجابية: 10.0 بالضبط
+    //   التنويع الفعلي       2.5 ← أكبر وزن: الأسهم الفردية + ETF + ريت + صكوك
+    //   التنوع القطاعي       1.5 ← موزون لأن السوق السعودي قطاعاته محدودة
+    //   أفق الاستثمار        1.0 ← الطويل الأجل يمتص التذبذب
+    //   تركيز السهم الأكبر   1.0 ← حد واقعي: <15% لا <10%
+    //   تركيز القطاع الأكبر  1.0 ← حد واقعي: <30% لا <20%
+    //   فئات الأصول          1.0 ← التنويع بين أنواع مختلفة
+    //   التوزيع الجغرافي     1.0 ← أقل وزناً: السوق المحلي استراتيجية صحيحة
+    //   احتياطي الكاش        0.5 ← هامش الأمان
+    //   أصول تحوط (ذهب)     0.5 ← اختياري، ليس شرطاً
+    // ══════════════════════════════════════════════════════════════
     function calculateSafetyRating() {
       let score = 0;
-      let breakdown = [];
-      const is    = parseInt(document.getElementById('individualStocks').value)         || 0;
-      const rc    = parseInt(document.getElementById('reitCount').value)                || 0;
-      const ec    = parseInt(document.getElementById('etfCount').value)                 || 0;
-      const bc    = parseInt(document.getElementById('bondCount').value)                || 0;
-      const lsp   = parseFloat(document.getElementById('largestStockPercentage').value) || 0;
-      const lsecp = parseFloat(document.getElementById('largestSectorPercentage').value)|| 0;
-      const geo   = document.getElementById('geographicDistribution').value;
-      const gold  = document.getElementById('goldPercentage').value;
-      const cash  = document.getElementById('hasCash').value;
-      const sec   = document.getElementById('sectorDiversification').value;
-      const hor   = document.getElementById('investmentHorizon').value;
-      const lev   = document.getElementById('usesLeverage').value;
+      const breakdown = [];
+
+      const is       = parseInt(document.getElementById('individualStocks').value)          || 0;
+      const rc       = parseInt(document.getElementById('reitCount').value)                 || 0;
+      const ec       = parseInt(document.getElementById('etfCount').value)                  || 0;
+      const bc       = parseInt(document.getElementById('bondCount').value)                 || 0;
+      const lsp      = parseFloat(document.getElementById('largestStockPercentage').value)  || 0;
+      const lsecp    = parseFloat(document.getElementById('largestSectorPercentage').value) || 0;
+      const geo      = document.getElementById('geographicDistribution').value;
+      const gold     = document.getElementById('goldPercentage').value;
+      const cash     = document.getElementById('hasCash').value;
+      const sec      = document.getElementById('sectorDiversification').value;
+      const hor      = document.getElementById('investmentHorizon').value;
+      const lev      = document.getElementById('usesLeverage').value;
       const levRatio = parseFloat(document.getElementById('leverageRatio').value) || 0;
 
+      // 1. التنويع الفعلي (0–2.5)
       const effectiveUnits = is + (ec * 30) + (rc * 5) + (bc * 3);
-      let ds;
-      if      (effectiveUnits === 0)  ds = 0;
-      else if (effectiveUnits >= 60)  ds = 2.5;
-      else if (effectiveUnits >= 30)  ds = 2.0;
-      else if (effectiveUnits >= 15)  ds = 1.5;
-      else if (effectiveUnits >= 5)   ds = 1.0;
-      else                            ds = 0.5;
+      const ds = effectiveUnits === 0 ? 0
+               : effectiveUnits >= 60 ? 2.5
+               : effectiveUnits >= 30 ? 2.0
+               : effectiveUnits >= 15 ? 1.5
+               : effectiveUnits >= 5  ? 1.0 : 0.5;
       score += ds;
       breakdown.push({ label: `التنويع الفعلي (${effectiveUnits} وحدة)`, value: ds, max: 2.5 });
 
-      const assetClasses = (is>0?1:0)+(ec>0?1:0)+(rc>0?1:0)+(bc>0?1:0);
-      const asScore = assetClasses >= 3 ? 1.0 : assetClasses === 2 ? 0.6 : assetClasses === 1 ? 0.3 : 0;
-      score += asScore;
-      breakdown.push({ label: `فئات الأصول (${assetClasses} فئة)`, value: asScore, max: 1 });
-
-      const geoMap = { diversified: 1.5, international: 1.0, regional: 0.75, 'local-only': 0.4 };
-      const gs = geoMap[geo] || 0;
-      score += gs;
-      breakdown.push({ label: 'التوزيع الجغرافي', value: gs, max: 1.5 });
-
-      const cs = cash === 'yes' ? 0.5 : 0;
-      score += cs;
-      breakdown.push({ label: 'احتياطي الكاش', value: cs, max: 0.5 });
-
-      const goldMap = { high: 1.0, medium: 0.75, low: 0.4, none: 0 };
-      const gls = goldMap[gold] || 0;
-      score += gls;
-      breakdown.push({ label: 'الذهب كأصل تحوط', value: gls, max: 1 });
-
+      // 2. التنوع القطاعي (0–1.5)
       const secMap = { 'single-sector': 0, '2-4-sectors': 0.6, '5-7-sectors': 1.1, '8-plus-sectors': 1.5 };
       const scs = secMap[sec] || 0;
       score += scs;
       breakdown.push({ label: 'التنوع القطاعي', value: scs, max: 1.5 });
 
+      // 3. أفق الاستثمار (0–1.0)
       const horMap = { long: 1.0, medium: 0.65, short: 0.3 };
       const hs = horMap[hor] || 0;
       score += hs;
-      breakdown.push({ label: 'أفق الاستثمار', value: hs, max: 1 });
+      breakdown.push({ label: 'أفق الاستثمار', value: hs, max: 1.0 });
 
-      let stockConc;
-      if      (lsp === 0)  stockConc = 0;
-      else if (lsp < 10)   stockConc = 1.0;
-      else if (lsp <= 15)  stockConc = 0.7;
-      else if (lsp <= 25)  stockConc = 0.3;
-      else                 stockConc = 0;
+      // 4. تركيز السهم الأكبر (0–1.0) — حد واقعي <15% لا <10%
+      const stockConc = lsp === 0 ? 0
+                      : lsp < 15  ? 1.0
+                      : lsp <= 20 ? 0.75
+                      : lsp <= 30 ? 0.4 : 0;
       score += stockConc;
-      breakdown.push({ label: 'تركيز السهم الأكبر', value: stockConc, max: 1 });
+      breakdown.push({ label: 'تركيز السهم الأكبر', value: stockConc, max: 1.0 });
 
-      let sconc;
-      if      (lsecp === 0)  sconc = 0;
-      else if (lsecp < 20)   sconc = 1.0;
-      else if (lsecp <= 30)  sconc = 0.6;
-      else if (lsecp <= 45)  sconc = 0.3;
-      else                   sconc = 0;
+      // 5. تركيز القطاع الأكبر (0–1.0) — حد واقعي <30% لا <20%
+      const sconc = lsecp === 0 ? 0
+                  : lsecp < 30  ? 1.0
+                  : lsecp <= 45 ? 0.6
+                  : lsecp <= 60 ? 0.3 : 0;
       score += sconc;
-      breakdown.push({ label: 'تركيز القطاع الأكبر', value: sconc, max: 1 });
+      breakdown.push({ label: 'تركيز القطاع الأكبر', value: sconc, max: 1.0 });
 
-      if      (lsp > 40) { const p=2.5; score=Math.max(0,score-p); breakdown.push({ label:`⛔ خصم: سهم واحد > 40% (خطر حاد)`, value:-p, isPenalty:true }); }
-      else if (lsp > 25) { const p=1.5; score=Math.max(0,score-p); breakdown.push({ label:`خصم: سهم واحد بين 25-40%`,          value:-p, isPenalty:true }); }
-      else if (lsp > 15) { const p=0.75;score=Math.max(0,score-p); breakdown.push({ label:`خصم: سهم واحد بين 15-25%`,          value:-p, isPenalty:true }); }
+      // 6. فئات الأصول (0–1.0)
+      const assetClasses = (is>0?1:0)+(ec>0?1:0)+(rc>0?1:0)+(bc>0?1:0);
+      const asScore = assetClasses >= 3 ? 1.0 : assetClasses === 2 ? 0.6 : assetClasses === 1 ? 0.3 : 0;
+      score += asScore;
+      breakdown.push({ label: `فئات الأصول (${assetClasses} فئة)`, value: asScore, max: 1.0 });
 
-      if      (lsecp > 70) { const p=2.0; score=Math.max(0,score-p); breakdown.push({ label:`⛔ خصم: قطاع واحد > 70% (خطر حاد)`, value:-p, isPenalty:true }); }
-      else if (lsecp > 50) { const p=1.0; score=Math.max(0,score-p); breakdown.push({ label:`خصم: قطاع واحد بين 50-70%`,         value:-p, isPenalty:true }); }
+      // 7. التوزيع الجغرافي (0–1.0) — محلي فقط = 0.55 (استراتيجية مشروعة)
+      const geoMap = { diversified: 1.0, international: 0.85, regional: 0.70, 'local-only': 0.55 };
+      const gs = geoMap[geo] || 0;
+      score += gs;
+      breakdown.push({ label: 'التوزيع الجغرافي', value: gs, max: 1.0 });
+
+      // 8. احتياطي الكاش (0–0.5)
+      const cs = cash === 'yes' ? 0.5 : 0;
+      score += cs;
+      breakdown.push({ label: 'احتياطي الكاش', value: cs, max: 0.5 });
+
+      // 9. أصول التحوط / ذهب (0–0.5) — اختياري
+      const goldMap = { high: 0.5, medium: 0.35, low: 0.15, none: 0 };
+      const gls = goldMap[gold] || 0;
+      score += gls;
+      breakdown.push({ label: 'أصول تحوط (ذهب)', value: gls, max: 0.5 });
+
+      // ── الخصومات: فقط للمخاطر الحقيقية ──────────────────────
+      if      (lsp > 40) { const p=2.5; score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: سهم واحد > 40%', value:-p, isPenalty:true }); }
+      else if (lsp > 30) { const p=1.2; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 30–40%',  value:-p, isPenalty:true }); }
+      else if (lsp > 20) { const p=0.4; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 20–30%',  value:-p, isPenalty:true }); }
+
+      if      (lsecp > 70) { const p=2.0; score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: قطاع واحد > 70%', value:-p, isPenalty:true }); }
+      else if (lsecp > 50) { const p=0.8; score=Math.max(0,score-p); breakdown.push({ label:'خصم: قطاع واحد 50–70%',  value:-p, isPenalty:true }); }
 
       const highDiv = sec === '8-plus-sectors' || sec === '5-7-sectors';
-      if (highDiv && lsecp > 50) { const p=0.75; score=Math.max(0,score-p); breakdown.push({ label:`خصم: تناقض (تنويع عالٍ + قطاع مهيمن)`, value:-p, isPenalty:true }); }
+      if (highDiv && lsecp > 50) { const p=0.5; score=Math.max(0,score-p); breakdown.push({ label:'خصم: تناقض (تنويع عالٍ + قطاع مهيمن)', value:-p, isPenalty:true }); }
 
       if (lev === 'yes') {
-        let levPen;
-        if      (levRatio > 100) levPen = 3.5;
-        else if (levRatio > 50)  levPen = 2.5;
-        else if (levRatio > 20)  levPen = 1.5;
-        else if (levRatio > 0)   levPen = 0.75;
-        else                     levPen = 1.0;
+        const levPen = levRatio > 100 ? 3.5 : levRatio > 50 ? 2.5 : levRatio > 20 ? 1.5 : levRatio > 0 ? 0.75 : 1.0;
         score = Math.max(0, score - levPen);
-        breakdown.push({ label:`⛔ خصم: رافعة مالية ${levRatio>0?levRatio+'%':'(غير محددة)'}`, value:-levPen, isPenalty:true });
+        breakdown.push({ label:`⛔ خصم: رافعة مالية ${levRatio > 0 ? levRatio + '%' : '(غير محددة)'}`, value:-levPen, isPenalty:true });
       }
 
       return { score: Math.min(parseFloat(score.toFixed(1)), 10), breakdown };
     }
 
     function getEvaluation(score) {
-      let ev;
-      if      (score >= 8.5) ev = '🟢 محفظة نموذجية ومتزنة جداً — مستوى أمان عالٍ';
-      else if (score >= 7.0) ev = '🟢 محفظة جيدة — يمكن تعزيز بعض جوانب التنويع';
-      else if (score >= 5.5) ev = '🟡 محفظة متوسطة — تحتاج مراجعة هيكلية';
-      else if (score >= 3.5) ev = '🟠 محفظة مركزة — مخاطر فوق المتوسط';
-      else                   ev = '🔴 محفظة عالية المخاطر — مراجعة عاجلة مطلوبة';
+      const ev = score >= 8.5 ? '🟢 محفظة متينة وواقعية — مستوى أمان عالٍ جداً'
+               : score >= 7.0 ? '🟢 محفظة جيدة — بناء سليم مع هامش للتحسين'
+               : score >= 5.5 ? '🟡 محفظة مقبولة — تحتاج مراجعة هيكلية'
+               : score >= 3.5 ? '🟠 محفظة مركزة — مخاطر فوق المتوسط'
+               :                '🔴 محفظة عالية المخاطر — مراجعة عاجلة';
 
-      const lsp   = parseFloat(document.getElementById('largestStockPercentage').value) || 0;
-      const lsecp = parseFloat(document.getElementById('largestSectorPercentage').value)|| 0;
+      const lsp   = parseFloat(document.getElementById('largestStockPercentage').value)  || 0;
+      const lsecp = parseFloat(document.getElementById('largestSectorPercentage').value) || 0;
       const gold  = document.getElementById('goldPercentage').value;
       const cash  = document.getElementById('hasCash').value;
       const sec   = document.getElementById('sectorDiversification').value;
@@ -421,16 +454,16 @@
       const is    = parseInt(document.getElementById('individualStocks').value) || 0;
       const ec    = parseInt(document.getElementById('etfCount').value) || 0;
 
-      let fb = [];
+      const fb = [];
       if (lev === 'yes')           fb.push('• ⛔ <strong>خطر حاد:</strong> الرافعة تُضاعف الخسائر — قلّصها أو أزلها');
-      if (lsecp > 50)              fb.push('• ⛔ تركيز قطاعي خطير — لا تضع أكثر من 30% في قطاع واحد');
-      if (lsp > 25)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — خفّضه تحت 10-15%');
-      if (gold === 'none')         fb.push('• أضف ذهباً (5-10%) كأصل تحوط في الأزمات وأوقات التضخم');
-      if (cash === 'no')           fb.push('• احتفظ بـ 5-10% كاش — للطوارئ وللفرص السوقية');
-      if (sec === 'single-sector') fb.push('• ⚠️ قطاع واحد = رهان على عامل خارجي واحد — وسّع نطاقك');
-      if (hor === 'short')         fb.push('• أفق قصير: ارفع نسبة الكاش والسندات، قلّل التعرض للأسهم');
-      if (geo === 'local-only')    fb.push('• تعرضك كله للسوق المحلي — أضف ETF دولي للحماية من المخاطر البلدية');
-      if (is > 0 && ec === 0)      fb.push('• فكّر في إضافة ETF واحد على الأقل لتخفيف مخاطر الأسهم الفردية');
+      if (lsecp > 50)              fb.push('• ⛔ تركيز قطاعي خطير — حاول إبقاء القطاع الأكبر تحت 40%');
+      if (lsp > 30)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — خفّضه تحت 20%');
+      if (cash === 'no')           fb.push('• احتفظ بـ 5-10% كاش — يوفر هامش الأمان وفرص الشراء');
+      if (sec === 'single-sector') fb.push('• ⚠️ قطاع واحد = مخاطرة مركّزة — حاول التوسع لقطاعين على الأقل');
+      if (hor === 'short')         fb.push('• أفق قصير: ارفع نسبة الكاش، قلّل الأسهم عالية التذبذب');
+      if (geo === 'local-only' && ec === 0) fb.push('• فكّر في ETF دولي واحد للتحوط من مخاطر السوق المحلي');
+      if (gold === 'none' && score < 7)    fb.push('• الذهب (5-10%) يوفر حماية في أوقات الأزمات والتضخم');
+      if (is > 0 && ec === 0 && is < 8)   fb.push('• مع عدد أسهم محدود، ETF يُضيف تنويعاً واسعاً بسهولة');
 
       return { evaluation: ev, feedback: fb.length ? fb.join('<br>') : null };
     }
@@ -442,17 +475,16 @@
       const { evaluation, feedback } = getEvaluation(score);
       const pct = (score / 10) * 100;
 
-      document.getElementById('safetyScore').textContent  = score.toFixed(1) + '/10';
+      document.getElementById('safetyScore').textContent    = score.toFixed(1) + '/10';
       document.getElementById('evaluationText').textContent = evaluation;
 
       const pFill = document.getElementById('progressFill');
-      const pText = document.getElementById('progressText');
-      const pDisp = document.getElementById('percentageDisplay');
       const pCont = document.getElementById('progressContainer');
+      const pDisp = document.getElementById('percentageDisplay');
 
-      pFill.style.width    = pct + '%';
-      pText.textContent    = Math.round(pct) + '%';
-      pDisp.textContent    = Math.round(pct) + '%';
+      pFill.style.width = pct + '%';
+      document.getElementById('progressText').textContent = Math.round(pct) + '%';
+      pDisp.textContent = Math.round(pct) + '%';
 
       let fillGrad, bgColor, textColor;
       if      (score >= 8.5) { fillGrad='linear-gradient(90deg,#22c55e,#16a34a)'; bgColor='rgba(22,163,74,0.08)';  textColor='#4ade80'; }
@@ -467,38 +499,94 @@
       pDisp.style.color      = '#0f172a';
 
       const fbEl = document.getElementById('smartFeedback');
-      if (feedback) { fbEl.innerHTML = '<strong>💡 توصيات مخصصة:</strong><br>' + feedback; fbEl.style.display='block'; }
-      else           { fbEl.style.display = 'none'; }
+      if (feedback) { fbEl.innerHTML = '<strong>💡 توصيات:</strong><br>' + feedback; fbEl.style.display = 'block'; }
+      else            fbEl.style.display = 'none';
 
-      document.getElementById('breakdownItems').innerHTML = breakdown.map(i=>`
-        <div class="breakdown-item">
-          <span>${i.label}</span>
-          <span class="breakdown-value ${i.isPenalty?'negative':i.value>0?'positive':'neutral'}">
-            ${!i.isPenalty&&i.value>0?'+':''}${i.value.toFixed(2)}${i.max?' / '+i.max:''}
-          </span>
-        </div>`).join('');
+      // تفاصيل النص
+      const positives = breakdown.filter(i => !i.isPenalty);
+      const penalties = breakdown.filter(i =>  i.isPenalty);
+      document.getElementById('breakdownItems').innerHTML =
+        (penalties.length ? penalties.map(i => `
+          <div class="breakdown-item">
+            <span>${esc(i.label)}</span>
+            <span class="breakdown-value negative">${i.value.toFixed(2)}</span>
+          </div>`).join('') : '') +
+        `<div class="breakdown-item" style="font-size:0.78rem;color:var(--text-muted);padding-top:8px">
+          <span>المجموع النهائي</span>
+          <span class="breakdown-value ${score >= 7 ? 'positive' : score >= 5 ? 'neutral' : 'negative'}">${score.toFixed(1)} / 10</span>
+        </div>`;
+
+      // شارت الأبعاد الإيجابية
+      renderBreakdownChart(positives);
       document.getElementById('scoreBreakdown').style.display = 'block';
     }
 
-    function resetCalculator() {
-      ['individualStocks','reitCount','etfCount','bondCount','largestStockPercentage','largestSectorPercentage','leverageRatio']
-        .forEach(id => document.getElementById(id).value = '');
-      ['geographicDistribution','goldPercentage','hasCash','sectorDiversification','investmentHorizon','usesLeverage']
-        .forEach(id => document.getElementById(id).value = '');
-      document.getElementById('smartFeedback').style.display     = 'none';
-      document.getElementById('scoreBreakdown').style.display    = 'none';
-      document.getElementById('leverageWarning').style.display   = 'none';
-      document.getElementById('leverageRatioGroup').style.display= 'none';
-      document.getElementById('sectorConflict').style.display    = 'none';
-      document.getElementById('etfNotice').style.display         = 'none';
-      document.getElementById('safetyScore').textContent         = '0/10';
-      document.getElementById('evaluationText').textContent      = 'أدخل البيانات للحصول على التقييم';
-      document.getElementById('progressFill').style.width        = '0%';
-      document.getElementById('progressText').textContent        = '0%';
-      document.getElementById('percentageDisplay').textContent   = '0%';
+    function renderBreakdownChart(items) {
+      const labels = items.map(i => i.label.replace(/\(.*?\)/g, '').trim());
+      const values = items.map(i => i.value);
+      const maxes  = items.map(i => i.max);
+      const colors = items.map(i => {
+        const ratio = i.max > 0 ? i.value / i.max : 0;
+        return ratio >= 0.8 ? 'rgba(34,197,94,0.85)'
+             : ratio >= 0.5 ? 'rgba(234,179,8,0.85)'
+             :                'rgba(239,68,68,0.75)';
+      });
+
+      if (breakdownChartInst) { breakdownChartInst.destroy(); breakdownChartInst = null; }
+      const ctx = document.getElementById('breakdownChart').getContext('2d');
+      breakdownChartInst = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [
+            { label: 'درجتك', data: values, backgroundColor: colors, borderRadius: 5, barPercentage: 0.65 },
+            { label: 'الحد الأقصى', data: maxes, backgroundColor: 'rgba(255,255,255,0.07)', borderColor: 'rgba(255,255,255,0.18)', borderWidth: 1, borderRadius: 5, barPercentage: 0.65 }
+          ]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#8b949e',
+              borderColor: '#30363d', borderWidth: 1, padding: 10,
+              titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' },
+              callbacks: {
+                label: item => item.datasetIndex === 0
+                  ? ` درجتك: ${item.raw.toFixed(2)} / ${maxes[item.dataIndex]}`
+                  : ` الحد الأقصى: ${item.raw}`
+              }
+            }
+          },
+          scales: {
+            x: { max: 2.5, ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 } }, grid: { color: 'rgba(48,54,61,0.5)' } },
+            y: { ticks: { color: '#c9d1d9', font: { family: 'Tajawal', size: 10 }, autoSkip: false }, grid: { color: 'rgba(48,54,61,0.3)' } }
+          }
+        }
+      });
     }
 
-    // ربط الـ listeners مرة واحدة فقط عند تحميل الصفحة
+    function resetCalculator() {
+      ['individualStocks','reitCount','etfCount','bondCount',
+       'largestStockPercentage','largestSectorPercentage','leverageRatio']
+        .forEach(id => document.getElementById(id).value = '');
+      ['geographicDistribution','goldPercentage','hasCash',
+       'sectorDiversification','investmentHorizon','usesLeverage']
+        .forEach(id => document.getElementById(id).value = '');
+      ['smartFeedback','scoreBreakdown','leverageWarning','leverageRatioGroup','sectorConflict','etfNotice']
+        .forEach(id => document.getElementById(id).style.display = 'none');
+      document.getElementById('safetyScore').textContent          = '—';
+      document.getElementById('evaluationText').textContent       = 'أدخل البيانات للحصول على التقييم';
+      document.getElementById('progressFill').style.width         = '0%';
+      document.getElementById('progressText').textContent         = '—';
+      document.getElementById('percentageDisplay').textContent    = '—';
+      document.getElementById('percentageDisplay').style.background = 'var(--bg-3)';
+      document.getElementById('percentageDisplay').style.color      = 'var(--text-muted)';
+      if (breakdownChartInst) { breakdownChartInst.destroy(); breakdownChartInst = null; }
+    }
+
     document.querySelectorAll('input[type="number"], select').forEach(el => {
       el.addEventListener('input',  updateResults);
       el.addEventListener('change', updateResults);

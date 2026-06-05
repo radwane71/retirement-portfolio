@@ -36,6 +36,26 @@
     .clear-btn { background: var(--bg-3); color: var(--text-muted); border: 1px solid var(--border); padding: 10px 24px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; margin: 8px auto; display: block; font-family: 'Tajawal', sans-serif; transition: all 0.2s; }
     .clear-btn:hover { background: var(--danger); color: #fff; border-color: var(--danger); }
     .legal-note { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; color: #f0b429; font-size: 0.82rem; text-align: center; }
+    /* تخطيط عمودين */
+    .calc-layout { display: grid; grid-template-columns: 1fr 1.4fr; gap: 20px; align-items: start; }
+    /* لوحة التصوير البصري */
+    .visual-panel { position: sticky; top: 20px; }
+    .visual-card { background: var(--bg-2); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+    .visual-card h3 { font-size: 0.88rem; color: var(--text-muted); margin-bottom: 16px; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    .vis-metric { margin-bottom: 18px; }
+    .vis-label { font-size: 0.78rem; color: var(--text-muted); margin-bottom: 5px; display: flex; justify-content: space-between; }
+    .vis-label span:last-child { color: var(--text); font-weight: 600; font-size: 0.82rem; }
+    .vis-bar-track { background: var(--bg-3); border-radius: 6px; height: 10px; overflow: hidden; }
+    .vis-bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s ease; min-width: 0%; }
+    .vis-avg-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+    .vis-avg-box { background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 12px; text-align: center; }
+    .vis-avg-box .lbl { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; }
+    .vis-avg-box .val { font-size: 1.15rem; font-weight: 700; }
+    .vis-stacked { display: flex; border-radius: 8px; overflow: hidden; height: 28px; margin-bottom: 6px; transition: all 0.4s; }
+    .vis-stacked .seg { display: flex; align-items: center; justify-content: center; font-size: 0.7rem; font-weight: 600; color: rgba(255,255,255,0.9); transition: width 0.4s ease; overflow: hidden; white-space: nowrap; }
+    .vis-empty-state { text-align: center; padding: 32px 12px; color: var(--text-muted); font-size: 0.85rem; line-height: 1.8; }
+    .vis-divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+    @media(max-width: 900px) { .calc-layout { grid-template-columns: 1fr; } .visual-panel { position: static; } }
     @media(max-width:768px) { .operation-row { grid-template-columns: 1fr; } .remove-btn { height: auto; width: 100%; } }
   </style>
 </head>
@@ -107,51 +127,128 @@
       </div>
     </div>
 
-    <div class="card" style="max-width:700px;">
-      <div class="legal-note">⚠️ إقرار: جميع المحتويات لأغراض تعليمية فقط. الاستثمار ينطوي على مخاطر. قرار الاستخدام على عاتقك.</div>
+    <div class="calc-layout">
 
-      <!-- البيانات الحالية -->
-      <h3 style="color:var(--text);font-size:0.95rem;margin-bottom:14px;padding-right:10px;border-right:3px solid var(--primary);">📋 البيانات الحالية</h3>
-      <div class="input-pair">
-        <div class="input-field">
-          <label for="currentAvgCost">متوسط التكلفة الحالية</label>
-          <input type="number" id="currentAvgCost" placeholder="0.00" step="0.01" min="0">
-        </div>
-        <div class="input-field">
-          <label for="currentShares">إجمالي عدد الأسهم المملوكة</label>
-          <input type="number" id="currentShares" placeholder="0" step="1" min="0">
+      <!-- عمود اليمين: النموذج -->
+      <div class="calc-form-col">
+        <div class="card">
+          <div class="legal-note">⚠️ إقرار: جميع المحتويات لأغراض تعليمية فقط. الاستثمار ينطوي على مخاطر. قرار الاستخدام على عاتقك.</div>
+
+          <h3 style="color:var(--text);font-size:0.95rem;margin-bottom:14px;padding-right:10px;border-right:3px solid var(--primary);">📋 البيانات الحالية</h3>
+          <div class="input-pair">
+            <div class="input-field">
+              <label for="currentAvgCost">متوسط التكلفة الحالية</label>
+              <input type="number" id="currentAvgCost" placeholder="0.00" step="0.01" min="0">
+            </div>
+            <div class="input-field">
+              <label for="currentShares">إجمالي عدد الأسهم المملوكة</label>
+              <input type="number" id="currentShares" placeholder="0" step="1" min="0">
+            </div>
+          </div>
+
+          <h3 style="color:var(--text);font-size:0.95rem;margin:18px 0 14px;padding-right:10px;border-right:3px solid var(--accent);">➕ العمليات الجديدة</h3>
+          <div id="operationsContainer">
+            <div class="operation-row">
+              <div class="input-field"><label>سعر الشراء الجديد</label><input type="number" class="new-price" placeholder="0.00" step="0.01" min="0" oninput="calculateAverage()"></div>
+              <div class="input-field"><label>كمية الأسهم الجديدة</label><input type="number" class="new-shares" placeholder="0" step="1" min="0" oninput="calculateAverage()"></div>
+              <button class="remove-btn" onclick="removeOperation(this)">🗑 حذف</button>
+            </div>
+          </div>
+          <button class="add-btn" onclick="addOperation()">➕ إضافة عملية شراء</button>
+
+          <div class="results-box">
+            <h3>📈 النتائج</h3>
+            <div class="result-item">
+              <div>المتوسط السعري الجديد</div>
+              <span class="result-value zero" id="newAverage">0.00</span>
+            </div>
+            <div class="result-item">
+              <div>إجمالي القيمة المستثمرة</div>
+              <span class="result-value zero" id="totalValue">0.00</span>
+            </div>
+            <div class="result-item">
+              <div>إجمالي عدد الأسهم</div>
+              <span class="result-value zero" id="totalShares">0</span>
+            </div>
+          </div>
+
+          <button class="clear-btn" onclick="confirmClear()">🔄 مسح كل البيانات</button>
         </div>
       </div>
 
-      <!-- العمليات الجديدة -->
-      <h3 style="color:var(--text);font-size:0.95rem;margin:18px 0 14px;padding-right:10px;border-right:3px solid var(--accent);">➕ العمليات الجديدة</h3>
-      <div id="operationsContainer">
-        <div class="operation-row">
-          <div class="input-field"><label>سعر الشراء الجديد</label><input type="number" class="new-price" placeholder="0.00" step="0.01" min="0" oninput="calculateAverage()"></div>
-          <div class="input-field"><label>كمية الأسهم الجديدة</label><input type="number" class="new-shares" placeholder="0" step="1" min="0" oninput="calculateAverage()"></div>
-          <button class="remove-btn" onclick="removeOperation(this)">🗑 حذف</button>
+      <!-- عمود اليسار: التصوير البصري -->
+      <div class="visual-panel">
+        <div class="visual-card">
+          <h3>📊 التصوير البصري للمتوسط</h3>
+
+          <div id="vis-empty" class="vis-empty-state">
+            أدخل البيانات في النموذج<br>لتظهر هنا التصورات البصرية
+          </div>
+
+          <div id="vis-content" style="display:none">
+
+            <!-- شريط التوزيع -->
+            <div class="vis-metric">
+              <div class="vis-label"><span>توزيع التكلفة الكلية</span></div>
+              <div class="vis-stacked" id="vis-stacked-bar">
+                <div class="seg" id="seg-current" style="background:#3b82f6;width:50%">حالي</div>
+                <div class="seg" id="seg-new"     style="background:#22c55e;width:50%">جديد</div>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-muted);margin-top:4px">
+                <span id="vis-lbl-current">— الحيازة الحالية</span>
+                <span id="vis-lbl-new">الشراء الجديد —</span>
+              </div>
+            </div>
+
+            <hr class="vis-divider">
+
+            <!-- مقارنة المتوسط -->
+            <div class="vis-avg-compare">
+              <div class="vis-avg-box">
+                <div class="lbl">المتوسط قبل</div>
+                <div class="val text-muted" id="vis-old-avg">—</div>
+              </div>
+              <div class="vis-avg-box" style="border-color:var(--accent)">
+                <div class="lbl">المتوسط بعد</div>
+                <div class="val text-accent" id="vis-new-avg">—</div>
+              </div>
+            </div>
+
+            <hr class="vis-divider">
+
+            <!-- تفاصيل الأسهم -->
+            <div class="vis-metric">
+              <div class="vis-label">
+                <span>🔵 الأسهم الحالية</span>
+                <span id="vis-shares-cur">—</span>
+              </div>
+              <div class="vis-bar-track">
+                <div class="vis-bar-fill" id="bar-shares-cur" style="background:#3b82f6;width:50%"></div>
+              </div>
+            </div>
+            <div class="vis-metric">
+              <div class="vis-label">
+                <span>🟢 الأسهم الجديدة</span>
+                <span id="vis-shares-new">—</span>
+              </div>
+              <div class="vis-bar-track">
+                <div class="vis-bar-fill" id="bar-shares-new" style="background:#22c55e;width:50%"></div>
+              </div>
+            </div>
+
+            <hr class="vis-divider">
+
+            <!-- تأثير التخفيض -->
+            <div id="vis-impact-box" style="background:var(--bg-1);border-radius:8px;padding:12px;text-align:center;display:none">
+              <div style="font-size:0.75rem;color:var(--text-muted);margin-bottom:4px">تأثير التراكم على المتوسط</div>
+              <div id="vis-impact-val" style="font-size:1.1rem;font-weight:700"></div>
+              <div id="vis-impact-sub" style="font-size:0.72rem;color:var(--text-muted);margin-top:2px"></div>
+            </div>
+
+          </div>
         </div>
       </div>
-      <button class="add-btn" onclick="addOperation()">➕ إضافة عملية شراء</button>
 
-      <!-- النتائج -->
-      <div class="results-box">
-        <h3>📈 النتائج</h3>
-        <div class="result-item">
-          <div>المتوسط السعري الجديد</div>
-          <span class="result-value zero" id="newAverage">0.00</span>
-        </div>
-        <div class="result-item">
-          <div>إجمالي القيمة المستثمرة</div>
-          <span class="result-value zero" id="totalValue">0.00</span>
-        </div>
-        <div class="result-item">
-          <div>إجمالي عدد الأسهم</div>
-          <span class="result-value zero" id="totalShares">0</span>
-        </div>
-      </div>
-
-      <button class="clear-btn" onclick="confirmClear()">🔄 مسح كل البيانات</button>
     </div>
   </main>
 
@@ -192,21 +289,75 @@
 
     function calculateAverage() {
       const currentAvgCost = Math.max(0, parseFloat(document.getElementById('currentAvgCost').value) || 0);
-      const currentShares  = Math.max(0, parseInt(document.getElementById('currentShares').value)  || 0);
+      const currentShares  = Math.max(0, parseFloat(document.getElementById('currentShares').value)  || 0);
       const prices = document.querySelectorAll('.new-price');
       const shares = document.querySelectorAll('.new-shares');
-      let totalValue  = currentAvgCost * currentShares;
-      let totalShares = currentShares;
+
+      const currentCost = currentAvgCost * currentShares;
+      let newCost   = 0;
+      let newShares = 0;
       for (let i = 0; i < prices.length; i++) {
         const p = Math.max(0, parseFloat(prices[i].value) || 0);
-        const s = Math.max(0, parseInt(shares[i].value)   || 0);
-        totalValue  += p * s;
-        totalShares += s;
+        const s = Math.max(0, parseFloat(shares[i].value) || 0);
+        newCost   += p * s;
+        newShares += s;
       }
-      const newAverage = totalShares > 0 ? totalValue / totalShares : 0;
-      setResult('newAverage',  newAverage.toFixed(2),      newAverage  === 0);
-      setResult('totalValue',  totalValue.toFixed(2),      totalValue  === 0);
-      setResult('totalShares', totalShares.toString(),     totalShares === 0);
+
+      const totalValue  = currentCost + newCost;
+      const totalShares = currentShares + newShares;
+      const newAverage  = totalShares > 0 ? totalValue / totalShares : 0;
+
+      setResult('newAverage',  newAverage.toFixed(2),  newAverage  === 0);
+      setResult('totalValue',  totalValue.toFixed(2),  totalValue  === 0);
+      setResult('totalShares', totalShares.toFixed(totalShares === Math.floor(totalShares) ? 0 : 2), totalShares === 0);
+
+      updateVisual(currentAvgCost, currentShares, currentCost, newCost, newShares, totalValue, totalShares, newAverage);
+    }
+
+    function updateVisual(oldAvg, curShares, curCost, newCost, newShares, totalCost, totalShares, newAvg) {
+      const hasData = totalShares > 0 && totalCost > 0;
+      document.getElementById('vis-empty').style.display   = hasData ? 'none'  : '';
+      document.getElementById('vis-content').style.display = hasData ? 'block' : 'none';
+      if (!hasData) return;
+
+      // شريط التوزيع
+      const curPct = totalCost > 0 ? curCost / totalCost * 100 : 0;
+      const newPct = 100 - curPct;
+      const segCur = document.getElementById('seg-current');
+      const segNew = document.getElementById('seg-new');
+      segCur.style.width = curPct.toFixed(1) + '%';
+      segNew.style.width = newPct.toFixed(1) + '%';
+      segCur.textContent = curPct >= 12 ? (curPct.toFixed(0) + '%') : '';
+      segNew.textContent = newPct >= 12 ? (newPct.toFixed(0) + '%') : '';
+      document.getElementById('vis-lbl-current').textContent = curPct.toFixed(1) + '% — الحيازة الحالية';
+      document.getElementById('vis-lbl-new').textContent     = 'الشراء الجديد — ' + newPct.toFixed(1) + '%';
+
+      // مقارنة المتوسط
+      const oldAvgEl = document.getElementById('vis-old-avg');
+      oldAvgEl.textContent = oldAvg > 0 ? oldAvg.toFixed(2) : '—';
+      document.getElementById('vis-new-avg').textContent = newAvg.toFixed(2);
+
+      // أشرطة الأسهم
+      const maxShares = Math.max(curShares, newShares, 1);
+      document.getElementById('vis-shares-cur').textContent = curShares.toLocaleString('en-US');
+      document.getElementById('vis-shares-new').textContent = newShares.toLocaleString('en-US');
+      document.getElementById('bar-shares-cur').style.width = (curShares / maxShares * 100).toFixed(1) + '%';
+      document.getElementById('bar-shares-new').style.width = (newShares / maxShares * 100).toFixed(1) + '%';
+
+      // تأثير التراكم
+      const impactBox = document.getElementById('vis-impact-box');
+      if (oldAvg > 0 && newShares > 0 && newAvg !== oldAvg) {
+        impactBox.style.display = '';
+        const diff = newAvg - oldAvg;
+        const pct  = oldAvg > 0 ? diff / oldAvg * 100 : 0;
+        const impVal = document.getElementById('vis-impact-val');
+        const impSub = document.getElementById('vis-impact-sub');
+        impVal.textContent = (diff >= 0 ? '+' : '') + diff.toFixed(2) + ' ر.س (' + (pct >= 0 ? '+' : '') + pct.toFixed(1) + '%)';
+        impVal.style.color = diff <= 0 ? 'var(--success)' : 'var(--danger)';
+        impSub.textContent = diff <= 0 ? '✅ التراكم خفّض متوسط تكلفتك' : '⚠️ التراكم رفع متوسط تكلفتك';
+      } else {
+        impactBox.style.display = 'none';
+      }
     }
 
     function setResult(id, value, isZero) {

@@ -547,6 +547,9 @@ tr:hover td { background: rgba(255,255,255,0.02); }
 }
 
 .login-logo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   text-align: center;
   margin-bottom: 28px;
 }
