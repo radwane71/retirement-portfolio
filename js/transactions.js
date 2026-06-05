@@ -56,7 +56,8 @@ function onSingleTickerInput() {
   document.getElementById('t-ticker').value = ticker;
   const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
   const name = official?.name || TICKER_DB[ticker];
-  if (name) document.getElementById('t-name').value = name;
+  // FIX: always update name — clear old name when ticker changes, fill when found
+  document.getElementById('t-name').value = name || '';
   hideTickerWarning();
 }
 
@@ -220,12 +221,11 @@ function stagingTickerInput(id, input) {
   updateStaging(id, 'ticker', ticker);
   const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
   const name = official?.name || TICKER_DB[ticker];
-  if (name) {
-    const tr = document.querySelector(`tr[data-sid="${id}"]`);
-    if (tr) {
-      const nameInput = tr.querySelector('.s-name');
-      if (nameInput && !nameInput.value) { nameInput.value = name; updateStaging(id, 'name', name); }
-    }
+  // FIX: update name whenever ticker changes — fill if found, clear if not
+  const tr = document.querySelector(`tr[data-sid="${id}"]`);
+  if (tr) {
+    const nameInput = tr.querySelector('.s-name');
+    if (nameInput) { nameInput.value = name || ''; updateStaging(id, 'name', name || ''); }
   }
 }
 
@@ -680,7 +680,8 @@ function onEditTickerInput() {
   document.getElementById('edit-ticker').value = ticker;
   const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
   const name = official?.name || TICKER_DB[ticker];
-  if (name) document.getElementById('edit-name').value = name;
+  // FIX: always update name — clear when ticker changes, fill when found
+  document.getElementById('edit-name').value = name || '';
 }
 
 function updateEditCalc() {

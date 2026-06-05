@@ -37,7 +37,8 @@ function onDivTickerInput() {
   inp.value    = ticker;
   const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
   const name     = official?.name || (typeof TICKER_DB !== 'undefined' ? TICKER_DB[ticker] : null);
-  if (name) document.getElementById('d-name').value = name;
+  // FIX: always update name — clear when ticker changes, fill when found
+  document.getElementById('d-name').value = name || '';
 }
 
 async function loadData() {

@@ -80,8 +80,9 @@ function onTickerInput() {
   const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
   const name   = official?.name   || (typeof TICKER_DB !== 'undefined' ? TICKER_DB[ticker] : null);
   const sector = official?.sector || null;
-  if (name   && !document.getElementById('rl-name').value)   document.getElementById('rl-name').value   = name;
-  if (sector && !document.getElementById('rl-sector').value) document.getElementById('rl-sector').value = sector;
+  // FIX: always update when ticker changes — don't keep stale name from previous ticker
+  if (name)   document.getElementById('rl-name').value   = name;
+  if (sector) document.getElementById('rl-sector').value = sector;
 }
 
 // ── File handling ──────────────────────────────────────────────────────────
