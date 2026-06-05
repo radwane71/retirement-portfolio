@@ -114,14 +114,39 @@ function renderGoals(type) {
   }).join('');
 }
 
+// AUDIT-FIX: replaced prompt() with DOM-based overlay — prompt() blocked in strict CSP
+// and broken on iOS Safari in some configurations.
 function addGoalRow(type) {
-  const desc = prompt('وصف الهدف:');
-  if (!desc || !desc.trim()) return;
-  const year = prompt('السنة المستهدفة (اختياري):') || '';
-  const list = goalList(type);
-  list.push({ id: uid(), desc: desc.trim(), year: year.trim(), status: 'قيد التنفيذ' });
-  saveData();
-  renderGoals(type);
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:380px;width:100%;padding:24px 20px">
+      <p style="margin:0 0 10px;color:var(--text-1,#e6edf3);font-weight:600">إضافة هدف</p>
+      <input id="_goal-desc" placeholder="وصف الهدف *" style="width:100%;padding:9px 11px;background:var(--bg-1,#0d1117);border:1px solid var(--border);border-radius:8px;color:var(--text,#e6edf3);font-family:inherit;font-size:.9rem;margin-bottom:10px;box-sizing:border-box">
+      <input id="_goal-year" placeholder="السنة المستهدفة (اختياري)" style="width:100%;padding:9px 11px;background:var(--bg-1,#0d1117);border:1px solid var(--border);border-radius:8px;color:var(--text,#e6edf3);font-family:inherit;font-size:.9rem;margin-bottom:16px;box-sizing:border-box">
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button id="_goal-cancel" class="btn btn-secondary" style="min-width:70px">إلغاء</button>
+        <button id="_goal-save"   class="btn btn-primary"   style="min-width:70px">إضافة</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const descInput = overlay.querySelector('#_goal-desc');
+  descInput.focus();
+
+  const cleanup = () => overlay.remove();
+  overlay.querySelector('#_goal-cancel').onclick = cleanup;
+  overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(); });
+  overlay.querySelector('#_goal-save').onclick = () => {
+    const desc = descInput.value.trim();
+    if (!desc) { descInput.style.borderColor = 'var(--danger,#f85149)'; return; }
+    const year = (overlay.querySelector('#_goal-year').value || '').trim();
+    const list = goalList(type);
+    list.push({ id: uid(), desc, year, status: 'قيد التنفيذ' });
+    saveData();
+    renderGoals(type);
+    cleanup();
+  };
+  descInput.addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#_goal-save').click(); });
 }
 
 function updateGoalStatus(type, id, sel) {

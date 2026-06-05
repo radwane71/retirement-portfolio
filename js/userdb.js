@@ -120,8 +120,30 @@ async function deleteStock(id, ticker) {
   await loadAll();
 }
 
+// AUDIT-FIX: replaced prompt() with DOM-based overlay — prompt() blocked in strict CSP
 async function editStock(id, field, oldVal) {
-  const newVal = prompt(`تعديل ${field === 'name' ? 'الاسم' : 'القطاع'}:`, oldVal);
+  const label = field === 'name' ? 'الاسم' : 'القطاع';
+  const newVal = await new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:360px;width:100%;padding:24px 20px">
+        <p style="margin:0 0 10px;color:var(--text-1,#e6edf3);font-weight:600">تعديل ${esc(label)}</p>
+        <input id="_edit-val" value="${esc(oldVal || '')}" style="width:100%;padding:9px 11px;background:var(--bg-1,#0d1117);border:1px solid var(--border);border-radius:8px;color:var(--text);font-family:inherit;font-size:.9rem;margin-bottom:16px;box-sizing:border-box">
+        <div style="display:flex;justify-content:flex-end;gap:10px">
+          <button id="_ev-cancel" class="btn btn-secondary" style="min-width:70px">إلغاء</button>
+          <button id="_ev-save"   class="btn btn-primary"   style="min-width:70px">حفظ</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const inp = overlay.querySelector('#_edit-val');
+    inp.focus(); inp.select();
+    const cleanup = val => { overlay.remove(); resolve(val); };
+    overlay.querySelector('#_ev-cancel').onclick = () => cleanup(null);
+    overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(null); });
+    overlay.querySelector('#_ev-save').onclick = () => cleanup(inp.value.trim() || null);
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') cleanup(inp.value.trim() || null); if (e.key === 'Escape') cleanup(null); });
+  });
   if (!newVal || newVal === oldVal) return;
   const { error } = await supabaseClient.from('user_stocks').update({ [field]: newVal }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }

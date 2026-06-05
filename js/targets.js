@@ -716,8 +716,11 @@ function runRebalancing() {
   let totalSpent = 0;
 
   const rows = allocations.map(c => {
-    const sharesToBuy  = Math.floor(c.allocated / +c.current_price);
-    const cost         = sharesToBuy * +c.current_price;
+    // AUDIT-FIX: guard against current_price = 0 (unpriced holding) to prevent
+    // Math.floor(Infinity) propagating into cost/totalSpent corrupting the rebalancer
+    const price        = +c.current_price || 0;
+    const sharesToBuy  = price > 0 ? Math.floor(c.allocated / price) : 0;
+    const cost         = sharesToBuy * price;
     totalSpent        += cost;
     const newShares    = +c.shares + sharesToBuy;
     const newValue     = newShares * +c.current_price;

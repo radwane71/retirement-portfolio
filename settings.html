@@ -299,7 +299,8 @@
         <div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div>
       </div>
       <div class="mt-4 flex gap-3">
-        <button class="btn btn-secondary" onclick="if(confirm('تسجيل الخروج؟')) logout()">
+        <!-- AUDIT-FIX: replaced inline confirm() with confirmAsync() -->
+        <button class="btn btn-secondary" onclick="confirmAsync('تسجيل الخروج؟').then(ok => { if(ok) logout(); })">
           🚪 تسجيل الخروج
         </button>
       </div>

@@ -225,7 +225,9 @@ async function restoreBackup(input) {
   const exportedAt = backup.exported_at
     ? new Date(backup.exported_at).toLocaleString('ar-SA') : 'غير محدد';
 
-  const confirmed = confirm(
+  // AUDIT-FIX: replaced blocking confirm() with async modal — confirm() fails under CSP
+  // and is unavailable in some iframe/mobile environments.
+  const confirmed = await confirmAsync(
     `استعادة النسخة الاحتياطية\n\n` +
     `• الإصدار: ${backup.version}\n` +
     `• تاريخ التصدير: ${exportedAt}\n` +
@@ -311,8 +313,9 @@ async function restoreBackup(input) {
       `✓ تمت الاستعادة بنجاح — تم استعادة ${inserted} سجل`);
     showToast('تمت الاستعادة بنجاح ✓', 'success');
 
-    setTimeout(() => {
-      if (confirm('تمت الاستعادة. هل تريد الانتقال إلى لوحة التحكم؟')) {
+    setTimeout(async () => {
+      // AUDIT-FIX: replaced blocking confirm() with confirmAsync()
+      if (await confirmAsync('تمت الاستعادة. هل تريد الانتقال إلى لوحة التحكم؟')) {
         window.location.href = 'dashboard.html';
       }
     }, 800);
@@ -532,7 +535,8 @@ function mapRow(table, row, userId) {
 // تصفير جميع البيانات
 // ══════════════════════════════════════════════════════════════
 async function resetAllData() {
-  const confirmed = confirm(
+  // AUDIT-FIX: replaced blocking confirm() with confirmAsync() — mobile-safe, CSP-safe
+  const confirmed = await confirmAsync(
     '⚠️ تصفير جميع البيانات\n\n' +
     'سيتم حذف كل بياناتك نهائياً:\n' +
     '• الأسهم والمعاملات\n' +
@@ -548,7 +552,8 @@ async function resetAllData() {
   );
   if (!confirmed) return;
 
-  const confirmed2 = confirm('تأكيد أخير: سيتم مسح كل البيانات بلا رجعة. متأكد؟');
+  // AUDIT-FIX: replaced blocking confirm() with confirmAsync()
+  const confirmed2 = await confirmAsync('تأكيد أخير: سيتم مسح كل البيانات بلا رجعة. متأكد؟');
   if (!confirmed2) return;
 
   const btn = document.getElementById('btn-reset');
@@ -585,7 +590,8 @@ async function resetAllData() {
 // حذف الحساب نهائياً
 // ══════════════════════════════════════════════════════════════
 async function deleteAccount() {
-  const confirmed = confirm(
+  // AUDIT-FIX: replaced blocking confirm() with confirmAsync() — mobile-safe, CSP-safe
+  const confirmed = await confirmAsync(
     '⛔ حذف الحساب نهائياً\n\n' +
     'سيتم حذف:\n• جميع بياناتك\n• حسابك بالكامل\n\n' +
     'لا يمكن التراجع عن هذا الإجراء.\n\n' +

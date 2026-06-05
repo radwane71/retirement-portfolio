@@ -122,8 +122,9 @@ function filterUsers() {
 }
 
 async function setUserStatus(userId, status) {
+  // AUDIT-FIX: replaced blocking confirm() with confirmAsync() — mobile-safe and CSP-safe
   const labels = { suspended: 'تعليق', banned: 'حظر', active: 'استعادة' };
-  if (!confirm(`هل تريد تغيير حالة المستخدم إلى "${labels[status]}"؟`)) return;
+  if (!await confirmAsync(`هل تريد تغيير حالة المستخدم إلى "${labels[status]}"؟`)) return;
 
   const { error } = await supabaseClient
     .from('user_profiles')
@@ -192,7 +193,8 @@ async function loadErasureRequests() {
 }
 
 async function executeErasure(requestId, userId) {
-  if (!confirm('⚠️ هذا الإجراء نهائي وغير قابل للتراجع. هل تريد حذف جميع بيانات هذا المستخدم؟')) return;
+  // AUDIT-FIX: replaced blocking confirm() with confirmAsync() — mobile-safe and CSP-safe
+  if (!await confirmAsync('⚠️ هذا الإجراء نهائي وغير قابل للتراجع. هل تريد حذف جميع بيانات هذا المستخدم؟')) return;
 
   // AUDIT-FIX: was only deleting 8/16 tables — GDPR violation; now deletes all 16 user tables
   // FK children first to avoid constraint violations
@@ -394,7 +396,8 @@ async function loadFailedLogins() {
 }
 
 async function blockIP(ip, email) {
-  if (!confirm(`هل تريد حظر IP: ${ip} ؟`)) return;
+  // AUDIT-FIX: replaced blocking confirm() with confirmAsync()
+  if (!await confirmAsync(`هل تريد حظر IP: ${ip} ؟`)) return;
   await supabaseClient.from('blocked_ips').insert([{
     ip_address: ip,
     email,

@@ -69,8 +69,13 @@ function formatDate(dateStr) {
   return d.toLocaleDateString('ar-SA', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+// AUDIT-FIX: use local calendar date instead of UTC to avoid off-by-one for UTC+3 after 9pm
 function todayISO() {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 // M-6: parse a YYYY-MM-DD string as local midnight — avoids UTC-shift date-off-by-one
@@ -211,6 +216,10 @@ function computeXIRR(flows) {
   const years = cf.map(c => (c.date - t0) / (365 * 86400000));
   const amts  = cf.map(c => c.amount);
   if (!amts.some(a => a > 0) || !amts.some(a => a < 0)) return null;
+  // AUDIT-FIX: guard against all-zero amounts which would make flowScale=0 and cause
+  // REL_TOL=0, meaning any NPV passes the convergence check and returns a spurious rate.
+  const totalAbsFlow = amts.reduce((s, a) => s + Math.abs(a), 0);
+  if (totalAbsFlow < 1e-9) return null;
 
   // H-3: relative tolerance — 0.01% of total absolute flow magnitude
   const flowScale = amts.reduce((s, a) => s + Math.abs(a), 0) || 1;

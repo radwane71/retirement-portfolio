@@ -215,8 +215,9 @@
       el.classList.toggle('zero', isZero);
     }
 
-    function confirmClear() {
-      if (!confirm('هل تريد مسح كافة البيانات؟ لا يمكن التراجع.')) return;
+    // AUDIT-FIX: replaced blocking confirm() with confirmAsync()
+    async function confirmClear() {
+      if (!await confirmAsync('هل تريد مسح كافة البيانات؟ لا يمكن التراجع.')) return;
       clearAll();
     }
 
