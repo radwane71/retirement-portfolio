@@ -471,6 +471,48 @@ async function loadAllData() {
   if (totalValue > 0) cashflows.push({ date: new Date(), amount: totalValue });
   const xirr = computeXIRR(cashflows);
 
+  // ── تركيز السهم الواحد — مخاطرة مباشرة على محفظة التقاعد ──────
+  // أكبر مركز كنسبة % من قيمة الأسهم، ووزن أكبر 5 مراكز مجتمعة. بيانات holdings صحيحة قطعاً.
+  let largestHolding = null;
+  holdings.forEach(h => {
+    const v = +h.shares * +h.current_price;
+    if (v > 0 && (!largestHolding || v > largestHolding.v)) largestHolding = { v, ticker: h.ticker, name: h.name || '' };
+  });
+  const posVals = holdings.map(h => +h.shares * +h.current_price).filter(v => v > 0).sort((a, b) => b - a);
+  const concTotal   = posVals.reduce((s, v) => s + v, 0);
+  const largestPosPct = concTotal > 0 ? posVals[0] / concTotal * 100 : 0;
+  const top5Pct       = concTotal > 0 ? posVals.slice(0, 5).reduce((s, v) => s + v, 0) / concTotal * 100 : 0;
+
+  // ── معدل المساهمة الصافي الشهري — محرّك الوصول لـ FIRE ────────
+  // إيداع − سحب خلال آخر 12 شهراً ÷ 12. تدفّق فعلي مسجّل في cashflow_entries.
+  let dep12 = 0, wd12 = 0, hasCf12 = false;
+  cfRows.forEach(e => {
+    if (!e.date) return;
+    const dt = new Date(e.date);
+    if (dt >= _yearAgo && dt <= _today) {
+      hasCf12 = true;
+      if (e.type === 'deposit')          dep12 += +e.amount;
+      else if (e.type === 'withdrawal')  wd12  += +e.amount;
+    }
+  });
+  const netContrib12  = dep12 - wd12;
+  const monthlyContrib = netContrib12 / 12;
+
+  // ── نمو الدخل التوزيعي السنوي (CAGR) — على السنوات المكتملة فقط ──
+  // إجمالي المستلم لكل سنة تقويمية كاملة (نستثني السنة الجارية الجزئية).
+  const divByYear = {};
+  divRows.forEach(d => { if (d.year) divByYear[d.year] = (divByYear[d.year] || 0) + +d.amount; });
+  const fullDivYears = Object.keys(divByYear).map(Number).filter(y => y < yr && divByYear[y] > 0).sort((a, b) => a - b);
+  let divCagr = null, divCagrFirstY = null, divCagrLastY = null;
+  if (fullDivYears.length >= 2) {
+    divCagrFirstY = fullDivYears[0];
+    divCagrLastY  = fullDivYears[fullDivYears.length - 1];
+    const span = divCagrLastY - divCagrFirstY;
+    if (span > 0 && divByYear[divCagrFirstY] > 0) {
+      divCagr = (Math.pow(divByYear[divCagrLastY] / divByYear[divCagrFirstY], 1 / span) - 1) * 100;
+    }
+  }
+
   window._ds = {
     yr,
     totalInvested:   totalBuys - totalSells,
@@ -489,6 +531,9 @@ async function loadAllData() {
     cashWithdrawn:   cfRows.filter(e => e.type === 'withdrawal' && new Date(e.date).getFullYear() === yr).reduce((s,e) => s + +e.amount, 0),
     stockCount:      holdings.length,
     sectorCount,     topSector, bottomSector,
+    largestPosPct, top5Pct, largestHolding,
+    monthlyContrib, netContrib12, hasCf12,
+    divCagr, divCagrFirstY, divCagrLastY,
   };
 }
 
@@ -666,6 +711,53 @@ function renderStats() {
       coverEl.textContent = '—';
       coverEl.className = 'value num text-muted';
       setText('stat-passive-cover-sub', 'أدخل مصاريفك في بطاقة هدف التقاعد');
+    }
+  }
+
+  // ── صف 6: التركيز والنمو ──────────────────────────────────
+  // تركيز السهم الواحد
+  const concEl = g('stat-concentration');
+  if (concEl) {
+    if (s.largestHolding && s.largestPosPct > 0) {
+      concEl.textContent = s.largestPosPct.toFixed(1) + '%';
+      // >25% تركيز خطر، >15% مرتفع، غير ذلك صحي — لمحفظة تقاعد
+      concEl.className = 'value num ' + (s.largestPosPct >= 25 ? 'text-danger' : s.largestPosPct >= 15 ? 'text-accent' : 'text-success');
+      const nm = s.largestHolding.name ? `${s.largestHolding.ticker} — ${s.largestHolding.name}` : s.largestHolding.ticker;
+      setText('stat-concentration-name', 'أكبر مركز: ' + nm);
+      setText('stat-concentration-sub', `أكبر 5 مراكز: ${s.top5Pct.toFixed(1)}% من قيمة الأسهم`);
+    } else {
+      concEl.textContent = '—';
+      concEl.className = 'value num text-muted';
+      setText('stat-concentration-name', 'لا توجد حيازات');
+      setText('stat-concentration-sub', '');
+    }
+  }
+
+  // معدل المساهمة الصافي الشهري
+  const contribEl = g('stat-contribution');
+  if (contribEl) {
+    if (s.hasCf12) {
+      contribEl.textContent = formatSAR(s.monthlyContrib);
+      contribEl.className = 'value num ' + (s.monthlyContrib > 0 ? 'text-success' : s.monthlyContrib < 0 ? 'text-danger' : 'text-muted');
+      setText('stat-contribution-sub', `صافي ${formatSAR(s.netContrib12)} خلال آخر 12 شهراً ÷ 12`);
+    } else {
+      contribEl.textContent = '—';
+      contribEl.className = 'value num text-muted';
+      setText('stat-contribution-sub', 'سجّل إيداعاتك وسحوباتك في صفحة التدفقات النقدية');
+    }
+  }
+
+  // نمو الدخل التوزيعي السنوي (CAGR)
+  const dgrEl = g('stat-div-growth');
+  if (dgrEl) {
+    if (s.divCagr != null) {
+      dgrEl.textContent = (s.divCagr >= 0 ? '+' : '') + s.divCagr.toFixed(1) + '%';
+      dgrEl.className = 'value num ' + (s.divCagr >= 0 ? 'text-success' : 'text-danger');
+      setText('stat-div-growth-sub', `متوسط النمو السنوي لدخلك التوزيعي (${s.divCagrFirstY}→${s.divCagrLastY})`);
+    } else {
+      dgrEl.textContent = '—';
+      dgrEl.className = 'value num text-muted';
+      setText('stat-div-growth-sub', 'يحتاج توزيعات في سنتين مكتملتين على الأقل');
     }
   }
 
@@ -3023,6 +3115,43 @@ function showCardInfo(key) {
           = <strong class="text-accent">${formatSAR(tot)}</strong>
         </div>
         <p class="info-note">💡 الصكوك تُقرأ من صفحة الصكوك (الفرص بحالة "مشترك").</p>`;
+      })()
+    },
+    'concentration': {
+      title: '🎯 تركيز أكبر سهم',
+      body: (() => {
+        const lh = s.largestHolding;
+        return `
+        <p>أكبر مركز فردي كنسبة من قيمة أسهمك. التركيز العالي في سهم واحد أخطر مخاطرة على محفظة التقاعد — أي هبوط حاد في سهم واحد يضرب ثروتك بالكامل.</p>
+        <div class="info-formula"><strong>(قيمة أكبر سهم ÷ إجمالي قيمة الأسهم) × 100</strong></div>
+        <div class="info-math">
+          ${lh ? `أكبر مركز: <strong>${esc(lh.ticker)}</strong> = <strong class="text-accent">${(s.largestPosPct||0).toFixed(1)}%</strong><br>أكبر 5 مراكز مجتمعة = <strong>${(s.top5Pct||0).toFixed(1)}%</strong>` : 'لا توجد حيازات.'}
+        </div>
+        <p class="info-note">⚠️ قاعدة شائعة لطول الأجل: تجنّب تجاوز سهم واحد لـ 20–25% من المحفظة. أخضر &lt;15% · أصفر 15–25% · أحمر &gt;25%.</p>`;
+      })()
+    },
+    'contribution': {
+      title: '💰 معدل المساهمة الشهري',
+      body: (() => {
+        return `
+        <p>صافي ما أضفته من جيبك (إيداع − سحب) شهرياً خلال آخر 12 شهراً. هذا هو المحرّك الحقيقي لوصولك لهدف الاستقلال المالي — أقوى من تقلّبات السوق على المدى الطويل.</p>
+        <div class="info-formula"><strong>(إجمالي الإيداع − إجمالي السحب) خلال 12 شهراً ÷ 12</strong></div>
+        <div class="info-math">
+          ${s.hasCf12 ? `صافي 12 شهراً = <strong>${formatSAR(s.netContrib12||0)}</strong><br>÷ 12 = <strong class="text-accent">${formatSAR(s.monthlyContrib||0)}/شهر</strong>` : 'لا توجد تدفقات نقدية مسجّلة — أدخلها من صفحة التدفقات النقدية.'}
+        </div>
+        <p class="info-note">💡 يُحسب من التدفقات النقدية الفعلية المسجّلة — رقم موثوق لا تقدير.</p>`;
+      })()
+    },
+    'div-growth': {
+      title: '📊 نمو الدخل التوزيعي السنوي',
+      body: (() => {
+        return `
+        <p>متوسط معدل النمو السنوي المركّب (CAGR) لإجمالي التوزيعات التي استلمتها فعلياً، محسوباً على السنوات التقويمية المكتملة فقط (نستثني السنة الجارية الجزئية).</p>
+        <div class="info-formula"><strong>(دخل آخر سنة ÷ دخل أول سنة) ^ (1 ÷ عدد السنوات) − 1</strong></div>
+        <div class="info-math">
+          ${s.divCagr != null ? `من ${s.divCagrFirstY} إلى ${s.divCagrLastY} = <strong class="text-accent">${(s.divCagr>=0?'+':'')}${s.divCagr.toFixed(1)}%/سنة</strong>` : 'يحتاج توزيعات في سنتين تقويميتين مكتملتين على الأقل.'}
+        </div>
+        <p class="info-note">⚠️ يعكس نمو دخلك الكلي (يجمع بين تراكم الأسهم ونمو توزيع الشركة) — مؤشر لمسار دخلك التقاعدي الفعلي، لا لجودة توزيع شركة بعينها.</p>`;
       })()
     },
     'allocation': {
