@@ -1,6 +1,41 @@
 // ─── Storage — Supabase (primary) + localStorage (cache/fallback) ─────────────
 const STORE_KEY = 'salary_planner_v1';
 
+// ─── Category Types ────────────────────────────────────────────────────────────
+// ثلاثة أنواع فقط — كل فئة تنتمي لأحدها
+const CAT_TYPES = {
+  expense: { label: 'مصاريف',  icon: '💸', color: '#f85149', desc: 'ما يُصرف ويختفي' },
+  savings: { label: 'ادخار',   icon: '💰', color: '#3fb950', desc: 'يُحفظ كاحتياطي' },
+  asset:   { label: 'أصول',    icon: '📈', color: '#3b82f6', desc: 'يتراكم ويكبر' },
+};
+const CAT_TYPE_ORDER = ['expense', 'savings', 'asset'];
+
+// ترقية تلقائية للفئات القديمة التي ليس لها نوع بعد
+const KNOWN_TYPE_MAP = {
+  'cat_expenses':   'expense',
+  'cat_savings':    'savings',
+  'cat_assets':     'asset',
+  'cat_retirement': 'asset',   // محفظة التقاعد = أصل ✅
+};
+
+function _migrateCategoryTypes() {
+  let changed = false;
+  store.categories.forEach(c => {
+    if (c.type) return;   // مضبوط مسبقاً
+    if (KNOWN_TYPE_MAP[c.id]) {
+      c.type = KNOWN_TYPE_MAP[c.id];
+    } else {
+      // تخمين ذكي من الاسم
+      const n = c.name;
+      if (/ادخار|طارئ|احتياط|مدخر/i.test(n))                        c.type = 'savings';
+      else if (/أصول|استثمار|تقاعد|محفظ|عقار|صكوك|سهم|ذهب/i.test(n)) c.type = 'asset';
+      else                                                              c.type = 'expense';
+    }
+    changed = true;
+  });
+  if (changed) saveStore(store);
+}
+
 function getStore() {
   // قراءة من cache المحلي — يُحدَّث عند init() من Supabase
   try {
@@ -20,10 +55,10 @@ function saveStore(data) {
 function defaultStore() {
   return {
     categories: [
-      { id: 'cat_expenses',   name: 'مصاريف',        color: '#f85149' },
-      { id: 'cat_savings',    name: 'ادخار / طارئ',  color: '#3fb950' },
-      { id: 'cat_assets',     name: 'أصول',          color: '#3b82f6' },
-      { id: 'cat_retirement', name: 'محفظة التقاعد', color: '#a855f7' },
+      { id: 'cat_expenses',   name: 'مصاريف',        color: '#f85149', type: 'expense' },
+      { id: 'cat_savings',    name: 'ادخار / طارئ',  color: '#3fb950', type: 'savings' },
+      { id: 'cat_assets',     name: 'أصول',          color: '#3b82f6', type: 'asset'   },
+      { id: 'cat_retirement', name: 'محفظة التقاعد', color: '#a855f7', type: 'asset'   },
     ],
     entries: []
   };
@@ -62,6 +97,7 @@ async function init() {
   } else {
     store = getStore();
   }
+  _migrateCategoryTypes();   // ترقية الفئات القديمة لتشمل حقل type
   buildYearSelects();
   renderAll();
 }
@@ -136,14 +172,44 @@ function renderDashboard() {
   document.getElementById('dash-label').textContent     = label;
   document.getElementById('dash-months').textContent    = entries.length + ' شهر';
 
+  // ── ملخص النوع: مصاريف / ادخار / أصول ─────────────────────────────────────
+  const typeSumEl = document.getElementById('type-summary');
+  if (typeSumEl) {
+    typeSumEl.innerHTML = CAT_TYPE_ORDER.map(typeId => {
+      const t        = CAT_TYPES[typeId];
+      const typeCats = store.categories.filter(c => (c.type || 'expense') === typeId);
+      const typeAmt  = typeCats.reduce((s, c) => s + (catTotals[c.id] || 0), 0);
+      const typePct  = totalSalary > 0 ? (typeAmt / totalSalary * 100).toFixed(1) : '0.0';
+      const barW     = totalSalary > 0 ? Math.min(100, typeAmt / totalSalary * 100) : 0;
+      const catNames = typeCats.map(c => esc(c.name)).join(' · ') || '—';
+      return `<div class="type-summary-item" style="border-right:3px solid ${t.color}">
+        <div class="type-summary-head">
+          <span class="type-summary-icon">${t.icon}</span>
+          <span class="type-summary-label">${t.label}</span>
+          <span class="type-summary-pct" style="color:${t.color}">${typePct}%</span>
+        </div>
+        <div class="type-summary-amt" style="color:${t.color}">${formatSAR(typeAmt)}</div>
+        <div class="type-summary-bar-track">
+          <div class="type-summary-bar-fill" style="width:${barW.toFixed(1)}%;background:${t.color}88"></div>
+        </div>
+        <div class="type-summary-cats">${catNames}</div>
+      </div>`;
+    }).join('');
+  }
+
+  // ── تفصيل الفئات الفردية ────────────────────────────────────────────────────
   const bd = document.getElementById('cat-breakdown');
   bd.innerHTML = store.categories.map(c => {
-    const amt = catTotals[c.id] || 0;
-    const pct = totalSalary > 0 ? (amt / totalSalary * 100).toFixed(1) : 0;
+    const amt   = catTotals[c.id] || 0;
+    const pct   = totalSalary > 0 ? (amt / totalSalary * 100).toFixed(1) : 0;
+    const t     = CAT_TYPES[c.type || 'expense'];
     return `<div class="dash-cat-card">
       <div class="dash-cat-dot" style="background:${c.color}"></div>
       <div class="dash-cat-info">
-        <span class="dash-cat-name">${esc(c.name)}</span>
+        <span class="dash-cat-name">
+          ${esc(c.name)}
+          <span class="cat-type-chip" style="background:${t.color}18;color:${t.color};border-color:${t.color}33">${t.icon} ${t.label}</span>
+        </span>
         <span class="dash-cat-amt">${formatSAR(amt)}</span>
       </div>
       <span class="dash-cat-pct">${pct}%</span>
@@ -166,21 +232,41 @@ function buildRangeLabel() {
 // ─── Category Management ──────────────────────────────────────────────────────
 function renderCategoryBadges() {
   const container = document.getElementById('cat-list');
-  container.innerHTML = store.categories.map(c => `
-    <div class="cat-badge" style="border-color:${c.color}20;background:${c.color}10">
+  container.innerHTML = store.categories.map(c => {
+    const t = CAT_TYPES[c.type || 'expense'];
+    return `<div class="cat-badge" style="border-color:${c.color}30;background:${c.color}0f">
       <span class="cat-dot" style="background:${c.color}"></span>
       <span class="cat-badge-name" ondblclick="startRenameCategory('${c.id}', this)">${esc(c.name)}</span>
+      <button class="cat-type-btn" onclick="cycleType('${c.id}')"
+        style="background:${t.color}18;color:${t.color};border:1px solid ${t.color}33"
+        title="النوع: ${t.label} — انقر للتغيير">${t.icon} ${t.label}</button>
       <button class="cat-del-btn" onclick="confirmDeleteCategory('${c.id}')" title="حذف الفئة">×</button>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+}
+
+// تبديل نوع الفئة دورياً: مصاريف ← ادخار ← أصول ← مصاريف
+function cycleType(catId) {
+  const cat = store.categories.find(c => c.id === catId);
+  if (!cat) return;
+  const cur  = CAT_TYPE_ORDER.indexOf(cat.type || 'expense');
+  cat.type   = CAT_TYPE_ORDER[(cur + 1) % CAT_TYPE_ORDER.length];
+  saveStore(store);
+  renderCategoryBadges();
+  renderDashboard();
 }
 
 function addCategory() {
-  const inp  = document.getElementById('new-cat-name');
-  const name = inp.value.trim();
+  const inp    = document.getElementById('new-cat-name');
+  const typSel = document.getElementById('new-cat-type');
+  const name   = inp.value.trim();
+  const type   = typSel?.value || 'expense';
   if (!name) { showToast('أدخل اسم الفئة', 'error'); return; }
   if (store.categories.some(c => c.name === name)) { showToast('الفئة موجودة مسبقاً', 'error'); return; }
-  const color = CC[store.categories.length % CC.length];
-  store.categories.push({ id: uid(), name, color });
+  // لون افتراضي حسب النوع إن لم يُختر لون
+  const typeColor = CAT_TYPES[type]?.color;
+  const color     = typeColor || CC[store.categories.length % CC.length];
+  store.categories.push({ id: uid(), name, color, type });
   saveStore(store);
   inp.value = '';
   renderCategoryBadges();
@@ -631,17 +717,30 @@ function openEditModal(id) {
 
 function buildAllocationsForm(existing) {
   const container = document.getElementById('allocations-form');
-  container.innerHTML = store.categories.map(c => {
-    const a   = existing.find(x => x.catId === c.id);
-    const val = a ? a.amount : '';
-    return `<div class="alloc-row">
-      <label class="alloc-label">
-        <span class="cat-dot" style="background:${c.color}"></span>${esc(c.name)}
-      </label>
-      <input type="number" class="alloc-input" data-cat="${c.id}"
-        value="${val}" placeholder="0" min="0" step="0.01">
+
+  // جمّع الفئات حسب النوع مع عناوين فاصلة
+  let html = '';
+  CAT_TYPE_ORDER.forEach(typeId => {
+    const typeCats = store.categories.filter(c => (c.type || 'expense') === typeId);
+    if (!typeCats.length) return;
+    const t = CAT_TYPES[typeId];
+    html += `<div class="alloc-group-header" style="color:${t.color};border-color:${t.color}33;background:${t.color}0a">
+      ${t.icon} ${t.label}
+      <span style="font-size:.72rem;opacity:.7;font-weight:400">${t.desc}</span>
     </div>`;
-  }).join('');
+    html += typeCats.map(c => {
+      const a   = existing.find(x => x.catId === c.id);
+      const val = a ? a.amount : '';
+      return `<div class="alloc-row">
+        <label class="alloc-label">
+          <span class="cat-dot" style="background:${c.color}"></span>${esc(c.name)}
+        </label>
+        <input type="number" class="alloc-input" data-cat="${c.id}"
+          value="${val}" placeholder="0" min="0" step="0.01">
+      </div>`;
+    }).join('');
+  });
+  container.innerHTML = html;
 
   const salaryInp = document.getElementById('entry-salary');
   function updateRemaining() {

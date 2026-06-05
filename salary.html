@@ -150,6 +150,100 @@
     .tbl-alt .num { text-align:left; }
     .tbl-alt .neg { color:var(--danger); }
     .tbl-alt .pos { color:var(--success); }
+
+    /* ── Type Summary Bar ────────────────────────────────────── */
+    .type-summary-bar {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+    .type-summary-item {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+    }
+    .type-summary-head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 4px;
+    }
+    .type-summary-icon  { font-size: 1rem; line-height: 1; }
+    .type-summary-label { font-size: 0.8rem; font-weight: 600; color: var(--text-2); flex: 1; }
+    .type-summary-pct   { font-size: 0.82rem; font-weight: 700; }
+    .type-summary-amt   { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
+    .type-summary-bar-track {
+      height: 5px;
+      background: rgba(255,255,255,.07);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 5px;
+    }
+    .type-summary-bar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
+    .type-summary-cats  { font-size: 0.72rem; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── Category Type Chip (in breakdown cards) ─────────────── */
+    .cat-type-chip {
+      display: inline-block;
+      font-size: 0.67rem;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: 10px;
+      border: 1px solid transparent;
+      margin-right: 5px;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    /* ── Type Toggle Button (in category badges) ─────────────── */
+    .cat-type-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      padding: 2px 7px;
+      border-radius: 10px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity .15s;
+      white-space: nowrap;
+    }
+    .cat-type-btn:hover { opacity: .75; }
+
+    /* ── Alloc Group Header ──────────────────────────────────── */
+    .alloc-group-header {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      padding: 7px 10px;
+      border-radius: var(--radius);
+      border: 1px solid transparent;
+      margin: 10px 0 6px;
+      letter-spacing: .02em;
+    }
+    .alloc-group-header:first-child { margin-top: 0; }
+
+    /* ── Type Select in add-cat row ──────────────────────────── */
+    .add-cat-type-sel {
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 0.85rem;
+      padding: 7px 10px;
+      cursor: pointer;
+    }
+    .add-cat-type-sel:focus { outline: none; border-color: var(--accent); }
+
+    @media (max-width: 600px) {
+      .type-summary-bar { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
@@ -347,9 +441,13 @@
       <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.82rem" onclick="clearDateRange()">مسح الفلتر</button>
     </div>
 
-    <!-- Category Breakdown -->
+    <!-- Type Summary + Category Breakdown -->
     <div class="section-box">
-      <h3>تفصيل الفئات</h3>
+      <h3>توزيع الراتب حسب النوع</h3>
+      <!-- ملخص الأنواع الثلاثة -->
+      <div class="type-summary-bar" id="type-summary"></div>
+      <!-- تفصيل الفئات الفردية -->
+      <div style="font-size:0.75rem;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">تفصيل الفئات</div>
       <div class="cat-breakdown-grid" id="cat-breakdown"></div>
     </div>
 
@@ -416,11 +514,21 @@
 
     <!-- Category Management -->
     <div class="section-box">
-      <h3>إدارة الفئات <small style="font-weight:400;text-transform:none;color:var(--text-2);font-size:0.75rem">(انقر مرتين على الاسم لتعديله)</small></h3>
+      <h3>
+        إدارة الفئات
+        <small style="font-weight:400;text-transform:none;color:var(--text-2);font-size:0.75rem">
+          (انقر مرتين على الاسم لتعديله · انقر الشارة الملونة لتغيير النوع)
+        </small>
+      </h3>
       <div class="cat-manager" id="cat-list"></div>
-      <div class="add-cat-row">
+      <div class="add-cat-row" style="flex-wrap:wrap">
         <input type="text" id="new-cat-name" placeholder="اسم الفئة الجديدة..."
-          onkeydown="if(event.key==='Enter') addCategory()">
+          onkeydown="if(event.key==='Enter') addCategory()" style="flex:1;min-width:160px">
+        <select id="new-cat-type" class="add-cat-type-sel" title="نوع الفئة">
+          <option value="expense">💸 مصاريف</option>
+          <option value="savings">💰 ادخار</option>
+          <option value="asset">📈 أصول</option>
+        </select>
         <button class="btn btn-secondary" onclick="addCategory()">+ إضافة فئة</button>
       </div>
     </div>
@@ -466,7 +574,7 @@
         <input type="number" id="entry-salary" min="0" step="0.01" placeholder="0.00">
       </div>
       <div class="alloc-section">
-        <h3>توزيع المبالغ</h3>
+        <h3>توزيع المبالغ <small style="font-weight:400;font-size:.75rem;color:var(--text-2)">مُجمَّعة حسب النوع</small></h3>
         <div id="allocations-form"></div>
         <div class="modal-remaining" id="modal-remaining">المتبقي: —</div>
       </div>
