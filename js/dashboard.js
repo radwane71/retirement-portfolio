@@ -4,6 +4,8 @@ let stockZones   = {};   // ticker → { entry_price, exit_price }
 let sectorChart = null;
 let _sectorMode = 'donut'; // 'donut' | 'bars' | 'cards'
 let weightChart = null;
+let weightDonutCur = null;   // مخطط دائري — الوزن الحالي على مستوى السهم
+let weightDonutTgt = null;   // مخطط دائري — الوزن المستهدف على مستوى السهم
 let _weightMode = 'bars';  // 'bars' | 'gap' | 'cards' | 'table'
 let allocChart  = null;    // مخطط التخصيص الكلي للأصول
 let beChart     = null;    // مخطط نقطة التعادل
@@ -1621,7 +1623,7 @@ function _renderSectorCards(entries, total) {
 // ── Weight chart: mode switcher ───────────────────────────────
 function setWeightMode(mode) {
   _weightMode = mode;
-  ['bars','gap','cards','table'].forEach(m => {
+  ['bars','donut','gap','cards','table'].forEach(m => {
     document.getElementById('wm-' + m)?.classList.toggle('active', m === mode);
   });
   // show legend only for bar modes
@@ -1649,6 +1651,20 @@ function renderWeightChart() {
 
   const chartCont = document.getElementById('weightChart-container');
   const altArea   = document.getElementById('weight-alt-area');
+
+  // destroy donut charts whenever we leave donut mode
+  if (_weightMode !== 'donut') {
+    if (weightDonutCur) { weightDonutCur.destroy(); weightDonutCur = null; }
+    if (weightDonutTgt) { weightDonutTgt.destroy(); weightDonutTgt = null; }
+  }
+
+  if (_weightMode === 'donut') {
+    if (weightChart) { weightChart.destroy(); weightChart = null; }
+    if (chartCont) chartCont.style.display = 'none';
+    if (altArea)   { altArea.style.display = ''; }
+    _renderWeightDonuts(wSorted, wCurrent, wTarget);
+    return;
+  }
 
   if (_weightMode === 'cards') {
     if (weightChart) { weightChart.destroy(); weightChart = null; }
@@ -1680,6 +1696,82 @@ function renderWeightChart() {
   } else {
     _renderBarsChart(wSorted, wCurrent, wTarget, wColors, wCtx);
   }
+}
+
+// مخططان دائريان على مستوى السهم: الوزن الحالي مقابل الوزن المستهدف
+function _renderWeightDonuts(wSorted, wCurrent, wTarget) {
+  const altArea = document.getElementById('weight-alt-area');
+  if (!altArea) return;
+
+  // لون ثابت لكل سهم عبر المخططَين (حسب ترتيب الوزن الحالي)
+  const colorOf = {};
+  wSorted.forEach((h, i) => { colorOf[h.ticker] = CHART_COLORS[i % CHART_COLORS.length]; });
+
+  // بيانات الحالي — كل الأسهم التي لها وزن
+  const curRows = wSorted
+    .map((h, i) => ({ ticker: h.ticker, name: h.name || h.ticker, val: wCurrent[i] }))
+    .filter(r => r.val > 0);
+
+  // بيانات المستهدف — الأسهم التي لها هدف محدد فقط
+  const tgtRows = wSorted
+    .map((h, i) => ({ ticker: h.ticker, name: h.name || h.ticker, val: wTarget[i] }))
+    .filter(r => r.val > 0)
+    .sort((a, b) => b.val - a.val);
+
+  altArea.innerHTML = `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:4px 0">
+      <div>
+        <div style="text-align:center;font-size:0.85rem;color:var(--text);font-weight:600;margin-bottom:6px">
+          الوزن الحالي
+        </div>
+        <div class="chart-container" style="height:340px"><canvas id="weightDonutCur"></canvas></div>
+      </div>
+      <div>
+        <div style="text-align:center;font-size:0.85rem;color:var(--text);font-weight:600;margin-bottom:6px">
+          الوزن المستهدف
+        </div>
+        <div class="chart-container" style="height:340px">
+          ${tgtRows.length
+            ? '<canvas id="weightDonutTgt"></canvas>'
+            : '<div class="empty-state" style="padding:40px 12px"><div class="icon">⚖️</div><p>لم تُحدَّد أوزان مستهدفة بعد — أضفها من صفحة الأهداف</p></div>'}
+        </div>
+      </div>
+    </div>`;
+
+  const mk = (canvasId, rows) => {
+    const ctx = document.getElementById(canvasId)?.getContext('2d');
+    if (!ctx) return null;
+    const tot = rows.reduce((s, r) => s + r.val, 0);
+    return new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: rows.map(r => r.ticker),
+        datasets: [{
+          data: rows.map(r => r.val),
+          backgroundColor: rows.map(r => colorOf[r.ticker] || '#8b949e'),
+          borderColor: '#1c2128', borderWidth: 2, hoverOffset: 6
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false, cutout: '55%',
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, padding: 8, usePointStyle: true, boxWidth: 8 } },
+          tooltip: {
+            backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#c9d1d9',
+            borderColor: '#30363d', borderWidth: 1,
+            titleFont: { family: 'Tajawal', size: 13, weight: 'bold' }, bodyFont: { family: 'Tajawal', size: 12 },
+            callbacks: {
+              title: items => { const r = rows[items[0].dataIndex]; return r.ticker + (r.name && r.name !== r.ticker ? ' — ' + r.name : ''); },
+              label: c => { const pct = tot > 0 ? (c.parsed / tot * 100).toFixed(1) : 0; return ' ' + c.parsed.toFixed(2) + '%  (' + pct + '% من المعروض)'; }
+            }
+          }
+        }
+      }
+    });
+  };
+
+  weightDonutCur = mk('weightDonutCur', curRows);
+  weightDonutTgt = tgtRows.length ? mk('weightDonutTgt', tgtRows) : null;
 }
 
 function _renderBarsChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
