@@ -22,7 +22,9 @@
       "mcp__Claude_in_Chrome__computer",
       "mcp__Claude_in_Chrome__get_page_text",
       "Bash(grep -E \"\\\\.sql$\")",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(git -C \"C:\\\\Users\\\\User\\\\retirement-portfolio\" status)",
+      "Bash(node --check \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\dashboard.js\")"
     ]
   }
 }
