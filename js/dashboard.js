@@ -164,6 +164,7 @@ async function init() {
   renderBreakEvenCard();
   renderAllocationChart();
   renderRetirementCard();
+  applyReliabilityBadges();
   startPriceAutoRefresh();
 
   // أوقف العداد عند إخفاء الصفحة — استأنفه عند العودة
@@ -518,6 +519,7 @@ async function loadAllData() {
   window._ds = {
     yr,
     totalInvested:   totalBuys - totalSells,
+    totalSells,
     totalCommission, totalVAT,
     realizedPnL,
     totalDivAll,     yearDiv,
@@ -590,7 +592,7 @@ function switchYieldTab(tab) {
     setText('yield-tab-label', 'العائد المُسنوى — السنة الجارية');
     setText('stat-div-yield',  (s.divYieldAnn || 0).toFixed(2) + '%');
     const note = s.daysElapsed
-      ? `أرباح ${formatSAR(s.yearDiv||0)} × (${s.daysInYear}÷${s.daysElapsed}) ÷ رأس المال أول يناير`
+      ? `أرباح ${formatSAR(s.yearDiv||0)} × (${s.daysInYear}÷${s.daysElapsed}) ÷ تكلفة المحفظة (WAC)`
       : 'أرباح السنة الجارية مُسنواة';
     setText('stat-div-yield-sub', note);
   } else if (tab === 'yoc') {
@@ -614,6 +616,47 @@ function switchYieldTab(tab) {
             : (s.divYieldMarket||0);
   const el = document.getElementById('stat-div-yield');
   if (el) el.className = 'value num ' + (val >= 5 ? 'text-success' : val >= 3 ? 'text-accent' : 'text-muted');
+}
+
+// ── شارات موثوقية الكروت ──────────────────────────────────────
+// 🟢 عالية = رقم محسوب مباشرة من بياناتك الفعلية (لا افتراضات)
+// 🟡 متوسطة = يعتمد على افتراض (سعر محدّث / نسبة سحب / تقدير زمني)
+// 🔵 إرشادي = مؤشر توجيهي يتغيّر مع الأسعار والأهداف
+const _RELIABILITY = {
+  high:   { dot: '🟢', label: 'موثوقية عالية — رقم محسوب مباشرة من بياناتك الفعلية' },
+  medium: { dot: '🟡', label: 'موثوقية متوسطة — يعتمد على افتراض (سعر محدّث / نسبة سحب / تقدير زمني)' },
+  low:    { dot: '🔵', label: 'إرشادي للتوجيه — مؤشر يتغيّر مع الأسعار والأهداف' },
+};
+const _CARD_RELIABILITY = {
+  // 🟢 حقائق من بياناتك
+  'total-value': 'high', 'portfolio-cash': 'high', 'realestate': 'high', 'invested': 'high',
+  'capital': 'high', 'pnl': 'high', 'realized': 'high', 'total-div': 'high', 'year-div': 'high',
+  'cashflow': 'high', 'composition': 'high', 'costs': 'high', 'fwd-income': 'high',
+  'total-assets': 'high', 'concentration': 'high', 'contribution': 'high',
+  // 🟡 تعتمد افتراضات
+  'networth': 'medium', 'div-yield': 'medium', 'xirr': 'medium', 'passive-cover': 'medium',
+  'div-growth': 'medium', 'retirement': 'medium', 'breakeven': 'medium',
+  // 🔵 إرشادي للتوجيه
+  'top-sector': 'low', 'bot-sector': 'low', 'allocation': 'low',
+};
+function applyReliabilityBadges() {
+  document.querySelectorAll('.info-btn').forEach(btn => {
+    const m = (btn.getAttribute('onclick') || '').match(/showCardInfo\('([^']+)'\)/);
+    if (!m) return;
+    const tier = _CARD_RELIABILITY[m[1]];
+    if (!tier) return;
+    const card = btn.closest('.stat-card, .card');
+    if (!card) return;
+    const labelEl = card.querySelector('.label, .section-title');
+    if (!labelEl || labelEl.querySelector('.reliability-badge')) return;
+    const r = _RELIABILITY[tier];
+    const span = document.createElement('span');
+    span.className = 'reliability-badge';
+    span.textContent = r.dot;
+    span.title = r.label;
+    span.style.cssText = 'font-size:.62rem;margin-inline-start:5px;cursor:help;vertical-align:middle';
+    labelEl.appendChild(span);
+  });
 }
 
 // ── Stats ─────────────────────────────────────────────────────
@@ -2183,8 +2226,11 @@ function renderBreakEvenCard() {
 
   // ── المعادلة الكاملة ──────────────────────────────────────
   // currentValue يشمل أسهم المنح (موجودة في holdings) — لا نضيف grantValueNow مرة ثانية
-  // نضيف نقد المحفظة: حصيلة البيع التي خفّضت رأس المال قد تكون لا تزال نقداً عند الوسيط
-  const totalReturns = currentValue + portfolioCash + totalDivAll;
+  // نقد المحفظة يُحسب كـ«عائد» فقط بقدر ما يمكن أن يكون حصيلة بيع (totalSells)؛
+  // أي نقد مودَع زيادة عن ذلك (إيداع جديد لم يُستثمر) ليس عائداً ولا يُحتسب
+  const totalSells   = s.totalSells || 0;
+  const cashReturned = Math.min(portfolioCash, totalSells);
+  const totalReturns = currentValue + cashReturned + totalDivAll;
 
   // صافي الربح/الخسارة الحقيقي = إجمالي العوائد − ما أنفق
   const trueNetPnL   = totalReturns - netCapital;
@@ -2216,22 +2262,30 @@ function renderBreakEvenCard() {
     </div>`;
 
   // ── شريط التقدم المشترك ──────────────────────────────────
+  // breProgress = نسبة استرداد رأس المال. 100% = نقطة التعادل بالضبط.
+  // ما زاد عن 100% هو ربحك الصافي على رأس المال (profit% = breProgress − 100).
+  const recoveredPct = breProgress;                        // كم استرجعت من رأس مالك
+  const aboveBE      = recoveredPct - 100;                 // + فوق التعادل / − تحته
+  const recoveredCaption = isBreakEven
+    ? `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>+${aboveBE.toFixed(1)}% ربح</b> فوق نقطة التعادل`
+    : `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>${aboveBE.toFixed(1)}% تحت نقطة التعادل</b>`;
   const progressBar = `
     <div style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span class="small text-muted">التقدم نحو نقطة التعادل</span>
-        <span class="small bold" style="color:${barColor}">${breProgress.toFixed(1)}%</span>
+        <span class="small text-muted">استرداد رأس المال</span>
+        <span class="small bold" style="color:${barColor}">${recoveredPct.toFixed(1)}%</span>
       </div>
       <div style="background:var(--bg-3);border-radius:99px;height:10px;overflow:hidden">
         <div style="height:100%;border-radius:99px;background:${barColor};width:${barWidth}%;transition:width 0.4s ease"></div>
       </div>
       <div style="display:flex;justify-content:space-between;margin-top:4px">
         <span class="small text-muted">0%</span>
-        <span class="small" style="color:var(--accent);font-weight:600">نقطة التعادل 100%</span>
+        <span class="small" style="color:var(--accent);font-weight:600">↑ نقطة التعادل = 100%</span>
         ${isBreakEven
-          ? '<span class="small text-success font-bold">✅ تجاوزت!</span>'
+          ? '<span class="small text-success font-bold">✅ تجاوزتها</span>'
           : `<span class="small text-muted">متبقي ${formatSAR(gapToBreakEven)}</span>`}
       </div>
+      <div class="small text-muted" style="margin-top:6px;text-align:center;line-height:1.5">${recoveredCaption}</div>
     </div>`;
 
   // ── الصافي الكبير المشترك ─────────────────────────────────
@@ -2272,7 +2326,7 @@ function renderBreakEvenCard() {
       <div style="margin-bottom:8px;margin-top:12px">
         <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">العوائد</div>
         ${row('قيمة المحفظة الحالية', formatSAR(currentValue), '', grantValueNow > 0 ? `(يشمل منحة ${s.totalGrantShares || 0} سهم)` : '')}
-        ${portfolioCash > 0 ? row('نقد المحفظة عند الوسيط', formatSAR(portfolioCash)) : ''}
+        ${cashReturned > 0 ? row('نقد من حصيلة البيع عند الوسيط', formatSAR(cashReturned)) : ''}
         ${row('إجمالي الأرباح الموزعة (كل الأوقات)', formatSAR(totalDivAll), 'text-success')}
         ${row('إجمالي العوائد', formatSAR(totalReturns), trueNetPnL >= 0 ? 'text-success' : '')}
       </div>
@@ -2292,11 +2346,11 @@ function renderBreakEvenCard() {
     // كل مكوّن كنسبة من رأس المال المنشغل
     const pct = v => netCapital > 0 ? Math.max(0, v / netCapital * 100) : 0;
     const components = [
-      { label: 'ر/خ ورقي (القيمة السوقية)', value: unrealizedPnL, color: unrealizedPnL >= 0 ? '#3b82f6' : '#f85149', base: pct(currentValue - portfolioCash) },
+      { label: 'ر/خ ورقي (القيمة السوقية)', value: unrealizedPnL, color: unrealizedPnL >= 0 ? '#3b82f6' : '#f85149', base: pct(currentValue) },
       { label: 'ر/خ محقق من المبيعات',      value: realizedPnL,  color: realizedPnL  >= 0 ? '#22c55e' : '#f85149', base: pct(realizedPnL) },
       { label: 'أرباح موزعة مستلمة',        value: totalDivAll,  color: '#3fb950',                                   base: pct(totalDivAll) },
-      portfolioCash > 0
-        ? { label: 'نقد عند الوسيط',        value: portfolioCash, color: '#f0b429',                                  base: pct(portfolioCash) }
+      cashReturned > 0
+        ? { label: 'نقد من حصيلة البيع',    value: cashReturned, color: '#f0b429',                                  base: pct(cashReturned) }
         : null,
     ].filter(Boolean);
 
@@ -2349,7 +2403,7 @@ function renderBreakEvenCard() {
     el.innerHTML = `
       <div style="margin-bottom:14px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span class="small text-muted">التقدم نحو نقطة التعادل</span>
+          <span class="small text-muted">استرداد رأس المال (التعادل = 100%)</span>
           <span class="small bold" style="color:${barColor}">${breProgress.toFixed(1)}% ${isBreakEven ? '✅' : ''}</span>
         </div>
         <div style="background:var(--bg-3);border-radius:99px;height:8px;overflow:hidden">
@@ -2375,7 +2429,7 @@ function renderBreakEvenCard() {
         <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(248,81,73,.7);display:inline-block"></span>رأس المال</span>
         <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(59,130,246,.7);display:inline-block"></span>قيمة المحفظة</span>
         <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(63,185,80,.7);display:inline-block"></span>أرباح موزعة</span>
-        ${portfolioCash > 0 ? `<span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(240,180,41,.7);display:inline-block"></span>نقد</span>` : ''}
+        ${cashReturned > 0 ? `<span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(240,180,41,.7);display:inline-block"></span>نقد من البيع</span>` : ''}
       </div>`;
 
     // نبني المخطط بعد أن يُدرَج الـ canvas في DOM
@@ -2415,9 +2469,9 @@ function renderBreakEvenCard() {
               borderWidth: 1,
               borderRadius: 0,
             },
-            ...(portfolioCash > 0 ? [{
-              label: 'نقد',
-              data: [0, portfolioCash],
+            ...(cashReturned > 0 ? [{
+              label: 'نقد من البيع',
+              data: [0, cashReturned],
               backgroundColor: 'rgba(240,180,41,.7)',
               borderColor: '#f0b429',
               borderWidth: 1,
@@ -3095,13 +3149,13 @@ function showCardInfo(key) {
           <em>(ما خرج من جيبك صافياً)</em>
         </div>
         <div class="info-formula">
-          <strong>إجمالي العوائد = قيمة المحفظة الحالية + نقد المحفظة + كل الأرباح الموزعة</strong><br>
-          <em>(كل ما يقابلك الآن مقابل ما دفعته — قيمة المنح مشمولة ضمن قيمة المحفظة)</em>
+          <strong>إجمالي العوائد = قيمة المحفظة الحالية + نقد من حصيلة البيع + كل الأرباح الموزعة</strong><br>
+          <em>(كل ما يقابلك الآن مقابل ما دفعته — قيمة المنح مشمولة ضمن قيمة المحفظة. النقد يُحتسب فقط بقدر حصيلة البيع، أما الإيداع الجديد غير المستثمر فلا يُعدّ عائداً)</em>
         </div>
         <div class="info-formula">
           <strong>صافي الربح/الخسارة الحقيقي = إجمالي العوائد − رأس المال المنشغل</strong>
         </div>
-        <p class="info-note">💡 نقطة التعادل = عندما إجمالي العوائد = رأس المال المنشغل (الشريط يصل 100%)</p>
+        <p class="info-note">💡 نقطة التعادل نقطة وليست نسبة: هي عندما تسترجع 100% من رأس مالك (إجمالي العوائد = رأس المال). شريط «استرداد رأس المال» يقيس كم استرجعت — فإن وصل 106% فأنت تجاوزت التعادل بـ +6% ربحاً صافياً، وإن كان 90% فأنت تحته بـ 10%.</p>
         <p class="info-note">📌 قيمة المنح تُحسب بسعر السوق الحالي — لأنها أسهم مجانية تحتسب كعائد.</p>`
     },
     'realized': {
