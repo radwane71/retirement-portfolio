@@ -1218,7 +1218,8 @@ function renderDiversificationCard() {
 
   // معامل القطاعات: يخفّض النتيجة إذا كانت القطاعات مركّزة
   // 0.60 (قطاع واحد) → 1.00 (قطاعات موزّعة بالتساوي)
-  const sectorFactor = 0.60 + 0.40 * (1 - secNHHI);
+  const effSectors   = secHHI > 0 ? 1 / secHHI : sectorCount;
+  const sectorFactor = Math.min(1.0, 0.60 + 0.40 * Math.min(1, effSectors / 10));
   const gaugePos = Math.min(97, Math.max(3, Math.round(stockGauge * sectorFactor)));
 
   // تحديد المنطقة
