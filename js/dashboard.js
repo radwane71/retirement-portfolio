@@ -1175,8 +1175,8 @@ function renderDiversificationCard() {
 
   const n = holdings.length;
   const weights = holdings.map(h => +h.shares * +h.current_price / totalVal);
-  const hhi = weights.reduce((s, w) => s + w * w, 0);  // 1/n..1
-  const effectiveN = Math.round(1 / hhi);               // عدد أسهم فعّال
+  const hhi = weights.reduce((s, w) => s + w * w, 0);      // 1/n..1.0
+  const effectiveN = Math.max(1, Math.round(1 / hhi));      // N_فعّال
 
   // إحصاءات القطاعات
   const secMap = {};
@@ -1186,55 +1186,65 @@ function renderDiversificationCard() {
   });
   const sectorCount = Object.keys(secMap).length;
   const secHHI = Object.values(secMap).reduce((s, w) => s + w * w, 0);
+  // نسبة HHI القطاعي المُعيَّرة: 0 = توزيع متساوٍ، 1 = قطاع واحد
+  const secNHHI = sectorCount > 1
+    ? (secHHI - 1 / sectorCount) / (1 - 1 / sectorCount)
+    : 1.0;
 
   // أكبر مركز
   const sorted = [...holdings].sort((a, b) => +b.shares * +b.current_price - +a.shares * +a.current_price);
   const top1Pct  = sorted[0] ? (+sorted[0].shares * +sorted[0].current_price / totalVal * 100) : 0;
   const top1Name = sorted[0]?.ticker || '';
 
-  // ── موضع المؤشر على المقياس (0=مركّز، 50=مثالي، 100=مبعثر) ──
-  let base;
-  if      (n <= 1)  base = 5;
-  else if (n <= 3)  base = 12;
-  else if (n <= 6)  base = 22;
-  else if (n <= 9)  base = 33;
-  else if (n <= 12) base = 45;
-  else if (n <= 17) base = 50;
-  else if (n <= 22) base = 57;
-  else if (n <= 28) base = 65;
-  else if (n <= 35) base = 73;
-  else if (n <= 50) base = 82;
-  else              base = 90;
+  // ── موضع المؤشر: مشتقّ من HHI الخام مباشرةً ─────────────────
+  // المرجع: DOJ (0.25 مركّز / 0.15 معتدل)، Evans & Archer 1968،
+  //         Statman 1987، Campbell et al 2001
+  // نقاط التحويل: [HHI_خام → gaugePos %]
+  // 0% = مركّز تماماً (N_eff=1)، 100% = تنوع واسع جداً
+  const bps = [
+    [1.000,  0], [0.500,  8], [0.250, 22], [0.150, 38],
+    [0.100, 52], [0.067, 64], [0.050, 74], [0.033, 84],
+    [0.020, 92], [0.000, 100]
+  ];
+  let stockGauge = 100;
+  for (let i = 0; i < bps.length - 1; i++) {
+    const [h1, g1] = bps[i], [h2, g2] = bps[i + 1];
+    if (hhi >= h2) {
+      const t = (hhi - h2) / (h1 - h2);
+      stockGauge = g2 + t * (g1 - g2);
+      break;
+    }
+  }
 
-  // تعديل HHI: إذا كانت الأوزان غير متساوية، يتجه نحو التركيز
-  const expectedHHI = 1 / n;
-  const hhiAdj = Math.min(12, Math.max(-10, -(hhi / expectedHHI - 1) * 10));
-
-  // تعديل القطاعات
-  const secAdj = sectorCount <= 1 ? -8 : sectorCount <= 2 ? -4 : sectorCount >= 5 ? +4 : 0;
-
-  const gaugePos = Math.min(95, Math.max(5, base + hhiAdj + secAdj));
+  // معامل القطاعات: يخفّض النتيجة إذا كانت القطاعات مركّزة
+  // 0.60 (قطاع واحد) → 1.00 (قطاعات موزّعة بالتساوي)
+  const sectorFactor = 0.60 + 0.40 * (1 - secNHHI);
+  const gaugePos = Math.min(97, Math.max(3, Math.round(stockGauge * sectorFactor)));
 
   // تحديد المنطقة
   let zoneLabel, zoneColor, advice;
-  if (gaugePos < 18) {
-    zoneLabel = 'مركّز جداً';  zoneColor = '#ef4444';
-    advice = `${n} أسهم في ${sectorCount} قطاعات — خسارة سهم واحد تُلقي بظلالها على المحفظة بأكملها. المرجع (Graham): الهدف 10–15 سهم كحد أدنى.`;
-  } else if (gaugePos < 38) {
-    zoneLabel = 'تنوع محدود';   zoneColor = '#f97316';
-    advice = `${n} أسهم — بداية جيدة. أضف تدريجياً في قطاعات مختلفة للوصول إلى النطاق الأمثل (10–20 سهم · 4+ قطاعات).`;
-  } else if (gaugePos <= 62) {
-    zoneLabel = 'تنوع ممتاز';   zoneColor = '#22c55e';
-    advice = `${n} أسهم في ${sectorCount} قطاعات — النطاق المثالي لمحفظة توزيعات. كل إضافة جديدة تحتاج مبرراً واضحاً لتُضيف قيمة فعلية.`;
-  } else if (gaugePos <= 80) {
-    zoneLabel = 'مراقبة التشتت'; zoneColor = '#eab308';
-    advice = `${n} سهماً — تعقيد الإدارة يرتفع. راجع كل مركز: هل تتابعه وتفهمه؟ (Peter Lynch: "diworsification" يزيد التعقيد دون حماية إضافية حقيقية).`;
+  if (gaugePos < 22) {
+    zoneLabel = 'مركّز جداً';   zoneColor = '#ef4444';
+    advice = `عدد فعّال = ${effectiveN} — مركز واحد يكفي لإلحاق ضرر بالغ بالمحفظة. المرجع (Graham): لا تقل عن 10 أسهم لحماية معقولة من المخاطر الفردية.`;
+  } else if (gaugePos < 40) {
+    zoneLabel = 'تركيز ملحوظ';  zoneColor = '#f97316';
+    advice = `عدد فعّال = ${effectiveN} — تنوع جزئي. 90% من مخاطر الأسهم الفردية تُزال عند N_فعّال ≥ 10 (Evans & Archer 1968). أضف في قطاعات مختلفة.`;
+  } else if (gaugePos < 60) {
+    zoneLabel = 'تنوع معقول';   zoneColor = '#84cc16';
+    advice = `عدد فعّال = ${effectiveN} — نطاق مقبول. معظم المخاطر الفردية محمية. الخطوة التالية: تعزيز تنوع القطاعات (${sectorCount} قطاع حالياً).`;
+  } else if (gaugePos < 80) {
+    zoneLabel = 'تنوع جيد';     zoneColor = '#22c55e';
+    advice = `عدد فعّال = ${effectiveN} — تنوع جيد يحمي من الصدمات الفردية والقطاعية. المرجع (Statman 1987): النطاق 30–40 سهم متساوٍ مثالي لمحفظة التقاعد.`;
   } else {
-    zoneLabel = 'تشتت مفرط';   zoneColor = '#f97316';
-    advice = `${n} سهماً — المحفظة باتت كالمؤشر لكن بدون كفاءة تكاليفه. فكر في دمج المراكز الصغيرة أو الانتقال لصندوق مؤشر لهذا الجزء.`;
+    zoneLabel = 'تنوع ممتاز';   zoneColor = '#10b981';
+    advice = `عدد فعّال = ${effectiveN} — تنوع واسع يُقلّل المخاطر غير المنهجية إلى أدنى مستوياتها. تأكد من متابعة كل مركز بانتظام.`;
   }
 
-  const hhiPct = (hhi * 100).toFixed(1);
+  // تنبيه منفصل لتعقيد الإدارة (Diworsification) — ليس منطقة خطر على المقياس
+  const diworseNote = n > 30 ? `
+    <div style="background:rgba(245,158,11,0.08);border-right:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.80rem;color:var(--text);line-height:1.65;margin-top:10px;direction:rtl">
+      💡 <strong>ملاحظة الإدارة:</strong> ${n} سهماً — عدد كبير يرفع تعقيد المتابعة (Lynch: diworsification). تأكد أن كل مركز مدروس وتعرفه جيداً.
+    </div>` : '';
 
   el.innerHTML = `
     <div class="section-header" style="margin-bottom:14px">
@@ -1242,94 +1252,66 @@ function renderDiversificationCard() {
       <button class="info-btn" onclick="showCardInfo('diversification')">ⓘ</button>
     </div>
 
-    <!-- المقياس البصري -->
+    <!-- المقياس البصري — اتجاه ثابت LTR لوضوح الرسم -->
     <div style="direction:ltr;padding:0 4px 4px">
       <!-- تسميات الأطراف -->
-      <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-muted);margin-bottom:6px">
+      <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:6px">
         <span style="color:#ef4444;font-weight:600">◀ مركّز</span>
-        <span style="color:#22c55e;font-weight:600">المنطقة المثلى</span>
-        <span style="color:#f97316;font-weight:600">مبعثر ▶</span>
+        <span style="color:#10b981;font-weight:600">متنوع ▶</span>
       </div>
 
-      <!-- شريط التدرج مع المؤشر -->
-      <div style="position:relative;margin-bottom:30px">
-        <div style="
-          height:22px;border-radius:11px;
-          background:linear-gradient(to right,
-            #ef4444 0%, #f97316 14%, #eab308 28%,
-            #22c55e 38%, #22c55e 62%,
-            #eab308 72%, #f97316 86%, #ef4444 100%
-          );
-        "></div>
-        <!-- إطار المنطقة المثلى -->
-        <div style="position:absolute;top:0;bottom:0;left:38%;width:24%;border:2.5px solid rgba(255,255,255,0.85);border-radius:9px;pointer-events:none"></div>
-        <!-- المؤشر (خط عمودي + رأس مثلث) -->
+      <!-- شريط التدرج + مؤشر -->
+      <div style="position:relative;margin-bottom:34px">
+        <div style="height:22px;border-radius:11px;background:linear-gradient(to right,#ef4444 0%,#f97316 18%,#eab308 32%,#84cc16 45%,#22c55e 62%,#10b981 80%,#10b981 100%)"></div>
+        <!-- إطار منطقة "تنوع جيد +" -->
+        <div style="position:absolute;top:0;bottom:0;left:60%;right:0;border:2.5px solid rgba(255,255,255,0.75);border-radius:0 9px 9px 0;pointer-events:none"></div>
+        <!-- المؤشر -->
         <div style="position:absolute;top:-5px;left:${gaugePos}%;transform:translateX(-50%)">
-          <div style="width:3px;height:32px;background:var(--text);border-radius:2px;margin:0 auto"></div>
-          <div style="
-            width:0;height:0;
-            border-left:7px solid transparent;
-            border-right:7px solid transparent;
-            border-top:9px solid var(--text);
-            margin:0 auto;margin-top:-1px;
-          "></div>
+          <div style="width:3px;height:32px;background:var(--text);border-radius:2px;margin:0 auto;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>
+          <div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid var(--text);margin:0 auto;margin-top:-1px"></div>
         </div>
-        <!-- تسمية الموضع الحالي -->
-        <div style="
-          position:absolute;top:34px;
-          left:${gaugePos}%;transform:translateX(-50%);
-          font-size:0.78rem;font-weight:700;
-          color:${zoneColor};white-space:nowrap;
-        ">${zoneLabel}</div>
+        <!-- تسمية المنطقة -->
+        <div style="position:absolute;top:34px;left:${gaugePos}%;transform:translateX(-50%);font-size:0.78rem;font-weight:700;color:${zoneColor};white-space:nowrap">${zoneLabel}</div>
       </div>
 
-      <!-- تسميات المناطق تحت الشريط -->
-      <div style="display:grid;grid-template-columns:18% 20% 24% 19% 19%;font-size:0.66rem;color:var(--text-muted);text-align:center;margin-bottom:16px">
-        <span>مركّز<br>جداً</span>
-        <span>تنوع<br>محدود</span>
-        <span style="color:var(--success);font-weight:600">● تنوع<br>ممتاز</span>
-        <span>مراقبة<br>التشتت</span>
-        <span>تشتت<br>مفرط</span>
+      <!-- تسميات المناطق — عرضها يطابق حدود الـ gradient -->
+      <div style="display:grid;grid-template-columns:22% 18% 20% 20% 20%;font-size:0.65rem;text-align:center;margin-bottom:16px">
+        <span style="color:#ef4444">مركّز<br>جداً</span>
+        <span style="color:#f97316">تركيز<br>ملحوظ</span>
+        <span style="color:#84cc16">تنوع<br>معقول</span>
+        <span style="color:#22c55e;font-weight:600">تنوع<br>جيد ●</span>
+        <span style="color:#10b981;font-weight:600">تنوع<br>ممتاز</span>
       </div>
     </div>
 
     <!-- مقاييس سريعة -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;direction:rtl">
       <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${n}</div>
-        <div style="font-size:0.69rem;color:var(--text-muted)">سهم</div>
+        <div style="font-size:1.3rem;font-weight:700;color:var(--text)">${effectiveN}</div>
+        <div style="font-size:0.68rem;color:var(--text-muted)">عدد فعّال</div>
       </div>
       <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${sectorCount}</div>
-        <div style="font-size:0.69rem;color:var(--text-muted)">قطاع</div>
+        <div style="font-size:1.3rem;font-weight:700;color:var(--text)">${n}</div>
+        <div style="font-size:0.68rem;color:var(--text-muted)">سهم</div>
+      </div>
+      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
+        <div style="font-size:1.3rem;font-weight:700;color:var(--text)">${sectorCount}</div>
+        <div style="font-size:0.68rem;color:var(--text-muted)">قطاع</div>
       </div>
       <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
         <div style="font-size:1.1rem;font-weight:700;color:var(--text)">${top1Pct.toFixed(1)}%</div>
-        <div style="font-size:0.69rem;color:var(--text-muted)">أكبر مركز (${esc(top1Name)})</div>
-      </div>
-      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${effectiveN}</div>
-        <div style="font-size:0.69rem;color:var(--text-muted)">عدد فعّال HHI</div>
+        <div style="font-size:0.68rem;color:var(--text-muted)">أكبر (${esc(top1Name)})</div>
       </div>
     </div>
 
     <!-- النصيحة -->
-    <div style="
-      background:${zoneColor}18;
-      border-right:3px solid ${zoneColor};
-      border-radius:0 8px 8px 0;
-      padding:10px 12px;
-      font-size:0.82rem;
-      color:var(--text);
-      line-height:1.65;
-      direction:rtl;
-    ">${advice}</div>
+    <div style="background:${zoneColor}18;border-right:3px solid ${zoneColor};border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.82rem;color:var(--text);line-height:1.65;direction:rtl">${advice}</div>
 
-    <!-- HHI مختصر -->
+    ${diworseNote}
+
+    <!-- تفاصيل HHI -->
     <div style="margin-top:10px;font-size:0.71rem;color:var(--text-muted);text-align:center;direction:rtl">
-      مؤشر هيرفيندال HHI = ${hhiPct}% &nbsp;·&nbsp;
-      HHI قطاعي = ${(secHHI*100).toFixed(1)}% &nbsp;·&nbsp;
-      عدد فعّال = ${effectiveN} سهم
+      HHI أسهم = ${(hhi * 100).toFixed(1)}% &nbsp;·&nbsp; HHI قطاعات = ${(secHHI * 100).toFixed(1)}% &nbsp;·&nbsp; عدد فعّال = ${effectiveN} سهم
     </div>`;
 }
 
@@ -3482,25 +3464,27 @@ function showCardInfo(key) {
         const n = holdings.length;
         const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
         const hhi = totalVal > 0
-          ? holdings.reduce((s, h) => { const w = +h.shares * +h.current_price / totalVal; return s + w*w; }, 0)
+          ? holdings.reduce((s, h) => { const w = +h.shares * +h.current_price / totalVal; return s + w * w; }, 0)
           : 0;
+        const effN = hhi > 0 ? Math.round(1 / hhi) : 0;
         return `
-          <p>يقيس هذا المؤشر مدى تنوع محفظتك بين ثلاثة مستويات: سهم فرد، قطاع، وتوزيع الأوزان.</p>
-          <div class="info-formula"><strong>مؤشر هيرفيندال-هيرشمان (HHI)</strong> = Σ(وزن كل سهم²)</div>
+          <p>المقياس مبني على <strong>مؤشر هيرفيندال-هيرشمان (HHI)</strong> — المعيار الأكاديمي والتنظيمي المعتمد (وزارة العدل الأمريكية DOJ، نظرية الحوافظ الحديثة MPT).</p>
+          <div class="info-formula"><strong>HHI = Σ (وزن كل سهم)²</strong></div>
           <div class="info-math">
-            HHI حالياً = ${(hhi*100).toFixed(2)}%<br>
-            HHI لـ ${n} أسهم متساوية = ${n > 0 ? (100/n).toFixed(2) : '—'}%<br>
-            العدد الفعّال = 1 ÷ HHI = <strong>${hhi > 0 ? Math.round(1/hhi) : '—'} سهم</strong>
+            HHI أسهمك حالياً = <strong>${(hhi * 100).toFixed(2)}%</strong><br>
+            العدد الفعّال = 1 ÷ HHI = <strong>${effN} سهم</strong><br>
+            <span class="text-muted small">العدد الفعّال يعكس توزيع الأوزان، لا مجرد العدد — 15 سهماً أكبرها 80% يُعطي عدداً فعّالاً ≈ 1.6</span>
           </div>
-          <p><strong>مناطق المقياس (Graham + Lynch):</strong></p>
-          <ul style="font-size:0.82rem;line-height:1.9;padding-right:16px">
-            <li><span style="color:#ef4444">●</span> <strong>مركّز جداً</strong>: أقل من 7 أسهم — خطر مرتفع على الأسهم الفردية</li>
-            <li><span style="color:#f97316">●</span> <strong>تنوع محدود</strong>: 7–9 أسهم — حماية جزئية</li>
-            <li><span style="color:#22c55e">●</span> <strong>تنوع ممتاز</strong>: 10–17 سهم في 4+ قطاعات — النطاق الأمثل</li>
-            <li><span style="color:#eab308">●</span> <strong>مراقبة التشتت</strong>: 18–35 سهم — تعقيد الإدارة يرتفع</li>
-            <li><span style="color:#f97316">●</span> <strong>تشتت مفرط</strong>: أكثر من 35 سهماً — "Diworsification" (Lynch)</li>
+          <p><strong>مناطق المقياس (مرجع: DOJ 2010 + Statman 1987 + Campbell 2001):</strong></p>
+          <ul style="font-size:0.82rem;line-height:2;padding-right:16px">
+            <li><span style="color:#ef4444">●</span> <strong>مركّز جداً</strong>: HHI > 25% (N_eff ≤ 4) — خطر مرتفع جداً</li>
+            <li><span style="color:#f97316">●</span> <strong>تركيز ملحوظ</strong>: HHI 15–25% (N_eff 4–7) — حماية جزئية</li>
+            <li><span style="color:#84cc16">●</span> <strong>تنوع معقول</strong>: HHI 10–15% (N_eff 7–12) — مقبول</li>
+            <li><span style="color:#22c55e">●</span> <strong>تنوع جيد</strong>: HHI 5–10% (N_eff 12–25) — جيد</li>
+            <li><span style="color:#10b981">●</span> <strong>تنوع ممتاز</strong>: HHI < 5% (N_eff > 25) — ممتاز</li>
           </ul>
-          <p class="info-note">⚠️ الموضع على المقياس يجمع: عدد الأسهم + HHI (توزيع الأوزان) + عدد القطاعات — وليس عدد الأسهم فقط.</p>`;
+          <p><strong>دور القطاعات:</strong> تنوع القطاعات يُخفّض الدرجة بنسبة تصل لـ 40% إذا كانت الأسهم مركّزة في قطاع واحد — لأن الارتباط بين الأسهم في القطاع الواحد يُلغي فائدة التعدد.</p>
+          <p class="info-note">💡 <strong>تنبيه الإدارة (Diworsification):</strong> يظهر بشكل منفصل عند n > 30 — ليس جزءاً من المقياس لأن المزيد من الأسهم رياضياً لا يزيد المخاطرة، بل يزيد تعقيد المتابعة فقط.</p>`;
       })()
     },
     'retirement': {
