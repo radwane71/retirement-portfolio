@@ -1350,9 +1350,9 @@ function showDiversificationAnalysis() {
 
   // ── معايير "تنوع ممتاز" ──────────────────────────────────────
   // HHI < 5% → N_eff > 20، وعامل القطاعات يجب أن يكون عالياً
-  const TARGET_HHI     = 0.05;   // N_eff = 20
-  const TARGET_TOP1    = 10;     // % - أكبر مركز
-  const TARGET_TOP3    = 30;     // % - أكبر 3
+  const TARGET_HHI     = 0.067;  // N_eff ≥ 15 — Evans & Archer (1968): 15 سهم تُزيل 90% من المخاطر القابلة للتنويع
+  const TARGET_TOP1    = 15;     // % - أكبر مركز
+  const TARGET_TOP3    = 45;     // % - أكبر 3
   const TARGET_SECTORS = 4;      // قطاعات كحد أدنى
   const TARGET_TOPSEC  = 35;     // % - أكبر قطاع
   const TARGET_SECFACT = 0.85;   // معامل القطاعات المطلوب
@@ -1366,11 +1366,11 @@ function showDiversificationAnalysis() {
     ok: hhiOk,
     label: `العدد الفعّال (N_فعّال)`,
     current: `${effN} سهم · HHI = ${(hhi*100).toFixed(1)}%`,
-    target:  `N_فعّال ≥ 20 · HHI ≤ 5%`,
+    target:  `N_فعّال ≥ 15 · HHI ≤ 6.7%`,
     action:  hhiOk ? null
-      : effN >= 15
+      : effN >= 12
         ? `وزّع مبالغ الإضافات بالتساوي أكثر — أكبر مركز يستأثر بحصة كبيرة ترفع الـ HHI`
-        : `أضف ${Math.max(0, 20 - effN)} أسهم جديدة بأوزان متوازنة (أو قلّل تركيز أكبر مراكزك)`
+        : `أضف ${Math.max(0, 15 - effN)} أسهم جديدة بأوزان متوازنة (أو قلّل تركيز أكبر مراكزك)`
   });
 
   // 2. أكبر مركز
@@ -1473,7 +1473,7 @@ function showDiversificationAnalysis() {
         <!-- ملاحظة -->
         <div style="margin-top:14px;font-size:0.72rem;color:var(--text-muted);line-height:1.7;direction:rtl">
           المعايير مبنية على: DOJ HHI thresholds · Evans & Archer (1968) · Statman (1987) · Campbell et al (2001)<br>
-          "تنوع ممتاز" = N_فعّال ≥ 20 · أكبر مركز ≤ 10% · أكبر 3 ≤ 30% · 4+ قطاعات متوازنة
+          "تنوع ممتاز" = N_فعّال ≥ 15 · أكبر مركز ≤ 15% · أكبر 3 ≤ 45% · 4+ قطاعات متوازنة
         </div>
       </div>
     </div>`;
