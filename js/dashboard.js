@@ -112,7 +112,7 @@ async function refreshPrices(silent = false) {
         _savePriceTimestamps();
       }
       // رسم فوري بالأسعار الجديدة + تحقق مناطق السعر
-      renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
+      renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
       renderPriceZonesCard(); renderBreakEvenCard();
       // تحقق تنبيهات مناطق الشراء/البيع بعد كل تحديث أسعار
       holdings.forEach(h => checkPriceZones(h.ticker, +h.current_price));
@@ -157,7 +157,7 @@ async function init() {
   await loadAllData();
   renderStats();
   renderRebalancingAlerts();
-  renderPortfolioHealthCard();
+  renderPortfolioHealthCard(); renderDiversificationCard();
   renderCharts();
   renderTable();
   renderPriceZonesCard();
@@ -557,7 +557,7 @@ async function reloadHoldings() {
     return h;
   });
   renderRebalancingAlerts();
-  renderPortfolioHealthCard();
+  renderPortfolioHealthCard(); renderDiversificationCard();
 }
 
 // ── Tab: طريقة حساب رأس المال ────────────────────────────────
@@ -1164,6 +1164,175 @@ function renderPortfolioHealthCard() {
     </p>`;
 }
 
+// ── مقياس التنويع (HHI gauge) ─────────────────────────────────
+function renderDiversificationCard() {
+  const el = document.getElementById('diversification-card');
+  if (!el) return;
+
+  const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  if (!holdings.length || !totalVal) { el.style.display = 'none'; return; }
+  el.style.display = '';
+
+  const n = holdings.length;
+  const weights = holdings.map(h => +h.shares * +h.current_price / totalVal);
+  const hhi = weights.reduce((s, w) => s + w * w, 0);  // 1/n..1
+  const effectiveN = Math.round(1 / hhi);               // عدد أسهم فعّال
+
+  // إحصاءات القطاعات
+  const secMap = {};
+  holdings.forEach(h => {
+    const k = (h.sector || '').trim() || 'غير مصنف';
+    secMap[k] = (secMap[k] || 0) + +h.shares * +h.current_price / totalVal;
+  });
+  const sectorCount = Object.keys(secMap).length;
+  const secHHI = Object.values(secMap).reduce((s, w) => s + w * w, 0);
+
+  // أكبر مركز
+  const sorted = [...holdings].sort((a, b) => +b.shares * +b.current_price - +a.shares * +a.current_price);
+  const top1Pct  = sorted[0] ? (+sorted[0].shares * +sorted[0].current_price / totalVal * 100) : 0;
+  const top1Name = sorted[0]?.ticker || '';
+
+  // ── موضع المؤشر على المقياس (0=مركّز، 50=مثالي، 100=مبعثر) ──
+  let base;
+  if      (n <= 1)  base = 5;
+  else if (n <= 3)  base = 12;
+  else if (n <= 6)  base = 22;
+  else if (n <= 9)  base = 33;
+  else if (n <= 12) base = 45;
+  else if (n <= 17) base = 50;
+  else if (n <= 22) base = 57;
+  else if (n <= 28) base = 65;
+  else if (n <= 35) base = 73;
+  else if (n <= 50) base = 82;
+  else              base = 90;
+
+  // تعديل HHI: إذا كانت الأوزان غير متساوية، يتجه نحو التركيز
+  const expectedHHI = 1 / n;
+  const hhiAdj = Math.min(12, Math.max(-10, -(hhi / expectedHHI - 1) * 10));
+
+  // تعديل القطاعات
+  const secAdj = sectorCount <= 1 ? -8 : sectorCount <= 2 ? -4 : sectorCount >= 5 ? +4 : 0;
+
+  const gaugePos = Math.min(95, Math.max(5, base + hhiAdj + secAdj));
+
+  // تحديد المنطقة
+  let zoneLabel, zoneColor, advice;
+  if (gaugePos < 18) {
+    zoneLabel = 'مركّز جداً';  zoneColor = '#ef4444';
+    advice = `${n} أسهم في ${sectorCount} قطاعات — خسارة سهم واحد تُلقي بظلالها على المحفظة بأكملها. المرجع (Graham): الهدف 10–15 سهم كحد أدنى.`;
+  } else if (gaugePos < 38) {
+    zoneLabel = 'تنوع محدود';   zoneColor = '#f97316';
+    advice = `${n} أسهم — بداية جيدة. أضف تدريجياً في قطاعات مختلفة للوصول إلى النطاق الأمثل (10–20 سهم · 4+ قطاعات).`;
+  } else if (gaugePos <= 62) {
+    zoneLabel = 'تنوع ممتاز';   zoneColor = '#22c55e';
+    advice = `${n} أسهم في ${sectorCount} قطاعات — النطاق المثالي لمحفظة توزيعات. كل إضافة جديدة تحتاج مبرراً واضحاً لتُضيف قيمة فعلية.`;
+  } else if (gaugePos <= 80) {
+    zoneLabel = 'مراقبة التشتت'; zoneColor = '#eab308';
+    advice = `${n} سهماً — تعقيد الإدارة يرتفع. راجع كل مركز: هل تتابعه وتفهمه؟ (Peter Lynch: "diworsification" يزيد التعقيد دون حماية إضافية حقيقية).`;
+  } else {
+    zoneLabel = 'تشتت مفرط';   zoneColor = '#f97316';
+    advice = `${n} سهماً — المحفظة باتت كالمؤشر لكن بدون كفاءة تكاليفه. فكر في دمج المراكز الصغيرة أو الانتقال لصندوق مؤشر لهذا الجزء.`;
+  }
+
+  const hhiPct = (hhi * 100).toFixed(1);
+
+  el.innerHTML = `
+    <div class="section-header" style="margin-bottom:14px">
+      <span class="section-title">🧩 مقياس التنويع <span class="eng-label">Diversification</span></span>
+      <button class="info-btn" onclick="showCardInfo('diversification')">ⓘ</button>
+    </div>
+
+    <!-- المقياس البصري -->
+    <div style="direction:ltr;padding:0 4px 4px">
+      <!-- تسميات الأطراف -->
+      <div style="display:flex;justify-content:space-between;font-size:0.72rem;color:var(--text-muted);margin-bottom:6px">
+        <span style="color:#ef4444;font-weight:600">◀ مركّز</span>
+        <span style="color:#22c55e;font-weight:600">المنطقة المثلى</span>
+        <span style="color:#f97316;font-weight:600">مبعثر ▶</span>
+      </div>
+
+      <!-- شريط التدرج مع المؤشر -->
+      <div style="position:relative;margin-bottom:30px">
+        <div style="
+          height:22px;border-radius:11px;
+          background:linear-gradient(to right,
+            #ef4444 0%, #f97316 14%, #eab308 28%,
+            #22c55e 38%, #22c55e 62%,
+            #eab308 72%, #f97316 86%, #ef4444 100%
+          );
+        "></div>
+        <!-- إطار المنطقة المثلى -->
+        <div style="position:absolute;top:0;bottom:0;left:38%;width:24%;border:2.5px solid rgba(255,255,255,0.85);border-radius:9px;pointer-events:none"></div>
+        <!-- المؤشر (خط عمودي + رأس مثلث) -->
+        <div style="position:absolute;top:-5px;left:${gaugePos}%;transform:translateX(-50%)">
+          <div style="width:3px;height:32px;background:var(--text);border-radius:2px;margin:0 auto"></div>
+          <div style="
+            width:0;height:0;
+            border-left:7px solid transparent;
+            border-right:7px solid transparent;
+            border-top:9px solid var(--text);
+            margin:0 auto;margin-top:-1px;
+          "></div>
+        </div>
+        <!-- تسمية الموضع الحالي -->
+        <div style="
+          position:absolute;top:34px;
+          left:${gaugePos}%;transform:translateX(-50%);
+          font-size:0.78rem;font-weight:700;
+          color:${zoneColor};white-space:nowrap;
+        ">${zoneLabel}</div>
+      </div>
+
+      <!-- تسميات المناطق تحت الشريط -->
+      <div style="display:grid;grid-template-columns:18% 20% 24% 19% 19%;font-size:0.66rem;color:var(--text-muted);text-align:center;margin-bottom:16px">
+        <span>مركّز<br>جداً</span>
+        <span>تنوع<br>محدود</span>
+        <span style="color:var(--success);font-weight:600">● تنوع<br>ممتاز</span>
+        <span>مراقبة<br>التشتت</span>
+        <span>تشتت<br>مفرط</span>
+      </div>
+    </div>
+
+    <!-- مقاييس سريعة -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;direction:rtl">
+      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
+        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${n}</div>
+        <div style="font-size:0.69rem;color:var(--text-muted)">سهم</div>
+      </div>
+      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
+        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${sectorCount}</div>
+        <div style="font-size:0.69rem;color:var(--text-muted)">قطاع</div>
+      </div>
+      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;color:var(--text)">${top1Pct.toFixed(1)}%</div>
+        <div style="font-size:0.69rem;color:var(--text-muted)">أكبر مركز (${esc(top1Name)})</div>
+      </div>
+      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
+        <div style="font-size:1.2rem;font-weight:700;color:var(--text)">${effectiveN}</div>
+        <div style="font-size:0.69rem;color:var(--text-muted)">عدد فعّال HHI</div>
+      </div>
+    </div>
+
+    <!-- النصيحة -->
+    <div style="
+      background:${zoneColor}18;
+      border-right:3px solid ${zoneColor};
+      border-radius:0 8px 8px 0;
+      padding:10px 12px;
+      font-size:0.82rem;
+      color:var(--text);
+      line-height:1.65;
+      direction:rtl;
+    ">${advice}</div>
+
+    <!-- HHI مختصر -->
+    <div style="margin-top:10px;font-size:0.71rem;color:var(--text-muted);text-align:center;direction:rtl">
+      مؤشر هيرفيندال HHI = ${hhiPct}% &nbsp;·&nbsp;
+      HHI قطاعي = ${(secHHI*100).toFixed(1)}% &nbsp;·&nbsp;
+      عدد فعّال = ${effectiveN} سهم
+    </div>`;
+}
+
 // ── معلومات منهجية محلل الصحة ───────────────────────────────
 function showHealthInfo() {
   // S-3: replace alert() with DOM modal — alert() blocks the main thread and is
@@ -1281,7 +1450,7 @@ function editRetirementGoal() {
     saveRetirementGoal({ monthly, swr, target_year });
     renderStats();
     renderRetirementCard();
-    renderPortfolioHealthCard();
+    renderPortfolioHealthCard(); renderDiversificationCard();
   };
   overlay.querySelector('#rg-save').addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#rg-save').click(); });
   document.addEventListener('keydown', function escKey(e) {
@@ -2719,7 +2888,7 @@ async function saveHolding(e) {
   showToast(editingId ? 'تم التحديث' : 'تمت الإضافة', 'success');
   closeModal();
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
+  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
 }
 
 // ── Sync holdings from transactions ──────────────────────────
@@ -2919,7 +3088,7 @@ async function confirmSync() {
   const keptNote  = keptCount > 0 ? ` (محتفظ بـ ${keptCount} متوسط يدوي)` : '';
   showToast(`✓ تمت المزامنة — ${upserted} سهم${keptNote}`, 'success');
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
+  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
 }
 
 // ── Info Modal ────────────────────────────────────────────────
@@ -3307,6 +3476,33 @@ function showCardInfo(key) {
         <div class="info-formula"><strong>نسبة كل فئة = قيمتها ÷ إجمالي الأصول × 100</strong></div>
         <p class="info-note">💡 لا توجد نسبة "مثالية" واحدة — تعتمد على عمرك وأهدافك وتحمّلك للمخاطر. القاعدة الشائعة: كلما اقتربت من التقاعد، زدت الأصول الأقل تذبذباً.</p>`
     },
+    'diversification': {
+      title: '🧩 مقياس التنويع — المنهجية',
+      body: (() => {
+        const n = holdings.length;
+        const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+        const hhi = totalVal > 0
+          ? holdings.reduce((s, h) => { const w = +h.shares * +h.current_price / totalVal; return s + w*w; }, 0)
+          : 0;
+        return `
+          <p>يقيس هذا المؤشر مدى تنوع محفظتك بين ثلاثة مستويات: سهم فرد، قطاع، وتوزيع الأوزان.</p>
+          <div class="info-formula"><strong>مؤشر هيرفيندال-هيرشمان (HHI)</strong> = Σ(وزن كل سهم²)</div>
+          <div class="info-math">
+            HHI حالياً = ${(hhi*100).toFixed(2)}%<br>
+            HHI لـ ${n} أسهم متساوية = ${n > 0 ? (100/n).toFixed(2) : '—'}%<br>
+            العدد الفعّال = 1 ÷ HHI = <strong>${hhi > 0 ? Math.round(1/hhi) : '—'} سهم</strong>
+          </div>
+          <p><strong>مناطق المقياس (Graham + Lynch):</strong></p>
+          <ul style="font-size:0.82rem;line-height:1.9;padding-right:16px">
+            <li><span style="color:#ef4444">●</span> <strong>مركّز جداً</strong>: أقل من 7 أسهم — خطر مرتفع على الأسهم الفردية</li>
+            <li><span style="color:#f97316">●</span> <strong>تنوع محدود</strong>: 7–9 أسهم — حماية جزئية</li>
+            <li><span style="color:#22c55e">●</span> <strong>تنوع ممتاز</strong>: 10–17 سهم في 4+ قطاعات — النطاق الأمثل</li>
+            <li><span style="color:#eab308">●</span> <strong>مراقبة التشتت</strong>: 18–35 سهم — تعقيد الإدارة يرتفع</li>
+            <li><span style="color:#f97316">●</span> <strong>تشتت مفرط</strong>: أكثر من 35 سهماً — "Diworsification" (Lynch)</li>
+          </ul>
+          <p class="info-note">⚠️ الموضع على المقياس يجمع: عدد الأسهم + HHI (توزيع الأوزان) + عدد القطاعات — وليس عدد الأسهم فقط.</p>`;
+      })()
+    },
     'retirement': {
       title: '🎯 هدف الاستقلال المالي (FIRE)',
       body: `
@@ -3397,7 +3593,7 @@ async function deleteHolding(id) {
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderCharts(); renderTable();
+  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
 }
 
 // ── تصدير CSV ─────────────────────────────────────────────────
