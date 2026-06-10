@@ -1249,7 +1249,10 @@ function renderDiversificationCard() {
   el.innerHTML = `
     <div class="section-header" style="margin-bottom:14px">
       <span class="section-title">🧩 مقياس التنويع <span class="eng-label">Diversification</span></span>
-      <button class="info-btn" onclick="showCardInfo('diversification')">ⓘ</button>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-secondary btn-sm" onclick="showDiversificationAnalysis()" style="font-size:0.74rem;padding:3px 10px">📋 تحليل مفصّل</button>
+        <button class="info-btn" onclick="showCardInfo('diversification')">ⓘ</button>
+      </div>
     </div>
 
     <!-- المقياس البصري — اتجاه ثابت LTR لوضوح الرسم -->
@@ -1313,6 +1316,173 @@ function renderDiversificationCard() {
     <div style="margin-top:10px;font-size:0.71rem;color:var(--text-muted);text-align:center;direction:rtl">
       HHI أسهم = ${(hhi * 100).toFixed(1)}% &nbsp;·&nbsp; HHI قطاعات = ${(secHHI * 100).toFixed(1)}% &nbsp;·&nbsp; عدد فعّال = ${effectiveN} سهم
     </div>`;
+}
+
+// ── تحليل التنويع المفصّل (popup شخصي) ──────────────────────────
+function showDiversificationAnalysis() {
+  const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  if (!holdings.length || !totalVal) return;
+
+  const n = holdings.length;
+  const weights = holdings.map(h => +h.shares * +h.current_price / totalVal);
+  const hhi     = weights.reduce((s, w) => s + w * w, 0);
+  const effN    = Math.max(1, Math.round(1 / hhi));
+
+  const secMap = {};
+  holdings.forEach(h => {
+    const k = (h.sector || '').trim() || 'غير مصنف';
+    secMap[k] = (secMap[k] || 0) + +h.shares * +h.current_price / totalVal;
+  });
+  const sectorCount = Object.keys(secMap).length;
+  const secHHI  = Object.values(secMap).reduce((s, w) => s + w * w, 0);
+  const secNHHI = sectorCount > 1 ? (secHHI - 1/sectorCount)/(1 - 1/sectorCount) : 1.0;
+  const sectorFactor = 0.60 + 0.40*(1 - secNHHI);
+
+  const sorted    = [...holdings].sort((a,b) => +b.shares*+b.current_price - +a.shares*+a.current_price);
+  const top1Pct   = sorted[0] ? +sorted[0].shares*+sorted[0].current_price/totalVal*100 : 0;
+  const top1Name  = sorted[0]?.ticker || '';
+  const top3Pct   = sorted.slice(0,3).reduce((s,h) => s + +h.shares*+h.current_price/totalVal*100, 0);
+
+  // أكبر قطاع
+  const topSector = Object.entries(secMap).sort((a,b)=>b[1]-a[1])[0];
+  const topSecPct = topSector ? topSector[1]*100 : 0;
+  const topSecName= topSector ? topSector[0] : '';
+
+  // ── معايير "تنوع ممتاز" ──────────────────────────────────────
+  // HHI < 5% → N_eff > 20، وعامل القطاعات يجب أن يكون عالياً
+  const TARGET_HHI     = 0.05;   // N_eff = 20
+  const TARGET_TOP1    = 10;     // % - أكبر مركز
+  const TARGET_TOP3    = 30;     // % - أكبر 3
+  const TARGET_SECTORS = 4;      // قطاعات كحد أدنى
+  const TARGET_TOPSEC  = 35;     // % - أكبر قطاع
+  const TARGET_SECFACT = 0.85;   // معامل القطاعات المطلوب
+
+  // ── بناء قائمة التحقق ────────────────────────────────────────
+  const checks = [];
+
+  // 1. N_eff / HHI
+  const hhiOk = hhi <= TARGET_HHI;
+  checks.push({
+    ok: hhiOk,
+    label: `العدد الفعّال (N_فعّال)`,
+    current: `${effN} سهم · HHI = ${(hhi*100).toFixed(1)}%`,
+    target:  `N_فعّال ≥ 20 · HHI ≤ 5%`,
+    action:  hhiOk ? null
+      : effN >= 15
+        ? `وزّع مبالغ الإضافات بالتساوي أكثر — أكبر مركز يستأثر بحصة كبيرة ترفع الـ HHI`
+        : `أضف ${Math.max(0, 20 - effN)} أسهم جديدة بأوزان متوازنة (أو قلّل تركيز أكبر مراكزك)`
+  });
+
+  // 2. أكبر مركز
+  const top1Ok = top1Pct <= TARGET_TOP1;
+  checks.push({
+    ok: top1Ok,
+    label: `أكبر مركز (${esc(top1Name)})`,
+    current: `${top1Pct.toFixed(1)}%`,
+    target:  `≤ ${TARGET_TOP1}%`,
+    action:  top1Ok ? null
+      : `توقف عن إضافة ${esc(top1Name)} وحوّل المبالغ الجديدة لأسهم أخرى حتى ينخفض وزنه لـ ${TARGET_TOP1}%`
+  });
+
+  // 3. أكبر 3 مراكز
+  const top3Ok = top3Pct <= TARGET_TOP3;
+  checks.push({
+    ok: top3Ok,
+    label: `أكبر 3 مراكز مجتمعة`,
+    current: `${top3Pct.toFixed(1)}%`,
+    target:  `≤ ${TARGET_TOP3}%`,
+    action:  top3Ok ? null
+      : `الأسهم الثلاثة الأكبر تستحوذ على ${top3Pct.toFixed(0)}% — وجّه الإضافات القادمة لبقية المراكز`
+  });
+
+  // 4. عدد القطاعات
+  const secCountOk = sectorCount >= TARGET_SECTORS;
+  checks.push({
+    ok: secCountOk,
+    label: `تنوع القطاعات`,
+    current: `${sectorCount} قطاع`,
+    target:  `≥ ${TARGET_SECTORS} قطاعات`,
+    action:  secCountOk ? null
+      : `أضف أسهماً من قطاعات غير ممثلة حالياً — ${TARGET_SECTORS - sectorCount} قطاع ناقص على الأقل`
+  });
+
+  // 5. هيمنة قطاع واحد
+  const topSecOk = topSecPct <= TARGET_TOPSEC;
+  checks.push({
+    ok: topSecOk,
+    label: `أكبر قطاع (${esc(topSecName)})`,
+    current: `${topSecPct.toFixed(1)}% من المحفظة`,
+    target:  `≤ ${TARGET_TOPSEC}%`,
+    action:  topSecOk ? null
+      : `قطاع "${esc(topSecName)}" يهيمن بـ ${topSecPct.toFixed(0)}% — أزمة قطاعية ستضرب حصة كبيرة. تنوّع في قطاعات أخرى`
+  });
+
+  // 6. معامل القطاعات
+  const secFactOk = sectorFactor >= TARGET_SECFACT;
+  checks.push({
+    ok: secFactOk,
+    label: `توزيع الأوزان بين القطاعات`,
+    current: `معامل = ${(sectorFactor*100).toFixed(0)}%`,
+    target:  `≥ ${TARGET_SECFACT*100}%`,
+    action:  secFactOk ? null
+      : `الأوزان القطاعية غير متوازنة — حاول أن تتقارب القطاعات في حجمها لا أن يطغى قطاع على البقية`
+  });
+
+  const passCount = checks.filter(c => c.ok).length;
+  const allPass   = passCount === checks.length;
+
+  // ── رسم الـ popup ─────────────────────────────────────────────
+  const rowsHtml = checks.map(c => `
+    <div style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="flex-shrink:0;margin-top:1px;font-size:1.1rem">${c.ok ? '✅' : '❌'}</div>
+      <div style="flex:1">
+        <div style="font-weight:600;font-size:0.85rem;color:var(--text)">${c.label}</div>
+        <div style="font-size:0.80rem;margin-top:3px">
+          <span style="color:${c.ok ? 'var(--success)' : '#ef4444'}">الآن: ${c.current}</span>
+          &nbsp;·&nbsp;
+          <span style="color:var(--text-muted)">الهدف: ${c.target}</span>
+        </div>
+        ${c.action ? `<div style="font-size:0.78rem;color:var(--text-2);margin-top:5px;padding:6px 10px;background:rgba(239,68,68,.08);border-radius:6px;line-height:1.6">👉 ${c.action}</div>` : ''}
+      </div>
+    </div>`).join('');
+
+  const summaryColor = allPass ? '#10b981' : passCount >= 4 ? '#22c55e' : passCount >= 2 ? '#f97316' : '#ef4444';
+  const summaryText  = allPass
+    ? '🏆 محفظتك تستوفي جميع معايير "تنوع ممتاز"!'
+    : `اجتزت ${passCount} من ${checks.length} معايير — ${checks.length - passCount} ${checks.length - passCount === 1 ? 'معيار ناقص' : 'معايير ناقصة'}`;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)">
+      <div style="padding:16px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg);z-index:1">
+        <span style="font-weight:700;font-size:.95rem">📋 تحليل التنويع — ماذا تحتاج للوصول لـ "تنوع ممتاز"؟</span>
+        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text-muted);padding:0 4px">✕</button>
+      </div>
+
+      <div style="padding:14px 18px">
+        <!-- ملخص -->
+        <div style="background:${summaryColor}18;border:1px solid ${summaryColor}40;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.85rem;font-weight:600;color:${summaryColor};text-align:center">
+          ${summaryText}
+        </div>
+
+        <!-- قائمة التحقق -->
+        <div style="direction:rtl">${rowsHtml}</div>
+
+        <!-- ملاحظة -->
+        <div style="margin-top:14px;font-size:0.72rem;color:var(--text-muted);line-height:1.7;direction:rtl">
+          المعايير مبنية على: DOJ HHI thresholds · Evans & Archer (1968) · Statman (1987) · Campbell et al (2001)<br>
+          "تنوع ممتاز" = N_فعّال ≥ 20 · أكبر مركز ≤ 10% · أكبر 3 ≤ 30% · 4+ قطاعات متوازنة
+        </div>
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
+  });
 }
 
 // ── معلومات منهجية محلل الصحة ───────────────────────────────
