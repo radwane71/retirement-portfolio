@@ -375,7 +375,13 @@ async function loadAllData() {
   const daysElapsed  = Math.floor((today_d - new Date(yr, 0, 1)) / 86400000) + 1;
   const daysInYear   = ((yr % 4 === 0 && yr % 100 !== 0) || yr % 400 === 0) ? 366 : 365;
   // الأرباح المُسنواة للسنة الحالية
-  const annualizedYearDiv = daysElapsed > 0 ? yearDiv * (daysInYear / daysElapsed) : yearDiv;
+  // AUDIT-FIX (H1): linear YTD→annual extrapolation (×365/days) is unreliable early in the
+  // year for lumpy / semi-annual Saudi payers — a single H1 dividend by June would scale ×2.2.
+  // Only extrapolate once ≥180 days (a full semi-annual cycle) have elapsed; before that fall
+  // back to the trailing-12-month figure, which is a true annual run-rate with no extrapolation.
+  const annualizedYearDiv = (daysElapsed >= 180)
+    ? yearDiv * (daysInYear / daysElapsed)
+    : ttmDiv;
   // المقام للعائد المُسنوى: costBasis (WAC × الأسهم الحالية) هو الأدق لأنه يعكس رأس المال الفعلي المُنشغل
   // صافي التدفقات النقدية (شراء − بيع) قد يكون منخفضاً إذا ضُخّ معظم المال في نفس السنة
   const denomAnn = costBasis > 0 ? costBasis : 1;
@@ -383,7 +389,9 @@ async function loadAllData() {
   // الطرق الثلاث
   const divYieldAnn    = denomAnn    > 0 ? annualizedYearDiv / denomAnn    * 100 : 0; // مُسنوى
   const divYieldYOC    = costBasis   > 0 ? ttmDiv            / costBasis   * 100 : 0; // على التكلفة (آخر 12 شهر)
-  const divYieldMarket = totalValue  > 0 ? annualizedYearDiv / totalValue  * 100 : 0; // سوقي
+  // AUDIT-FIX (M2): use TTM over market value — consistent with YOC (both trailing-12m);
+  // previously used annualized-YTD here while YOC used TTM, making the two tabs incomparable.
+  const divYieldMarket = totalValue  > 0 ? ttmDiv / totalValue  * 100 : 0; // سوقي
 
   // إبقاء القديم متوافقاً
   const divYieldYear = divYieldMarket;
@@ -428,16 +436,18 @@ async function loadAllData() {
         .sort((a, b) => divDate(a).localeCompare(divDate(b)));
       if (!tickerDivs.length) return;
 
-      let dps = 0;
-      for (let i = tickerDivs.length - 1; i >= 0; i--) {
-        const s = sharesAt(h.ticker, divDate(tickerDivs[i]));
-        if (s >= 0.001) { dps = +tickerDivs[i].amount / s; break; }
+      // بناء سلسلة الـ DPS لكل دفعة (المبلغ ÷ الأسهم وقت الدفعة) بالترتيب الزمني
+      const dpsSeries = [];
+      for (let i = 0; i < tickerDivs.length; i++) {
+        const sh = sharesAt(h.ticker, divDate(tickerDivs[i]));
+        if (sh >= 0.001) dpsSeries.push(+tickerDivs[i].amount / sh);
       }
-      if (dps < 0.0001) {
+      if (!dpsSeries.length) {
         const tot = tickerDivs.reduce((s, d) => s + +d.amount, 0);
-        dps = tot / +h.shares;
+        const fb  = tot / +h.shares;
+        if (fb < 0.0001) return;
+        dpsSeries.push(fb);
       }
-      if (dps < 0.0001) return;
 
       // L-3: use median inter-dividend gap for frequency — robust to skipped dividends
       let freq = 1;
@@ -453,6 +463,14 @@ async function loadAllData() {
         if (medGap <= 105)      freq = 4;
         else if (medGap <= 210) freq = 2;
       }
+
+      // AUDIT-FIX (M1): forward DPS = MEDIAN of the last `freq` per-share payments, not the single
+      // latest one. A special / irregular final dividend (e.g. quarterly 1,1,1,5) would otherwise
+      // inflate the forward run-rate to 5×4=20 vs the true ~4. The median ignores such outliers.
+      const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
+      const dps = recent[Math.floor(recent.length / 2)];
+      if (dps < 0.0001) return;
+
       total += dps * freq * +h.shares;
     });
     return total;
@@ -1229,7 +1247,8 @@ function renderDiversificationCard() {
     advice = `عدد فعّال = ${effectiveN} — مركز واحد يكفي لإلحاق ضرر بالغ بالمحفظة. المرجع (Graham): لا تقل عن 10 أسهم لحماية معقولة من المخاطر الفردية.`;
   } else if (gaugePos < 40) {
     zoneLabel = 'تركيز ملحوظ';  zoneColor = '#f97316';
-    advice = `عدد فعّال = ${effectiveN} — تنوع جزئي. 90% من مخاطر الأسهم الفردية تُزال عند N_فعّال ≥ 10 (Evans & Archer 1968). أضف في قطاعات مختلفة.`;
+    // AUDIT-FIX: align threshold with detailed analysis (TARGET_HHI 0.067 → N_eff ≥ 15); was inconsistently "≥ 10"
+    advice = `عدد فعّال = ${effectiveN} — تنوع جزئي. 90% من مخاطر الأسهم الفردية تُزال عند N_فعّال ≥ 15 (Evans & Archer 1968). أضف في قطاعات مختلفة.`;
   } else if (gaugePos < 60) {
     zoneLabel = 'تنوع معقول';   zoneColor = '#84cc16';
     advice = `عدد فعّال = ${effectiveN} — نطاق مقبول. معظم المخاطر الفردية محمية. الخطوة التالية: تعزيز تنوع القطاعات (${sectorCount} قطاع حالياً).`;
@@ -2926,9 +2945,16 @@ function renderRetirementCard() {
   const s = window._ds || {};
   const goal = getRetirementGoal();
 
-  const stocks = holdings.reduce((a, h) => a + +h.shares * +h.current_price, 0);
-  const investAssets = stocks + (portfolioCash || 0) + (s.reTotal || 0) + getSukukActiveTotal();
-  const netWorth = s.latestNW != null ? s.latestNW : investAssets;
+  const stocks  = holdings.reduce((a, h) => a + +h.shares * +h.current_price, 0);
+  const reTotal = s.reTotal || 0;
+  const sukuk   = getSukukActiveTotal();
+  // AUDIT-FIX (M3): the 4% / Trinity SWR applies to LIQUID, drawdownable assets. Counting illiquid
+  // real estate (esp. a primary residence — produces no 4% withdrawable cash without a sale)
+  // overstates FIRE progress. Base progress + safe-withdrawal on investable assets and show total
+  // net worth separately for context.
+  const investAssets = stocks + (portfolioCash || 0) + reTotal + sukuk;  // total incl. RE
+  const fireBase     = stocks + (portfolioCash || 0) + sukuk;            // liquid / drawdownable
+  const netWorth     = s.latestNW != null ? s.latestNW : investAssets;   // total NW (context only)
 
   if (!goal.monthly) {
     el.innerHTML = `<div style="text-align:center;padding:18px 8px">
@@ -2940,9 +2966,9 @@ function renderRetirementCard() {
 
   const annualExpenses = goal.monthly * 12;
   const fireNumber = goal.swr > 0 ? annualExpenses / (goal.swr / 100) : annualExpenses * 25;
-  const progress = fireNumber > 0 ? Math.min(netWorth / fireNumber * 100, 100) : 0;
-  const remaining = Math.max(0, fireNumber - netWorth);
-  const safeAnnualWithdrawal = netWorth * (goal.swr / 100);
+  const progress = fireNumber > 0 ? Math.min(fireBase / fireNumber * 100, 100) : 0;
+  const remaining = Math.max(0, fireNumber - fireBase);
+  const safeAnnualWithdrawal = fireBase * (goal.swr / 100);
   const safeMonthly = safeAnnualWithdrawal / 12;
   const barColor = progress >= 100 ? '#22c55e' : progress >= 50 ? '#f0b429' : '#3b82f6';
 
@@ -2967,14 +2993,15 @@ function renderRetirementCard() {
       <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">${formatSAR(fireNumber)}</div>
       <div class="small text-muted" style="margin-top:2px">مصاريف ${formatSAR(annualExpenses)}/سنة ÷ ${goal.swr}%</div>
     </div>
-    ${row('صافي الثروة الحالي' + (s.latestNW != null ? ' (آخر لقطة)' : ' (تقديري)'), formatSAR(netWorth), 'text-accent')}
+    ${row('الأصول السائلة (للسحب)', formatSAR(fireBase), 'text-accent')}
+    ${reTotal > 0 ? row('صافي الثروة الكلي (مع العقار)', formatSAR(netWorth) + ' — غير مُحتسب', 'text-muted') : ''}
     ${row('المتبقي للوصول للهدف', formatSAR(remaining), remaining > 0 ? 'text-danger' : 'text-success')}
     ${row('السحب الآمن الحالي', formatSAR(safeMonthly) + '/شهر', '')}
     ${row('تغطية مصاريفك الآن', (goal.monthly > 0 ? (safeMonthly / goal.monthly * 100).toFixed(1) : 0) + '%', safeMonthly >= goal.monthly ? 'text-success' : 'text-muted')}
     ${goal.swr !== 4 ? (() => {
       const fire4 = annualExpenses / 0.04;
-      const prog4 = Math.min(netWorth / fire4 * 100, 100);
-      const rem4  = Math.max(0, fire4 - netWorth);
+      const prog4 = Math.min(fireBase / fire4 * 100, 100);
+      const rem4  = Math.max(0, fire4 - fireBase);
       return `<div style="margin-top:10px;padding:10px 12px;background:rgba(240,180,41,.06);border:1px solid rgba(240,180,41,.2);border-radius:8px">
         <div class="small" style="color:var(--warning,#f0b429);font-weight:600;margin-bottom:6px">📐 مقارنة بقاعدة 4% (Trinity Study)</div>
         <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
@@ -3501,12 +3528,19 @@ function showCardInfo(key) {
         <p>ثلاث طرق لحساب العائد، كل منها تعبّر عن زاوية مختلفة:</p>
 
         <p style="margin:12px 0 4px"><strong>① مُسنوى (السنة الجارية)</strong> — الأدق للسنة غير المكتملة</p>
-        <div class="info-formula">أرباح ${s.yr||new Date().getFullYear()} × (${s.daysInYear||365}÷${s.daysElapsed||1}) ÷ رأس المال أول يناير</div>
+        ${(s.daysElapsed||0) >= 180 ? `
+        <div class="info-formula">أرباح ${s.yr||new Date().getFullYear()} × (${s.daysInYear||365}÷${s.daysElapsed||1}) ÷ التكلفة</div>
         <div class="info-math">
           ${formatSAR(s.yearDiv||0)} × ${((s.daysInYear||365)/(s.daysElapsed||1)).toFixed(2)} = أرباح مُسنواة ${formatSAR(s.annualizedYearDiv||0)}<br>
-          ÷ رأس مال أول يناير ${formatSAR(s.denomAnn||0)}<br>
+          ÷ التكلفة ${formatSAR(s.denomAnn||0)}<br>
           = <strong class="text-success">${(s.divYieldAnn||0).toFixed(2)}%</strong>
-        </div>
+        </div>` : `
+        <div class="info-formula">أرباح آخر 12 شهراً ÷ التكلفة</div>
+        <div class="info-math">
+          مبكراً في السنة (${s.daysElapsed||0} يوماً) نتجنّب التضخيم بالاستقراء الخطي ونستخدم آخر 12 شهراً:<br>
+          ${formatSAR(s.ttmDiv||0)} ÷ ${formatSAR(s.denomAnn||0)}<br>
+          = <strong class="text-success">${(s.divYieldAnn||0).toFixed(2)}%</strong>
+        </div>`}
 
         <p style="margin:12px 0 4px"><strong>② على التكلفة YOC</strong> — العائد السنوي على ما دفعته فعلاً</p>
         <div class="info-formula">أرباح آخر 12 شهراً ÷ تكلفة الشراء الأصلية</div>
@@ -3517,9 +3551,9 @@ function showCardInfo(key) {
         <p class="small text-muted" style="margin:-4px 0 8px">يستخدم أرباح آخر 12 شهراً (وليس التراكمي) ليكون عائداً سنوياً حقيقياً.</p>
 
         <p style="margin:12px 0 4px"><strong>③ سوقي</strong> — العائد على القيمة السوقية الحالية</p>
-        <div class="info-formula">أرباح ${s.yr||new Date().getFullYear()} مُسنواة ÷ القيمة السوقية الحالية</div>
+        <div class="info-formula">أرباح آخر 12 شهراً ÷ القيمة السوقية الحالية</div>
         <div class="info-math">
-          ${formatSAR(s.annualizedYearDiv||0)} ÷ ${formatSAR(totalValue)}<br>
+          ${formatSAR(s.ttmDiv||0)} ÷ ${formatSAR(totalValue)}<br>
           = <strong class="text-success">${(s.divYieldMarket||0).toFixed(2)}%</strong>
         </div>
         <p class="info-note">💡 اليوم ${s.daysElapsed||'؟'} من ${s.daysInYear||365} — السنة الجارية تُسنوى تلقائياً</p>`

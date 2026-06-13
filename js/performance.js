@@ -221,17 +221,20 @@ function renderKPIs() {
     if (hhiSub) hhiSub.textContent = hhi < 0.10 ? 'تنويع ممتاز' : hhi < 0.18 ? 'تنويع معقول' : hhi < 0.25 ? 'تركز متوسط ⚠️' : 'تركز عالٍ ❌';
   }
 
-  // Max Drawdown من سجل صافي الثروة
+  // Max Drawdown — AUDIT-FIX (H3): compute on the flow-adjusted TWR index, NOT raw net worth.
+  // On raw total_value a deposit masks a drawdown and a withdrawal masquerades as one. Reusing
+  // the Modified-Dietz TWR series (same one the benchmark tab uses) isolates true market drops.
   const ddEl = document.getElementById('pk-max-drawdown');
   if (ddEl && _snapshots.length >= 2) {
-    // M-7: direct string comparison — locale-independent, deterministic for ISO dates
-    const sorted = _snapshots.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    let peak = sorted[0].total_value;
+    const { twrMap, sortedSnaps } = _computeTWR(_snapshots, _cf || []);
+    // sortedSnaps is ISO-date ordered & de-duplicated by day; twrMap[date] = index (base 100)
+    let peak = twrMap[sortedSnaps[0].date] ?? 100;
     let maxDD = 0;
-    let peakDate = sorted[0].date;
+    let peakDate = sortedSnaps[0].date;
     let ddPeakDate = '', ddTroughDate = '';
-    for (const s of sorted) {
-      const v = +s.total_value;
+    for (const s of sortedSnaps) {
+      const v = twrMap[s.date];
+      if (v == null) continue;
       if (v > peak) { peak = v; peakDate = s.date; }
       const dd = peak > 0 ? (v - peak) / peak * 100 : 0;
       if (dd < maxDD) { maxDD = dd; ddPeakDate = peakDate; ddTroughDate = s.date; }
@@ -1329,7 +1332,17 @@ function renderBenchmarkTab() {
   const lastTasi  = tasiNorm[tasiNorm.length - 1];
   const portDelta = lastPort - 100;
   const tasiDelta = lastTasi - 100;
-  const alpha     = portDelta - tasiDelta;   // الزيادة على تاسي (Alpha)
+  // AUDIT-FIX (H2): the portfolio line is TWR (total return — includes dividends) but the manually
+  // entered TASI series is the PRICE index. Comparing them directly overstates Alpha by TASI's
+  // dividend yield (~3.5%/yr historically). Approximate TASI Total-Return (TRI) by compounding an
+  // assumed dividend yield over the elapsed period and report Alpha against THAT (apples-to-apples).
+  // The price-based figure is retained as a secondary reference.
+  const TASI_DIV_YIELD = 0.035; // متوسط عائد توزيعات تاسي التاريخي التقريبي
+  const yearsElapsed = Math.max(0,
+    (new Date(points[points.length - 1].date) - new Date(points[0].date)) / (365.25 * 86400000));
+  const tasiTriDelta = ((1 + tasiDelta / 100) * Math.pow(1 + TASI_DIV_YIELD, yearsElapsed) - 1) * 100;
+  const alpha      = portDelta - tasiTriDelta;  // Alpha مقابل العائد الإجمالي (TRI) — الأصحّ
+  const alphaPrice = portDelta - tasiDelta;     // مقابل تاسي السعري — مرجع ثانوي
   const betterThan = alpha > 0;
 
   const fmtPct = (v, sign = true) =>
@@ -1354,16 +1367,17 @@ function renderBenchmarkTab() {
           <div class="small text-muted">${periodLabel}</div>
         </div>
         <div style="flex:1;min-width:140px">
-          <div class="small text-muted">عائد تاسي</div>
+          <div class="small text-muted">عائد تاسي (سعري)</div>
           <div class="num bold" style="font-size:1.2rem;color:${tasiColor}">${fmtPct(tasiDelta)}</div>
-          <div class="small text-muted">نفس الفترة</div>
+          <div class="small text-muted">+ توزيعات ≈ ${fmtPct(tasiTriDelta)} (TRI)</div>
         </div>
         <div style="flex:1;min-width:140px;border-right:2px solid var(--border);padding-right:12px">
-          <div class="small text-muted">الأداء الزائد (Alpha)</div>
+          <div class="small text-muted">الأداء الزائد (Alpha مقابل TRI)</div>
           <div class="num bold" style="font-size:1.3rem;color:${alphaColor}">${fmtPct(alpha)}</div>
           <div class="small" style="color:${alphaColor};font-weight:600">
             ${betterThan ? '✅ محفظتك تتفوق على تاسي' : '⚠️ تاسي يتفوق على محفظتك'}
           </div>
+          <div class="small text-muted">مقابل السعري: ${fmtPct(alphaPrice)}</div>
         </div>
         <div style="flex:1;min-width:140px">
           <div class="small text-muted">عدد نقاط المقارنة</div>
@@ -1376,8 +1390,9 @@ function renderBenchmarkTab() {
         مؤشر تاسي مُدخَّل يدوياً. كلاهما مُنسَّب إلى 100 عند <strong>${formatDate(points[0].date)}</strong>.
       </p>
       <p class="small" style="color:var(--warning,#f0b429);background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.25);border-radius:6px;padding:8px 10px;margin-top:6px">
-        ⚠️ <strong>ملاحظة منهجية:</strong> المقارنة هنا مع <strong>تاسي السعري</strong> (Price Index) الذي لا يشمل إعادة استثمار التوزيعات.
-        مؤشر تاسي للعائد الإجمالي (TRI) يكون أعلى بـ ~3-4% سنوياً. Alpha الحقيقي = عائد محفظتك − TRI.
+        ⚠️ <strong>ملاحظة منهجية:</strong> عائد محفظتك (TWR) يشمل توزيعاتك، لذا تُقارن مع <strong>تاسي للعائد الإجمالي (TRI)</strong>
+        المُقدَّر = تاسي السعري + عائد توزيعات تقديري ${(TASI_DIV_YIELD*100).toFixed(1)}%/سنة (مُركّب على ${yearsElapsed.toFixed(1)} سنة).
+        هذا تقدير — عائد توزيعات تاسي الفعلي يتغيّر سنوياً.
       </p>
       ${suspiciousPeriods.length ? `
       <div style="margin-top:10px;padding:10px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.25);border-radius:8px">
