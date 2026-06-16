@@ -397,20 +397,26 @@ function calcCommission(shares, price) {
 
 // ── Chart defaults ────────────────────────────────────────────
 function chartDefaults() {
+  const light = document.body.classList.contains('light-mode');
+  const textColor     = light ? '#52606d' : '#8b949e';
+  const tooltipBg     = light ? '#eaecf1' : '#1c2128';
+  const tooltipTitle  = light ? '#1a1d24' : '#e6edf3';
+  const tooltipBorder = light ? '#bcc2cc' : '#30363d';
+  const gridColor     = light ? 'rgba(0,0,0,0.09)' : 'rgba(48,54,61,0.6)';
   return {
     responsive: true,
     maintainAspectRatio: false,
     plugins: {
-      legend: { labels: { color: '#8b949e', font: { family: 'Tajawal', size: 12 }, padding: 14, usePointStyle: true } },
+      legend: { labels: { color: textColor, font: { family: 'Tajawal', size: 12 }, padding: 14, usePointStyle: true } },
       tooltip: {
-        backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#8b949e',
-        borderColor: '#30363d', borderWidth: 1, padding: 10,
+        backgroundColor: tooltipBg, titleColor: tooltipTitle, bodyColor: textColor,
+        borderColor: tooltipBorder, borderWidth: 1, padding: 10,
         titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' }
       }
     },
     scales: {
-      x: { ticks: { color: '#8b949e', font: { family: 'Tajawal' } }, grid: { color: 'rgba(48,54,61,0.6)' } },
-      y: { ticks: { color: '#8b949e', font: { family: 'Tajawal' } }, grid: { color: 'rgba(48,54,61,0.6)' } }
+      x: { ticks: { color: textColor, font: { family: 'Tajawal' } }, grid: { color: gridColor } },
+      y: { ticks: { color: textColor, font: { family: 'Tajawal' } }, grid: { color: gridColor } }
     }
   };
 }

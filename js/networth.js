@@ -429,72 +429,82 @@ function closeSnapshotDetail() {
   document.getElementById('snap-detail-modal').style.display = 'none';
 }
 
-// ── Save Snapshot (full details) ──────────────────────────────
+// ── Save Snapshot (full details) — لقطة واحدة فقط لكل شهر ────
 async function saveSnapshot() {
-  const { totalAssets, totalLiabs, net, manualAssets } = calcTotals();
+  const today      = todayISO();                    // e.g. "2026-06-16"
+  const thisMonth  = today.slice(0, 7);             // e.g. "2026-06"
+
+  // تحقق من وجود لقطة لهذا الشهر
+  const existing = snapshots.find(s => s.date && s.date.startsWith(thisMonth));
+  if (existing) {
+    const ok = await confirmAsync(
+      `لديك لقطة لهذا الشهر بتاريخ ${formatDate(existing.date)}.\nهل تريد استبدالها بالقيم الحالية؟`
+    );
+    if (!ok) return;
+    // احذف اللقطة القديمة أولاً
+    const { error: delErr } = await supabaseClient
+      .from('net_worth_snapshots').delete().eq('id', existing.id);
+    if (delErr) { showToast('خطأ: ' + delErr.message, 'error'); return; }
+  }
+
+  const { totalAssets, totalLiabs, net } = calcTotals();
   const { data: { user } } = await supabaseClient.auth.getUser();
 
   const snapshotJson = {
-    auto_stocks:    autoStocks,
+    auto_stocks:     autoStocks,
     auto_realestate: autoRe,
-    assets:         nwAssets.map(a => ({ category: a.category, name: a.name, value: +a.value })),
-    liabilities:    nwLiabs.map(l => ({ category: l.category, name: l.name, value: +l.value })),
-    total_assets:   totalAssets,
-    total_liabs:    totalLiabs,
+    assets:          nwAssets.map(a => ({ category: a.category, name: a.name, value: +a.value })),
+    liabilities:     nwLiabs.map(l => ({ category: l.category, name: l.name, value: +l.value })),
+    total_assets:    totalAssets,
+    total_liabs:     totalLiabs,
     net
   };
 
-  const payload = {
+  const { error } = await supabaseClient.from('net_worth_snapshots').insert([{
     user_id:       user.id,
-    date:          todayISO(),
+    date:          today,
     total_value:   net,
-    notes:         'لقطة تلقائية',
+    notes:         'لقطة شهرية',
     snapshot_json: snapshotJson
-  };
-
-  // AUDIT-FIX: upsert on (user_id, date) prevents duplicate snapshots for same calendar day
-  const { error } = await supabaseClient.from('net_worth_snapshots')
-    .upsert([payload], { onConflict: 'user_id,date' });
+  }]);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  showToast('تم حفظ اللقطة الكاملة ✓', 'success');
+  showToast('✓ تم حفظ لقطة ' + thisMonth, 'success');
   const rSnap = await supabaseClient.from('net_worth_snapshots').select('*').order('date', { ascending: true });
   snapshots = rSnap.data || [];
   renderChart(); renderSnapshotTable();
 }
 
-// ── تنظيف اللقطات المكررة ─────────────────────────────────────────────
-// لكل يوم يحتوي أكثر من لقطة: احتفظ بالأفضل (يدوية > تلقائية، ثم الأحدث id)
-// وجود المئات من اللقطات المكررة يُشوّه حساب TWR وMax Drawdown
+// ── تنظيف اللقطات: يُبقي لقطة واحدة لكل شهر (الأفضل: يدوية أو الأحدث) ──────
 async function deduplicateSnapshots() {
   if (!snapshots.length) { showToast('لا توجد لقطات', 'error'); return; }
 
-  // تجميع حسب التاريخ
-  const byDate = {};
+  // تجميع حسب الشهر (YYYY-MM)
+  const byMonth = {};
   snapshots.forEach(s => {
-    if (!byDate[s.date]) byDate[s.date] = [];
-    byDate[s.date].push(s);
+    const month = s.date ? s.date.slice(0, 7) : 'unknown';
+    if (!byMonth[month]) byMonth[month] = [];
+    byMonth[month].push(s);
   });
 
-  // ابحث عن الأيام بها أكثر من لقطة
+  // لكل شهر: احتفظ بالأفضل (يدوية > تلقائية، ثم الأحدث id)
   const toDelete = [];
-  Object.values(byDate).forEach(group => {
+  Object.values(byMonth).forEach(group => {
     if (group.length <= 1) return;
-    // افضل لقطة: يدوية أولاً (ليست auto)، ثم الأعلى id (الأحدث إضافةً)
     const sorted = [...group].sort((a, b) => {
-      const aManual = a.notes && !a.notes.startsWith('auto') ? 1 : 0;
-      const bManual = b.notes && !b.notes.startsWith('auto') ? 1 : 0;
-      if (bManual !== aManual) return bManual - aManual; // يدوية أولاً
-      return b.id > a.id ? 1 : -1; // ثم الأحدث
+      const aManual = a.notes && a.notes !== 'لقطة تلقائية' ? 1 : 0;
+      const bManual = b.notes && b.notes !== 'لقطة تلقائية' ? 1 : 0;
+      if (bManual !== aManual) return bManual - aManual;
+      return b.id > a.id ? 1 : -1;
     });
-    // احذف كل شيء ما عدا الأول
     sorted.slice(1).forEach(s => toDelete.push(s.id));
   });
 
-  if (!toDelete.length) { showToast('✓ لا توجد تكرارات — المحفظة نظيفة', 'success'); return; }
+  if (!toDelete.length) { showToast('✓ كل شهر لديه لقطة واحدة فقط — المحفظة نظيفة', 'success'); return; }
 
-  if (!await confirmAsync(`سيتم حذف ${toDelete.length} لقطة مكررة (يُبقى أفضل لقطة لكل يوم). هل تتابع؟`)) return;
+  if (!await confirmAsync(
+    `سيتم حذف ${toDelete.length} لقطة زائدة.\nسيُبقى لقطة واحدة لكل شهر فقط.\nهل تتابع؟`
+  )) return;
 
-  // حذف على دفعات لتجنب تجاوز حدود Supabase
   const BATCH = 50;
   let deleted = 0;
   for (let i = 0; i < toDelete.length; i += BATCH) {
@@ -504,7 +514,7 @@ async function deduplicateSnapshots() {
     deleted += chunk.length;
   }
 
-  showToast(`✓ تم حذف ${deleted} لقطة مكررة — تبقّى ${snapshots.length - deleted} لقطة`, 'success');
+  showToast(`✓ تم الحذف — تبقّى ${snapshots.length - deleted} لقطة (لقطة واحدة لكل شهر)`, 'success');
   const rSnap = await supabaseClient.from('net_worth_snapshots').select('*').order('date', { ascending: true });
   snapshots = rSnap.data || [];
   renderChart(); renderSnapshotTable();

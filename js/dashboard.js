@@ -1903,14 +1903,15 @@ function renderSectorChart() {
   const sCtx = g('sectorChart')?.getContext('2d');
   if (!sCtx) return;
   const sLabels = entries.map(([k]) => k), sData = entries.map(([, v]) => v);
+  const _light = document.body.classList.contains('light-mode');
   sectorChart = new Chart(sCtx, {
     type: 'doughnut',
-    data: { labels: sLabels, datasets: [{ data: sData, backgroundColor: CHART_COLORS, borderColor: '#1c2128', borderWidth: 2, hoverOffset: 6 }] },
+    data: { labels: sLabels, datasets: [{ data: sData, backgroundColor: CHART_COLORS, borderColor: _light ? '#dde1e8' : '#1c2128', borderWidth: 2, hoverOffset: 6 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 10, usePointStyle: true } },
-        tooltip: { backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#8b949e', borderColor: '#30363d', borderWidth: 1, titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' },
+        legend: { position: 'bottom', labels: { color: _light ? '#52606d' : '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 10, usePointStyle: true } },
+        tooltip: { backgroundColor: _light ? '#eaecf1' : '#1c2128', titleColor: _light ? '#1a1d24' : '#e6edf3', bodyColor: _light ? '#52606d' : '#8b949e', borderColor: _light ? '#bcc2cc' : '#30363d', borderWidth: 1, titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' },
           callbacks: { label: c => { const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : 0; return ' ' + formatSAR(c.parsed) + '  (' + pct + '%)'; } } }
       }
     }

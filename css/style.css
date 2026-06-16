@@ -1351,25 +1351,58 @@ th.sortable:hover { color: var(--accent); }
 
 /* ===================== LIGHT MODE ===================== */
 body.light-mode {
-  --bg:          #f6f8fa;
-  --bg-2:        #ffffff;
-  --bg-3:        #f0f2f5;
-  --border:      #d0d7de;
-  --text:        #1f2328;
-  --text-2:      #656d76;
-  --accent:      #c48000;
-  --accent-dim:  rgba(196,128,0,0.10);
+  --bg:          #dde1e8;
+  --bg-2:        #eaecf1;
+  --bg-3:        #d4d8df;
+  --border:      #bcc2cc;
+  --text:        #1a1d24;
+  --text-2:      #52606d;
+  --text-muted:  #52606d;
+  --accent:      #b87400;
+  --accent-dim:  rgba(184,116,0,0.13);
   --success:     #1a7f37;
-  --success-dim: rgba(26,127,55,0.10);
-  --danger:      #cf222e;
-  --danger-dim:  rgba(207,34,46,0.10);
+  --success-dim: rgba(26,127,55,0.12);
+  --danger:      #c8202b;
+  --danger-dim:  rgba(200,32,43,0.11);
+  --primary:     #4a4fc4;
+  --warning:     #b87400;
+  --bg-1:        #dde1e8;
 }
+
+/* Fix hardcoded dark rgba(255,255,255,...) that break light mode */
+body.light-mode .nav-link:hover            { background: rgba(0,0,0,0.05); }
+body.light-mode .nav-group-btn:hover       { background: rgba(0,0,0,0.05); }
+body.light-mode .hamburger-btn:hover       { background: rgba(0,0,0,0.06); }
+body.light-mode .form-group input[readonly]{ background: rgba(0,0,0,0.04); }
+body.light-mode tr:hover td               { background: rgba(0,0,0,0.03); }
+body.light-mode td.editable:hover         { background: rgba(184,116,0,0.07) !important; }
+
+/* w-card bar track (was rgba(255,255,255,0.08)) */
+body.light-mode .w-card-bar-track  { background: rgba(0,0,0,0.10); }
+body.light-mode .w-card-bar-target { background: rgba(0,0,0,0.35); }
+
+/* mini-tab active text on accent bg */
+body.light-mode .mini-tab-active { color: #fff; }
+
+/* inline edit input */
 body.light-mode .inline-input {
-  background: #fff !important;
+  background: #eaecf1 !important;
   color: var(--text);
 }
-body.light-mode tr:hover td { background: rgba(0,0,0,0.02); }
-body.light-mode .btn-primary { color: #fff; }
+
+/* btn-primary readable on gray bg */
+body.light-mode .btn-primary  { color: #fff; }
+body.light-mode .btn-warning  { color: #fff; }
+
+/* mobile top-bar shadow lighter */
+body.light-mode #mobile-topbar {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+}
+
+/* sidebar drawer shadow lighter */
+body.light-mode .sidebar.mobile-open {
+  box-shadow: -6px 0 24px rgba(0,0,0,0.15);
+}
 
 /* ===================== FONT ZOOM WIDGET ===================== */
 .font-zoom-widget {
