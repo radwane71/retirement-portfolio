@@ -96,6 +96,41 @@
     .type-option .t-icon   { font-size:1.4rem; margin-bottom:4px; }
     .type-option .t-name   { font-size:0.82rem; font-weight:700; }
     .type-option .t-desc   { font-size:0.72rem; color:var(--text-2); margin-top:2px; }
+
+    /* ── Mobile: declutter task cards ── */
+    @media (max-width: 768px) {
+      .task-item {
+        padding: 13px 14px;
+        gap: 10px;
+        flex-wrap: wrap;
+        align-items: center;
+      }
+      .task-type-icon { font-size:1.25rem; margin-top:0; }
+      /* العنوان + المحتوى يأخذان بقية الصف بجانب الأيقونة */
+      .task-body { flex: 1 1 0; }
+      .task-header { gap:6px; row-gap:4px; margin-bottom:5px; }
+      .task-ticker { font-size:0.95rem; }
+      .task-name   { font-size:0.8rem; width:100%; }
+      .task-badge  { font-size:0.66rem; padding:2px 8px; }
+      .task-notes  { font-size:0.82rem; }
+      /* الأزرار تنزل سطراً كاملاً وتتوزّع بالتساوي */
+      .task-actions {
+        flex-basis: 100%;
+        width: 100%;
+        gap: 8px;
+        margin-top: 2px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+      }
+      .task-actions .btn { flex: 1; justify-content: center; min-height: 38px; }
+      /* الفلاتر: مسمّيات أوضح */
+      .year-pills { gap:6px; }
+      .alert-section { padding: 14px; }
+    }
+    @media (max-width: 520px) {
+      .task-item { padding: 12px; }
+      .task-actions .btn { font-size:0.76rem; padding:6px 8px; }
+    }
   </style>
 </head>
 <body>

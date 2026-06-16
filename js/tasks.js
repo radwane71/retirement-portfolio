@@ -251,8 +251,8 @@ function renderTaskBoard(boardId, tasks) {
     const closedStr = t.closed_at ? ' · أُغلقت ' + formatDate(t.closed_at.slice(0,10)) : '';
 
     const extraInfo = [];
-    if (t.target_price)  extraInfo.push(`🎯 سعر التجميع: أقل من ${formatSAR(t.target_price)}`);
-    if (t.reduction_pct) extraInfo.push(`📉 نسبة التخفيف: ${t.reduction_pct}%`);
+    if (t.type === 'accumulation' && t.target_price)  extraInfo.push(`🎯 سعر التجميع: أقل من ${formatSAR(t.target_price)}`);
+    if (t.type === 'reduction' && t.reduction_pct)    extraInfo.push(`📉 نسبة التخفيف: ${t.reduction_pct}%`);
 
     return `<div class="task-item ${cls}">
       <div class="task-type-icon">${meta.icon}</div>
@@ -358,8 +358,9 @@ async function saveTask() {
     ticker:        ticker || null,
     name:          name   || null,
     notes:         notes  || null,
-    target_price:  price,
-    reduction_pct: pct,
+    // خزّن السعر/النسبة فقط للنوع المناسب — يمنع تسرّب سعر التجميع لمهام أخرى
+    target_price:  _selectedType === 'accumulation' ? price : null,
+    reduction_pct: _selectedType === 'reduction'   ? pct   : null,
     status:        _editingTaskId
                   ? (_tasks.find(t => t.id === _editingTaskId)?.status || 'active')
                   : 'active',
