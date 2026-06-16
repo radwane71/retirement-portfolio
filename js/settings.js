@@ -18,6 +18,9 @@ const TABLES = [
   'portfolio_tasks',
   'review_log',
   'review_log_attachments',
+  // إعدادات المستخدم المتزامنة عبر الأجهزة (الراتب، الصكوك، هدف التقاعد، مؤشر تاسي)
+  // مصدر الحقيقة لهذه البيانات — localStorage مجرد cache. لا بد من نسخها واستعادتها.
+  'user_settings',
 ];
 
 // حجم الـ batch لكل جدول (الجداول الكبيرة تحتاج batch أصغر)
@@ -523,6 +526,16 @@ function mapRow(table, row, userId) {
       };
       break;
 
+    case 'user_settings':
+      // المفتاح/القيمة فقط — لا نحفظ id (PK مركّب user_id,key)
+      if (!row.key) return null;
+      r = {
+        key:        row.key,
+        value:      row.value      ?? null,
+        updated_at: row.updated_at ?? new Date().toISOString(),
+      };
+      break;
+
     default:
       return null;
   }
@@ -660,7 +673,7 @@ async function exportMonthlyReviewMD() {
     setStatus('md-export-status', 'info', 'جارٍ تحميل البيانات…');
     const [holdings, transactions, dividends, cashflows, snapshots,
            assets, liabilities, realEstate, stockTargets, sectorTargets,
-           watchlist, tasks, userStocks, reviewLog] = await Promise.all([
+           watchlist, tasks, userStocks, reviewLog, portfolioCashRows] = await Promise.all([
       fetchTable('holdings'),
       fetchTable('transactions', 'date'),
       fetchTable('dividends', 'date'),
@@ -675,9 +688,13 @@ async function exportMonthlyReviewMD() {
       fetchTable('portfolio_tasks', 'created_at'),
       fetchTable('user_stocks'),
       fetchTable('review_log', 'review_date'),   // دفتر المراجعة — notes المستخدم عن كل سهم
+      fetchTable('portfolio_cash'),              // النقد غير المستثمر في المحفظة
     ]);
 
-    // ── بيانات localStorage ──────────────────────────────────
+    // النقد غير المستثمر (صف واحد عادةً)
+    const portfolioCash = portfolioCashRows.reduce((s, c) => s + (+c.amount || 0), 0);
+
+    // ── الإعدادات المتزامنة — نُفضّل مصدر الحقيقة (user_settings) ثم الكاش المحلي ──
     // M-2: use userLsKey so we read this user's data on shared devices
     const lsGet = (key, def) => {
       try {
@@ -685,10 +702,18 @@ async function exportMonthlyReviewMD() {
         return JSON.parse(v) || def;
       } catch { return def; }
     };
-    const retGoal    = lsGet('retirement_goal_v1', { monthly: 0, swr: 4 });
-    const salaryData = lsGet('salary_planner_v1',  { categories: [], entries: [] });
-    const sukukData  = lsGet('sukuk_planner_v1',   { opportunities: [] });
-    const lifeGoals  = lsGet('life_goals_v1',      []);
+    const syncedGet = async (key, def) => {
+      try {
+        const remote = (typeof loadUserSetting === 'function') ? await loadUserSetting(key) : null;
+        if (remote != null) return remote;
+      } catch { /* تجاهل — نرجع للكاش */ }
+      return lsGet(key, def);
+    };
+    const retGoal    = await syncedGet('retirement_goal_v1', { monthly: 0, swr: 4 });
+    const salaryData = await syncedGet('salary_planner_v1',  { categories: [], entries: [] });
+    const sukukData  = await syncedGet('sukuk_planner_v1',   { opportunities: [] });
+    const benchmark  = await syncedGet('tharwa-benchmark_v1', []);
+    const lifeGoals  = lsGet('life_goals_v1', []);   // localStorage فقط (غير متزامن)
 
     setStatus('md-export-status', 'info', 'جارٍ بناء التقرير…');
 
@@ -1206,11 +1231,14 @@ async function exportMonthlyReviewMD() {
     p(`إجمالي الإيداعات            : ${SAR(totalDeposited)} ر.س`);
     p(`إجمالي السحوبات             : ${SAR(totalWithdrawn)} ر.س`);
     p(`صافي رأس المال المُودَع      : ${SAR(totalDeposited - totalWithdrawn)} ر.س`);
+    p(`النقد غير المستثمر          : ${SAR(portfolioCash)} ر.س`);
     p(`--- العقارات ---`);
     p(`عدد الأصول العقارية         : ${activeRE.length}`);
     p(`إجمالي القيمة الحالية        : ${SAR(reCurrentVal)} ر.س`);
     p(`--- صافي الثروة الإجمالي ---`);
     p(`أسهم + عقارات + أصول − التزامات : ${SAR(totalNetWorth)} ر.س`);
+    p(`+ النقد غير المستثمر            : ${SAR(portfolioCash)} ر.س`);
+    p(`= إجمالي الثروة شاملاً النقد     : ${SAR(totalNetWorth + portfolioCash)} ر.س`);
     p(`--- المهام ---`);
     p(`مهام نشطة                  : ${activeTasks.length}`);
     p(`مهام منجزة                  : ${doneTasks.length}`);
@@ -1665,6 +1693,33 @@ async function exportMonthlyReviewMD() {
       p(`**إجمالي المراجعات:** ${reviewLog.length} مراجعة على ${Object.keys(byTicker).length} رمز`);
     } else {
       p('_لا توجد مراجعات مسجّلة في دفتر المراجعة._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 19. المؤشر المرجعي (تاسي) — خط أساس مقارنة الأداء
+    // ════════════════════════════════════════════════════════
+    h2('19. المؤشر المرجعي (تاسي TASI) — مقارنة الأداء');
+    p('نقاط مؤشر السوق المُدخَلة يدوياً في صفحة الأداء التاريخي، تُستخدم كخط أساس لقياس أداء المحفظة مقابل السوق.');
+
+    if (Array.isArray(benchmark) && benchmark.length) {
+      const bm = [...benchmark].filter(e => e && e.date).sort((a, b) => a.date.localeCompare(b.date));
+      if (bm.length) {
+        const first = bm[0], last = bm[bm.length - 1];
+        const chg = +first.value > 0 ? (+last.value - +first.value) / +first.value * 100 : 0;
+        p(`**عدد النقاط:** ${bm.length} | **من** ${first.date} (${N(first.value)}) **إلى** ${last.date} (${N(last.value)})  `);
+        p(`**تغيّر المؤشر خلال الفترة:** ${(chg >= 0 ? '+' : '') + PCT(chg)}`);
+        const bRows = bm.map((e, i) => {
+          const prev = i > 0 ? +bm[i - 1].value : null;
+          const d = prev && prev > 0 ? (+e.value - prev) / prev * 100 : null;
+          return [e.date, N(e.value), d == null ? '—' : ((d >= 0 ? '+' : '') + PCT(d))];
+        });
+        p(mdTable(['التاريخ', 'قيمة المؤشر', 'التغير عن النقطة السابقة'], bRows));
+      } else {
+        p('_لا توجد نقاط صالحة للمؤشر المرجعي._');
+      }
+    } else {
+      p('_لم تُدخَل بيانات للمؤشر المرجعي (تاسي) بعد._');
     }
     hr();
 
