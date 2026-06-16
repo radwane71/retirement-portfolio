@@ -71,7 +71,17 @@
 
     .pt-disclaimer { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 12px; padding: 14px 18px; margin-top: 18px; color: var(--text-2); font-size: 0.8rem; text-align: center; line-height: 1.7; }
 
-    @media (max-width: 600px) { .pt-quant-grid { grid-template-columns: 1fr; } .pt-verdict { font-size: 1.4rem; } }
+    /* Inline learning helper */
+    .pt-help-toggle { background: none; border: 1px dashed var(--accent); color: var(--accent); font-family: 'Tajawal', sans-serif; font-size: 0.82rem; font-weight: 600; padding: 7px 12px; border-radius: 8px; cursor: pointer; margin-bottom: 16px; transition: background 0.15s; }
+    .pt-help-toggle:hover { background: var(--accent-dim); }
+    .pt-help-panel { background: var(--bg-1); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 18px; }
+    .pt-help-panel p { font-size: 0.86rem; color: var(--text); line-height: 1.8; margin-bottom: 10px; }
+    .pt-help-panel .formula { background: var(--accent-dim); border-right: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 8px 12px; font-weight: 700; color: var(--text); margin: 10px 0; font-size: 0.9rem; }
+    .pt-help-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+    .pt-help-result { display: none; margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: var(--bg-2); border: 1px solid var(--border); font-size: 0.9rem; line-height: 1.7; color: var(--text); }
+    .pt-help-note { font-size: 0.76rem !important; color: var(--text-2) !important; border-top: 1px solid var(--border); padding-top: 10px; margin-top: 12px !important; }
+    .pt-help-note a { color: var(--accent); }
+    @media (max-width: 600px) { .pt-quant-grid { grid-template-columns: 1fr; } .pt-verdict { font-size: 1.4rem; } .pt-help-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
@@ -226,6 +236,18 @@
         {
           text: 'هل وصل السهم أو تجاوز السعر المستهدف الذي وضعته عند الشراء؟',
           hint: 'الانضباط مع خطتك أساس النجاح. تحقّق الأطروحة الاستثمارية يستدعي مراجعة، لا طمعاً مفتوحاً.',
+          helpHtml: `
+            <p>السعر المستهدف هو تقديرك لـ<strong>القيمة العادلة</strong> للسهم. أبسط طريقة لغير المتخصص هي <strong>مكرّر الربحية</strong>:</p>
+            <div class="formula">السعر العادل ≈ ربحية السهم (EPS) × مكرّر ربحية معقول</div>
+            <p>• <strong>ربحية السهم (EPS):</strong> صافي ربح الشركة مقسوماً على عدد الأسهم — تجده في القوائم المالية (تطبيق تداول، أو موقع أرقام/argaam).<br>
+            • <strong>مكرّر معقول:</strong> استخدم متوسط مكرّر القطاع، أو متوسط مكرّر السهم نفسه تاريخياً (وليس مكرّره المرتفع الحالي).</p>
+            <div class="pt-help-grid">
+              <div class="pt-field"><label>ربحية السهم EPS (ر.س)</label><span class="sub">مثال: 3.5</span><input type="number" id="h_eps" placeholder="0.00" step="0.01" min="0"></div>
+              <div class="pt-field"><label>مكرّر ربحية معقول</label><span class="sub">متوسط القطاع/التاريخي، مثال: 15</span><input type="number" id="h_pe_fair" placeholder="0" step="0.1" min="0"></div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="ProfitEngine.calcFairValue()">احسب السعر العادل</button>
+            <div class="pt-help-result" id="h_fv_result"></div>
+            <p class="pt-help-note">⚠️ القيمة العادلة <strong>تقدير</strong> لا رقم مقدّس — استخدمها كنطاق لا كنقطة. السهم النامي قد يتجاوزها فعلاً، لكن تجاوزه الكبير لها يعني أنك دخلت "منطقة السعر المرتفع" (راجع السؤال التالي). لطرق أعمق (التدفقات النقدية المخصومة)، استخدم صفحة <a href="stock-valuation.html">القيمة العادلة للأسهم</a>.</p>`,
           choices: [
             { label: '🎯 نعم، وصل للهدف أو تجاوزه بوضوح', pts: 3 },
             { label: '⏳ قريب جداً من الهدف', pts: 1.5 },
@@ -235,6 +257,18 @@
         {
           text: 'هل ارتفاع السهم تدعمه أرباح حقيقية أم ضجيج ومضاربة؟',
           hint: 'الارتفاع عبر توسّع المكرر فقط (بلا نمو أرباح) هشّ وقابل للانهيار العنيف.',
+          helpHtml: `
+            <p>القاعدة الذهبية: <strong>سعر السهم = أرباح الشركة × المكرّر</strong>. فالسعر يرتفع لأحد سببين:</p>
+            <p>• <strong>نمو أرباح حقيقي (صحي):</strong> الشركة تكسب أكثر فعلاً.<br>
+            • <strong>توسّع المكرّر (مضاربة/معنويات):</strong> الناس يدفعون أغلى لنفس الربح بسبب الحماس — هذا هشّ.</p>
+            <p>الاختبار البسيط: قارن <strong>نسبة ارتفاع السعر</strong> بـ<strong>نسبة نمو الأرباح</strong> خلال نفس الفترة (آخر سنة مثلاً):</p>
+            <div class="pt-help-grid">
+              <div class="pt-field"><label>ارتفاع السعر آخر سنة %</label><span class="sub">مثال: 80</span><input type="number" id="h_price_chg" placeholder="0" step="0.1"></div>
+              <div class="pt-field"><label>نمو ربحية السهم آخر سنة %</label><span class="sub">نمو EPS، مثال: 15</span><input type="number" id="h_eps_growth" placeholder="0" step="0.1"></div>
+            </div>
+            <button type="button" class="btn btn-secondary btn-sm" onclick="ProfitEngine.calcGrowthVsSpec()">صنّف الارتفاع</button>
+            <div class="pt-help-result" id="h_gvs_result"></div>
+            <p class="pt-help-note">📊 أرقام نمو الأرباح تجدها في القوائم المالية الربعية/السنوية للشركة (تطبيق تداول السعودية، أو مواقع مثل أرقام/argaam).</p>`,
           choices: [
             { label: '🗣️ يطير بالمضاربة والكلام بلا نمو أرباح فعلي', pts: 4, euphoria: true },
             { label: '🏢 الأرباح تنمو لكن السعر يسبقها بكثير', pts: 2 },
@@ -286,6 +320,7 @@
           <div class="pt-q-number">مؤشر ${curQ + 1}</div>
           <div class="pt-q-text">${q.text}</div>
           <div class="pt-q-hint">💡 ${q.hint}</div>
+          ${q.helpHtml ? `<button type="button" class="pt-help-toggle" onclick="ProfitEngine.toggleHelp()">🧮 كيف أعرف الإجابة؟</button><div class="pt-help-panel" id="pt-help" style="display:none">${q.helpHtml}</div>` : ''}
           <div class="pt-choices">`;
         q.choices.forEach((c, i) => {
           html += `<button class="pt-choice" onclick="ProfitEngine.choose(${i})">${c.label}</button>`;
@@ -481,7 +516,61 @@
         return `<div class="pt-factors"><h4>📋 مبررات مؤشر التطرّف:</h4>${items}</div>`;
       }
 
-      return { start, choose, calculate };
+      // ── حاسبات تعليمية مدمجة ───────────────────────────────────
+      function toggleHelp() {
+        const p = document.getElementById('pt-help');
+        if (p) p.style.display = p.style.display === 'none' ? 'block' : 'none';
+      }
+
+      function calcFairValue() {
+        const eps = g('h_eps'), pe = g('h_pe_fair');
+        const out = document.getElementById('h_fv_result');
+        if (eps === null || pe === null || eps <= 0 || pe <= 0) {
+          out.style.display = 'block';
+          out.style.color = 'var(--danger)';
+          out.innerHTML = '⚠️ أدخل ربحية السهم (EPS) ومكرّراً معقولاً (قيمتان موجبتان).';
+          return;
+        }
+        const fv = eps * pe;
+        out.style.display = 'block';
+        out.style.color = 'var(--text)';
+        out.innerHTML = `السعر العادل التقديري ≈ <strong style="color:var(--accent)">${fv.toFixed(2)} ر.س</strong><br>
+          <span style="color:var(--text-2);font-size:0.84rem">إن كان السعر الحالي أعلى من هذا بكثير → السهم بلغ/تجاوز هدفك (اختر "نعم"). وإن كان أقل بوضوح → لم يبلغه بعد (اختر "لا").</span>`;
+      }
+
+      function calcGrowthVsSpec() {
+        const priceChg = g('h_price_chg'), epsGrowth = g('h_eps_growth');
+        const out = document.getElementById('h_gvs_result');
+        if (priceChg === null || epsGrowth === null) {
+          out.style.display = 'block';
+          out.style.color = 'var(--danger)';
+          out.innerHTML = '⚠️ أدخل نسبة ارتفاع السعر ونسبة نمو الأرباح.';
+          return;
+        }
+        out.style.display = 'block';
+        out.style.color = 'var(--text)';
+        if (priceChg <= 0) {
+          out.innerHTML = 'السعر لم يرتفع خلال الفترة — هذا السؤال يخص الأسهم المرتفعة فقط.';
+          return;
+        }
+        const ratio = epsGrowth / priceChg; // كم من ارتفاع السعر تغطّيه الأرباح
+        let verdict, color, pick;
+        if (ratio >= 0.7) {
+          verdict = 'نمو أرباح حقيقي (صحي) — الأرباح تواكب السعر';
+          color = 'var(--success)'; pick = '📊 «الارتفاع مبرّر تماماً بقفزة الأرباح»';
+        } else if (ratio >= 0.4) {
+          verdict = 'مختلط — الأرباح تنمو لكن السعر يسبقها';
+          color = 'var(--accent)'; pick = '🏢 «الأرباح تنمو لكن السعر يسبقها بكثير»';
+        } else {
+          verdict = 'غالباً مضاربة / توسّع مكرّر — الأرباح لا تبرّر الارتفاع';
+          color = 'var(--danger)'; pick = '🗣️ «يطير بالمضاربة بلا نمو أرباح فعلي»';
+        }
+        out.innerHTML = `الأرباح تغطّي <strong>${(ratio * 100).toFixed(0)}%</strong> من ارتفاع السعر.<br>
+          <strong style="color:${color}">${verdict}</strong><br>
+          <span style="color:var(--text-2);font-size:0.84rem">👈 بناءً على هذا، اختر: ${pick}</span>`;
+      }
+
+      return { start, choose, calculate, toggleHelp, calcFairValue, calcGrowthVsSpec };
     })();
 
     init();
