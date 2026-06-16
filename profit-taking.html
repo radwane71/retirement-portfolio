@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>متى أجني أرباحي؟ - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    .legal-note { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px; color: var(--accent); font-size: 0.82rem; text-align: center; line-height: 1.7; }
+
+    /* Progress */
+    .pt-progress-label { font-size: 0.8rem; color: var(--text-2); font-weight: 600; margin-bottom: 6px; }
+    .pt-progress-track { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; height: 8px; overflow: hidden; margin-bottom: 20px; }
+    .pt-progress-fill { height: 100%; background: var(--accent); border-radius: 10px; transition: width 0.35s ease; width: 0%; }
+
+    /* Questions */
+    .pt-q-number { font-size: 0.78rem; color: var(--accent); font-weight: 700; margin-bottom: 6px; letter-spacing: 0.03em; }
+    .pt-q-text { font-size: 1.12rem; font-weight: 700; color: var(--text); margin-bottom: 8px; line-height: 1.5; }
+    .pt-q-hint { font-size: 0.82rem; color: var(--text-2); margin-bottom: 18px; line-height: 1.6; border-right: 3px solid var(--accent); background: var(--accent-dim); padding: 10px 12px; border-radius: 0 8px 8px 0; }
+    .pt-choices { display: flex; flex-direction: column; gap: 10px; }
+    .pt-choice { width: 100%; padding: 13px 16px; font-size: 0.98rem; font-weight: 600; border: 1.5px solid var(--border); border-radius: 12px; cursor: pointer; background: var(--bg-2); color: var(--text); font-family: 'Tajawal', sans-serif; text-align: right; transition: border-color 0.18s, background 0.18s, transform 0.12s; }
+    .pt-choice:hover { border-color: var(--accent); background: var(--accent-dim); transform: translateX(-3px); }
+
+    /* Quant inputs */
+    .pt-quant-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-top: 16px; }
+    .pt-field { display: flex; flex-direction: column; gap: 5px; }
+    .pt-field label { font-size: 0.85rem; font-weight: 700; color: var(--text); }
+    .pt-field .sub { font-size: 0.72rem; color: var(--text-2); }
+    .pt-field input { padding: 10px 12px; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 0.95rem; font-family: 'Tajawal', sans-serif; direction: rtl; text-align: right; transition: border-color 0.2s; }
+    .pt-field input:focus { outline: none; border-color: var(--accent); }
+    .pt-field input.input-error { border-color: var(--danger) !important; box-shadow: 0 0 0 3px var(--danger-dim); }
+    .pt-validation { display: none; color: var(--danger); font-size: 0.85rem; margin-top: 12px; font-weight: 600; line-height: 1.6; }
+
+    /* Result */
+    .pt-result { display: none; text-align: center; }
+    .pt-result-icon { font-size: 3.4rem; margin-bottom: 10px; }
+    .pt-verdict { font-size: 1.7rem; font-weight: 900; margin-bottom: 6px; }
+    .pt-verdict.strong { color: var(--danger); }
+    .pt-verdict.trim   { color: var(--accent); }
+    .pt-verdict.hold   { color: var(--success); }
+    .pt-summary { font-size: 1rem; color: var(--text); line-height: 1.8; margin: 14px auto 22px; max-width: 620px; }
+
+    .pt-index-wrap { max-width: 560px; margin: 0 auto 6px; }
+    .pt-index-track { background: var(--bg-2); border: 1px solid var(--border); border-radius: 20px; height: 16px; overflow: hidden; direction: ltr; position: relative; }
+    .pt-index-fill { height: 100%; transition: width 0.9s cubic-bezier(0.4,0,0.2,1); border-radius: 20px; }
+    .pt-index-scale { display: flex; justify-content: space-between; font-size: 0.72rem; color: var(--text-2); margin: 6px auto 22px; max-width: 560px; direction: ltr; }
+
+    .pt-breakdown { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; margin: 18px 0; }
+    .pt-score-box { background: var(--bg-1); border: 1px solid var(--border); border-radius: 12px; padding: 12px 16px; min-width: 120px; }
+    .pt-score-box .lbl { font-size: 0.7rem; color: var(--text-2); margin-bottom: 4px; }
+    .pt-score-box .val { font-size: 1.25rem; font-weight: 700; color: var(--text); }
+    .pt-score-box .wt  { font-size: 0.64rem; color: var(--text-2); margin-top: 2px; }
+
+    .pt-factors { background: var(--bg-1); border: 1px solid var(--border); border-radius: 14px; padding: 18px; margin: 20px 0; text-align: right; }
+    .pt-factors h4 { color: var(--accent); margin-bottom: 14px; font-size: 0.9rem; }
+    .pt-factor { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 11px; font-size: 0.88rem; color: var(--text); line-height: 1.55; }
+    .pt-factor .dot { flex-shrink: 0; font-size: 1rem; }
+
+    .pt-override { border-radius: 14px; padding: 18px; margin: 18px auto; max-width: 640px; text-align: center; line-height: 1.7; }
+    .pt-override.danger { background: var(--danger-dim); border: 2px solid var(--danger); }
+    .pt-override.warn   { background: var(--accent-dim); border: 2px solid var(--accent); }
+    .pt-override .ov-title { font-size: 1.25rem; font-weight: 800; margin: 8px 0; }
+    .pt-override p { font-size: 0.98rem; color: var(--text); }
+
+    .pt-disclaimer { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: 12px; padding: 14px 18px; margin-top: 18px; color: var(--text-2); font-size: 0.8rem; text-align: center; line-height: 1.7; }
+
+    @media (max-width: 600px) { .pt-quant-grid { grid-template-columns: 1fr; } .pt-verdict { font-size: 1.4rem; } }
+  </style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')"><span class="icon">📈</span><span>محفظة التقاعد</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')"><span class="icon">💼</span><span>الإدارة المالية</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')"><span class="icon">🏗️</span><span>استثمارات أخرى</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')"><span class="icon">🌱</span><span>إدارة الحياة</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html" class="nav-link nav-sub" id="nav-life-goals"><span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"  class="nav-link nav-sub" id="nav-inventory"><span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html"     class="nav-link nav-sub" id="nav-school">  <span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-learn')"><span class="icon">📚</span><span>تعليم الاستثمار</span><span class="nav-group-chevron">▾</span></button>
+        <div class="nav-group-body" id="grp-learn">
+          <a href="invest-tips.html"      class="nav-link nav-sub" id="nav-invest-tips">      <span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="emergency-fund.html"   class="nav-link nav-sub" id="nav-emergency-fund">   <span class="icon">🛡️</span><span>صندوق الطوارئ</span></a>
+          <a href="avg-calculator.html"   class="nav-link nav-sub" id="nav-avg-calc">         <span class="icon">📊</span><span>متوسط سعر الشراء</span></a>
+          <a href="portfolio-rating.html" class="nav-link nav-sub" id="nav-portfolio-rating"> <span class="icon">🛡️</span><span>تقييم أمان المحفظة</span></a>
+          <a href="stock-valuation.html"  class="nav-link nav-sub" id="nav-stock-valuation">  <span class="icon">💹</span><span>القيمة العادلة للأسهم</span></a>
+          <a href="profit-taking.html"    class="nav-link nav-sub" id="nav-profit-taking">    <span class="icon">💸</span><span>متى أجني أرباحي؟</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>💸 متى أجني أرباحي؟</h1>
+        <p>محرك جني الأرباح — يقيس إن كان سهمك دخل منطقة تضخّم سعري أو مبالغة تقييم تستدعي تأمين بعض الربح.</p>
+      </div>
+    </div>
+
+    <!-- الخطوة 1: الأسئلة السلوكية -->
+    <div class="card" id="pt-question-card">
+      <div class="legal-note">⚠️ أداة تعليمية بحتة. ليست توصية بيع أو شراء. لا تعرف ظروفك ولا حجم محفظتك. القرار مسؤوليتك وحدك.</div>
+      <div class="pt-progress-label" id="pt-progress-text">السؤال 1 من 4</div>
+      <div class="pt-progress-track"><div class="pt-progress-fill" id="pt-progress-fill"></div></div>
+      <div id="pt-question-body"></div>
+    </div>
+
+    <!-- الخطوة 2: المحرك الكمي -->
+    <div class="card" id="pt-quant-card" style="display:none">
+      <h3 style="color:var(--text);font-size:0.95rem;margin-bottom:6px;padding-right:10px;border-right:3px solid var(--accent)">📊 المؤشرات الكمية</h3>
+      <p style="font-size:0.82rem;color:var(--text-2);line-height:1.6;margin-bottom:6px">
+        أدخل ما تعرفه بدقة. كل حقل فارغ يُستبعد ويُعاد توزيع الأوزان تلقائياً على ما أدخلته.
+        التكلفة والسعر الحالي إلزاميان لحساب نسبة الربح.
+      </p>
+      <div class="pt-quant-grid">
+        <div class="pt-field">
+          <label>متوسط سعر التكلفة <span style="color:var(--danger)">*</span></label>
+          <span class="sub">السعر الذي دفعته للسهم</span>
+          <input type="number" id="q_cost" placeholder="0.00" min="0.01" step="0.01">
+        </div>
+        <div class="pt-field">
+          <label>السعر الحالي <span style="color:var(--danger)">*</span></label>
+          <span class="sub">آخر سعر إغلاق</span>
+          <input type="number" id="q_price" placeholder="0.00" min="0.01" step="0.01">
+        </div>
+        <div class="pt-field">
+          <label>متوسط 200 يوم (MA200)</label>
+          <span class="sub">لقياس الامتداد الفني عن المتوسط</span>
+          <input type="number" id="q_ma200" placeholder="مثال: 45.00" min="0.01" step="0.01">
+        </div>
+        <div class="pt-field">
+          <label>مكرر الربحية الحالي (P/E)</label>
+          <span class="sub">مكرر السهم الآن</span>
+          <input type="number" id="q_pe" placeholder="مثال: 25" min="0" step="0.1">
+        </div>
+        <div class="pt-field">
+          <label>مكرر ربحية القطاع (أو التاريخي)</label>
+          <span class="sub">للمقارنة مع علاوة التقييم</span>
+          <input type="number" id="q_spe" placeholder="مثال: 15" min="0.1" step="0.1">
+        </div>
+      </div>
+      <div class="pt-validation" id="pt-validation"></div>
+      <button class="btn btn-primary mt-4" onclick="ProfitEngine.calculate()">⚖️ افحص مناطق البيع</button>
+    </div>
+
+    <!-- الخطوة 3: النتيجة -->
+    <div class="card pt-result" id="pt-result-card"></div>
+  </main>
+
+  <div id="toast"></div>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script>
+    async function init() {
+      const user = await requireAuth();
+      if (!user) return;
+      setActiveNav('nav-profit-taking');
+      ProfitEngine.start();
+    }
+
+    const ProfitEngine = (function () {
+      // ════════════════════════════════════════════════════════════
+      //  المنهجية (كلاسيكية):
+      //  نبني "مؤشر تطرّف" واحد من 0 إلى 100 — كلما ارتفع زاد مبرر جني
+      //  الربح. يتكوّن من 4 إشارات، كل واحدة تُطبَّع إلى 0..100:
+      //    1) سلوكي/محفظي (الأسئلة)   وزن أساسي 0.30
+      //    2) حجم الربح                وزن أساسي 0.15
+      //    3) الامتداد عن MA200        وزن أساسي 0.25
+      //    4) علاوة التقييم (PE/قطاع)  وزن أساسي 0.30
+      //  الإشارات الكمية الناقصة تُستبعَد، وتُعاد قسمة أوزان الموجود
+      //  ليصبح مجموعها 1 (تطبيع الأوزان). بعدها نطابق المؤشر مع نطاقات
+      //  الحكم، مع تجاوزات صارمة للتركّز المفرط والنشوة (FOMO).
+      // ════════════════════════════════════════════════════════════
+
+      const W = { qual: 0.30, profit: 0.15, ext: 0.25, val: 0.30 };
+
+      const questions = [
+        {
+          text: 'هل وصل السهم أو تجاوز السعر المستهدف الذي وضعته عند الشراء؟',
+          hint: 'الانضباط مع خطتك أساس النجاح. تحقّق الأطروحة الاستثمارية يستدعي مراجعة، لا طمعاً مفتوحاً.',
+          choices: [
+            { label: '🎯 نعم، وصل للهدف أو تجاوزه بوضوح', pts: 3 },
+            { label: '⏳ قريب جداً من الهدف', pts: 1.5 },
+            { label: '📈 لا، ما زال أقل من قيمته العادلة عندي', pts: -3 }
+          ]
+        },
+        {
+          text: 'هل ارتفاع السهم تدعمه أرباح حقيقية أم ضجيج ومضاربة؟',
+          hint: 'الارتفاع عبر توسّع المكرر فقط (بلا نمو أرباح) هشّ وقابل للانهيار العنيف.',
+          choices: [
+            { label: '🗣️ يطير بالمضاربة والكلام بلا نمو أرباح فعلي', pts: 4, euphoria: true },
+            { label: '🏢 الأرباح تنمو لكن السعر يسبقها بكثير', pts: 2 },
+            { label: '📊 الارتفاع مبرّر تماماً بقفزة الأرباح', pts: -4 }
+          ]
+        },
+        {
+          text: 'بعد ارتفاعه، هل صار هذا السهم نسبة مخيفة من محفظتك؟',
+          hint: 'إعادة التوازن (Rebalancing): لا تترك سهماً واحداً يبتلع محفظتك مهما كان جيداً.',
+          choices: [
+            { label: '🐋 نعم، تجاوز 30–40% من إجمالي المحفظة', pts: 4, concentrated: true },
+            { label: '⚖️ كبر قليلاً لكنه ضمن حدود آمنة', pts: 1 },
+            { label: '🛡️ لا، وزنه ما زال معقولاً', pts: -1 }
+          ]
+        },
+        {
+          text: 'لو نزل السهم غداً 20%، ما شعورك الصادق؟',
+          hint: 'اختبار وسادة الأمان: السهم المتضخم يثير الرعب، والعادل يجعلك ترغب بالمزيد.',
+          choices: [
+            { label: '😱 رعب وندم أني ما بعت اليوم', pts: 3 },
+            { label: '🤔 انزعاج ثم مراجعة للأرقام', pts: 0 },
+            { label: '🤩 فرح وأشتري كميات إضافية', pts: -3 }
+          ]
+        }
+      ];
+      const QUAL_MIN = -11, QUAL_MAX = 14; // أدنى/أقصى مجموع نظري للأسئلة
+
+      let curQ = 0, qualRaw = 0, qualReasons = [];
+      let flagEuphoria = false, flagConcentrated = false;
+
+      const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+      const g = id => { const v = document.getElementById(id).value.trim(); return v !== '' ? parseFloat(v) : null; };
+
+      function start() {
+        curQ = 0; qualRaw = 0; qualReasons = [];
+        flagEuphoria = false; flagConcentrated = false;
+        document.getElementById('pt-result-card').style.display = 'none';
+        document.getElementById('pt-quant-card').style.display = 'none';
+        document.getElementById('pt-question-card').style.display = 'block';
+        document.getElementById('pt-validation').style.display = 'none';
+        renderQuestion();
+      }
+
+      function renderQuestion() {
+        const q = questions[curQ];
+        document.getElementById('pt-progress-fill').style.width = (curQ / questions.length * 100) + '%';
+        document.getElementById('pt-progress-text').textContent = `السؤال ${curQ + 1} من ${questions.length}`;
+        let html = `
+          <div class="pt-q-number">مؤشر ${curQ + 1}</div>
+          <div class="pt-q-text">${q.text}</div>
+          <div class="pt-q-hint">💡 ${q.hint}</div>
+          <div class="pt-choices">`;
+        q.choices.forEach((c, i) => {
+          html += `<button class="pt-choice" onclick="ProfitEngine.choose(${i})">${c.label}</button>`;
+        });
+        html += `</div>`;
+        document.getElementById('pt-question-body').innerHTML = html;
+      }
+
+      function choose(idx) {
+        const c = questions[curQ].choices[idx];
+        qualRaw += c.pts;
+        if (c.euphoria) flagEuphoria = true;
+        if (c.concentrated) flagConcentrated = true;
+        const clean = c.label.replace(/[\u{1F000}-\u{1FAFF}☀-➿️]/gu, '').trim();
+        if (c.pts >= 3)      qualReasons.push({ text: clean, sign: 'neg' });
+        else if (c.pts <= -3) qualReasons.push({ text: clean, sign: 'pos' });
+
+        curQ++;
+        if (curQ < questions.length) {
+          renderQuestion();
+        } else {
+          document.getElementById('pt-progress-fill').style.width = '100%';
+          document.getElementById('pt-question-card').style.display = 'none';
+          document.getElementById('pt-quant-card').style.display = 'block';
+          document.getElementById('pt-quant-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      }
+
+      function calculate() {
+        const cost = g('q_cost'), price = g('q_price'), ma200 = g('q_ma200'), pe = g('q_pe'), spe = g('q_spe');
+        const msg = document.getElementById('pt-validation');
+        document.querySelectorAll('#pt-quant-card input').forEach(el => el.classList.remove('input-error'));
+
+        if (cost === null || price === null || cost <= 0 || price <= 0) {
+          if (cost === null || cost <= 0) document.getElementById('q_cost').classList.add('input-error');
+          if (price === null || price <= 0) document.getElementById('q_price').classList.add('input-error');
+          msg.style.display = 'block';
+          msg.textContent = '⚠️ أدخل متوسط التكلفة والسعر الحالي (قيمتان موجبتان) لحساب نسبة الربح.';
+          return;
+        }
+
+        const profitPct = (price - cost) / cost * 100;
+        if (profitPct <= 0) {
+          msg.style.display = 'block';
+          msg.textContent = 'ℹ️ السهم في خسارة أو عند التعادل. هذه أداة جني أرباح للأسهم الرابحة فقط. استراتيجية الخسارة (التعزيز/الصبر) خارج نطاقها.';
+          return;
+        }
+        msg.style.display = 'none';
+
+        // ── الإشارات (كل واحدة 0..100) ─────────────────────────────
+        const reasons = [];
+        const present = {};
+
+        // 1) سلوكي — حاضر دائماً
+        const qualSig = clamp((qualRaw - QUAL_MIN) / (QUAL_MAX - QUAL_MIN) * 100, 0, 100);
+        present.qual = qualSig;
+
+        // 2) حجم الربح: 0% → 0 ، 150%+ → 100
+        const profitSig = clamp(profitPct / 150 * 100, 0, 100);
+        present.profit = profitSig;
+        if (profitPct > 100) reasons.push({ text: `ربح ضخم +${profitPct.toFixed(1)}% — المخاطرة على الربح المتراكم ترتفع`, sign: 'neg' });
+        else if (profitPct > 50) reasons.push({ text: `ربح ممتاز +${profitPct.toFixed(1)}% — يستحق مراقبة لصيقة`, sign: 'neg' });
+        else reasons.push({ text: `ربح حالي +${profitPct.toFixed(1)}%`, sign: 'pos' });
+
+        // 3) الامتداد عن MA200: 0% فوقه → 0 ، +50%+ → 100 (تحته → 0)
+        let extPct = null;
+        if (ma200 !== null && ma200 > 0) {
+          extPct = (price - ma200) / ma200 * 100;
+          const extSig = clamp(extPct / 50 * 100, 0, 100);
+          present.ext = extSig;
+          if (extPct > 40) reasons.push({ text: `تضخّم فني حاد: السعر فوق MA200 بـ +${extPct.toFixed(1)}% (ارتداد عنيف محتمل)`, sign: 'neg' });
+          else if (extPct > 20) reasons.push({ text: `زخم مرتفع: فوق MA200 بـ +${extPct.toFixed(1)}%`, sign: 'neg' });
+          else if (extPct >= 0) reasons.push({ text: `قريب من MA200 (+${extPct.toFixed(1)}%) — نمو غير متضخم فنياً`, sign: 'pos' });
+          else reasons.push({ text: `تحت MA200 بـ ${extPct.toFixed(1)}% — لا تطرّف فني`, sign: 'pos' });
+        }
+
+        // 4) علاوة التقييم PE/قطاع: نسبة 1.0 → 0 ، 2.5+ → 100 (<1 → 0)
+        let peRatio = null;
+        if (pe !== null && spe !== null && pe > 0 && spe > 0) {
+          peRatio = pe / spe;
+          const valSig = clamp((peRatio - 1) / 1.5 * 100, 0, 100);
+          present.val = valSig;
+          if (peRatio > 2.0) reasons.push({ text: `فقاعة تقييم: مكرر السهم (${pe}) ضعف القطاع (${spe})`, sign: 'neg' });
+          else if (peRatio > 1.4) reasons.push({ text: `علاوة تقييم: السهم أغلى من أقرانه (${pe} مقابل ${spe})`, sign: 'neg' });
+          else if (peRatio < 1.0) reasons.push({ text: `تقييم مريح: مكرر السهم أقل من القطاع (${pe} مقابل ${spe})`, sign: 'pos' });
+          else reasons.push({ text: `تقييم قريب من القطاع (${pe} مقابل ${spe})`, sign: 'pos' });
+        }
+
+        // ── تطبيع الأوزان على الإشارات الحاضرة ─────────────────────
+        let wSum = 0;
+        Object.keys(present).forEach(k => wSum += W[k]);
+        let index = 0;
+        const usedWeights = {};
+        Object.keys(present).forEach(k => {
+          const w = W[k] / wSum;
+          usedWeights[k] = w;
+          index += present[k] * w;
+        });
+        index = clamp(index, 0, 100);
+
+        showResult({ index, present, usedWeights, reasons, profitPct });
+      }
+
+      function showResult({ index, present, usedWeights, reasons, profitPct }) {
+        document.getElementById('pt-quant-card').style.display = 'none';
+        const rc = document.getElementById('pt-result-card');
+        rc.style.display = 'block';
+
+        // ── تجاوزات صارمة (كلاسيكية) ───────────────────────────────
+        if (flagConcentrated && profitPct > 40) {
+          rc.innerHTML = `
+            <div class="pt-override danger">
+              <div class="pt-result-icon">⚖️</div>
+              <div class="ov-title" style="color:var(--accent)">تقليم إلزامي لإعادة التوازن</div>
+              <p>السهم حقق ربحاً ممتازاً (+${profitPct.toFixed(1)}%) لكنه انتفخ ليصبح وزناً مفرطاً في محفظتك. القاعدة الكلاسيكية لإعادة التوازن: بِع جزءاً يعيد وزنه لحدوده الطبيعية — هذا قرار <strong>إدارة مخاطر</strong> مستقل عن جودة الشركة نفسها.</p>
+            </div>
+            ${factorsHtml(reasons)}
+            <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;
+          rc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+        if (flagEuphoria && profitPct > 30) {
+          rc.innerHTML = `
+            <div class="pt-override warn">
+              <div class="pt-result-icon">🎈</div>
+              <div class="ov-title" style="color:var(--danger)">تحذير: نشوة سعرية (FOMO)</div>
+              <p>السهم يرتفع بقوة الضجيج لا بالأرباح، وأنت على ربح ممتاز (+${profitPct.toFixed(1)}%) في قمة موجة المضاربة. الأدبيات المالية تنبّه أن الارتفاعات بلا أساس أرباح تنعكس بحدّة. تأمين جزء من الربح هنا قرار محافظ مبرّر.</p>
+            </div>
+            ${factorsHtml(reasons)}
+            <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;
+          rc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+
+        // ── الحكم بحسب نطاقات المؤشر ───────────────────────────────
+        let verdict, icon, cls, barColor, summary;
+        if (index >= 70) {
+          verdict = 'منطقة جني أرباح قوية'; icon = '💰'; cls = 'strong'; barColor = 'var(--danger)';
+          summary = 'المؤشرات تشير إلى تضخّم واضح — السعر ابتعد عن أساسيات الشركة ومتوسطاتها. الطرح الكلاسيكي: جنِّ جزءاً كبيراً من الربح (50–100%) وأمِّن السيولة.';
+        } else if (index >= 45) {
+          verdict = 'تقليم جزئي'; icon = '✂️'; cls = 'trim'; barColor = 'var(--accent)';
+          summary = 'السهم دخل منطقة تقييم/زخم مرتفع. الاستراتيجية المتوازنة: بِع 20–30% لاسترداد جزء من رأس المال، واترك الباقي ينمو ("اللعب بأموال السوق").';
+        } else if (index >= 25) {
+          verdict = 'احتفظ ومتابعة'; icon = '🛡️'; cls = 'hold'; barColor = 'var(--success)';
+          summary = 'الارتفاع ما زال مبرّراً نسبياً ولم يبلغ التطرّف. دع أرباحك تركض وراقب الأساسيات. (إن أردت، يمكن استخدام وقف خسارة متحرك كأداة اختيارية لحماية الربح — وليست إلزاماً.)';
+        } else {
+          verdict = 'احتفاظ صلب'; icon = '🚀'; cls = 'hold'; barColor = 'var(--success)';
+          summary = 'الشركة تنمو والتقييم ما زال عادلاً أو رخيصاً رغم ارتفاع السعر. لا مبرّر لجني الربح الآن — "لا تقطف زهورك وتسقي الأعشاب الضارة".';
+        }
+
+        const fieldsCount = Object.keys(present).length;
+        rc.innerHTML = `
+          <div class="pt-result-icon">${icon}</div>
+          <div class="pt-verdict ${cls}">${verdict}</div>
+          <div class="pt-summary">${summary}</div>
+
+          <div class="pt-index-wrap">
+            <div class="pt-index-track"><div class="pt-index-fill" style="width:${index.toFixed(0)}%;background:${barColor}"></div></div>
+          </div>
+          <div class="pt-index-scale"><span>0 — احتفاظ</span><span>مؤشر التطرّف: ${index.toFixed(0)}/100</span><span>100 — بيع</span></div>
+
+          <div class="pt-breakdown">
+            ${scoreBox('سلوكي', present.qual, usedWeights.qual)}
+            ${scoreBox('حجم الربح', present.profit, usedWeights.profit)}
+            ${scoreBox('امتداد MA200', present.ext, usedWeights.ext)}
+            ${scoreBox('علاوة التقييم', present.val, usedWeights.val)}
+          </div>
+          <div style="font-size:0.74rem;color:var(--text-2);margin-bottom:6px">عدد الإشارات المُحتسبة: ${fieldsCount} من 4 — الأوزان مُعاد توزيعها على المتاح</div>
+
+          ${factorsHtml(reasons)}
+          <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;
+        rc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+
+      function scoreBox(label, val, weight) {
+        if (val === undefined) {
+          return `<div class="pt-score-box"><div class="lbl">${label}</div><div class="val" style="color:var(--text-2);font-size:1rem">غير متاح</div><div class="wt">—</div></div>`;
+        }
+        return `<div class="pt-score-box"><div class="lbl">${label}</div><div class="val">${val.toFixed(0)}</div><div class="wt">وزن ${(weight * 100).toFixed(0)}%</div></div>`;
+      }
+
+      function factorsHtml(reasons) {
+        if (!reasons || !reasons.length) {
+          return `<div class="pt-factors"><h4>📋 المبررات</h4><p style="color:var(--text-2)">لا توجد إشارات تطرّف بارزة في البيانات المُدخلة.</p></div>`;
+        }
+        // الأهم أولاً: إشارات البيع (neg) ثم الاحتفاظ (pos)
+        const sorted = [...reasons].sort((a, b) => (a.sign === 'neg' ? -1 : 1) - (b.sign === 'neg' ? -1 : 1));
+        const items = sorted.map(r => `
+          <div class="pt-factor">
+            <span class="dot" style="color:${r.sign === 'neg' ? 'var(--danger)' : 'var(--success)'}">${r.sign === 'neg' ? '⚠️' : '✅'}</span>
+            <span>${r.text}</span>
+          </div>`).join('');
+        return `<div class="pt-factors"><h4>📋 مبررات مؤشر التطرّف:</h4>${items}</div>`;
+      }
+
+      return { start, choose, calculate };
+    })();
+
+    init();
+  </script>
+</body>
+</html>
