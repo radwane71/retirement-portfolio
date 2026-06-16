@@ -537,6 +537,7 @@ async function loadAllData() {
   window._ds = {
     yr,
     totalInvested:   totalBuys - totalSells,
+    totalBuys,
     totalSells,
     totalCommission, totalVAT,
     realizedPnL,
@@ -618,13 +619,14 @@ function switchYieldTab(tab) {
     setText('stat-div-yield',  (s.divYieldYOC || 0).toFixed(2) + '%');
     setText('stat-div-yield-sub', `TTM (${formatSAR(s.ttmDiv||0)}) ÷ تكلفة الشراء`);
   } else if (tab === 'fwd') {
-    setText('yield-tab-label', '▶ العائد المتوقع (Forward)');
+    setText('yield-tab-label', '▶ العائد المتوقع (Forward) — على التكلفة');
     setText('stat-div-yield',  (s.divYieldFwd || 0).toFixed(2) + '%');
-    setText('stat-div-yield-sub', `${formatSAR(s.fwdProjected||0)}/سنة ≈ ${formatSAR((s.fwdProjected||0)/12)}/شهر`);
+    setText('stat-div-yield-sub', `${formatSAR(s.fwdProjected||0)}/سنة ≈ ${formatSAR((s.fwdProjected||0)/12)}/شهر ÷ التكلفة (WAC)`);
   } else {
-    setText('yield-tab-label', 'العائد السوقي');
+    setText('yield-tab-label', 'العائد السوقي — التوزيع الجاري');
     setText('stat-div-yield',  (s.divYieldMarket || 0).toFixed(2) + '%');
-    setText('stat-div-yield-sub', `أرباح ${yr} مُسنواة ÷ القيمة السوقية الحالية`);
+    // AUDIT-FIX: الحساب فعلياً TTM ÷ القيمة السوقية (لا «أرباح السنة مُسنواة») — صُحّح النص ليطابق الكود
+    setText('stat-div-yield-sub', `TTM (${formatSAR(s.ttmDiv||0)}) ÷ القيمة السوقية الحالية`);
   }
 
   // لون حسب القيمة
@@ -648,7 +650,7 @@ const _RELIABILITY = {
 const _CARD_RELIABILITY = {
   // 🟢 حقائق من بياناتك
   'total-value': 'high', 'portfolio-cash': 'high', 'realestate': 'high', 'invested': 'high',
-  'capital': 'high', 'pnl': 'high', 'realized': 'high', 'total-div': 'high', 'year-div': 'high',
+  'capital': 'high', 'pnl': 'high', 'realized': 'high', 'total-return': 'high', 'total-div': 'high', 'year-div': 'high',
   'cashflow': 'high', 'composition': 'high', 'costs': 'high', 'fwd-income': 'high',
   'total-assets': 'high', 'concentration': 'high', 'contribution': 'high',
   // 🟡 تعتمد افتراضات
@@ -706,6 +708,27 @@ function renderStats() {
   const pnlPctEl = g('stat-pnl-pct');
   if (pnlEl)    { pnlEl.textContent = formatSAR(pnl, true); pnlEl.className = 'value num ' + (pnl >= 0 ? 'text-success' : 'text-danger'); }
   if (pnlPctEl) { pnlPctEl.textContent = (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%'; pnlPctEl.className = 'sub ' + (pnl >= 0 ? 'text-success' : 'text-danger'); }
+
+  // ── إجمالي العائد منذ البداية ─────────────────────────────────
+  // الربح الكلي = (غير محقق) + (محقق من البيع) + (كل التوزيعات)
+  //            = القيمة السوقية + إجمالي المبيعات + إجمالي التوزيعات − إجمالي المشتريات
+  // النسبة على إجمالي المشتريات (رأس المال المنشغل) — عائد تراكمي بسيط، غير مُسنوى.
+  const trEl    = g('stat-total-return');
+  const trSubEl = g('stat-total-return-sub');
+  if (trEl) {
+    const totalBuys = s.totalBuys || 0;
+    if (totalBuys > 0) {
+      const totalProfit = totalValue + (s.totalSells || 0) + (s.totalDivAll || 0) - totalBuys;
+      const totalRetPct = totalProfit / totalBuys * 100;
+      trEl.textContent = formatSAR(totalProfit, true) + ` (${totalProfit >= 0 ? '+' : ''}${totalRetPct.toFixed(1)}%)`;
+      trEl.className = 'value num ' + (totalProfit >= 0 ? 'text-success' : 'text-danger');
+      if (trSubEl) trSubEl.textContent = `غير محقق ${formatSAR(pnl, true)} + محقق ${formatSAR(s.realizedPnL || 0, true)} + توزيعات ${formatSAR(s.totalDivAll || 0)}`;
+    } else {
+      trEl.textContent = '—';
+      trEl.className = 'value num text-muted';
+      if (trSubEl) trSubEl.textContent = 'يحتاج معاملات شراء مسجّلة';
+    }
+  }
 
   setText('stat-net-worth', s.latestNW != null ? formatSAR(s.latestNW) : '—');
   setText('stat-nw-date',   s.latestNWDate ? formatDate(s.latestNWDate) : 'لا توجد لقطة');
@@ -1215,14 +1238,14 @@ function renderDiversificationCard() {
   const top1Name = sorted[0]?.ticker || '';
 
   // ── موضع المؤشر: مشتقّ من HHI الخام مباشرةً ─────────────────
-  // المرجع: DOJ (0.25 مركّز / 0.15 معتدل)، Evans & Archer 1968،
-  //         Statman 1987، Campbell et al 2001
-  // نقاط التحويل: [HHI_خام → gaugePos %]
-  // 0% = مركّز تماماً (N_eff=1)، 100% = تنوع واسع جداً
+  // مُعايَر للمستثمر الفردي (محفظة تقاعد) لا للمؤسسات:
+  //   Evans & Archer 1968 — 15 سهماً تُزيل ~90% من المخاطر القابلة للتنويع
+  //   ⇒ N_فعّال ≥ 15 (HHI ≤ 0.067) = «ممتاز»، N_فعّال ~10 = «جيد»
+  // نقاط التحويل: [HHI_خام → gaugePos %]  (0 = مركّز تماماً، 100 = تنوع واسع)
   const bps = [
-    [1.000,  0], [0.500,  8], [0.250, 22], [0.150, 38],
-    [0.100, 52], [0.067, 64], [0.050, 74], [0.033, 84],
-    [0.020, 92], [0.000, 100]
+    [1.000,  0], [0.500,  8], [0.250, 22], [0.150, 40],
+    [0.100, 62], [0.067, 80], [0.050, 88], [0.033, 93],
+    [0.020, 97], [0.000, 100]
   ];
   let stockGauge = 100;
   for (let i = 0; i < bps.length - 1; i++) {
@@ -1234,10 +1257,10 @@ function renderDiversificationCard() {
     }
   }
 
-  // معامل القطاعات: يخفّض النتيجة إذا كانت القطاعات مركّزة
-  // 0.60 (قطاع واحد) → 1.00 (قطاعات موزّعة بالتساوي)
+  // معامل القطاعات: يخفّض النتيجة إذا كانت القطاعات مركّزة — مُعايَر للفرد
+  // 0.70 (قطاع واحد) → 1.00 (≥ 6 قطاعات فعّالة، نطاق واقعي لمحفظة فردية)
   const effSectors   = secHHI > 0 ? 1 / secHHI : sectorCount;
-  const sectorFactor = Math.min(1.0, 0.60 + 0.40 * Math.min(1, effSectors / 10));
+  const sectorFactor = Math.min(1.0, 0.70 + 0.30 * Math.min(1, effSectors / 6));
   const gaugePos = Math.min(97, Math.max(3, Math.round(stockGauge * sectorFactor)));
 
   // تحديد المنطقة
@@ -1254,10 +1277,10 @@ function renderDiversificationCard() {
     advice = `عدد فعّال = ${effectiveN} — نطاق مقبول. معظم المخاطر الفردية محمية. الخطوة التالية: تعزيز تنوع القطاعات (${sectorCount} قطاع حالياً).`;
   } else if (gaugePos < 80) {
     zoneLabel = 'تنوع جيد';     zoneColor = '#22c55e';
-    advice = `عدد فعّال = ${effectiveN} — تنوع جيد يحمي من الصدمات الفردية والقطاعية. المرجع (Statman 1987): النطاق 30–40 سهم متساوٍ مثالي لمحفظة التقاعد.`;
+    advice = `عدد فعّال = ${effectiveN} — تنوع جيد لمحفظة فردية يحمي من الصدمات الفردية والقطاعية. أنت قريب من نطاق Evans & Archer (≥ 15 سهماً فعّالاً) الذي يُزيل ~90% من المخاطر القابلة للتنويع.`;
   } else {
     zoneLabel = 'تنوع ممتاز';   zoneColor = '#10b981';
-    advice = `عدد فعّال = ${effectiveN} — تنوع واسع يُقلّل المخاطر غير المنهجية إلى أدنى مستوياتها. تأكد من متابعة كل مركز بانتظام.`;
+    advice = `عدد فعّال = ${effectiveN} — تنوع ممتاز لمحفظة فردية (≥ 15 سهماً فعّالاً، Evans & Archer 1968). المخاطر غير المنهجية عند أدنى مستوياتها — ركّز الآن على جودة المتابعة لا زيادة العدد.`;
   }
 
   // تنبيه منفصل لتعقيد الإدارة (Diworsification) — ليس منطقة خطر على المقياس
@@ -3523,6 +3546,27 @@ function showCardInfo(key) {
         </div>
         <p class="info-note">⚠️ هذا تقدير بناءً على متوسط تكلفة الشراء الكلي لكل رمز.</p>`
     },
+    'total-return': {
+      title: '🧮 إجمالي العائد منذ البداية',
+      body: (() => {
+        const totalBuys = s.totalBuys || 0;
+        const totalProfit = totalBuys > 0
+          ? (holdings.reduce((a,h)=>a+ +h.shares*+h.current_price,0) + (s.totalSells||0) + (s.totalDivAll||0) - totalBuys)
+          : 0;
+        const pct = totalBuys > 0 ? totalProfit / totalBuys * 100 : 0;
+        return `
+        <p>كل ما ربحته من المحفظة منذ أول صفقة — يجمع الأبعاد الثلاثة في رقم واحد بديهي.</p>
+        <div class="info-formula">
+          <strong>إجمالي الربح = (ربح ورقي) + (ربح محقق من البيع) + (كل التوزيعات)</strong><br>
+          = القيمة السوقية + إجمالي المبيعات + إجمالي التوزيعات − إجمالي المشتريات
+        </div>
+        <div class="info-math">
+          النسبة = إجمالي الربح ÷ إجمالي المشتريات = <strong class="${totalProfit>=0?'text-success':'text-danger'}">${totalProfit>=0?'+':''}${pct.toFixed(1)}%</strong><br>
+          (الأسهم المجانية/المنح تظهر كربح صافٍ لأن تكلفتها صفر)
+        </div>
+        <p class="info-note">📌 هذا عائد <strong>تراكمي بسيط</strong> منذ البداية وليس سنوياً — للعائد السنوي الحقيقي الذي يراعي التوقيت استخدم بطاقة <strong>XIRR</strong>. النسبة على إجمالي المشتريات، فإن أعدت تدوير رأس المال (بيع ثم شراء) يكون الرقم متحفظاً.</p>`;
+      })()
+    },
     'div-yield': {
       title: '📈 العائد التوزيعي — ثلاث طرق',
       body: `
@@ -3681,15 +3725,15 @@ function showCardInfo(key) {
             العدد الفعّال = 1 ÷ HHI = <strong>${effN} سهم</strong><br>
             <span class="text-muted small">العدد الفعّال يعكس توزيع الأوزان، لا مجرد العدد — 15 سهماً أكبرها 80% يُعطي عدداً فعّالاً ≈ 1.6</span>
           </div>
-          <p><strong>مناطق المقياس (مرجع: DOJ 2010 + Statman 1987 + Campbell 2001):</strong></p>
+          <p><strong>مناطق المقياس — مُعايَرة للمستثمر الفردي (مرجع: Evans & Archer 1968 + DOJ):</strong></p>
           <ul style="font-size:0.82rem;line-height:2;padding-right:16px">
-            <li><span style="color:#ef4444">●</span> <strong>مركّز جداً</strong>: HHI > 25% (N_eff ≤ 4) — خطر مرتفع جداً</li>
-            <li><span style="color:#f97316">●</span> <strong>تركيز ملحوظ</strong>: HHI 15–25% (N_eff 4–7) — حماية جزئية</li>
-            <li><span style="color:#84cc16">●</span> <strong>تنوع معقول</strong>: HHI 10–15% (N_eff 7–12) — مقبول</li>
-            <li><span style="color:#22c55e">●</span> <strong>تنوع جيد</strong>: HHI 5–10% (N_eff 12–25) — جيد</li>
-            <li><span style="color:#10b981">●</span> <strong>تنوع ممتاز</strong>: HHI < 5% (N_eff > 25) — ممتاز</li>
+            <li><span style="color:#ef4444">●</span> <strong>مركّز جداً</strong>: HHI > 25% (N_eff < 4) — خطر مرتفع جداً</li>
+            <li><span style="color:#f97316">●</span> <strong>تركيز ملحوظ</strong>: HHI 14–25% (N_eff 4–7) — حماية جزئية</li>
+            <li><span style="color:#84cc16">●</span> <strong>تنوع معقول</strong>: HHI 10–14% (N_eff 7–10) — مقبول</li>
+            <li><span style="color:#22c55e">●</span> <strong>تنوع جيد</strong>: HHI 6.7–10% (N_eff 10–15) — جيد للمحفظة الفردية</li>
+            <li><span style="color:#10b981">●</span> <strong>تنوع ممتاز</strong>: HHI < 6.7% (N_eff ≥ 15) — يُزيل ~90% من المخاطر القابلة للتنويع</li>
           </ul>
-          <p><strong>دور القطاعات:</strong> تنوع القطاعات يُخفّض الدرجة بنسبة تصل لـ 40% إذا كانت الأسهم مركّزة في قطاع واحد — لأن الارتباط بين الأسهم في القطاع الواحد يُلغي فائدة التعدد.</p>
+          <p><strong>دور القطاعات:</strong> تنوع القطاعات يُخفّض الدرجة بنسبة تصل لـ 30% إذا تركّزت الأسهم في قطاع واحد (الدرجة الكاملة عند ~6 قطاعات فعّالة — نطاق واقعي للفرد) — لأن الارتباط داخل القطاع الواحد يُلغي فائدة التعدد.</p>
           <p class="info-note">💡 <strong>تنبيه الإدارة (Diworsification):</strong> يظهر بشكل منفصل عند n > 30 — ليس جزءاً من المقياس لأن المزيد من الأسهم رياضياً لا يزيد المخاطرة، بل يزيد تعقيد المتابعة فقط.</p>`;
       })()
     },
