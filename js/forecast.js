@@ -18,7 +18,7 @@ let _chartMode       = 'line';              // 'line' | 'log' | 'bar' | 'cards'
 
 const SCENARIO_META = [
   { key:'conservative', name:'متحفظ',    emoji:'🛡️', cls:'sc-conservative', color:'#8b949e',
-    desc:'أداء دون التاريخي — يناسب فترات الضغط السوقي والركود' },
+    desc:'أداء دون التاريخي — لكنه يفترض نمواً موجباً، وليس سيناريو خسارة أو أسوأ-حالة' },
   { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950',
     desc:'أداؤك التاريخي مُعدَّل بواقعية حسب ثقة بياناتك (مزج بمعيار السوق)' },
   { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429',
@@ -98,8 +98,9 @@ async function loadHistoricalData() {
 
   const xirrResult = computeXIRR(xirrFlows);   // من utils.js
 
-  // عائد الأرباح السنوي: نستخدم آخر سنتين فعليتين من الأرباح ÷ القيمة السوقية الحالية
-  // هذا أدق من المتوسط التاريخي الكلي لأنه يعكس الوضع الفعلي للمحفظة الحالية
+  // عائد الأرباح السنوي: نستخدم آخر 12 شهراً فعلية (TTM) ÷ القيمة السوقية الحالية
+  // TTM أدق من «متوسط آخر سنتين تقويميتين» لأن السنة التقويمية الحالية غالباً
+  // ناقصة (نصف سنة مثلاً) فتُخفّض المتوسط زوراً وتُقلّل الدخل المتوقع.
   // ملاحظة: يجب حساب safeDivYield قبل annCapGrowth لأنه يُستخدم في تفكيك XIRR
   const totalDivAll  = divRows.reduce((s,d) => s + +d.amount, 0);
   const divYears     = [...new Set(divRows.map(d => d.year))].length || 1;
@@ -108,11 +109,26 @@ async function loadHistoricalData() {
   divRows.forEach(d => { divByYearTemp[d.year] = (divByYearTemp[d.year] || 0) + +d.amount; });
   const sortedDivYears = Object.keys(divByYearTemp).map(Number).sort((a,b) => b - a);
 
-  // متوسط آخر سنتين لهما أرباح فعلية (أو سنة واحدة إن لم يتوفر أكثر)
-  const recentDivAmounts = sortedDivYears.slice(0, 2).map(y => divByYearTemp[y]);
-  const avgRecentDiv = recentDivAmounts.length
-    ? recentDivAmounts.reduce((s,v) => s + v, 0) / recentDivAmounts.length
-    : totalDivAll / Math.max(divYears, yearsActive);
+  // ── معدّل الأرباح السنوي عبر آخر 12 شهراً متجدّدة (TTM) ──────────
+  // نجمع كل توزيع تاريخه ضمن آخر 365 يوماً. للسجلات بلا تاريخ نرجع لتقدير
+  // السنة (1 يونيو) كما في XIRR للاتساق.
+  const ttmCutoff = new Date(today.getTime() - 365 * 86400000);
+  const ttmDivTotal = divRows.reduce((s, d) => {
+    const dDate = d.date ? parseDateLocal(d.date) : new Date(+d.year, 5, 1);
+    return (dDate && dDate >= ttmCutoff && dDate <= today) ? s + +d.amount : s;
+  }, 0);
+
+  // إن لم تتوفر أي أرباح في آخر 12 شهراً (محفظة جديدة/توزيع سنوي لم يَحِن)،
+  // نرجع لمتوسط آخر سنتين تقويميتين كاحتياطي، ثم للمتوسط الكلي.
+  let avgRecentDiv;
+  if (ttmDivTotal > 0) {
+    avgRecentDiv = ttmDivTotal;
+  } else {
+    const recentDivAmounts = sortedDivYears.slice(0, 2).map(y => divByYearTemp[y]);
+    avgRecentDiv = recentDivAmounts.length
+      ? recentDivAmounts.reduce((s,v) => s + v, 0) / recentDivAmounts.length
+      : totalDivAll / Math.max(divYears, yearsActive);
+  }
 
   // القيمة السوقية الحالية هي الأساس الصحيح (مو التكلفة التاريخية)
   const avgAnnualDiv = avgRecentDiv;
@@ -231,8 +247,13 @@ async function loadHistoricalData() {
   // صافي الثروة الشامل للحساب الدقيق لتقدم FIRE
   const totalNW = snapshotNW ?? (currentValue + reTotal);
 
+  // الأصول الثابتة غير السهمية (عقارات + صافي أصول أخرى من اللقطة)
+  // تُضاف كأساس ثابت لا ينمو في الإسقاط — حتى يتطابق الرسم مع شريط FIRE
+  // بلا اختراع افتراض نمو للعقار (محافظ وصادق).
+  const flatAssets = Math.max(0, totalNW - currentValue);
+
   return {
-    currentValue, costBasis, netCapital, totalNW,
+    currentValue, costBasis, netCapital, totalNW, flatAssets,
     annCapGrowth,                          // الأداء الشخصي الخام
     blendedCapGrowth,                      // المستخدم فعلياً في السيناريوهات
     safeDivYield, avgAnnualDiv,
@@ -294,6 +315,7 @@ function projectScenario(scenario, params) {
     startValue, monthlyAdd, lumpSum,
     horizonYears, reinvestDividends,
     adjustInflation, inflationRate,
+    flatBaseline = 0,   // أصول ثابتة (عقارات + صافي أصول أخرى) — تُضاف ولا تنمو
   } = params;
 
   const monthlyCapRate = Math.pow(1 + scenario.capRate, 1/12) - 1;
@@ -302,31 +324,33 @@ function projectScenario(scenario, params) {
   const totalMonths    = horizonYears * 12;
   const monthlyInfl    = Math.pow(1 + inflationRate, 1/12) - 1;
 
-  let value               = startValue + lumpSum;
+  // stock = الجزء السهمي الذي ينمو ويوزّع أرباحاً. الأساس الثابت يُضاف عند العرض فقط.
+  let stock               = startValue + lumpSum;
   let cumulativeDividends = 0;
   let cumulativeAdded     = lumpSum;
   let inflationFactor     = 1;
 
+  const total0 = stock + flatBaseline;
   const snapshots = [{
-    year: 0, value, cumDiv: 0, cumAdded: 0,
-    realValue: value,
-    monthlyIncome:     value * monthlyDivRate,
-    monthlyIncomeReal: value * monthlyDivRate,   // = nominal when no inflation yet
-    yourCapital:       startValue + lumpSum,      // مجموع ما أضفته من مالك
-    priceGrowth:       0,                         // نمو السعر الصافي
+    year: 0, value: total0, cumDiv: 0, cumAdded: 0,
+    realValue: total0,
+    monthlyIncome:     stock * monthlyDivRate,   // الدخل من الأسهم فقط (العقار لا يُنمذَج هنا)
+    monthlyIncomeReal: stock * monthlyDivRate,   // = الاسمي قبل أي تضخم
+    yourCapital:       startValue + lumpSum + flatBaseline,
+    priceGrowth:       0,
   }];
 
   for (let m = 1; m <= totalMonths; m++) {
-    // 1. نمو رأس المال (سعر السهم)
-    value *= (1 + monthlyCapRate);
+    // 1. نمو رأس المال (سعر السهم) — على الجزء السهمي فقط
+    stock *= (1 + monthlyCapRate);
 
-    // 2. الأرباح الموزعة
-    const divEarned = value * monthlyDivRate;
+    // 2. الأرباح الموزعة (من الأسهم)
+    const divEarned = stock * monthlyDivRate;
     cumulativeDividends += divEarned;
-    if (reinvestDividends) value += divEarned;
+    if (reinvestDividends) stock += divEarned;
 
     // 3. الإضافة الشهرية (DCA)
-    value           = Math.max(0, value + monthlyAdd);
+    stock           = Math.max(0, stock + monthlyAdd);
     cumulativeAdded += monthlyAdd;
 
     // 4. مؤشر التضخم
@@ -334,19 +358,20 @@ function projectScenario(scenario, params) {
 
     // تسجيل لقطة سنوية
     if (m % 12 === 0) {
-      const realVal      = adjustInflation ? value / inflationFactor : value;
-      // رأس مالك الفعلي المُضاف (أصل + شهري + مبلغ فوري)
-      const yourCap      = startValue + cumulativeAdded;
-      // نمو السعر الصافي = كل شيء فوق ما دفعته ومن الأرباح المعاد استثمارها
-      const priceGrowth  = Math.max(0, value - yourCap - (reinvestDividends ? cumulativeDividends : 0));
+      const total        = stock + flatBaseline;            // الثروة الكلية (أسهم نامية + عقار ثابت)
+      const realVal      = adjustInflation ? total / inflationFactor : total;
+      // رأس مالك الفعلي = الأصل + الإضافات + الأساس الثابت (العقار ليس نمو سوق)
+      const yourCap      = startValue + cumulativeAdded + flatBaseline;
+      const priceGrowth  = Math.max(0, total - yourCap - (reinvestDividends ? cumulativeDividends : 0));
+      const stockIncome  = stock * monthlyDivRate;
       snapshots.push({
         year:              m / 12,
-        value,
+        value:             total,
         cumDiv:            cumulativeDividends,
         cumAdded:          cumulativeAdded,
         realValue:         realVal,
-        monthlyIncome:     value * monthlyDivRate,
-        monthlyIncomeReal: realVal * monthlyDivRate,
+        monthlyIncome:     stockIncome,
+        monthlyIncomeReal: adjustInflation ? stockIncome / inflationFactor : stockIncome,
         yourCapital:       yourCap,
         priceGrowth,
       });
@@ -395,6 +420,11 @@ function runForecast() {
     reinvestDividends: reinvest,
     adjustInflation: inflation,
     inflationRate,
+    // أصول ثابتة (عقارات وغيرها) — تُضاف لقاعدة الثروة بلا نمو، فقط عندما
+    // تكون قيمة البداية هي قيمة الأسهم التلقائية (حتى لا نُضاعف لو أدخل المستخدم ثروته الكاملة)
+    flatBaseline: (Math.abs(startValue - (_hist.currentValue || 0)) < 1)
+      ? (_hist.flatAssets || 0)
+      : 0,
   };
 
   _projections = _scenarios.map(sc => ({
@@ -955,6 +985,7 @@ function updateChartSubtitle(params) {
   const parts = [];
   if (params.monthlyAdd > 0)     parts.push(`إضافة ${fmt(params.monthlyAdd)} / شهر`);
   if (params.lumpSum > 0)        parts.push(`+ فوري ${fmt(params.lumpSum)}`);
+  if (params.flatBaseline > 0)   parts.push(`+ أصول ثابتة (عقارات وغيرها) ${fmt(params.flatBaseline)} بلا نمو`);
   if (!params.reinvestDividends) parts.push('بدون إعادة استثمار الأرباح');
   if (params.adjustInflation)    parts.push(`معدّل للتضخم ${pct(params.inflationRate)}`);
   el.textContent = parts.length ? parts.join(' · ') : 'بدون إضافات';
