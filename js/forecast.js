@@ -48,22 +48,19 @@ async function init() {
 async function loadHistoricalData() {
   // M-15: explicit high limit — Supabase default is 1000 rows which silently truncates
   //        large portfolios and corrupts XIRR / CWA / cap-growth calculations
-  const [rTx, rDiv, rH, rCf, rNw, rRe] = await Promise.all([
+  // هذه الصفحة تختص بمحفظة التقاعد الاستثمارية فقط (أسهم + ما تنتجه من توزيعات).
+  // لا نجلب العقارات ولا صافي الثروة — مسار صافي الثروة عبر الزمن موجود في صفحته المستقلة.
+  const [rTx, rDiv, rH, rCf] = await Promise.all([
     supabaseClient.from('transactions').select('type,total,shares,price,date,ticker').eq('is_archived',false).limit(100000),
     supabaseClient.from('dividends').select('amount,year,date').eq('is_archived',false).order('year').limit(100000),
     supabaseClient.from('holdings').select('shares,current_price,avg_price,ticker'),
     supabaseClient.from('cashflow_entries').select('type,amount,date').eq('is_archived',false),
-    supabaseClient.from('net_worth_snapshots').select('total_value').order('date',{ascending:false}).limit(1).maybeSingle(),
-    supabaseClient.from('real_estate').select('current_value,status').eq('is_active',true),
   ]);
 
   const txRows  = rTx.data  || [];
   const divRows = rDiv.data || [];
   const hRows   = rH.data   || [];
   const cfRows  = rCf.data  || [];
-  // صافي الثروة الفعلي: من آخر snapshot إن وُجد، وإلا أسهم + عقارات
-  const reTotal  = (rRe.data || []).filter(p => p.status !== 'sold').reduce((s,p) => s + +p.current_value, 0);
-  const snapshotNW = rNw.data?.total_value ? +rNw.data.total_value : null;
 
   // القيمة السوقية والتكلفة الحالية
   const currentValue = hRows.reduce((s,h) => s + +h.shares * +h.current_price, 0);
@@ -244,16 +241,8 @@ async function loadHistoricalData() {
     fireGoal = { monthly: +fg.monthly || 0, swr: +fg.swr || 4, target_year: +fg.target_year || 0 };
   } catch(_) {}
 
-  // صافي الثروة الشامل للحساب الدقيق لتقدم FIRE
-  const totalNW = snapshotNW ?? (currentValue + reTotal);
-
-  // الأصول الثابتة غير السهمية (عقارات + صافي أصول أخرى من اللقطة)
-  // تُضاف كأساس ثابت لا ينمو في الإسقاط — حتى يتطابق الرسم مع شريط FIRE
-  // بلا اختراع افتراض نمو للعقار (محافظ وصادق).
-  const flatAssets = Math.max(0, totalNW - currentValue);
-
   return {
-    currentValue, costBasis, netCapital, totalNW, flatAssets,
+    currentValue, costBasis, netCapital,
     annCapGrowth,                          // الأداء الشخصي الخام
     blendedCapGrowth,                      // المستخدم فعلياً في السيناريوهات
     safeDivYield, avgAnnualDiv,
@@ -315,7 +304,6 @@ function projectScenario(scenario, params) {
     startValue, monthlyAdd, lumpSum,
     horizonYears, reinvestDividends,
     adjustInflation, inflationRate,
-    flatBaseline = 0,   // أصول ثابتة (عقارات + صافي أصول أخرى) — تُضاف ولا تنمو
   } = params;
 
   const monthlyCapRate = Math.pow(1 + scenario.capRate, 1/12) - 1;
@@ -324,33 +312,32 @@ function projectScenario(scenario, params) {
   const totalMonths    = horizonYears * 12;
   const monthlyInfl    = Math.pow(1 + inflationRate, 1/12) - 1;
 
-  // stock = الجزء السهمي الذي ينمو ويوزّع أرباحاً. الأساس الثابت يُضاف عند العرض فقط.
-  let stock               = startValue + lumpSum;
+  // المحفظة الاستثمارية فقط — لا عقارات ولا صافي ثروة (تُتابَع في صفحاتها)
+  let value               = startValue + lumpSum;
   let cumulativeDividends = 0;
   let cumulativeAdded     = lumpSum;
   let inflationFactor     = 1;
 
-  const total0 = stock + flatBaseline;
   const snapshots = [{
-    year: 0, value: total0, cumDiv: 0, cumAdded: 0,
-    realValue: total0,
-    monthlyIncome:     stock * monthlyDivRate,   // الدخل من الأسهم فقط (العقار لا يُنمذَج هنا)
-    monthlyIncomeReal: stock * monthlyDivRate,   // = الاسمي قبل أي تضخم
-    yourCapital:       startValue + lumpSum + flatBaseline,
+    year: 0, value, cumDiv: 0, cumAdded: 0,
+    realValue: value,
+    monthlyIncome:     value * monthlyDivRate,
+    monthlyIncomeReal: value * monthlyDivRate,   // = الاسمي قبل أي تضخم
+    yourCapital:       startValue + lumpSum,
     priceGrowth:       0,
   }];
 
   for (let m = 1; m <= totalMonths; m++) {
-    // 1. نمو رأس المال (سعر السهم) — على الجزء السهمي فقط
-    stock *= (1 + monthlyCapRate);
+    // 1. نمو رأس المال (سعر السهم)
+    value *= (1 + monthlyCapRate);
 
-    // 2. الأرباح الموزعة (من الأسهم)
-    const divEarned = stock * monthlyDivRate;
+    // 2. الأرباح الموزعة
+    const divEarned = value * monthlyDivRate;
     cumulativeDividends += divEarned;
-    if (reinvestDividends) stock += divEarned;
+    if (reinvestDividends) value += divEarned;
 
     // 3. الإضافة الشهرية (DCA)
-    stock           = Math.max(0, stock + monthlyAdd);
+    value           = Math.max(0, value + monthlyAdd);
     cumulativeAdded += monthlyAdd;
 
     // 4. مؤشر التضخم
@@ -358,20 +345,17 @@ function projectScenario(scenario, params) {
 
     // تسجيل لقطة سنوية
     if (m % 12 === 0) {
-      const total        = stock + flatBaseline;            // الثروة الكلية (أسهم نامية + عقار ثابت)
-      const realVal      = adjustInflation ? total / inflationFactor : total;
-      // رأس مالك الفعلي = الأصل + الإضافات + الأساس الثابت (العقار ليس نمو سوق)
-      const yourCap      = startValue + cumulativeAdded + flatBaseline;
-      const priceGrowth  = Math.max(0, total - yourCap - (reinvestDividends ? cumulativeDividends : 0));
-      const stockIncome  = stock * monthlyDivRate;
+      const realVal      = adjustInflation ? value / inflationFactor : value;
+      const yourCap      = startValue + cumulativeAdded;
+      const priceGrowth  = Math.max(0, value - yourCap - (reinvestDividends ? cumulativeDividends : 0));
       snapshots.push({
         year:              m / 12,
-        value:             total,
+        value,
         cumDiv:            cumulativeDividends,
         cumAdded:          cumulativeAdded,
         realValue:         realVal,
-        monthlyIncome:     stockIncome,
-        monthlyIncomeReal: adjustInflation ? stockIncome / inflationFactor : stockIncome,
+        monthlyIncome:     value * monthlyDivRate,
+        monthlyIncomeReal: adjustInflation ? (value * monthlyDivRate) / inflationFactor : value * monthlyDivRate,
         yourCapital:       yourCap,
         priceGrowth,
       });
@@ -420,11 +404,6 @@ function runForecast() {
     reinvestDividends: reinvest,
     adjustInflation: inflation,
     inflationRate,
-    // أصول ثابتة (عقارات وغيرها) — تُضاف لقاعدة الثروة بلا نمو، فقط عندما
-    // تكون قيمة البداية هي قيمة الأسهم التلقائية (حتى لا نُضاعف لو أدخل المستخدم ثروته الكاملة)
-    flatBaseline: (Math.abs(startValue - (_hist.currentValue || 0)) < 1)
-      ? (_hist.flatAssets || 0)
-      : 0,
   };
 
   _projections = _scenarios.map(sc => ({
@@ -537,8 +516,8 @@ function renderFireBanner(h) {
   const inflMonthly  = yearsLeft > 0 ? fg.monthly * Math.pow(1 + INFLATION_RATE, yearsLeft) : fg.monthly;
   const fireInflated = (inflMonthly * 12) / (fg.swr / 100);
   const showInfl     = yearsLeft > 0 && Math.abs(fireInflated - fireNumber) > 1000;
-  // استخدم صافي الثروة الكامل (أسهم + عقارات + snapshot) لا الأسهم وحدها
-  const currentNW    = h.totalNW || h.currentValue;
+  // المحفظة الاستثمارية فقط — هذه الصفحة تحت محفظة التقاعد ولا تُدخِل العقارات/صافي الثروة
+  const currentNW    = h.currentValue;
   const progress     = fireNumber > 0 ? Math.min(100, currentNW / fireNumber * 100) : 0;
   // نسبة الإنجاز الحقيقية: مقارنة بالهدف المعدَّل بالتضخم
   const progressReal = fireInflated > 0 ? Math.min(100, currentNW / fireInflated * 100) : 0;
@@ -985,7 +964,6 @@ function updateChartSubtitle(params) {
   const parts = [];
   if (params.monthlyAdd > 0)     parts.push(`إضافة ${fmt(params.monthlyAdd)} / شهر`);
   if (params.lumpSum > 0)        parts.push(`+ فوري ${fmt(params.lumpSum)}`);
-  if (params.flatBaseline > 0)   parts.push(`+ أصول ثابتة (عقارات وغيرها) ${fmt(params.flatBaseline)} بلا نمو`);
   if (!params.reinvestDividends) parts.push('بدون إعادة استثمار الأرباح');
   if (params.adjustInflation)    parts.push(`معدّل للتضخم ${pct(params.inflationRate)}`);
   el.textContent = parts.length ? parts.join(' · ') : 'بدون إضافات';
