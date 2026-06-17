@@ -196,7 +196,17 @@
         <span class="section-title">جميع السجلات</span>
         <button class="btn btn-secondary btn-sm" onclick="exportDividendsCSV()">⬇ تصدير CSV</button>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+        <div style="position:relative;flex:1;min-width:180px;max-width:320px">
+          <input id="div-filter-input" type="text" placeholder="ابحث برمز أو اسم السهم…"
+            oninput="filterDivTable()"
+            style="width:100%;padding:7px 36px 7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-2);color:var(--text-1);font-family:Tajawal;font-size:0.9rem;box-sizing:border-box">
+          <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-muted);pointer-events:none">🔍</span>
+        </div>
+        <span id="div-filter-count" class="small text-muted"></span>
+        <button class="btn btn-secondary btn-sm" onclick="document.getElementById('div-filter-input').value='';filterDivTable()" style="white-space:nowrap">مسح الفلتر</button>
+      </div>
+      <p class="small text-muted mb-4" style="margin-top:-4px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
         <table>
           <thead>

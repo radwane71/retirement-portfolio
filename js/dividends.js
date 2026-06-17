@@ -6,6 +6,7 @@ let selectedYear = 'all';
 let chartView    = 'month';   // 'month' | 'year'
 let incomeMode   = 'bar';     // 'bar' | 'line' | 'stacked' | 'table'
 let incomeChart  = null;
+let divFilter    = '';        // فلتر جدول السجلات (رمز أو اسم)
 
 function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
   return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
@@ -854,9 +855,31 @@ function switchDivYear(yr) {
 // ══════════════════════════════════════════════════════════════
 // جدول السجلات
 // ══════════════════════════════════════════════════════════════
+function filterDivTable() {
+  divFilter = document.getElementById('div-filter-input')?.value.trim().toUpperCase() || '';
+  renderTable();
+  const countEl = document.getElementById('div-filter-count');
+  if (countEl) {
+    const filtered = _filteredDividends();
+    countEl.textContent = divFilter
+      ? `${filtered.length} من ${dividends.length} سجل`
+      : '';
+  }
+}
+
+function _filteredDividends() {
+  if (!divFilter) return dividends;
+  return dividends.filter(d =>
+    (d.ticker || '').toUpperCase().includes(divFilter) ||
+    (d.name   || '').toUpperCase().includes(divFilter)
+  );
+}
+
 function renderTable() {
   const tbody = document.getElementById('div-tbody');
   if (!tbody) return;
+
+  const rows = _filteredDividends();
 
   if (!dividends.length) {
     tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="icon">💰</div><p>لا توجد أرباح مسجلة بعد</p></div></td></tr>`;
@@ -864,7 +887,13 @@ function renderTable() {
     return;
   }
 
-  tbody.innerHTML = dividends.map(d => `<tr>
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="icon">🔍</div><p>لا توجد نتائج للبحث عن "<strong>${esc(divFilter)}</strong>"</p></div></td></tr>`;
+    enableInlineEditing(tbody, onDivSaved);
+    return;
+  }
+
+  tbody.innerHTML = rows.map(d => `<tr>
     <td ${ed('dividends',d.id,'date','date',d.date)}>${formatDate(d.date)}</td>
     <td ${ed('dividends',d.id,'ticker','text',d.ticker,'text-accent bold')}>${esc(d.ticker)}</td>
     <td ${ed('dividends',d.id,'name','text',d.name)}>${esc(d.name)}</td>
@@ -939,11 +968,14 @@ async function archiveDiv(id) {
 // ── تصدير CSV ─────────────────────────────────────────────────
 function exportDividendsCSV() {
   if (!dividends.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
-  exportCSV(`أرباح_موزعة_${todayISO()}.csv`,
+  const rows = _filteredDividends();
+  if (!rows.length) { showToast('لا توجد سجلات مطابقة للتصدير', 'error'); return; }
+  const suffix = divFilter ? `_${divFilter}` : '';
+  exportCSV(`أرباح_موزعة${suffix}_${todayISO()}.csv`,
     ['التاريخ', 'الرمز', 'الاسم', 'المبلغ', 'الشهر', 'السنة'],
-    dividends.map(d => [d.date, d.ticker, d.name, d.amount, MONTHS_AR[d.month - 1], d.year])
+    rows.map(d => [d.date, d.ticker, d.name, d.amount, MONTHS_AR[d.month - 1], d.year])
   );
-  showToast(`✓ تم تصدير ${dividends.length} سجل`, 'success');
+  showToast(`✓ تم تصدير ${rows.length} سجل${divFilter ? ` (${divFilter})` : ''}`, 'success');
 }
 
 // ══════════════════════════════════════════════════════════════
