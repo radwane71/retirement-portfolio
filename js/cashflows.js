@@ -159,11 +159,15 @@ async function addEntry(ev) {
   const amount = +document.getElementById('cf-amount').value;
   if (amount <= 0) { showToast('المبلغ يجب أن يكون أكبر من صفر', 'error'); return; }
 
+  const cfType = document.getElementById('cf-type').value;
+  const cfTypeLabel = cfType === 'deposit' ? 'إيداع' : 'سحب';
+  if (!await confirmAsync(`هل تريد تسجيل ${cfTypeLabel} بمبلغ ${formatSAR(amount)}؟`)) return;
+
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     user_id: user.id,
     date:    document.getElementById('cf-date').value,
-    type:    document.getElementById('cf-type').value,
+    type:    cfType,
     amount,
     notes:   document.getElementById('cf-notes').value.trim()
   };

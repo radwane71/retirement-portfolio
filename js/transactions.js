@@ -154,6 +154,9 @@ async function addSingleTransaction(e) {
       if (!ok) return;
     }
   }
+  const confirmLabel = type === 'buy' ? 'شراء' : type === 'sell' ? 'بيع' : 'تسجيل منحة';
+  if (!await confirmAsync(`هل تريد تأكيد عملية ${confirmLabel} ${formatShares(shares)} سهم من ${ticker}؟`)) return;
+
   const c = type === 'grant'
     ? { commission: 0, vat: 0, totalBuy: 0, totalSell: 0 }
     : calcCommission(shares, price);
@@ -291,6 +294,8 @@ async function saveAllStaging() {
     );
     if (!ok) return;
   }
+
+  if (!await confirmAsync(`هل تريد إضافة ${stagingRows.length} معاملة؟`)) return;
 
   const { data: { user } } = await supabaseClient.auth.getUser();
   const btn = document.getElementById('btn-save-all');

@@ -934,6 +934,8 @@ async function addDividend(e) {
     }
   }
 
+  if (!await confirmAsync(`هل تريد تسجيل أرباح ${name || ticker} بمبلغ ${formatSAR(amount)}؟`)) return;
+
   const { data: { user } } = await supabaseClient.auth.getUser();
   const payload = {
     user_id: user.id,

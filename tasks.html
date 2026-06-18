@@ -324,7 +324,7 @@
     <div class="modal-card task-modal-card">
       <div class="modal-header">
         <h3 style="margin:0;font-size:1rem" id="task-modal-title">مهمة جديدة</h3>
-        <button class="modal-close" onclick="closeTaskModal()">✕</button>
+        <button class="modal-close" onclick="closeTaskModalWithConfirm()">✕</button>
       </div>
 
       <!-- Task type selector -->
@@ -386,7 +386,7 @@
       </div>
 
       <div class="flex gap-3 mt-4" style="justify-content:flex-end">
-        <button class="btn btn-secondary" onclick="closeTaskModal()">إلغاء</button>
+        <button class="btn btn-secondary" onclick="closeTaskModalWithConfirm()">إلغاء</button>
         <button class="btn btn-primary"   onclick="saveTask()">حفظ المهمة</button>
       </div>
     </div>

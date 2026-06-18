@@ -247,7 +247,10 @@ function renderTaskBoard(boardId, tasks) {
     const isDone  = t.status === 'done';
     const isCancl = t.status === 'cancelled';
     const cls     = isDone ? 'done' : isCancl ? 'cancelled' : '';
-    const dateStr = formatDate(t.created_at?.slice(0,10) || '');
+    const wasEdited = t.updated_at && t.created_at && t.updated_at.slice(0,10) !== t.created_at.slice(0,10);
+    const dateStr   = wasEdited
+      ? 'آخر تعديل ' + formatDate(t.updated_at.slice(0,10))
+      : 'أُضيفت '    + formatDate(t.created_at?.slice(0,10) || '');
     const closedStr = t.closed_at ? ' · أُغلقت ' + formatDate(t.closed_at.slice(0,10)) : '';
 
     const extraInfo = [];
@@ -313,8 +316,15 @@ function closeTaskModal() {
   _editingTaskId = null; _selectedType = null;
 }
 
-function closeTaskModalOverlay(e) {
-  if (e.target.id === 'task-modal') closeTaskModal();
+async function closeTaskModalWithConfirm() {
+  if (!await confirmAsync('هل تريد إلغاء التعديل؟ ستُفقد التغييرات غير المحفوظة.')) return;
+  closeTaskModal();
+}
+
+async function closeTaskModalOverlay(e) {
+  if (e.target.id !== 'task-modal') return;
+  if (!await confirmAsync('هل تريد إلغاء التعديل؟ ستُفقد التغييرات غير المحفوظة.')) return;
+  closeTaskModal();
 }
 
 function selectTaskType(type) {
@@ -348,6 +358,9 @@ async function saveTask() {
   if (!ticker && !notes) { showToast('أدخل رمز السهم أو ملاحظات على الأقل', 'error'); return; }
   if (price !== null && price <= 0)    { showToast('السعر المستهدف يجب أن يكون أكبر من صفر', 'error'); return; }
   if (pct   !== null && (pct <= 0 || pct > 100)) { showToast('نسبة التخفيف يجب أن تكون بين 1% و100%', 'error'); return; }
+
+  const confirmMsg = _editingTaskId ? 'هل تريد حفظ التعديلات على المهمة؟' : 'هل تريد إضافة هذه المهمة؟';
+  if (!await confirmAsync(confirmMsg)) return;
 
   const { data: { user } } = await supabaseClient.auth.getUser();
   const now = new Date().toISOString();
@@ -400,6 +413,7 @@ async function closeTask(id, newStatus) {
 }
 
 async function reopenTask(id) {
+  if (!await confirmAsync('هل تريد إعادة فتح هذه المهمة؟')) return;
   const { error } = await supabaseClient.from('portfolio_tasks').update({
     status:     'active',
     closed_at:  null,
