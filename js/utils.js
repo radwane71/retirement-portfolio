@@ -741,3 +741,75 @@ async function _doInlineEdit(td, tbody, { table, id, field, type, raw, selectKey
     if (e.key === 'Escape') { done = true; tbody._ieBusy = false; td.innerHTML = origHTML; }
   });
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// 🧩 مقياس التنويع — دالة نقية مشتركة (المصدر الوحيد للحقيقة)
+// تُستخدم في لوحة التحكم (renderDiversificationCard) وفي صفحة أسهم المراقبة
+// (تحليل أثر الإضافة) — أي تعديل هنا ينعكس تلقائياً على الصفحتين.
+// المنهجية: HHI خام → موضع المؤشر، مُعايَر للمستثمر الفردي
+//   (Evans & Archer 1968: 15 سهماً فعّالاً تُزيل ~90% من المخاطر القابلة للتنويع)
+// ----------------------------------------------------------------------
+// المُدخل: positions = [{ value:Number, sector:String }]
+// المُخرج: null إذا لا توجد مراكز/قيمة، وإلا كائن يضم كل مقاييس التنويع.
+// ══════════════════════════════════════════════════════════════════════
+function computeDiversification(positions) {
+  const items = (positions || []).filter(p => +p.value > 0);
+  const totalVal = items.reduce((s, p) => s + +p.value, 0);
+  if (!items.length || totalVal <= 0) return null;
+
+  const n = items.length;
+  const weights = items.map(p => +p.value / totalVal);
+  const hhi = weights.reduce((s, w) => s + w * w, 0);          // 1/n .. 1.0
+  const effectiveN = Math.max(1, Math.round(1 / hhi));         // N_فعّال
+
+  // إحصاءات القطاعات
+  const secMap = {};
+  items.forEach(p => {
+    const k = (p.sector || '').trim() || 'غير مصنف';
+    secMap[k] = (secMap[k] || 0) + +p.value / totalVal;        // وزن نسبي 0..1
+  });
+  const sectorCount = Object.keys(secMap).length;
+  const secHHI = Object.values(secMap).reduce((s, w) => s + w * w, 0);
+
+  // أكبر مركز
+  const sorted = [...items].sort((a, b) => +b.value - +a.value);
+  const top1Pct  = sorted[0] ? (+sorted[0].value / totalVal * 100) : 0;
+  const top1Name = sorted[0]?.label || '';
+
+  // ── موضع المؤشر: مشتقّ من HHI الخام مباشرةً ─────────────────
+  // نقاط التحويل: [HHI_خام → gaugePos %]  (0 = مركّز تماماً، 100 = تنوع واسع)
+  const bps = [
+    [1.000,  0], [0.500,  8], [0.250, 22], [0.150, 40],
+    [0.100, 62], [0.067, 80], [0.050, 88], [0.033, 93],
+    [0.020, 97], [0.000, 100]
+  ];
+  let stockGauge = 100;
+  for (let i = 0; i < bps.length - 1; i++) {
+    const [h1, g1] = bps[i], [h2, g2] = bps[i + 1];
+    if (hhi >= h2) {
+      const t = (hhi - h2) / (h1 - h2);
+      stockGauge = g2 + t * (g1 - g2);
+      break;
+    }
+  }
+
+  // معامل القطاعات: 0.70 (قطاع واحد) → 1.00 (≥ 6 قطاعات فعّالة)
+  const effSectors   = secHHI > 0 ? 1 / secHHI : sectorCount;
+  const sectorFactor = Math.min(1.0, 0.70 + 0.30 * Math.min(1, effSectors / 6));
+  const gaugePos = Math.min(97, Math.max(3, Math.round(stockGauge * sectorFactor)));
+
+  // تحديد المنطقة — نفس عتبات لوحة التحكم
+  let zoneLabel, zoneColor;
+  if      (gaugePos < 22) { zoneLabel = 'مركّز جداً';  zoneColor = '#ef4444'; }
+  else if (gaugePos < 40) { zoneLabel = 'تركيز ملحوظ'; zoneColor = '#f97316'; }
+  else if (gaugePos < 60) { zoneLabel = 'تنوع معقول';  zoneColor = '#84cc16'; }
+  else if (gaugePos < 80) { zoneLabel = 'تنوع جيد';    zoneColor = '#22c55e'; }
+  else                    { zoneLabel = 'تنوع ممتاز';  zoneColor = '#10b981'; }
+
+  return {
+    totalVal, n, hhi, effectiveN,
+    secMap, sectorCount, secHHI, effSectors,
+    top1Pct, top1Name,
+    stockGauge, sectorFactor, gaugePos, zoneLabel, zoneColor,
+  };
+}

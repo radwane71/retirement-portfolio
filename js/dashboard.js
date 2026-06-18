@@ -1214,72 +1214,29 @@ function renderDiversificationCard() {
   if (!holdings.length || !totalVal) { el.style.display = 'none'; return; }
   el.style.display = '';
 
-  const n = holdings.length;
-  const weights = holdings.map(h => +h.shares * +h.current_price / totalVal);
-  const hhi = weights.reduce((s, w) => s + w * w, 0);      // 1/n..1.0
-  const effectiveN = Math.max(1, Math.round(1 / hhi));      // N_فعّال
+  // ── الحساب عبر الدالة المشتركة (utils.js) — مصدر واحد للحقيقة ──
+  const div = computeDiversification(holdings.map(h => ({
+    value:  +h.shares * +h.current_price,
+    sector: h.sector,
+    label:  h.ticker,
+  })));
+  const {
+    n, hhi, effectiveN, sectorCount, secHHI,
+    top1Pct, top1Name, gaugePos, zoneLabel, zoneColor,
+  } = div;
 
-  // إحصاءات القطاعات
-  const secMap = {};
-  holdings.forEach(h => {
-    const k = (h.sector || '').trim() || 'غير مصنف';
-    secMap[k] = (secMap[k] || 0) + +h.shares * +h.current_price / totalVal;
-  });
-  const sectorCount = Object.keys(secMap).length;
-  const secHHI = Object.values(secMap).reduce((s, w) => s + w * w, 0);
-  // نسبة HHI القطاعي المُعيَّرة: 0 = توزيع متساوٍ، 1 = قطاع واحد
-  const secNHHI = sectorCount > 1
-    ? (secHHI - 1 / sectorCount) / (1 - 1 / sectorCount)
-    : 1.0;
-
-  // أكبر مركز
-  const sorted = [...holdings].sort((a, b) => +b.shares * +b.current_price - +a.shares * +a.current_price);
-  const top1Pct  = sorted[0] ? (+sorted[0].shares * +sorted[0].current_price / totalVal * 100) : 0;
-  const top1Name = sorted[0]?.ticker || '';
-
-  // ── موضع المؤشر: مشتقّ من HHI الخام مباشرةً ─────────────────
-  // مُعايَر للمستثمر الفردي (محفظة تقاعد) لا للمؤسسات:
-  //   Evans & Archer 1968 — 15 سهماً تُزيل ~90% من المخاطر القابلة للتنويع
-  //   ⇒ N_فعّال ≥ 15 (HHI ≤ 0.067) = «ممتاز»، N_فعّال ~10 = «جيد»
-  // نقاط التحويل: [HHI_خام → gaugePos %]  (0 = مركّز تماماً، 100 = تنوع واسع)
-  const bps = [
-    [1.000,  0], [0.500,  8], [0.250, 22], [0.150, 40],
-    [0.100, 62], [0.067, 80], [0.050, 88], [0.033, 93],
-    [0.020, 97], [0.000, 100]
-  ];
-  let stockGauge = 100;
-  for (let i = 0; i < bps.length - 1; i++) {
-    const [h1, g1] = bps[i], [h2, g2] = bps[i + 1];
-    if (hhi >= h2) {
-      const t = (hhi - h2) / (h1 - h2);
-      stockGauge = g2 + t * (g1 - g2);
-      break;
-    }
-  }
-
-  // معامل القطاعات: يخفّض النتيجة إذا كانت القطاعات مركّزة — مُعايَر للفرد
-  // 0.70 (قطاع واحد) → 1.00 (≥ 6 قطاعات فعّالة، نطاق واقعي لمحفظة فردية)
-  const effSectors   = secHHI > 0 ? 1 / secHHI : sectorCount;
-  const sectorFactor = Math.min(1.0, 0.70 + 0.30 * Math.min(1, effSectors / 6));
-  const gaugePos = Math.min(97, Math.max(3, Math.round(stockGauge * sectorFactor)));
-
-  // تحديد المنطقة
-  let zoneLabel, zoneColor, advice;
+  // تحديد نص النصيحة حسب المنطقة
+  let advice;
   if (gaugePos < 22) {
-    zoneLabel = 'مركّز جداً';   zoneColor = '#ef4444';
     advice = `عدد فعّال = ${effectiveN} — مركز واحد يكفي لإلحاق ضرر بالغ بالمحفظة. المرجع (Graham): لا تقل عن 10 أسهم لحماية معقولة من المخاطر الفردية.`;
   } else if (gaugePos < 40) {
-    zoneLabel = 'تركيز ملحوظ';  zoneColor = '#f97316';
     // AUDIT-FIX: align threshold with detailed analysis (TARGET_HHI 0.067 → N_eff ≥ 15); was inconsistently "≥ 10"
     advice = `عدد فعّال = ${effectiveN} — تنوع جزئي. 90% من مخاطر الأسهم الفردية تُزال عند N_فعّال ≥ 15 (Evans & Archer 1968). أضف في قطاعات مختلفة.`;
   } else if (gaugePos < 60) {
-    zoneLabel = 'تنوع معقول';   zoneColor = '#84cc16';
     advice = `عدد فعّال = ${effectiveN} — نطاق مقبول. معظم المخاطر الفردية محمية. الخطوة التالية: تعزيز تنوع القطاعات (${sectorCount} قطاع حالياً).`;
   } else if (gaugePos < 80) {
-    zoneLabel = 'تنوع جيد';     zoneColor = '#22c55e';
     advice = `عدد فعّال = ${effectiveN} — تنوع جيد لمحفظة فردية يحمي من الصدمات الفردية والقطاعية. أنت قريب من نطاق Evans & Archer (≥ 15 سهماً فعّالاً) الذي يُزيل ~90% من المخاطر القابلة للتنويع.`;
   } else {
-    zoneLabel = 'تنوع ممتاز';   zoneColor = '#10b981';
     advice = `عدد فعّال = ${effectiveN} — تنوع ممتاز لمحفظة فردية (≥ 15 سهماً فعّالاً، Evans & Archer 1968). المخاطر غير المنهجية عند أدنى مستوياتها — ركّز الآن على جودة المتابعة لا زيادة العدد.`;
   }
 
