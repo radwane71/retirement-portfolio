@@ -941,6 +941,29 @@ function renderChart(horizonYears, goalAmount = 0) {
       };
     });
 
+  // خط رأس المال المُضاف (مدخراتك الفعلية بدون عائد) — للخط فقط
+  if (!isBar && _projections.length > 0) {
+    const baseProj = _projections[0];  // yourCapital نفسه لكل السيناريوهات
+    const capitalValues = baseProj.data.slice(0, horizonYears + 1).map(d => +d.yourCapital.toFixed(0));
+    // أضفه فقط إذا فيه إضافات فعلية (غير ثابت)
+    const hasContribs = capitalValues[capitalValues.length - 1] > capitalValues[0];
+    if (hasContribs) {
+      datasets.push({
+        label:           '💰 رأس مالك المُضاف',
+        data:            capitalValues,
+        borderColor:     '#58a6ff',
+        backgroundColor: 'rgba(88,166,255,0.06)',
+        borderWidth:     2,
+        borderDash:      [6, 4],
+        pointRadius:     0,
+        pointHoverRadius: 4,
+        tension:         0.1,
+        fill:            false,
+        order:           99,
+      });
+    }
+  }
+
   // خط الهدف (للخط فقط)
   if (!isBar && goalAmount > 0 && _goalType === 'portfolio_value') {
     datasets.push({
