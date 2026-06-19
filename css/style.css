@@ -1349,52 +1349,52 @@ th.sortable:hover { color: var(--accent); }
 /* ===================== GRANT BADGE ===================== */
 .badge-grant { background: rgba(139,92,246,0.15); color: #a78bfa; }
 
-/* ===================== SOFT GRAY (وضع ليلي مريح) =====================
-   «الثيم الفاتح» سابقاً — حُوِّل إلى رمادي داكن ناعم مريح للعين: أفتح من
-   الأسود الكامل للثيم الداكن، بخلفيات رمادية متدرّجة ونص شبه-أبيض مريح،
-   وألوان دلالية واضحة تظهر بوضوح على الرمادي.                            */
+/* ===================== WARM CREAM (فاتح دافئ مريح) =====================
+   ثيم فاتح بلون كريمي دافئ (~#FFE5BF) مريح للعين كورقة قديمة دافئة — بدل
+   الأبيض الناصع المُجهِد. نص بنّي داكن (لا أسود قاسٍ) لتباين مريح، وألوان
+   دلالية غامقة تُقرأ بوضوح على الكريمي.                                   */
 body.light-mode {
-  --bg:          #2b3039;   /* الخلفية الأساسية — رمادي إردوازي متوسط الغمقان */
-  --bg-2:        #343b45;   /* البطاقات واللوحات — أفتح قليلاً لتبرز         */
-  --bg-3:        #3e4651;   /* العناصر المرتفعة ورؤوس الجداول — الأفتح       */
-  --border:      #4b5563;   /* حدود ناعمة لكن واضحة                         */
-  --text:        #e6eaef;   /* نص رئيسي شبه-أبيض (ليس أبيض ناصع) مريح للعين  */
-  --text-2:      #a8b1bd;   /* نص ثانوي مكتوم وواضح                         */
-  --text-muted:  #a8b1bd;
-  --accent:      #f0b429;   /* ذهبي ساطع يظهر بوضوح على الرمادي             */
-  --accent-dim:  rgba(240,180,41,0.14);
-  --success:     #4ac46a;
-  --success-dim: rgba(74,196,106,0.14);
-  --danger:      #f56b63;
-  --danger-dim:  rgba(245,107,99,0.14);
-  --primary:     #7c80ee;
-  --warning:     #f0b429;
-  --bg-1:        #2b3039;
+  --bg:          #f4dab2;   /* خلفية الصفحة — كريمي دافئ يؤطّر البطاقات       */
+  --bg-2:        #ffe5bf;   /* البطاقات واللوحات — اللون الكريمي المطلوب      */
+  --bg-3:        #eccfa0;   /* العناصر المرتفعة ورؤوس الجداول — أعمق قليلاً   */
+  --border:      #d9bc8f;   /* حدّ تان دافئ واضح                            */
+  --text:        #382d1e;   /* نص بنّي داكن (ليس أسود قاسٍ) مريح للعين        */
+  --text-2:      #6d5d44;   /* نص ثانوي بنّي مكتوم وواضح                     */
+  --text-muted:  #6d5d44;
+  --accent:      #a85d00;   /* عنبري غامق يُقرأ بوضوح على الكريمي            */
+  --accent-dim:  rgba(168,93,0,0.13);
+  --success:     #1f7a34;
+  --success-dim: rgba(31,122,52,0.13);
+  --danger:      #bf3326;
+  --danger-dim:  rgba(191,51,38,0.11);
+  --primary:     #4a4fc4;
+  --warning:     #a85d00;
+  --bg-1:        #f4dab2;
 }
 
-/* قواعد الـhover/الأشرطة: أبيض-شفاف لتظهر على الخلفية الرمادية الداكنة */
-body.light-mode .nav-link:hover            { background: rgba(255,255,255,0.05); }
-body.light-mode .nav-group-btn:hover       { background: rgba(255,255,255,0.05); }
-body.light-mode .hamburger-btn:hover       { background: rgba(255,255,255,0.06); }
-body.light-mode .form-group input[readonly]{ background: rgba(255,255,255,0.05); }
-body.light-mode tr:hover td               { background: rgba(255,255,255,0.03); }
-body.light-mode td.editable:hover         { background: rgba(240,180,41,0.10) !important; }
+/* قواعد الـhover/الأشرطة: أسود-شفاف لتظهر على الخلفية الكريمية الفاتحة */
+body.light-mode .nav-link:hover            { background: rgba(0,0,0,0.05); }
+body.light-mode .nav-group-btn:hover       { background: rgba(0,0,0,0.05); }
+body.light-mode .hamburger-btn:hover       { background: rgba(0,0,0,0.06); }
+body.light-mode .form-group input[readonly]{ background: rgba(0,0,0,0.04); }
+body.light-mode tr:hover td               { background: rgba(0,0,0,0.03); }
+body.light-mode td.editable:hover         { background: rgba(168,93,0,0.10) !important; }
 
-body.light-mode .w-card-bar-track  { background: rgba(255,255,255,0.10); }
-body.light-mode .w-card-bar-target { background: rgba(255,255,255,0.45); }
+body.light-mode .w-card-bar-track  { background: rgba(0,0,0,0.10); }
+body.light-mode .w-card-bar-target { background: rgba(0,0,0,0.35); }
 
 /* mini-tab active text on accent bg */
-body.light-mode .mini-tab-active { color: #1a1d24; }
+body.light-mode .mini-tab-active { color: #fff; }
 
-/* inline edit input — رمادي مرتفع بدل الأبيض */
+/* inline edit input — كريمي فاتح */
 body.light-mode .inline-input {
-  background: var(--bg-3) !important;
+  background: #fff3df !important;
   color: var(--text);
 }
 
-/* btn-primary/warning نص داكن على خلفية اللون الفاتح */
+/* btn-primary/warning نص أبيض على الخلفية الملوّنة الغامقة */
 body.light-mode .btn-primary  { color: #fff; }
-body.light-mode .btn-warning  { color: #1a1d24; }
+body.light-mode .btn-warning  { color: #fff; }
 
 /* mobile top-bar shadow lighter */
 body.light-mode #mobile-topbar {
