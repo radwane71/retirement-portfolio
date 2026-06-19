@@ -1349,50 +1349,52 @@ th.sortable:hover { color: var(--accent); }
 /* ===================== GRANT BADGE ===================== */
 .badge-grant { background: rgba(139,92,246,0.15); color: #a78bfa; }
 
-/* ===================== LIGHT MODE ===================== */
+/* ===================== SOFT GRAY (وضع ليلي مريح) =====================
+   «الثيم الفاتح» سابقاً — حُوِّل إلى رمادي داكن ناعم مريح للعين: أفتح من
+   الأسود الكامل للثيم الداكن، بخلفيات رمادية متدرّجة ونص شبه-أبيض مريح،
+   وألوان دلالية واضحة تظهر بوضوح على الرمادي.                            */
 body.light-mode {
-  --bg:          #dde1e8;
-  --bg-2:        #eaecf1;
-  --bg-3:        #d4d8df;
-  --border:      #bcc2cc;
-  --text:        #1a1d24;
-  --text-2:      #52606d;
-  --text-muted:  #52606d;
-  --accent:      #b87400;
-  --accent-dim:  rgba(184,116,0,0.13);
-  --success:     #1a7f37;
-  --success-dim: rgba(26,127,55,0.12);
-  --danger:      #c8202b;
-  --danger-dim:  rgba(200,32,43,0.11);
-  --primary:     #4a4fc4;
-  --warning:     #b87400;
-  --bg-1:        #dde1e8;
+  --bg:          #2b3039;   /* الخلفية الأساسية — رمادي إردوازي متوسط الغمقان */
+  --bg-2:        #343b45;   /* البطاقات واللوحات — أفتح قليلاً لتبرز         */
+  --bg-3:        #3e4651;   /* العناصر المرتفعة ورؤوس الجداول — الأفتح       */
+  --border:      #4b5563;   /* حدود ناعمة لكن واضحة                         */
+  --text:        #e6eaef;   /* نص رئيسي شبه-أبيض (ليس أبيض ناصع) مريح للعين  */
+  --text-2:      #a8b1bd;   /* نص ثانوي مكتوم وواضح                         */
+  --text-muted:  #a8b1bd;
+  --accent:      #f0b429;   /* ذهبي ساطع يظهر بوضوح على الرمادي             */
+  --accent-dim:  rgba(240,180,41,0.14);
+  --success:     #4ac46a;
+  --success-dim: rgba(74,196,106,0.14);
+  --danger:      #f56b63;
+  --danger-dim:  rgba(245,107,99,0.14);
+  --primary:     #7c80ee;
+  --warning:     #f0b429;
+  --bg-1:        #2b3039;
 }
 
-/* Fix hardcoded dark rgba(255,255,255,...) that break light mode */
-body.light-mode .nav-link:hover            { background: rgba(0,0,0,0.05); }
-body.light-mode .nav-group-btn:hover       { background: rgba(0,0,0,0.05); }
-body.light-mode .hamburger-btn:hover       { background: rgba(0,0,0,0.06); }
-body.light-mode .form-group input[readonly]{ background: rgba(0,0,0,0.04); }
-body.light-mode tr:hover td               { background: rgba(0,0,0,0.03); }
-body.light-mode td.editable:hover         { background: rgba(184,116,0,0.07) !important; }
+/* قواعد الـhover/الأشرطة: أبيض-شفاف لتظهر على الخلفية الرمادية الداكنة */
+body.light-mode .nav-link:hover            { background: rgba(255,255,255,0.05); }
+body.light-mode .nav-group-btn:hover       { background: rgba(255,255,255,0.05); }
+body.light-mode .hamburger-btn:hover       { background: rgba(255,255,255,0.06); }
+body.light-mode .form-group input[readonly]{ background: rgba(255,255,255,0.05); }
+body.light-mode tr:hover td               { background: rgba(255,255,255,0.03); }
+body.light-mode td.editable:hover         { background: rgba(240,180,41,0.10) !important; }
 
-/* w-card bar track (was rgba(255,255,255,0.08)) */
-body.light-mode .w-card-bar-track  { background: rgba(0,0,0,0.10); }
-body.light-mode .w-card-bar-target { background: rgba(0,0,0,0.35); }
+body.light-mode .w-card-bar-track  { background: rgba(255,255,255,0.10); }
+body.light-mode .w-card-bar-target { background: rgba(255,255,255,0.45); }
 
 /* mini-tab active text on accent bg */
-body.light-mode .mini-tab-active { color: #fff; }
+body.light-mode .mini-tab-active { color: #1a1d24; }
 
-/* inline edit input */
+/* inline edit input — رمادي مرتفع بدل الأبيض */
 body.light-mode .inline-input {
-  background: #eaecf1 !important;
+  background: var(--bg-3) !important;
   color: var(--text);
 }
 
-/* btn-primary readable on gray bg */
+/* btn-primary/warning نص داكن على خلفية اللون الفاتح */
 body.light-mode .btn-primary  { color: #fff; }
-body.light-mode .btn-warning  { color: #fff; }
+body.light-mode .btn-warning  { color: #1a1d24; }
 
 /* mobile top-bar shadow lighter */
 body.light-mode #mobile-topbar {
