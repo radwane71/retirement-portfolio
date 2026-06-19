@@ -22,9 +22,9 @@ const SCENARIO_META = [
   { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950',
     desc:'أداؤك التاريخي مُعدَّل بواقعية حسب ثقة بياناتك (مزج بمعيار السوق)' },
   { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429',
-    desc:'أداء أعلى من التاريخي +4% نمو، +1.5% أرباح إضافية' },
+    desc:'أداء أعلى من التاريخي: +2.5% نمو سعري، +1% أرباح — الربع الأعلى الواقعي طويل المدى' },
   { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7',
-    desc:'أداء استثنائي +8% نمو، +3% أرباح — ظروف مثالية' },
+    desc:'عقد صاعد قوي: +5% نمو سعري، +2% أرباح — ممكن الحدوث، لكنه ليس المتوسط المتوقَّع' },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────
@@ -228,7 +228,11 @@ async function loadHistoricalData() {
   // عند ثقة 100% → أداؤك الشخصي بالكامل
   const MARKET_CAP_BENCHMARK = 0.05;
   const confWeight = confidenceScore / 100;
-  const blendedCapGrowth = Math.min(0.35, Math.max(0.02,
+  // السقف 11% (وليس 35%): نمو سعري سنوي 11% مُركَّب 35 سنة هو بالفعل الحدّ
+  // الأعلى المُدافَع عنه لأداء شخصي مُثبت بسجل كافٍ. أي رقم أعلى يُنتج إسقاطات
+  // فلكية تُعشِّم على غلط. هذا السقف لا «يبتر» إلا الحالات المتطرفة (محفظة حارّة
+  // قصيرة العمر) — المحافظ الاعتيادية تقع تحته بكثير.
+  const blendedCapGrowth = Math.min(0.11, Math.max(0.02,
     annCapGrowth * confWeight + MARKET_CAP_BENCHMARK * (1 - confWeight)
   ));
 
@@ -288,11 +292,16 @@ function buildScenarios(divOverride) {
   // هذا يُدخل واقعية: بيانات أقل ثقة → نمزج نحو معيار السوق (5%)
   const base = _hist.blendedCapGrowth;
   const div  = divOverride !== undefined ? divOverride : _hist.safeDivYield;
+  // المعايرة مُرساة لمعيار السوق السعودي طويل المدى (تاسي): نمو سعري ~5% +
+  // توزيعات ~3.5% ≈ 8.5% إجمالي. العلاوات صغيرة والسقوف منخفضة عمداً لأن
+  // الأرقام تُركَّب حتى 35 سنة — أي علاوة كبيرة تتحوّل لرقم خيالي بالتركيب.
+  //   • متفائل  = الربع الأعلى الواقعي (≈12–13% إجمالي)
+  //   • استثنائي = عقد صاعد قوي ممكن الحدوث (≈15–16% إجمالي) لا حلم بعيد المنال
   _scenarios = [
-    { key:'conservative', capRate: Math.max(0.02, base * 0.60), divRate: Math.max(0.01, div * 0.70) },
-    { key:'base',         capRate: base,                         divRate: div },
-    { key:'optimistic',   capRate: Math.min(0.35, base + 0.04), divRate: Math.min(0.12, div + 0.015) },
-    { key:'exceptional',  capRate: Math.min(0.40, base + 0.08), divRate: Math.min(0.15, div + 0.030) },
+    { key:'conservative', capRate: Math.max(0.02,  base * 0.65),  divRate: Math.max(0.01, div * 0.75)  },
+    { key:'base',         capRate: base,                          divRate: div                          },
+    { key:'optimistic',   capRate: Math.min(0.13,  base + 0.025), divRate: Math.min(0.07, div + 0.010) },
+    { key:'exceptional',  capRate: Math.min(0.155, base + 0.05),  divRate: Math.min(0.09, div + 0.020) },
   ];
 }
 
