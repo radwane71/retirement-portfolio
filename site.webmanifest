@@ -16,7 +16,7 @@
   "theme_color": "#6366f1",
   "background_color": "#ffffff",
   "display": "standalone",
-  "start_url": "/dashboard.html",
+  "start_url": "./dashboard.html",
   "lang": "ar",
   "dir": "rtl"
 }

@@ -13,6 +13,72 @@ let _activeScenarios = ['conservative','base','optimistic','exceptional'];
 let _activeHighlight = 'base';
 let _goalType        = 'portfolio_value';   // 'portfolio_value' | 'monthly_income'
 let _chartMode       = 'line';              // 'line' | 'log' | 'bar' | 'cards'
+let _dcaPeriodCount  = 0;
+
+// ── DCA Period Management ─────────────────────────────────────────────
+function addDcaPeriod(amount = 0, years = 5) {
+  const container = document.getElementById('dca-periods-container');
+  if (!container) return;
+  const id = ++_dcaPeriodCount;
+  const row = document.createElement('div');
+  row.className = 'dca-period-row';
+  row.id = `dca-row-${id}`;
+  row.innerHTML = `
+    <span class="dca-label">فترة ${id}</span>
+    <input type="number" class="dca-amount" placeholder="المبلغ / شهر (ر.س)" value="${amount || ''}" min="0" step="100" oninput="updateDcaBar();runForecast()">
+    <span class="dca-label" style="min-width:auto">لمدة</span>
+    <input type="number" class="dca-years" placeholder="سنوات" value="${years || ''}" min="0.5" step="0.5" style="max-width:80px" oninput="updateDcaBar();runForecast()">
+    <span class="dca-label" style="min-width:auto">سنة</span>
+    <button type="button" class="dca-rm-btn" onclick="removeDcaPeriod(${id})">×</button>`;
+  container.appendChild(row);
+  updateDcaBar();
+}
+
+function removeDcaPeriod(id) {
+  const row = document.getElementById(`dca-row-${id}`);
+  if (row) row.remove();
+  updateDcaBar();
+  runForecast();
+}
+
+function getDcaPeriods() {
+  const rows = document.querySelectorAll('.dca-period-row');
+  const periods = [];
+  rows.forEach(row => {
+    const amount = parseFloat(row.querySelector('.dca-amount').value) || 0;
+    const years  = parseFloat(row.querySelector('.dca-years').value)  || 0;
+    if (years > 0) periods.push({ amount, years });
+  });
+  return periods;
+}
+
+function buildDcaSchedule(periods, totalMonths) {
+  const schedule = new Array(totalMonths).fill(0);
+  let cursor = 0;
+  for (const p of periods) {
+    const end = Math.min(cursor + Math.round(p.years * 12), totalMonths);
+    for (let m = cursor; m < end; m++) schedule[m] = p.amount;
+    cursor = end;
+    if (cursor >= totalMonths) break;
+  }
+  return schedule;
+}
+
+function updateDcaBar() {
+  const el = document.getElementById('dca-total-bar');
+  if (!el) return;
+  const periods = getDcaPeriods();
+  const totalYears = periods.reduce((s, p) => s + p.years, 0);
+  const totalAdded = periods.reduce((s, p) => s + p.amount * p.years * 12, 0);
+  if (periods.length === 0) {
+    el.innerHTML = 'إجمالي سنوات DCA: <strong>لا توجد فترات</strong>';
+  } else {
+    const summary = periods.map((p, i) =>
+      `فترة ${i+1}: ${Number(p.amount).toLocaleString('ar-SA')} ر.س × ${p.years} سنة`
+    ).join(' ← ');
+    el.innerHTML = `${summary} — إجمالي: <strong>${totalYears} سنة · ${Number(Math.round(totalAdded)).toLocaleString('ar-SA')} ر.س مُضاف</strong>`;
+  }
+}
 
 // المعالم تُبنى ديناميكياً كل سنة في renderMilestoneTable
 
@@ -310,7 +376,7 @@ function buildScenarios(divOverride) {
 // إضافات دورية، تعديل التضخم
 function projectScenario(scenario, params) {
   const {
-    startValue, monthlyAdd, lumpSum,
+    startValue, dcaSchedule, lumpSum,
     horizonYears, reinvestDividends,
     adjustInflation, inflationRate,
   } = params;
@@ -331,7 +397,7 @@ function projectScenario(scenario, params) {
     year: 0, value, cumDiv: 0, cumAdded: 0,
     realValue: value,
     monthlyIncome:     value * monthlyDivRate,
-    monthlyIncomeReal: value * monthlyDivRate,   // = الاسمي قبل أي تضخم
+    monthlyIncomeReal: value * monthlyDivRate,
     yourCapital:       startValue + lumpSum,
     priceGrowth:       0,
   }];
@@ -345,7 +411,8 @@ function projectScenario(scenario, params) {
     cumulativeDividends += divEarned;
     if (reinvestDividends) value += divEarned;
 
-    // 3. الإضافة الشهرية (DCA)
+    // 3. الإضافة الشهرية (DCA) — متغيرة حسب الجدول
+    const monthlyAdd = dcaSchedule ? (dcaSchedule[m - 1] || 0) : 0;
     value           = Math.max(0, value + monthlyAdd);
     cumulativeAdded += monthlyAdd;
 
@@ -391,13 +458,16 @@ function runForecast() {
   if (!_hist || !_scenarios.length) return;
 
   const startValue    = parseFloat(document.getElementById('inp-current-value').value) || _hist.currentValue || 0;
-  const monthlyAdd    = parseFloat(document.getElementById('inp-monthly-add').value)   || 0;
   const lumpSum       = parseFloat(document.getElementById('inp-lump-sum').value)       || 0;
   const horizonYears  = parseInt(document.getElementById('inp-horizon').value)           || 35;
   const reinvest      = document.getElementById('inp-reinvest').checked;
   const inflation     = document.getElementById('inp-inflation').checked;
   const inflationRate = parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025;
   const goalAmount    = parseFloat(document.getElementById('inp-goal-amount').value)    || 0;
+
+  // بناء جدول DCA الشهري من الفترات المُدخَلة
+  const dcaPeriods  = getDcaPeriods();
+  const dcaSchedule = buildDcaSchedule(dcaPeriods, horizonYears * 12);
 
   // عائد الأرباح: يدوي إذا أدخله المستخدم، وإلا من البيانات الفعلية
   const divYieldOverride = parseFloat(document.getElementById('inp-div-yield').value);
@@ -409,7 +479,7 @@ function runForecast() {
   buildScenarios(divYieldToUse);
 
   const params = {
-    startValue, monthlyAdd, lumpSum, horizonYears,
+    startValue, dcaSchedule, dcaPeriods, lumpSum, horizonYears,
     reinvestDividends: reinvest,
     adjustInflation: inflation,
     inflationRate,
@@ -490,9 +560,11 @@ function renderHistSummary() {
   const cvInp = document.getElementById('inp-current-value');
   if (cvInp && !+cvInp.value) cvInp.value = Math.round(h.currentValue);
 
-  const maInp = document.getElementById('inp-monthly-add');
-  if (maInp && !+maInp.value && h.avgMonthlyDeposit > 0)
-    maInp.value = Math.round(h.avgMonthlyDeposit);
+  // تهيئة أول فترة DCA بمتوسط الإضافة التاريخية إذا لم يكن هناك فترات
+  if (document.querySelectorAll('.dca-period-row').length === 0) {
+    const defaultDca = h.avgMonthlyDeposit > 0 ? Math.round(h.avgMonthlyDeposit) : 8000;
+    addDcaPeriod(defaultDca, 5);
+  }
 
   const dyBadge = document.getElementById('div-yield-auto');
   if (dyBadge) dyBadge.textContent = `من بياناتك: ${pct(h.safeDivYield)}`;
@@ -775,7 +847,7 @@ function setChartMode(mode) {
 function renderCardsView(horizonYears) {
   const el = document.getElementById('cards-area');
   if (!el) return;
-  const milestones = [1, 3, 5, 10, 15, 20, 25, 30, 35].filter(y => y <= horizonYears);
+  const milestones = [1, 3, 5, 10, 15, 20, 25, 30, 35, 40, 45].filter(y => y <= horizonYears);
 
   el.innerHTML = `<div class="sc-cards-grid">${
     _projections.filter(p => _activeScenarios.includes(p.key)).map(p => {
@@ -807,7 +879,7 @@ function renderChart(horizonYears, goalAmount = 0) {
   const isLog = _chartMode === 'log';
 
   // وضع الأشرطة: نقاط المعالم فقط
-  const barMilestones = [0, 1, 3, 5, 10, 15, 20, 25, 30, 35].filter(y => y <= horizonYears);
+  const barMilestones = [0, 1, 3, 5, 10, 15, 20, 25, 30, 35, 40, 45].filter(y => y <= horizonYears);
 
   const startYear = new Date().getFullYear();
   const labels = isBar
@@ -971,7 +1043,13 @@ function updateChartSubtitle(params) {
   const el = document.getElementById('chart-subtitle');
   if (!el) return;
   const parts = [];
-  if (params.monthlyAdd > 0)     parts.push(`إضافة ${fmt(params.monthlyAdd)} / شهر`);
+  if (params.dcaPeriods && params.dcaPeriods.some(p => p.amount > 0)) {
+    const dcaSummary = params.dcaPeriods
+      .filter(p => p.amount > 0 && p.years > 0)
+      .map(p => `${Number(p.amount).toLocaleString('ar-SA')}×${p.years}سنة`)
+      .join('←');
+    parts.push(`DCA: ${dcaSummary}`);
+  }
   if (params.lumpSum > 0)        parts.push(`+ فوري ${fmt(params.lumpSum)}`);
   if (!params.reinvestDividends) parts.push('بدون إعادة استثمار الأرباح');
   if (params.adjustInflation)    parts.push(`معدّل للتضخم ${pct(params.inflationRate)}`);
