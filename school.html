@@ -173,6 +173,10 @@
       display:inline-flex; align-items:center; gap:6px; padding:4px 10px;
       background:var(--bg-3); border:1px solid var(--border); border-radius:16px; font-size:0.79rem;
     }
+    .daily-pill {
+      display:inline-flex; align-items:center; gap:5px; padding:5px 12px;
+      background:var(--bg-3); border:1px solid var(--border); border-radius:16px; font-size:0.82rem;
+    }
 
     /* ── Modals ── */
     .modal-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.6); z-index:1000; align-items:center; justify-content:center; padding:16px; }
@@ -321,6 +325,8 @@
         <button class="page-tab-btn active" onclick="switchTab('life-tab')">🌟 الأهداف الحياتية</button>
         <button class="page-tab-btn"        onclick="switchTab('school-tab')">📚 الأهداف المدرسية</button>
         <button class="page-tab-btn"        onclick="switchTab('grades-tab')">📊 الدرجات الدراسية</button>
+        <button class="page-tab-btn"        onclick="switchTab('daily-tab')">📋 المتابعة اليومية</button>
+        <button class="page-tab-btn"        onclick="switchTab('exams-tab')">🗓️ الاختبارات</button>
       </div>
 
       <!-- Life Goals tab -->
@@ -396,6 +402,67 @@
           </div>
           <div style="padding:14px 18px">
             <div class="grade-wrap" id="grade-wrap"></div>
+          </div>
+        </div>
+
+        <!-- Trend chart -->
+        <div class="goals-section" style="margin-top:16px">
+          <div class="goals-section-head">
+            <h3>📈 تطوّر المعدل عبر الفصول</h3>
+          </div>
+          <div style="padding:14px 18px">
+            <div id="trend-empty" class="empty-state" style="display:none">سجّل درجات في فصلين على الأقل ليظهر اتجاه التطوّر</div>
+            <div style="position:relative;height:240px"><canvas id="trend-chart"></canvas></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Daily tracking tab -->
+      <div class="tab-pane" id="daily-tab">
+        <div class="goals-section" style="margin-bottom:16px">
+          <div class="goals-section-head">
+            <h3>🗓️ الحضور والغياب</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="openAttModal()">＋ تسجيل</button>
+          </div>
+          <div id="att-summary" style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px 0"></div>
+          <div style="padding:14px 18px;overflow-x:auto">
+            <table class="goals-tbl"><thead><tr><th>التاريخ</th><th>الحالة</th><th>ملاحظة</th><th></th></tr></thead><tbody id="att-body"></tbody></table>
+          </div>
+        </div>
+
+        <div class="goals-section" style="margin-bottom:16px">
+          <div class="goals-section-head">
+            <h3>🌟 سجل السلوك</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="openBehModal()">＋ ملاحظة</button>
+          </div>
+          <div id="beh-summary" style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px 0"></div>
+          <div style="padding:14px 18px;overflow-x:auto">
+            <table class="goals-tbl"><thead><tr><th>التاريخ</th><th>النوع</th><th>العنوان</th><th>تفاصيل</th><th></th></tr></thead><tbody id="beh-body"></tbody></table>
+          </div>
+        </div>
+
+        <div class="goals-section">
+          <div class="goals-section-head">
+            <h3>📝 الواجبات والمهام</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="openHwModal()">＋ واجب</button>
+          </div>
+          <div id="hw-summary" style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px 0"></div>
+          <div style="padding:14px 18px;overflow-x:auto">
+            <table class="goals-tbl"><thead><tr><th style="min-width:160px">الواجب</th><th>المادة</th><th>التسليم</th><th>الحالة</th><th>ملاحظة</th><th></th></tr></thead><tbody id="hw-body"></tbody></table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Exams tab -->
+      <div class="tab-pane" id="exams-tab">
+        <div class="goals-section">
+          <div class="goals-section-head">
+            <h3>🗓️ تقويم الاختبارات</h3>
+            <button class="btn btn-primary" style="font-size:0.8rem;padding:6px 12px" onclick="openExamModal()">＋ اختبار</button>
+          </div>
+          <div id="exam-summary" style="display:flex;gap:8px;flex-wrap:wrap;padding:10px 18px 0"></div>
+          <div style="padding:14px 18px;overflow-x:auto">
+            <table class="goals-tbl"><thead><tr><th>التاريخ</th><th style="min-width:140px">الاختبار</th><th>المادة</th><th>ملاحظة</th><th></th></tr></thead><tbody id="exam-body"></tbody></table>
           </div>
         </div>
       </div>
@@ -561,11 +628,84 @@
     </div>
   </div>
 
+  <!-- ── Attendance Modal ── -->
+  <div class="modal-overlay" id="att-modal">
+    <div class="modal-box sm">
+      <h3>تسجيل حضور</h3>
+      <div class="form-row"><label>التاريخ *</label><input type="date" id="att-date"></div>
+      <div class="form-row"><label>الحالة</label>
+        <select id="att-status">
+          <option value="present">✅ حاضر</option>
+          <option value="absent">❌ غائب</option>
+          <option value="late">⏰ متأخر</option>
+          <option value="excused">📋 غياب بعذر</option>
+        </select>
+      </div>
+      <div class="form-row"><label>ملاحظة</label><input type="text" id="att-note" placeholder="اختياري — سبب الغياب مثلاً"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('att-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveAtt()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Behavior Modal ── -->
+  <div class="modal-overlay" id="beh-modal">
+    <div class="modal-box sm">
+      <h3>ملاحظة سلوكية</h3>
+      <div class="form-row"><label>التاريخ *</label><input type="date" id="beh-date"></div>
+      <div class="form-row"><label>النوع</label>
+        <select id="beh-type"><option value="positive">🌟 إيجابي</option><option value="negative">⚠️ سلبي</option></select>
+      </div>
+      <div class="form-row"><label>العنوان *</label><input type="text" id="beh-title" placeholder="مثال: تعاون مع زملائه / إزعاج في الصف"></div>
+      <div class="form-row"><label>تفاصيل</label><input type="text" id="beh-note" placeholder="اختياري"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('beh-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveBeh()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Homework Modal ── -->
+  <div class="modal-overlay" id="hw-modal">
+    <div class="modal-box sm">
+      <h3>واجب / مهمة</h3>
+      <div class="form-row"><label>العنوان *</label><input type="text" id="hw-title" placeholder="مثال: حل تمارين صفحة 42"></div>
+      <div class="form-row"><label>المادة</label><select id="hw-subject"></select></div>
+      <div class="form-row"><label>موعد التسليم</label><input type="date" id="hw-due"></div>
+      <div class="form-row"><label>الحالة</label>
+        <select id="hw-status"><option value="pending">⏳ معلّق</option><option value="done">✅ مُسلّم</option><option value="late">🔴 متأخر</option></select>
+      </div>
+      <div class="form-row"><label>ملاحظة</label><input type="text" id="hw-note" placeholder="اختياري"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('hw-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveHw()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Exam Modal ── -->
+  <div class="modal-overlay" id="exam-modal">
+    <div class="modal-box sm">
+      <h3>اختبار قادم</h3>
+      <div class="form-row"><label>العنوان *</label><input type="text" id="exam-title" placeholder="مثال: اختبار الفصل الأول"></div>
+      <div class="form-row"><label>المادة</label><select id="exam-subject"></select></div>
+      <div class="form-row"><label>التاريخ *</label><input type="date" id="exam-date"></div>
+      <div class="form-row"><label>ملاحظة</label><input type="text" id="exam-note" placeholder="اختياري — الفصول المقرّرة مثلاً"></div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="closeModal('exam-modal')">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveExam()">حفظ</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="js/supabase.js"></script>
   <script src="js/utils.js"></script>
-  <script src="js/auth.js"></script>  <script src="js/school.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <script src="js/school.js"></script>
   <script>setActiveNav('nav-school');</script>
 </body>
 </html>
