@@ -367,7 +367,7 @@ html, body {
 }
 .dash-hero .label,
 .dash-hero .sub        { color: rgba(255,255,255,0.72) !important; }
-.dash-hero .eng-label  { color: rgba(255,255,255,0.5)  !important; }
+.dash-hero .eng-label  { color: rgba(255,255,255,0.7) !important; background: rgba(255,255,255,0.14) !important; border-color: rgba(255,255,255,0.22) !important; }
 .dash-hero .value      { color: #fff !important; font-size: 2rem; }
 .dash-hero .info-btn   { color: rgba(255,255,255,0.6); }
 .dash-hero .info-btn:hover { color: #fff; }
