@@ -277,6 +277,7 @@ function renderTaskBoard(boardId, tasks) {
           <span class="task-badge ${meta.badge}">${meta.label}</span>
           <span class="task-badge badge-status-${t.status}">${t.status === 'active' ? 'نشطة' : t.status === 'done' ? 'منجزة ✅' : 'ملغاة ❌'}</span>
         </div>
+        ${tickerPortfolioInfo(t.ticker)}
         ${extraInfo.length ? `<div class="task-notes" style="color:var(--accent);font-size:0.8rem">${extraInfo.join(' · ')}</div>` : ''}
         ${t.notes ? `<div class="task-notes">${esc(t.notes)}</div>` : ''}
         <div class="task-meta">أُضيفت ${dateStr}${closedStr}</div>
@@ -443,6 +444,51 @@ async function reloadTasks() {
   renderKPIs();
   renderAutoAlerts();
   applyFilters();
+}
+
+// ── معلومات السهم في المحفظة + هدفه المسجّل ──────────────────────────────
+// لكل مهمة بها رمز سهم: تعرض نسبته الحالية من المحفظة، والهدف المسجّل له في
+// صفحة الأهداف، والانحراف بينهما — لربط المهمة بوضع السهم الفعلي.
+function tickerPortfolioInfo(ticker) {
+  if (!ticker) return '';
+  const tk = String(ticker).trim().toUpperCase();
+  const h  = _holdings.find(x => String(x.ticker).trim().toUpperCase() === tk);
+  const target = _stockTargets[ticker] != null ? +_stockTargets[ticker]
+               : (_stockTargets[tk] != null ? +_stockTargets[tk] : null);
+
+  let currentPct = null;
+  if (h && _totalValue > 0) currentPct = (+h.shares * +h.current_price) / _totalValue * 100;
+
+  // لا شيء نعرضه إن لم يكن السهم في المحفظة ولا له هدف
+  if (currentPct === null && target === null) return '';
+
+  const parts = [];
+
+  // النسبة الحالية في المحفظة
+  if (currentPct !== null) {
+    parts.push(`<span class="tk-port-pill">📊 نسبة السهم بالمحفظة: <strong>${currentPct.toFixed(1)}%</strong></span>`);
+  } else {
+    parts.push(`<span class="tk-port-pill tk-muted">📊 غير موجود في المحفظة حالياً</span>`);
+  }
+
+  // الهدف المسجّل في صفحة الأهداف
+  if (target !== null) {
+    parts.push(`<span class="tk-port-pill">🎯 الهدف المسجّل: <strong>${target.toFixed(1)}%</strong></span>`);
+    // الانحراف بين الحالي والهدف
+    if (currentPct !== null) {
+      const diff = currentPct - target;
+      const within = Math.abs(diff) <= 1.5;
+      const color  = within ? 'var(--success)' : (diff > 0 ? 'var(--danger)' : 'var(--accent)');
+      const arrow  = within ? '✓' : (diff > 0 ? '▲' : '▼');
+      const sign   = diff > 0 ? '+' : '';
+      const label  = within ? 'مطابق للهدف' : `${arrow} ${sign}${diff.toFixed(1)}%`;
+      parts.push(`<span class="tk-port-pill" style="color:${color};font-weight:700">${label}</span>`);
+    }
+  } else {
+    parts.push(`<span class="tk-port-pill tk-muted">🎯 لا هدف مسجّل له</span>`);
+  }
+
+  return `<div class="tk-port-row">${parts.join('')}</div>`;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────
