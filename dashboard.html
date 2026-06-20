@@ -118,10 +118,10 @@
       <span title="مؤشر إرشادي يتغيّر مع الأسعار والأهداف">🔵 إرشادي — للتوجيه فقط</span>
     </div>
 
-    <!-- ══ صف 1: القيمة الكلية للثروة ══ -->
-    <div class="stats-grid stats-grid-4">
+    <div class="dash-divider"><span class="n">١</span> النظرة العامة — أين أنا الآن</div>
+    <div class="stats-grid stats-grid-3">
 
-      <div class="stat-card">
+      <div class="stat-card dash-hero">
         <button class="info-btn" onclick="showCardInfo('total-value')">ⓘ</button>
         <div class="label">إجمالي قيمة المحفظة <span class="eng-label">Portfolio Value</span></div>
         <div class="value num" id="stat-total-value">—</div>
@@ -129,21 +129,10 @@
       </div>
 
       <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('portfolio-cash')">ⓘ</button>
-        <div class="label">نقد المحفظة <span class="eng-label">Cash</span></div>
-        <div class="value num text-accent" id="stat-portfolio-cash"
-             title="انقر للتعديل" onclick="startEditCash()" style="cursor:pointer">—</div>
-        <div class="sub" id="stat-portfolio-cash-sub">انقر للإدخال</div>
-        <input type="number" id="cash-edit-input" min="0" step="0.01"
-               style="display:none;width:100%;margin-top:6px;padding:4px 8px;border-radius:6px;border:1px solid var(--accent);background:var(--bg-2);color:var(--text);font-family:Tajawal;font-size:14px;text-align:center"
-               onblur="saveCash()" onkeydown="if(event.key==='Enter')saveCash();if(event.key==='Escape')cancelEditCash()">
-      </div>
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('realestate')">ⓘ</button>
-        <div class="label">قيمة العقارات <span class="eng-label">Real Estate</span></div>
-        <div class="value num" id="stat-realestate">—</div>
-        <div class="sub">المملوكة والمؤجرة</div>
+        <button class="info-btn" onclick="showCardInfo('total-return')">ⓘ</button>
+        <div class="label">🧮 إجمالي العائد منذ البداية <span class="eng-label">Total Return</span></div>
+        <div class="value num" id="stat-total-return">—</div>
+        <div class="sub" id="stat-total-return-sub">غير محقق + محقق + توزيعات</div>
       </div>
 
       <div class="stat-card">
@@ -155,8 +144,8 @@
 
     </div>
 
-    <!-- ══ صف 2: رأس المال والأداء ══ -->
-    <div class="stats-grid stats-grid-4">
+    <div class="dash-divider"><span class="n">٢</span> مؤشرات الأداء — كيف أبلي</div>
+    <div class="stats-grid stats-grid-fill">
 
       <div class="stat-card">
         <button class="info-btn" onclick="showCardInfo('invested')">ⓘ</button>
@@ -201,16 +190,16 @@
       </div>
 
       <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('total-return')">ⓘ</button>
-        <div class="label">🧮 إجمالي العائد منذ البداية <span class="eng-label">Total Return</span></div>
-        <div class="value num" id="stat-total-return">—</div>
-        <div class="sub" id="stat-total-return-sub">غير محقق + محقق + توزيعات</div>
+        <button class="info-btn" onclick="showCardInfo('xirr')">ⓘ</button>
+        <div class="label">📈 العائد السنوي الحقيقي <span class="eng-label">XIRR</span></div>
+        <div class="value num" id="stat-xirr">—</div>
+        <div class="sub" id="stat-xirr-sub">معدل النمو السنوي المركّب</div>
       </div>
 
     </div>
 
-    <!-- ══ صف 3: الدخل ══ -->
-    <div class="stats-grid stats-grid-4">
+    <div class="dash-divider"><span class="n">٣</span> الدخل والتوزيعات</div>
+    <div class="stats-grid stats-grid-fill">
 
       <div class="stat-card">
         <button class="info-btn" onclick="showCardInfo('total-div')">ⓘ</button>
@@ -240,6 +229,43 @@
       </div>
 
       <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('fwd-income')">ⓘ</button>
+        <div class="label">💵 الدخل التوزيعي المتوقع <span class="eng-label">Fwd Income</span></div>
+        <div class="value num text-success" id="stat-fwd-income">—</div>
+        <div class="sub" id="stat-fwd-income-sub">على أساس آخر 12 شهراً</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('div-growth')">ⓘ</button>
+        <div class="label">📊 نمو الدخل التوزيعي <span class="eng-label">Dividend CAGR</span></div>
+        <div class="value num" id="stat-div-growth">—</div>
+        <div class="sub" id="stat-div-growth-sub">متوسط النمو السنوي لدخلك التوزيعي</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('passive-cover')">ⓘ</button>
+        <div class="label">🛡️ تغطية الدخل السلبي للمصاريف</div>
+        <div class="value num" id="stat-passive-cover">—</div>
+        <div class="sub" id="stat-passive-cover-sub">انقر على هدف التقاعد لإدخال مصاريفك</div>
+      </div>
+
+    </div>
+
+    <div class="dash-divider"><span class="n">٤</span> السيولة والأصول</div>
+    <div class="stats-grid stats-grid-fill">
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('portfolio-cash')">ⓘ</button>
+        <div class="label">نقد المحفظة <span class="eng-label">Cash</span></div>
+        <div class="value num text-accent" id="stat-portfolio-cash"
+             title="انقر للتعديل" onclick="startEditCash()" style="cursor:pointer">—</div>
+        <div class="sub" id="stat-portfolio-cash-sub">انقر للإدخال</div>
+        <input type="number" id="cash-edit-input" min="0" step="0.01"
+               style="display:none;width:100%;margin-top:6px;padding:4px 8px;border-radius:6px;border:1px solid var(--accent);background:var(--bg-2);color:var(--text);font-family:Tajawal;font-size:14px;text-align:center"
+               onblur="saveCash()" onkeydown="if(event.key==='Enter')saveCash();if(event.key==='Escape')cancelEditCash()">
+      </div>
+
+      <div class="stat-card">
         <button class="info-btn" onclick="showCardInfo('cashflow')">ⓘ</button>
         <div class="label">صافي التدفق النقدي هذا العام <span class="eng-label">Net Cash Flow</span></div>
         <div class="value num" id="stat-cash-actual">—</div>
@@ -249,10 +275,39 @@
         </div>
       </div>
 
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('contribution')">ⓘ</button>
+        <div class="label">💰 معدل المساهمة الشهري <span class="eng-label">Net Contribution</span></div>
+        <div class="value num" id="stat-contribution">—</div>
+        <div class="sub" id="stat-contribution-sub">صافي إيداعك الشهري (آخر 12 شهراً)</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('realestate')">ⓘ</button>
+        <div class="label">قيمة العقارات <span class="eng-label">Real Estate</span></div>
+        <div class="value num" id="stat-realestate">—</div>
+        <div class="sub">المملوكة والمؤجرة</div>
+      </div>
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('total-assets')">ⓘ</button>
+        <div class="label">🏦 إجمالي الأصول الاستثمارية</div>
+        <div class="value num text-accent" id="stat-total-assets">—</div>
+        <div class="sub" id="stat-total-assets-sub">أسهم + نقد + عقار + صكوك</div>
+      </div>
+
     </div>
 
-    <!-- ══ صف 4: التنويع والتكاليف ══ -->
-    <div class="stats-grid stats-grid-4">
+    <div class="dash-divider"><span class="n">٥</span> المخاطر وتفاصيل المحفظة</div>
+    <div class="stats-grid stats-grid-fill">
+
+      <div class="stat-card">
+        <button class="info-btn" onclick="showCardInfo('concentration')">ⓘ</button>
+        <div class="label">🎯 تركيز أكبر سهم <span class="eng-label">Concentration</span></div>
+        <div class="value num" id="stat-concentration">—</div>
+        <div class="sub bold" id="stat-concentration-name">—</div>
+        <div class="small text-muted mt-1" id="stat-concentration-sub">—</div>
+      </div>
 
       <div class="stat-card">
         <button class="info-btn" onclick="showCardInfo('composition')">ⓘ</button>
@@ -299,66 +354,8 @@
 
     </div>
 
-    <!-- ══ صف 5: الأداء السنوي والدخل ══ -->
-    <div class="stats-grid stats-grid-4">
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('xirr')">ⓘ</button>
-        <div class="label">📈 العائد السنوي الحقيقي <span class="eng-label">XIRR</span></div>
-        <div class="value num" id="stat-xirr">—</div>
-        <div class="sub" id="stat-xirr-sub">معدل النمو السنوي المركّب</div>
-      </div>
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('fwd-income')">ⓘ</button>
-        <div class="label">💵 الدخل التوزيعي المتوقع <span class="eng-label">Fwd Income</span></div>
-        <div class="value num text-success" id="stat-fwd-income">—</div>
-        <div class="sub" id="stat-fwd-income-sub">على أساس آخر 12 شهراً</div>
-      </div>
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('passive-cover')">ⓘ</button>
-        <div class="label">🛡️ تغطية الدخل السلبي للمصاريف</div>
-        <div class="value num" id="stat-passive-cover">—</div>
-        <div class="sub" id="stat-passive-cover-sub">انقر على هدف التقاعد لإدخال مصاريفك</div>
-      </div>
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('total-assets')">ⓘ</button>
-        <div class="label">🏦 إجمالي الأصول الاستثمارية</div>
-        <div class="value num text-accent" id="stat-total-assets">—</div>
-        <div class="sub" id="stat-total-assets-sub">أسهم + نقد + عقار + صكوك</div>
-      </div>
-
-    </div>
-
-    <!-- ══ صف 6: التركيز والنمو ══ -->
-    <div class="stats-grid stats-grid-3">
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('concentration')">ⓘ</button>
-        <div class="label">🎯 تركيز أكبر سهم <span class="eng-label">Concentration</span></div>
-        <div class="value num" id="stat-concentration">—</div>
-        <div class="sub bold" id="stat-concentration-name">—</div>
-        <div class="small text-muted mt-1" id="stat-concentration-sub">—</div>
-      </div>
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('contribution')">ⓘ</button>
-        <div class="label">💰 معدل المساهمة الشهري <span class="eng-label">Net Contribution</span></div>
-        <div class="value num" id="stat-contribution">—</div>
-        <div class="sub" id="stat-contribution-sub">صافي إيداعك الشهري (آخر 12 شهراً)</div>
-      </div>
-
-      <div class="stat-card">
-        <button class="info-btn" onclick="showCardInfo('div-growth')">ⓘ</button>
-        <div class="label">📊 نمو الدخل التوزيعي <span class="eng-label">Dividend CAGR</span></div>
-        <div class="value num" id="stat-div-growth">—</div>
-        <div class="sub" id="stat-div-growth-sub">متوسط النمو السنوي لدخلك التوزيعي</div>
-      </div>
-
-    </div>
-
+    <!-- ⑥ التخصيص والهدف -->
+    <div class="dash-divider"><span class="n">٦</span> التخصيص والهدف</div>
     <!-- Asset Allocation + Retirement Goal -->
     <div class="charts-grid">
       <div class="card">
@@ -381,6 +378,8 @@
       </div>
     </div>
 
+    <!-- ⑦ صحة المحفظة والمخاطر -->
+    <div class="dash-divider"><span class="n">٧</span> صحة المحفظة والمخاطر</div>
     <!-- Portfolio Health Card -->
     <div class="card" style="margin-bottom:16px" id="portfolio-health-card" style="display:none"></div>
 
@@ -406,6 +405,8 @@
       </div>
     </div>
 
+    <!-- ⑧ التوزيع والأوزان -->
+    <div class="dash-divider"><span class="n">٨</span> التوزيع والأوزان</div>
     <!-- Charts -->
     <div class="charts-grid">
       <div class="card">
@@ -444,6 +445,8 @@
       </div>
     </div>
 
+    <!-- ⑨ الدخل وإشارات الأسعار -->
+    <div class="dash-divider"><span class="n">٩</span> الدخل وإشارات الأسعار</div>
     <!-- Income by Sector Card -->
     <div class="card" style="margin-bottom:16px">
       <div class="section-header" style="margin-bottom:8px">
@@ -471,6 +474,8 @@
       </div>
     </div>
 
+    <!-- ⑩ التفاصيل -->
+    <div class="dash-divider"><span class="n">١٠</span> التفاصيل — الأسهم في المحفظة</div>
     <!-- Holdings table -->
     <div class="card">
       <div class="section-header">

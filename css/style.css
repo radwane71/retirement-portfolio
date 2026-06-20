@@ -255,6 +255,8 @@ html, body {
 }
 .stats-grid-4 { grid-template-columns: repeat(4, 1fr); }
 .stats-grid-3 { grid-template-columns: repeat(3, 1fr); }
+/* تعبئة تلقائية: تبقي عرض البطاقة ثابتاً وتملأ الصفوف بأناقة لأي عدد بطاقات */
+.stats-grid-fill { grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); }
 
 .stat-card {
   background: var(--bg-3);
@@ -355,6 +357,49 @@ html, body {
   font-size: 0.75rem;
   color: var(--text-2);
   margin-top: 6px;
+}
+
+/* ── كرت Hero (النظرة العامة) — تركوازي بارز في الثيمين ── */
+.dash-hero {
+  background: linear-gradient(135deg, #0f6e63 0%, #0c544b 100%);
+  border: none !important;
+  color: #fff;
+}
+.dash-hero .label,
+.dash-hero .sub        { color: rgba(255,255,255,0.72) !important; }
+.dash-hero .eng-label  { color: rgba(255,255,255,0.5)  !important; }
+.dash-hero .value      { color: #fff !important; font-size: 2rem; }
+.dash-hero .info-btn   { color: rgba(255,255,255,0.6); }
+.dash-hero .info-btn:hover { color: #fff; }
+.dash-hero:hover       { box-shadow: 0 10px 28px rgba(12,84,75,0.28) !important; border: none !important; }
+
+/* ── فاصل أقسام لوحة التحكم ── */
+.dash-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 26px 2px 14px;
+  color: var(--text);
+  font-size: 0.86rem;
+  font-weight: 700;
+}
+.dash-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.dash-divider .n {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 /* ===================== COLORS ===================== */
@@ -1354,57 +1399,100 @@ th.sortable:hover { color: var(--accent); }
    ثيم فاتح بلون كريمي دافئ (~#FFE5BF) مريح للعين كورقة قديمة دافئة — بدل
    الأبيض الناصع المُجهِد. نص بنّي داكن (لا أسود قاسٍ) لتباين مريح، وألوان
    دلالية غامقة تُقرأ بوضوح على الكريمي.                                   */
+/* ══════════════════════════════════════════════════════════════
+   الثيم الفاتح — لوحة نظيفة: خلفية رمادية فاتحة + كروت بيضاء بظل ناعم
+   + سايدبار تركوازي غامق + لون مميّز تركوازي (مطابق للمرجع البصري)
+   ══════════════════════════════════════════════════════════════ */
 body.light-mode {
-  --bg:          #f4dab2;   /* خلفية الصفحة — كريمي دافئ يؤطّر البطاقات       */
-  --bg-2:        #ffe5bf;   /* البطاقات واللوحات — اللون الكريمي المطلوب      */
-  --bg-3:        #eccfa0;   /* العناصر المرتفعة ورؤوس الجداول — أعمق قليلاً   */
-  --border:      #d9bc8f;   /* حدّ تان دافئ واضح                            */
-  --text:        #382d1e;   /* نص بنّي داكن (ليس أسود قاسٍ) مريح للعين        */
-  --text-2:      #6d5d44;   /* نص ثانوي بنّي مكتوم وواضح                     */
-  --text-muted:  #6d5d44;
-  --accent:      #a85d00;   /* عنبري غامق يُقرأ بوضوح على الكريمي            */
-  --accent-dim:  rgba(168,93,0,0.13);
-  --success:     #1f7a34;
-  --success-dim: rgba(31,122,52,0.13);
-  --danger:      #bf3326;
-  --danger-dim:  rgba(191,51,38,0.11);
-  --primary:     #4a4fc4;
-  --warning:     #a85d00;
-  --bg-1:        #f4dab2;
+  --bg:          #eef1f6;   /* خلفية الصفحة — رمادي بارد فاتح يؤطّر البطاقات */
+  --bg-2:        #ffffff;   /* البطاقات واللوحات — أبيض نقي                  */
+  --bg-3:        #f3f5f9;   /* العناصر المرتفعة ورؤوس الجداول — رمادي فاتح   */
+  --border:      #e7ebf1;   /* حدّ ناعم فاتح                                */
+  --text:        #1f2b37;   /* نص أردوازي داكن مريح للعين                   */
+  --text-2:      #7a8696;   /* نص ثانوي رمادي مكتوم                         */
+  --text-muted:  #7a8696;
+  --accent:      #0e9e8e;   /* تركوازي يُقرأ بوضوح على الأبيض               */
+  --accent-dim:  rgba(14,158,142,0.12);
+  --success:     #16a34a;
+  --success-dim: rgba(22,163,74,0.12);
+  --danger:      #e5564b;
+  --danger-dim:  rgba(229,86,75,0.11);
+  --primary:     #0e9e8e;
+  --warning:     #e08a00;
+  --bg-1:        #eef1f6;
 }
 
-/* قواعد الـhover/الأشرطة: أسود-شفاف لتظهر على الخلفية الكريمية الفاتحة */
-body.light-mode .nav-link:hover            { background: rgba(0,0,0,0.05); }
-body.light-mode .nav-group-btn:hover       { background: rgba(0,0,0,0.05); }
-body.light-mode .hamburger-btn:hover       { background: rgba(0,0,0,0.06); }
-body.light-mode .form-group input[readonly]{ background: rgba(0,0,0,0.04); }
-body.light-mode tr:hover td               { background: rgba(0,0,0,0.03); }
-body.light-mode td.editable:hover         { background: rgba(168,93,0,0.10) !important; }
+/* ── السايدبار: تركوازي غامق بنص فاتح ─────────────────────────── */
+body.light-mode .sidebar {
+  background: linear-gradient(180deg, #0f534d 0%, #0c4641 100%);
+  border-left: 1px solid #0a3d39;
+}
+body.light-mode .sidebar-logo      { border-bottom-color: rgba(255,255,255,0.10); }
+body.light-mode .sidebar-logo h2   { color: #ffffff; }
+body.light-mode .sidebar-logo p    { color: rgba(255,255,255,0.55); }
+body.light-mode .nav-section       { color: rgba(255,255,255,0.45); }
+body.light-mode .nav-link          { color: rgba(255,255,255,0.72); }
+body.light-mode .nav-link:hover    { background: rgba(255,255,255,0.08); color:#fff; }
+body.light-mode .nav-link.active,
+body.light-mode .nav-link.nav-sub.active {
+  background: rgba(255,255,255,0.14);
+  color: #ffffff;
+  border-right-color: #2dd4bf;          /* مؤشّر تركوازي ساطع */
+}
+body.light-mode .nav-group-btn         { color: rgba(255,255,255,0.85); }
+body.light-mode .nav-group-btn:hover   { background: rgba(255,255,255,0.08); color:#fff; }
+body.light-mode .nav-group-btn.open    { color:#fff; border-right-color:#2dd4bf; }
+body.light-mode .nav-link.nav-sub      { color: rgba(255,255,255,0.66); }
+body.light-mode .nav-group-body        { border-right-color: rgba(255,255,255,0.12); }
+body.light-mode .nav-link.nav-sub:hover{ border-right-color: rgba(255,255,255,0.22); }
+body.light-mode .sidebar-footer        { border-top-color: rgba(255,255,255,0.10); }
+body.light-mode .logout-btn            { color: #ffd9d3; }
+body.light-mode .logout-btn:hover      { background: rgba(255,255,255,0.08); color:#fff; }
 
-body.light-mode .w-card-bar-track  { background: rgba(0,0,0,0.10); }
-body.light-mode .w-card-bar-target { background: rgba(0,0,0,0.35); }
+/* ── الكروت: بيضاء بظل ناعم بدل الحدّ الثقيل (توقيع المظهر النظيف) ── */
+body.light-mode .card,
+body.light-mode .stat-card {
+  background: #ffffff;                 /* stat-card كانت رمادية (bg-3) — توحيدها بيضاء */
+  border-color: #edf0f4;
+  box-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
+}
+body.light-mode .stat-card:hover,
+body.light-mode .card:hover {
+  border-color: #d7dde6;
+  box-shadow: 0 6px 16px rgba(16,24,40,0.08);
+}
+
+/* ── قواعد hover/أشرطة على الخلفية الفاتحة ────────────────────── */
+body.light-mode .hamburger-btn:hover       { background: rgba(0,0,0,0.06); }
+body.light-mode .form-group input[readonly]{ background: rgba(0,0,0,0.03); }
+body.light-mode tr:hover td               { background: rgba(14,158,142,0.05); }
+body.light-mode td.editable:hover         { background: rgba(14,158,142,0.10) !important; }
+
+body.light-mode .w-card-bar-track  { background: rgba(0,0,0,0.08); }
+body.light-mode .w-card-bar-target { background: rgba(0,0,0,0.30); }
 
 /* mini-tab active text on accent bg */
 body.light-mode .mini-tab-active { color: #fff; }
 
-/* inline edit input — كريمي فاتح */
+/* inline edit input — رمادي فاتح */
 body.light-mode .inline-input {
-  background: #fff3df !important;
+  background: #f3f5f9 !important;
   color: var(--text);
 }
 
-/* btn-primary/warning نص أبيض على الخلفية الملوّنة الغامقة */
+/* btn-primary/warning نص أبيض على الخلفية الملوّنة */
 body.light-mode .btn-primary  { color: #fff; }
 body.light-mode .btn-warning  { color: #fff; }
 
-/* mobile top-bar shadow lighter */
+/* mobile top-bar أبيض بظل خفيف */
 body.light-mode #mobile-topbar {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.10);
+  background: #ffffff;
+  box-shadow: 0 1px 8px rgba(16,24,40,0.08);
 }
 
 /* sidebar drawer shadow lighter */
 body.light-mode .sidebar.mobile-open {
-  box-shadow: -6px 0 24px rgba(0,0,0,0.15);
+  box-shadow: -6px 0 24px rgba(0,0,0,0.18);
 }
 
 /* ===================== FONT ZOOM WIDGET ===================== */
