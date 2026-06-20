@@ -147,16 +147,16 @@
 
     <!-- Monthly Income Chart -->
     <div class="card" id="income-chart-card">
-      <div class="section-header" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
+      <div class="section-header income-chart-header">
         <span class="section-title">الدخل الشهري، ر.س
           <button class="info-btn" type="button" onclick="showCardInfo('monthly-income')" title="ما هذا الرسم؟" style="position:static;opacity:.7">ⓘ</button>
         </span>
-        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-right:auto">
-          <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <div class="income-chart-controls">
+          <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;flex-shrink:0">
             <button id="chart-view-month" class="btn btn-sm btn-primary" onclick="setChartView('month')" style="border-radius:0;border:none">شهري</button>
             <button id="chart-view-year"  class="btn btn-sm btn-secondary" onclick="setChartView('year')"  style="border-radius:0;border:none">سنوي</button>
           </div>
-          <div class="chart-mode-btns">
+          <div class="chart-mode-btns" style="flex-wrap:nowrap">
             <button class="chart-mode-btn active" onclick="setIncomeMode('bar')"     id="im-bar">أعمدة</button>
             <button class="chart-mode-btn"         onclick="setIncomeMode('line')"    id="im-line">خط</button>
             <button class="chart-mode-btn"         onclick="setIncomeMode('stacked')" id="im-stacked">مكدس</button>

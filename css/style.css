@@ -33,6 +33,7 @@ html, body {
   font-size: 15px;
   min-height: 100vh;
   line-height: 1.6;
+  overflow-x: hidden;
 }
 
 /* ===================== SIDEBAR ===================== */
@@ -1678,6 +1679,16 @@ body.light-mode .sidebar.mobile-open {
 .chart-mode-btn { padding:5px 13px; border-radius:var(--radius); border:1.5px solid var(--border); background:var(--bg-3); color:var(--text-2); font-family:'Tajawal',sans-serif; font-size:0.8rem; cursor:pointer; transition:all .18s; }
 .chart-mode-btn:hover  { border-color:var(--accent); color:var(--accent); }
 .chart-mode-btn.active { border-color:var(--accent); color:var(--accent); background:var(--accent-dim); font-weight:700; }
+
+/* Income chart header — controls row */
+.income-chart-header { align-items:flex-start; flex-wrap:wrap; gap:10px; }
+.income-chart-controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-inline-start:auto; }
+@media (max-width: 768px) {
+  .income-chart-header { flex-direction:column; align-items:stretch; gap:8px; }
+  .income-chart-controls { margin-inline-start:0; overflow-x:auto; flex-wrap:nowrap; padding-bottom:2px; }
+  .income-chart-controls::-webkit-scrollbar { height:3px; }
+  .income-chart-controls::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
+}
 
 /* ── Weight cards view ── */
 .w-cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(160px,1fr)); gap:10px; padding:8px 0 12px; }
