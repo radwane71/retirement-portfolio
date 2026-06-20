@@ -361,7 +361,7 @@ html, body {
 
 /* ── كرت Hero (النظرة العامة) — تركوازي بارز في الثيمين ── */
 .dash-hero {
-  background: linear-gradient(135deg, #0f6e63 0%, #0c544b 100%);
+  background: linear-gradient(135deg, #0f6e63 0%, #0c544b 100%) !important;
   border: none !important;
   color: #fff;
 }

@@ -731,7 +731,7 @@ function renderStats() {
       const totalRetPct = totalProfit / totalBuys * 100;
       trEl.textContent = formatSAR(totalProfit, true) + ` (${totalProfit >= 0 ? '+' : ''}${totalRetPct.toFixed(1)}%)`;
       trEl.className = 'value num ' + (totalProfit >= 0 ? 'text-success' : 'text-danger');
-      if (trSubEl) trSubEl.textContent = `غير محقق ${formatSAR(pnl, true)} + محقق ${formatSAR(s.realizedPnL || 0, true)} + توزيعات ${formatSAR(s.totalDivAll || 0)}`;
+      if (trSubEl) trSubEl.textContent = `القيمة الحالية + المبيعات + التوزيعات − المشتريات`;
     } else {
       trEl.textContent = '—';
       trEl.className = 'value num text-muted';
