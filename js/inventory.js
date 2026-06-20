@@ -1,5 +1,15 @@
 // ─── Storage ──────────────────────────────────────────────────────────────────
 const INV_KEY = 'inventory_v1';
+
+// ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
+window.CARD_INFO = {
+  'inventory': {
+    title: '📦 مخزون المنزل',
+    body: `
+      <p>جرد لمحتويات منزلك ومستودعك بقيمتها التقديرية — مفيد للتأمين، وعند البيع/الانتقال، ولمعرفة قيمة ممتلكاتك ضمن أصولك.</p>
+      <p class="info-note">💡 القيمة الإجمالية هنا يمكن إضافتها يدوياً كأصل في صفحة «صافي الثروة» لاكتمال صورة ثروتك. صوّر الفواتير المهمة واحتفظ بها.</p>`
+  },
+};
 function loadItems() { try { return JSON.parse(localStorage.getItem(INV_KEY)) || []; } catch { return []; } }
 function saveItems(list) { localStorage.setItem(INV_KEY, JSON.stringify(list)); }
 

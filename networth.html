@@ -112,7 +112,9 @@
     <div class="card" style="margin-bottom:20px">
       <div class="section-header" style="flex-wrap:wrap;gap:8px">
         <div>
-          <span class="section-title">📊 مصادر الثروة — الأصول مقابل الالتزامات</span>
+          <span class="section-title">📊 مصادر الثروة — الأصول مقابل الالتزامات
+            <button class="info-btn" type="button" onclick="showCardInfo('composition')" title="شرح هذا الرسم" style="position:static;opacity:.7">ⓘ</button>
+          </span>
           <div class="small text-muted" id="nw-comp-subtitle" style="margin-top:2px">—</div>
         </div>
         <div class="chart-mode-btns">
@@ -131,6 +133,10 @@
     </div>
 
     <!-- Net worth summary bar -->
+    <div class="section-header" style="margin:0 0 6px">
+      <span class="section-title">🏦 معادلة صافي الثروة</span>
+      <button class="info-btn" type="button" onclick="showCardInfo('networth-bar')" title="ما معنى صافي الثروة؟" style="position:static;opacity:.7">ⓘ</button>
+    </div>
     <div class="nw-total-bar">
       <div class="nw-item">
         <div class="lbl">إجمالي الأصول</div>
@@ -228,7 +234,9 @@
     <!-- Historical chart + snapshots -->
     <div class="card">
       <div class="section-header" style="flex-wrap:wrap;gap:8px">
-        <span class="section-title">📉 مسار صافي الثروة عبر الزمن</span>
+        <span class="section-title">📉 مسار صافي الثروة عبر الزمن
+          <button class="info-btn" type="button" onclick="showCardInfo('nw-history')" title="شرح هذا الرسم" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <div class="chart-mode-btns">
           <button class="chart-mode-btn active" onclick="setNwChartMode('line')"    id="nwm-line">خط</button>
           <button class="chart-mode-btn"         onclick="setNwChartMode('bar')"     id="nwm-bar">أشرطة</button>
@@ -242,7 +250,9 @@
 
     <div class="card">
       <div class="section-header">
-        <span class="section-title">اللقطات التاريخية</span>
+        <span class="section-title">اللقطات التاريخية
+          <button class="info-btn" type="button" onclick="showCardInfo('snapshots')" title="ما هي اللقطة؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <button class="btn btn-secondary btn-sm" onclick="exportNetworthCSV()">⬇ تصدير CSV</button>
       </div>
       <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>

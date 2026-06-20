@@ -1,6 +1,21 @@
 // ─── Storage — Supabase (primary) + localStorage (cache/fallback) ─────────────
 const SUKUK_KEY = 'sukuk_planner_v1';
 
+// ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
+window.CARD_INFO = {
+  'sukuk-summary': {
+    title: '📜 الصكوك والتمويل الجماعي',
+    body: `
+      <p>الصك أداة استثمار إسلامية تُشبه السند: تموّل مشروعاً/جهة مقابل عائد دوري متفق عليه، وتسترد رأس مالك عند الاستحقاق. عائدها شبه ثابت ومخاطرتها أقل من الأسهم عادةً.</p>
+      <div class="info-formula"><strong>العائد الكلي % = العائد السنوي % × (المدة بالأشهر ÷ 12)</strong></div>
+      <div class="info-math">
+        الإجمالي عند الاستحقاق = المبلغ × (1 + العائد الكلي%) — <em>يشمل رأس المال + الربح</em><br>
+        صافي الربح = الإجمالي عند الاستحقاق − المبلغ المستثمر
+      </div>
+      <p class="info-note">⚠️ ملاحظتان مهمتان: (١) العائد هنا <strong>بسيط</strong> غير مركّب (مناسب لصك يوزّع أرباحه دورياً). (٢) «متوسط العائد الكلي %» إجمالي على كامل المدة وليس سنوياً — صكٌّ بعائد 10% كلي على سنتين ≈ 5% سنوياً فقط، فانتبه عند المقارنة.</p>`
+  },
+};
+
 function getStore() {
   try {
     const raw = localStorage.getItem(userLsKey(SUKUK_KEY)) || localStorage.getItem(SUKUK_KEY);

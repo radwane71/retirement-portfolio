@@ -4,6 +4,22 @@ let _userId    = null;
 
 const STATUS_LBL = { owned: 'مملوك', rented: 'مؤجر', sold: 'مباع' };
 
+// ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
+window.CARD_INFO = {
+  'realestate-summary': {
+    title: '🏠 العقارات',
+    body: `
+      <p>تتبّع عقاراتك كأصل ضمن ثروتك: قيمتها الحالية، تكلفة شرائها، الربح الورقي، والدخل الإيجاري.</p>
+      <div class="info-math">
+        • <strong>القيمة الحالية:</strong> تقديرك السوقي اليوم (حدّثه دورياً).<br>
+        • <strong>الربح/الخسارة:</strong> = القيمة الحالية − تكلفة الشراء (ربح ورقي حتى تبيع).<br>
+        • <strong>الدخل الإيجاري الشهري:</strong> من العقارات المؤجّرة فقط.
+      </div>
+      <div class="info-formula">العائد الإيجاري السنوي ≈ (الإيجار الشهري × 12) ÷ القيمة الحالية × 100</div>
+      <p class="info-note">💡 العائد الإيجاري يقيس كفاءة العقار كمصدر دخل — عقار بقيمة مليون يدرّ 40 ألف سنوياً = 4%. قارنه بعوائد الأسهم/الصكوك لتقرّر أين تضع مالك. (العقارات المباعة تُستبعد من الإجماليات وتظهر في صافي الثروة.)</p>`
+  },
+};
+
 function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
   return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
     `data-table="${table}" data-id="${esc(rowId)}" data-field="${field}" ` +

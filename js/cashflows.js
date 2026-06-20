@@ -4,6 +4,17 @@ let divEntries = [];  // أرباح موزعة مقروءة من جدول divide
 
 const TYPE_AR = { deposit: 'إيداع', withdrawal: 'سحب', dividend: 'أرباح موزعة' };
 
+// ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
+window.CARD_INFO = {
+  'cashflow-summary': {
+    title: '💸 التدفقات النقدية',
+    body: `
+      <p>هنا تسجّل المال الذي تُدخله لحساب الاستثمار (إيداع) أو تُخرجه منه (سحب). هذا يفصل «أموالك التي ضختها» عن «أرباح السوق» — أساسٌ لقياس أدائك الحقيقي.</p>
+      <div class="info-formula"><strong>صافي التدفق = إجمالي الإيداعات − إجمالي السحوبات</strong></div>
+      <p class="info-note">💡 لماذا يهم؟ لو ارتفعت محفظتك 10,000 ر.س لكنك أودعت 10,000، فالنمو من جيبك لا من السوق. هذه السجلات تُغذّي حساب معدل مساهمتك الشهري ومسار الوصول للتقاعد (FIRE) في لوحة التحكم. الأرباح الموزعة تُقرأ تلقائياً من صفحتها ولا تحتاج إدخالاً هنا.</p>`
+  },
+};
+
 function edCf(rowId, field, type, raw, extraCls = '', selectKey = '') {
   return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
     `data-table="cashflow_entries" data-id="${esc(rowId)}" data-field="${field}" ` +

@@ -160,7 +160,9 @@
     <!-- ── TAB: Open positions ── -->
     <div id="pview-open" class="card">
       <div class="section-header">
-        <span class="section-title">المراكز المفتوحة — Open Positions</span>
+        <span class="section-title">المراكز المفتوحة — Open Positions
+          <button class="info-btn" type="button" onclick="showCardInfo('open-pos')" title="ماذا تعني هذه الأعمدة؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <span class="small text-muted">الأسهم الموجودة حالياً في المحفظة</span>
       </div>
       <p class="small text-muted mb-4" style="margin-top:-8px">الأسهم مرتبة بالربح/الخسارة غير المحقق — التكلفة من متوسط سعر الشراء المرجّح</p>
@@ -191,7 +193,9 @@
     <!-- ── TAB: Closed positions ── -->
     <div id="pview-closed" class="card" style="display:none">
       <div class="section-header">
-        <span class="section-title">المراكز المغلقة — Closed Positions</span>
+        <span class="section-title">المراكز المغلقة — Closed Positions
+          <button class="info-btn" type="button" onclick="showCardInfo('closed-pos')" title="ما هي المراكز المغلقة؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <span class="small text-muted">صفقات تم إغلاقها بالكامل (بيع = شراء)</span>
       </div>
       <div class="table-wrapper">
@@ -417,7 +421,9 @@
     <!-- ── TAB: Dividend Metrics ── -->
     <div id="pview-div-metrics" class="card" style="display:none">
       <div class="section-header">
-        <span class="section-title">💰 مؤشرات التوزيعات المتقدمة</span>
+        <span class="section-title">💰 مؤشرات التوزيعات المتقدمة
+          <button class="info-btn" type="button" onclick="showCardInfo('div-metrics')" title="شرح هذه المؤشرات" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <span class="small text-muted">YoC · Dividend ROI · سنوات الاسترداد</span>
       </div>
       <p class="small text-muted" style="margin-bottom:12px">
@@ -452,7 +458,9 @@
     <!-- ── TAB: Behavioral Audit ── -->
     <div id="pview-behavioral" class="card" style="display:none">
       <div class="section-header">
-        <span class="section-title">🧠 تحليل السلوك الاستثماري</span>
+        <span class="section-title">🧠 تحليل السلوك الاستثماري
+          <button class="info-btn" type="button" onclick="showCardInfo('behavioral')" title="ماذا يكشف هذا التحليل؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <span class="small text-muted">مرآة تكشف أنماطك الفعلية في الشراء والبيع</span>
       </div>
       <p class="small text-muted" style="margin-bottom:16px">

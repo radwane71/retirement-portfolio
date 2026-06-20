@@ -395,6 +395,46 @@ function calcCommission(shares, price) {
   };
 }
 
+// ── Shared "explain this card" modal (ⓘ) ──────────────────────
+// يُستخدم في كل الصفحات (عدا لوحة التحكم التي لها نسخة خاصة بأرقام حيّة).
+// الصفحة تُعرّف window.CARD_INFO = { key: { title, body } } وتضع أزرار:
+//   <button class="info-btn" type="button" onclick="showCardInfo('key')">ⓘ</button>
+// body يمكن أن يكون نصاً أو دالة تُعيد نصاً (لحساب أرقام عند الفتح).
+window.openInfoModal = function(title, bodyHtml) {
+  let ov = document.getElementById('tharwa-info-modal');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'tharwa-info-modal';
+    ov.className = 'modal-overlay';
+    ov.style.display = 'none';
+    ov.innerHTML =
+      '<div class="modal" style="max-width:480px">' +
+        '<div class="modal-header">' +
+          '<span class="modal-title" id="tharwa-info-title">—</span>' +
+          '<button class="modal-close" type="button" aria-label="إغلاق">✕</button>' +
+        '</div>' +
+        '<div id="tharwa-info-body" style="padding:4px 0 8px;line-height:1.8;font-size:0.92rem"></div>' +
+      '</div>';
+    document.body.appendChild(ov);
+    const close = () => { ov.style.display = 'none'; };
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+    ov.querySelector('.modal-close').addEventListener('click', close);
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+  }
+  ov.querySelector('#tharwa-info-title').textContent = title;
+  ov.querySelector('#tharwa-info-body').innerHTML = bodyHtml;
+  ov.style.display = 'flex';
+};
+
+// نسخة مشتركة — تقرأ من window.CARD_INFO. لوحة التحكم تُعرّف نسختها الخاصة
+// (function declaration في dashboard.js تُحمَّل لاحقاً وتتجاوز هذه على صفحتها فقط).
+window.showCardInfo = function(key) {
+  const c = (window.CARD_INFO || {})[key];
+  if (!c) return;
+  const body = typeof c.body === 'function' ? c.body() : c.body;
+  openInfoModal(c.title, body);
+};
+
 // ── Chart defaults ────────────────────────────────────────────
 function chartDefaults() {
   const light = document.body.classList.contains('light-mode');

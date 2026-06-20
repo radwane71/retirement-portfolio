@@ -137,6 +137,10 @@
     <div id="div-confidence-banner" style="margin-bottom:12px"></div>
 
     <!-- Summary Stats Bar -->
+    <div class="section-header" style="margin-bottom:8px">
+      <span class="section-title">📊 ملخص العائد التوزيعي</span>
+      <button class="info-btn" type="button" onclick="showCardInfo('div-stats')" title="ما معنى هذه الأرقام؟" style="position:static;opacity:.7">ⓘ</button>
+    </div>
     <div id="div-stats" class="tx-stats-bar" style="margin-bottom:16px">
       <div class="tx-stat-item"><div class="tx-stat-val text-muted">—</div><div class="tx-stat-lbl">جارٍ التحميل…</div></div>
     </div>
@@ -144,7 +148,9 @@
     <!-- Monthly Income Chart -->
     <div class="card" id="income-chart-card">
       <div class="section-header" style="align-items:flex-start;flex-wrap:wrap;gap:10px">
-        <span class="section-title">الدخل الشهري، ر.س</span>
+        <span class="section-title">الدخل الشهري، ر.س
+          <button class="info-btn" type="button" onclick="showCardInfo('monthly-income')" title="ما هذا الرسم؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-right:auto">
           <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
             <button id="chart-view-month" class="btn btn-sm btn-primary" onclick="setChartView('month')" style="border-radius:0;border:none">شهري</button>
@@ -171,11 +177,15 @@
     <!-- Summaries -->
     <div class="charts-grid">
       <div class="card">
-        <div class="section-header"><span class="section-title">الإجمالي السنوي</span></div>
+        <div class="section-header"><span class="section-title">الإجمالي السنوي</span>
+          <button class="info-btn" type="button" onclick="showCardInfo('yearly-summary')" title="شرح الجدول السنوي" style="position:static;opacity:.7">ⓘ</button>
+        </div>
         <div id="yearly-summary"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></div>
       </div>
       <div class="card">
-        <div class="section-header"><span class="section-title">الإجمالي لكل سهم</span></div>
+        <div class="section-header"><span class="section-title">الإجمالي لكل سهم</span>
+          <button class="info-btn" type="button" onclick="showCardInfo('holding-summary')" title="شرح جدول كل سهم" style="position:static;opacity:.7">ⓘ</button>
+        </div>
         <div id="holding-summary"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></div>
       </div>
     </div>

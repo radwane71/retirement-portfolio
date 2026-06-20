@@ -2,6 +2,16 @@ let userStocks   = [];
 let holdings     = [];
 let _conflictPending = null;   // {ticker, name, sector} من النموذج عند التعارض
 
+// ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
+window.CARD_INFO = {
+  'userdb': {
+    title: '🗂️ قاعدة بيانات أسهمي',
+    body: `
+      <p>قاموسك الشخصي للأسهم: الرمز + الاسم + القطاع. تُدخله مرة واحدة هنا فيُستخدم تلقائياً في كل الصفحات (الأهداف، المراقبة، الأرباح…).</p>
+      <p class="info-note">💡 القطاع الذي تحدّده هنا هو أساس حسابات التنويع والتركّز القطاعي في لوحة التحكم — احرص على تصنيف صحيح ومتّسق (مثلاً «بنوك» لكل البنوك لا «بنك» مرة و«مصارف» مرة).</p>`
+  },
+};
+
 async function init() {
   const user = await requireAuth();
   if (!user) return;

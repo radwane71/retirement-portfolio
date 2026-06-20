@@ -414,7 +414,9 @@
     <!-- ── Scenario selector ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">السيناريوهات الأربعة</span>
+        <span class="section-title">السيناريوهات الأربعة
+          <button class="info-btn" type="button" onclick="showCardInfo('scenarios')" title="كيف تُحسب السيناريوهات؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <span class="small text-muted">اضغط على السيناريو لتفعيله أو إيقافه في الرسم</span>
       </div>
       <div class="scenario-grid" id="scenario-grid">
@@ -429,7 +431,9 @@
     <!-- ── User inputs ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">معطيات الإسقاط</span>
+        <span class="section-title">معطيات الإسقاط
+          <button class="info-btn" type="button" onclick="showCardInfo('forecast-inputs')" title="ماذا تعني هذه المدخلات؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <button class="btn btn-primary btn-sm" onclick="runForecast()">تحديث الإسقاط ↻</button>
       </div>
       <div class="inputs-panel">
@@ -492,7 +496,9 @@
     <!-- ── Goal setting ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">🎯 تحديد الهدف — متى تصل؟</span>
+        <span class="section-title">🎯 تحديد الهدف — متى تصل؟
+          <button class="info-btn" type="button" onclick="showCardInfo('forecast-goal')" title="كيف يُحسب وقت الوصول؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
         <span class="small text-muted">حدّد هدفك لكل سيناريو</span>
       </div>
       <div class="goal-type-btns">

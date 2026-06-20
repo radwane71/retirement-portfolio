@@ -313,25 +313,34 @@ async function loadAllData() {
   const totalGrantTickers = Object.keys(grantMap).length;
 
   // ── ر/خ المحقق من البيع (دقيق بعد الرسوم) ────────────────
-  // متوسط تكلفة الشراء المرجّح لكل رمز — يشمل عمولة وضريبة الشراء (t.total)
-  // وأسهم المنح تُضاف بتكلفة صفر فتخفض المتوسط (WAC حقيقي)
-  const buyMap = {};
-  txRows.filter(t => t.type === 'buy').forEach(t => {
-    if (!buyMap[t.ticker]) buyMap[t.ticker] = { cost: 0, shares: 0 };
-    buyMap[t.ticker].cost   += +t.total;     // يشمل العمولة + الضريبة
-    buyMap[t.ticker].shares += +t.shares;
-  });
-  txRows.filter(t => t.type === 'grant').forEach(t => {
-    if (!buyMap[t.ticker]) buyMap[t.ticker] = { cost: 0, shares: 0 };
-    buyMap[t.ticker].shares += +t.shares;    // أسهم مجانية: تكلفة صفر
-  });
+  // F-6: WAC زمني — نمشي على المعاملات بترتيبها التاريخي ونستخدم متوسط التكلفة
+  // وقت كل عملية بيع (لا متوسط نهائي يشمل مشتريات لاحقة). مطابق لمنهج
+  // transactions.js (renderTxStats) لضمان توافق الرقم بين الصفحتين.
+  //   • تكلفة الشراء (t.total) تشمل العمولة + الضريبة
+  //   • أسهم المنح تُضاف بتكلفة صفر فتخفض المتوسط (WAC حقيقي)
+  //   • t.total للبيع = القيمة − العمولة − الضريبة (صافي ما دخل جيبك)
   let realizedPnL = 0;
-  txRows.filter(t => t.type === 'sell').forEach(t => {
-    const m   = buyMap[t.ticker];
-    const avg = m && m.shares > 0 ? m.cost / m.shares : 0;
-    // t.total للبيع = القيمة − العمولة − الضريبة (صافي ما دخل جيبك)
-    realizedPnL += (+t.total) - (+t.shares * avg);
-  });
+  {
+    const sortedTx = txRows.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    const costMap  = {}; // ticker → { shares, totalCost (شاملة عمولة + ضريبة) }
+    sortedTx.forEach(t => {
+      if (!costMap[t.ticker]) costMap[t.ticker] = { shares: 0, totalCost: 0 };
+      const m = costMap[t.ticker];
+      if (t.type === 'buy') {
+        m.totalCost += +t.total;
+        m.shares    += +t.shares;
+      } else if (t.type === 'grant') {
+        m.shares    += +t.shares;            // منحة: تكلفة صفر
+      } else if (t.type === 'sell') {
+        const avgCostPerShare = m.shares > 0 ? m.totalCost / m.shares : 0;
+        const costOfSold      = avgCostPerShare * +t.shares;
+        realizedPnL += (+t.total) - costOfSold;
+        // خصم التكلفة بعدد الأسهم (لا بالنسبة) — مطابق recomputeHoldingFromTx
+        m.totalCost = Math.max(0, m.totalCost - costOfSold);
+        m.shares    = Math.max(0, m.shares - +t.shares);
+      }
+    });
+  }
 
   // ── القيمة السوقية والتكلفة ──────────────────────────────
   const totalValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
@@ -3494,14 +3503,14 @@ function showCardInfo(key) {
         <p>هذا الرقم يُحسب من صفقات البيع الفعلية — ما تحقق فعلاً في جيبك.</p>
         <div class="info-formula">
           لكل صفقة بيع:<br>
-          <strong>ر/خ = عدد الأسهم المباعة × (سعر البيع − متوسط سعر الشراء)</strong>
+          <strong>ر/خ = صافي حصيلة البيع − (عدد الأسهم المباعة × متوسط التكلفة وقت البيع)</strong>
         </div>
         <div class="info-math">
-          متوسط سعر الشراء يُحسب من جميع عمليات الشراء لكل رمز<br>
-          ثم يُطرح من سعر البيع الفعلي<br>
+          نمشي على معاملاتك بترتيبها التاريخي، ونستخدم متوسط التكلفة المرجّح<br>
+          (شامل العمولة والضريبة) <strong>كما كان لحظة كل بيع</strong> — لا متوسطاً نهائياً<br>
           إجمالي ر/خ المحقق = <strong class="${(s.realizedPnL||0) >= 0 ? 'text-success' : 'text-danger'}">${(s.realizedPnL||0) >= 0 ? '+' : ''}${formatSAR(s.realizedPnL||0, true)}</strong>
         </div>
-        <p class="info-note">⚠️ هذا تقدير بناءً على متوسط تكلفة الشراء الكلي لكل رمز.</p>`
+        <p class="info-note">✅ هذه الطريقة الزمنية الدقيقة، ومطابقة لرقم «الربح المحقق» في صفحة سجل المعاملات.</p>`
     },
     'total-return': {
       title: '🧮 إجمالي العائد منذ البداية',
