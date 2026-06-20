@@ -24,6 +24,7 @@ let activeChildId = null;
 let activeTab     = 'life-tab';
 let goalEditId    = null;
 let goalType      = null;
+let childEditMode = false;   // true = تعديل الطفل الحالي · false = إضافة طفل جديد
 let yearEditId    = null;
 let gradeCtx      = null;  // { yearId, termId, subjectId }
 
@@ -127,6 +128,7 @@ function calcAge(birth) {
 
 // ── Child Modal ───────────────────────────────────────────────────────────────
 function openChildModal(editing = false) {
+  childEditMode = editing;
   const c = editing ? getChild() : null;
   document.getElementById('child-modal-title').textContent = c ? 'تعديل بيانات الطفل' : 'إضافة طفل جديد';
   document.getElementById('cm-name').value   = c?.name   || '';
@@ -151,7 +153,7 @@ function saveChild() {
     grade:  document.getElementById('cm-grade').value.trim(),
     notes:  document.getElementById('cm-notes').value.trim()
   };
-  const existing = getChild();
+  const existing = childEditMode ? getChild() : null;
   if (existing) {
     Object.assign(existing, obj);
     showToast('تم تحديث البيانات ✓', 'success');
