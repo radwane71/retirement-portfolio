@@ -106,6 +106,13 @@
     .hist-models-tbl tr:last-child td { border-bottom:none; }
     .hist-clear-btn { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; border-radius:7px; padding:8px 16px; font-size:0.85rem; cursor:pointer; font-family:'Tajawal',sans-serif; }
     .hist-clear-btn:hover { background:rgba(239,68,68,0.25); }
+    /* حقول الرمز والاسم */
+    .ticker-row { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-bottom:4px; }
+    .hist-stock-id { font-size:1.05rem; font-weight:900; color:var(--primary); letter-spacing:0.5px; }
+    .hist-stock-name { font-size:0.88rem; color:var(--text-muted); margin-top:2px; }
+    .hist-saving { font-size:0.75rem; color:var(--text-muted); animation:pulse 1.2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .ticker-lookup-hint { font-size:0.75rem; color:var(--text-muted); margin-top:3px; }
   </style>
 </head>
 <body>
@@ -194,6 +201,21 @@
       <!-- بطاقة البيانات الأساسية -->
       <div class="card">
         <div class="section-hdr">📊 البيانات الأساسية</div>
+
+        <div class="ticker-row">
+          <div class="ig" style="margin-bottom:0">
+            <label>رمز السهم</label>
+            <input type="text" id="stockTicker" placeholder="مثال: 1010" maxlength="10"
+                   oninput="this.value=this.value.toUpperCase()"
+                   onblur="lookupStockName()">
+            <p class="ticker-lookup-hint">سيُملأ الاسم تلقائياً من قاعدة بياناتك</p>
+          </div>
+          <div class="ig" style="margin-bottom:0">
+            <label>اسم الشركة</label>
+            <input type="text" id="stockName" placeholder="يُملأ تلقائياً أو أدخله يدوياً">
+          </div>
+        </div>
+        <div style="margin-bottom:14px;"></div>
 
         <div class="ig">
           <label>نوع الشركة <button class="help-icon" onclick="showHelp('companyType')">ℹ️</button></label>
@@ -308,8 +330,11 @@
 
     <!-- سجل العمليات -->
     <div class="card" id="historySection" style="display:none;">
-      <div class="section-hdr" style="display:flex;justify-content:space-between;align-items:center;">
-        <span>🗂️ سجل العمليات الحسابية</span>
+      <div class="section-hdr" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span>🗂️ سجل العمليات الحسابية</span>
+          <span id="hist-saving-badge" class="hist-saving" style="display:none;">💾 جاري الحفظ…</span>
+        </div>
         <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
       </div>
       <div id="historyList"></div>
@@ -681,29 +706,75 @@
       document.getElementById('waccInputs').style.display = this.checked ? '' : 'none';
     });
 
-    // ===== سجل العمليات =====
-    const HIST_KEY = 'valuation_history_v1';
+    // ===== سجل العمليات — Supabase =====
+    const HIST_DB_KEY = 'valuation_history_v1';
+    let _history = [];
 
-    function loadHistory() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch { return []; } }
-    function saveHistory(arr) { localStorage.setItem(HIST_KEY, JSON.stringify(arr)); }
+    // ── تحميل السجل من Supabase مع migrate تلقائي من localStorage ──
+    async function loadHistoryFromDB() {
+      try {
+        const remote = await loadUserSetting(HIST_DB_KEY);
+        if (Array.isArray(remote) && remote.length > 0) {
+          _history = remote;
+        } else {
+          // نقل البيانات القديمة من localStorage إن وجدت
+          try {
+            const local = JSON.parse(localStorage.getItem(HIST_DB_KEY) || '[]');
+            if (local.length > 0) {
+              _history = local;
+              await saveUserSetting(HIST_DB_KEY, _history);
+              localStorage.removeItem(HIST_DB_KEY);
+            }
+          } catch (_) {}
+        }
+      } catch (_) {
+        // fallback عند انقطاع الشبكة
+        try { _history = JSON.parse(localStorage.getItem(HIST_DB_KEY) || '[]'); } catch { _history = []; }
+      }
+    }
+
+    async function persistHistory() {
+      try {
+        await saveUserSetting(HIST_DB_KEY, _history);
+      } catch (e) {
+        console.warn('تعذّر حفظ السجل في Supabase:', e);
+      }
+    }
+
+    // ── البحث التلقائي عن اسم الشركة من قاعدة بيانات الأسهم ──
+    async function lookupStockName() {
+      const ticker = (document.getElementById('stockTicker').value || '').trim().toUpperCase();
+      if (!ticker) return;
+      const nameEl = document.getElementById('stockName');
+      if (nameEl.value.trim()) return; // لا تتجاوز ما أدخله المستخدم يدوياً
+      try {
+        // نبحث في user_stocks أولاً ثم holdings
+        const { data: us } = await supabaseClient.from('user_stocks').select('name').eq('ticker', ticker).maybeSingle();
+        if (us?.name) { nameEl.value = us.name; return; }
+        const { data: h }  = await supabaseClient.from('holdings').select('name').eq('ticker', ticker).maybeSingle();
+        if (h?.name)  { nameEl.value = h.name; }
+      } catch (_) {}
+    }
 
     function captureInputs() {
       const companyType = document.getElementById('companyType').value;
       const base = {
+        ticker:    (document.getElementById('stockTicker').value || '').trim().toUpperCase(),
+        stockName: (document.getElementById('stockName').value   || '').trim(),
         companyType,
-        growth5yr:    document.getElementById('growth5yr').value,
-        growthPerp:   document.getElementById('growthPerp').value,
-        discountRate: document.getElementById('discountRate').value,
-        currentPe:    document.getElementById('currentPe').value,
-        sectorPe:     document.getElementById('sectorPe').value,
-        dividends:    document.getElementById('dividends').value,
-        bookValue:    document.getElementById('bookValue').value,
-        bondYield:    document.getElementById('bondYield').value,
-        currentPrice: document.getElementById('currentPrice').value,
-        fairPb:       document.getElementById('fairPb').value,
-        scenario:     document.getElementById('scenario').value,
-        debtRatio:    document.getElementById('debtRatio').value,
-        liquidityRatio: document.getElementById('liquidityRatio').value,
+        growth5yr:       document.getElementById('growth5yr').value,
+        growthPerp:      document.getElementById('growthPerp').value,
+        discountRate:    document.getElementById('discountRate').value,
+        currentPe:       document.getElementById('currentPe').value,
+        sectorPe:        document.getElementById('sectorPe').value,
+        dividends:       document.getElementById('dividends').value,
+        bookValue:       document.getElementById('bookValue').value,
+        bondYield:       document.getElementById('bondYield').value,
+        currentPrice:    document.getElementById('currentPrice').value,
+        fairPb:          document.getElementById('fairPb').value,
+        scenario:        document.getElementById('scenario').value,
+        debtRatio:       document.getElementById('debtRatio').value,
+        liquidityRatio:  document.getElementById('liquidityRatio').value,
         earningsQuality: document.getElementById('earningsQuality').value,
       };
       if (companyType === 'reit') {
@@ -725,45 +796,47 @@
       if (document.getElementById('useWacc').checked) {
         Object.assign(base, {
           useWacc: true,
-          riskFree:    document.getElementById('riskFree').value,
-          beta:        document.getElementById('beta').value,
-          marketReturn:document.getElementById('marketReturn').value,
-          debtCost:    document.getElementById('debtCost').value,
-          taxRate:     document.getElementById('taxRate').value,
-          debtEquity:  document.getElementById('debtEquity').value,
+          riskFree:     document.getElementById('riskFree').value,
+          beta:         document.getElementById('beta').value,
+          marketReturn: document.getElementById('marketReturn').value,
+          debtCost:     document.getElementById('debtCost').value,
+          taxRate:      document.getElementById('taxRate').value,
+          debtEquity:   document.getElementById('debtEquity').value,
         });
       }
       return base;
     }
 
-    function saveCalcToHistory(inputs, results) {
-      const arr = loadHistory();
-      arr.unshift({
-        id: Date.now(),
-        date: new Date().toLocaleString('ar-SA'),
-        inputs,
-        results
-      });
-      if (arr.length > 50) arr.splice(50);
-      saveHistory(arr);
+    async function saveCalcToHistory(inputs, results) {
+      _history.unshift({ id: Date.now(), date: new Date().toLocaleString('ar-SA'), inputs, results });
+      if (_history.length > 100) _history.splice(100);
       renderHistory();
+      showHistSaving(true);
+      await persistHistory();
+      showHistSaving(false);
     }
 
-    function deleteHistoryItem(id) {
-      const arr = loadHistory().filter(e => e.id !== id);
-      saveHistory(arr);
+    async function deleteHistoryItem(id) {
+      _history = _history.filter(e => e.id !== id);
       renderHistory();
+      await persistHistory();
     }
 
-    function clearAllHistory() {
-      if (!confirm('هل أنت متأكد من حذف جميع العمليات؟')) return;
-      saveHistory([]);
+    async function clearAllHistory() {
+      if (!await confirmAsync('هل أنت متأكد من حذف جميع العمليات؟ لا يمكن التراجع.')) return;
+      _history = [];
       renderHistory();
+      await persistHistory();
+    }
+
+    function showHistSaving(on) {
+      const el = document.getElementById('hist-saving-badge');
+      if (el) el.style.display = on ? '' : 'none';
     }
 
     function toggleHistDetail(id) {
-      const el = document.getElementById('hist-detail-' + id);
-      const btn = document.getElementById('hist-btn-' + id);
+      const el  = document.getElementById('hist-detail-' + id);
+      const btn = document.getElementById('hist-btn-'    + id);
       if (el.classList.contains('open')) {
         el.classList.remove('open');
         btn.textContent = '👁️ عرض التفاصيل';
@@ -774,6 +847,7 @@
     }
 
     const INPUT_LABELS = {
+      ticker:'رمز السهم', stockName:'اسم الشركة',
       companyType:'نوع الشركة', eps:'EPS', fcf:'FCF', netDebt:'الدين الصافي/سهم',
       growth5yr:'نمو 5 سنوات %', growthPerp:'نمو دائم %', discountRate:'WACC %',
       currentPe:'P/E الحالي', sectorPe:'P/E القطاع', dividends:'توزيعات',
@@ -787,37 +861,41 @@
     };
 
     function renderHistory() {
-      const arr = loadHistory();
       const section = document.getElementById('historySection');
       const list    = document.getElementById('historyList');
-      if (arr.length === 0) {
+      if (_history.length === 0) {
         section.style.display = 'none';
         list.innerHTML = '';
         return;
       }
       section.style.display = '';
-      list.innerHTML = arr.map(entry => {
-        const inp = entry.inputs;
-        const res = entry.results;
-        const typeLabel = inp.companyType === 'reit' ? '🏢 ريت عقاري' : '📊 شركة عادية';
+      const scenarioMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
+
+      list.innerHTML = _history.map(entry => {
+        const inp = entry.inputs || {};
+        const res = entry.results || {};
+        const typeLabel  = inp.companyType === 'reit' ? '🏢 ريت عقاري' : '📊 شركة عادية';
+        const ticker     = inp.ticker    || '';
+        const stockName  = inp.stockName || '';
 
         const inputsHtml = Object.entries(inp)
-          .filter(([k]) => k !== 'companyType' && k !== 'useWacc' && k !== 'scenario')
+          .filter(([k]) => !['companyType','useWacc','scenario','ticker','stockName'].includes(k))
           .map(([k,v]) => `<div class="hist-inp"><span>${INPUT_LABELS[k]||k}:</span><span>${v}</span></div>`)
           .join('');
 
-        const modelsHtml = res.models && res.models.length
-          ? `<div style="overflow-x:auto;"><table class="hist-models-tbl"><thead><tr><th>النموذج</th><th>القيمة العادلة</th></tr></thead><tbody>
-              ${res.models.map(m => `<tr><td>${m.name}</td><td>${m.value}</td></tr>`).join('')}
-            </tbody></table></div>`
+        const modelsHtml = res.models?.length
+          ? `<div style="overflow-x:auto;"><table class="hist-models-tbl">
+               <thead><tr><th>النموذج</th><th>القيمة العادلة</th></tr></thead>
+               <tbody>${res.models.map(m=>`<tr><td>${m.name}</td><td>${m.value}</td></tr>`).join('')}</tbody>
+             </table></div>`
           : '';
-
-        const scenarioMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
 
         return `<div class="hist-item">
           <div class="hist-header">
             <div>
-              <div class="hist-title">${typeLabel} — ${scenarioMap[inp.scenario]||inp.scenario}</div>
+              ${ticker ? `<div class="hist-stock-id">${ticker}</div>` : ''}
+              ${stockName ? `<div class="hist-stock-name">${stockName}</div>` : ''}
+              <div class="hist-title" style="margin-top:${ticker?'4px':'0'}">${typeLabel} — ${scenarioMap[inp.scenario]||inp.scenario||'—'}</div>
               <div class="hist-date">🕐 ${entry.date}</div>
             </div>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
@@ -837,13 +915,12 @@
       }).join('');
     }
 
-    // patch calculateFairValue to save history
+    // ── patch calculateFairValue لحفظ النتيجة ──
     const _origCalc = calculateFairValue;
     calculateFairValue = function() {
       const inputs = captureInputs();
       _origCalc();
-      // collect results after rendering
-      setTimeout(() => {
+      setTimeout(async () => {
         const fairRange  = document.getElementById('fairValueRange').textContent;
         const fairDetail = document.getElementById('fairValueDetails').textContent;
         const marginEl   = document.getElementById('dashboardMargin').textContent;
@@ -853,12 +930,24 @@
           if (tds.length >= 2) models.push({ name: tds[0].innerText, value: tds[1].innerText });
         });
         if (fairRange && fairRange !== '-' && fairRange !== '—') {
-          saveCalcToHistory(inputs, { fairValueRange: fairRange, fairValueDetail: fairDetail, marginText: marginEl !== '—' ? marginEl : '', models });
+          await saveCalcToHistory(inputs, {
+            fairValueRange: fairRange,
+            fairValueDetail: fairDetail,
+            marginText: (marginEl && marginEl !== '—') ? marginEl : '',
+            models
+          });
         }
       }, 300);
     };
 
-    renderHistory();
+    async function init() {
+      const user = await requireAuth();
+      if (!user) return;
+      setActiveNav('nav-stock-valuation');
+      await loadHistoryFromDB();
+      renderHistory();
+    }
+
     init();
   </script>
 </body>
