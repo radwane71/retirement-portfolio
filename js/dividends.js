@@ -404,8 +404,13 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
   const cwDiff  = calMonths - months;
 
   // ── بيانات الأرباح ────────────────────────────────────────────────
+  // عدد السنوات التقويمية التي ظهر فيها توزيع. ملاحظة: محفظة تمتد على سنتين
+  // تقويميتين (مثلاً بدأت خريف 2025 وتوزيعات في 2025 ثم 2026) تعطي 2 رغم أن
+  // عمرها أقل من سنة. نقيّدها بعمر المحفظة التقويمي حتى لا نعدّ «سنة أرباح
+  // كاملة» لم تكتمل — يمنع تضخيم الثقة والتناقض في العرض (عمر 8 شهر ↔ «2 سنة»).
   const divYearsSet   = new Set(dividends.map(d => d.year));
-  const divYears      = divYearsSet.size;
+  const maxCycles     = Math.max(1, Math.ceil(calMonths / 12));
+  const divYears      = Math.min(divYearsSet.size, maxCycles);
   const uniqueTickers = new Set(dividends.map(d => d.ticker)).size;
 
   // ── الفجوة بين Forward و TTM ──────────────────────────────────────
