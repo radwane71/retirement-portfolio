@@ -1103,7 +1103,7 @@ function renderPortfolioHealthCard() {
     dDetail = `100% — صافي ثروتك يكفي للاستقلال المالي${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}`;
   } else {
     const pStr = fireProgress.toFixed(0) + '%';
-    const rem  = formatSAR(Math.max(0, fireNumber - latestNW));
+    const rem  = formatSAR(Math.max(0, fireNumber - fireBase));
     if (fireProgress >= 50) {
       dScore = 'yellow'; dLabel = `${pStr} من الهدف`;
     } else {
