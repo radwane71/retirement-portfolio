@@ -1169,20 +1169,37 @@ function renderPortfolioHealthCard() {
   // ══════════════════════════════════════════════════════════
   // دوال مساعدة للرسم
   // ══════════════════════════════════════════════════════════
-  const DOT = {
-    green:  `<span style="color:#3fb950;font-size:.95rem;line-height:1">●</span>`,
-    yellow: `<span style="color:#f0b429;font-size:.95rem;line-height:1">●</span>`,
-    red:    `<span style="color:#f85149;font-size:.95rem;line-height:1">●</span>`,
-    gray:   `<span style="color:#8b949e;font-size:.95rem;line-height:1">○</span>`,
-  };
   const CLR = { green:'#3fb950', yellow:'#f0b429', red:'#f85149', gray:'#8b949e' };
   const TIP_CLR = { red:'#f85149', yellow:'#f0b429', blue:'#58a6ff', green:'#3fb950' };
 
-  const dimRow = (dot, labelTxt, score, detail) => `
-    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
-      <div style="width:18px;flex-shrink:0;padding-top:1px">${DOT[dot] || DOT.gray}</div>
-      <div style="flex:0 0 110px;font-weight:600;font-size:.83rem;color:${CLR[score] || CLR.gray};padding-top:1px">${labelTxt}</div>
-      <div style="flex:1;font-size:.82rem;color:var(--text-2);line-height:1.5">${detail}</div>
+  // ── النسب المئوية للأبعاد القابلة للقياس (للأشرطة) ──
+  const cProgress = monthlyTarget > 0 ? Math.min(fwdMonthly / monthlyTarget * 100, 100) : null;
+  const dProgress = fireProgress; // 0–100 أو null
+
+  // ── النتيجة الإجمالية: متوسط الأبعاد المُقيَّمة (نستثني ما بلا هدف = gray) ──
+  const SCORE_VAL = { green:100, yellow:55, red:20 };
+  const scored     = [aScore, bScore, cScore, dScore].filter(c => c !== 'gray');
+  const greenCount = scored.filter(c => c === 'green').length;
+  const overall      = scored.length ? Math.round(scored.reduce((s,c)=>s+SCORE_VAL[c],0)/scored.length) : null;
+  const overallColor = overall == null ? CLR.gray : overall>=80?CLR.green : overall>=55?CLR.yellow : CLR.red;
+  const overallLabel = overall == null ? 'غير مكتمل'
+                     : overall>=80 ? 'ممتازة' : overall>=60 ? 'جيدة' : overall>=40 ? 'مقبولة' : 'تحتاج عناية';
+
+  // ── شريط تقدّم اختياري ──
+  const bar = (pct, color) => pct == null ? '' : `
+    <div style="margin-top:7px;height:6px;background:var(--bg-2);border-radius:99px;overflow:hidden">
+      <div style="height:100%;width:${Math.max(2, Math.min(100, pct))}%;background:${color};border-radius:99px"></div>
+    </div>`;
+
+  // ── بطاقة بُعد: أيقونة + اسم المحور + شارة الحُكم + تفصيل + شريط ──
+  const dimCard = (icon, title, color, verdict, detail, pct) => `
+    <div style="padding:11px 12px;background:var(--bg-3);border-radius:10px;border-inline-start:3px solid ${CLR[color]||CLR.gray}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:5px">
+        <span style="font-weight:700;font-size:.84rem">${icon} ${title}</span>
+        <span style="font-size:.71rem;font-weight:700;color:${CLR[color]||CLR.gray};background:${(CLR[color]||CLR.gray)}22;padding:2px 9px;border-radius:20px;white-space:nowrap">${verdict}</span>
+      </div>
+      <div style="font-size:.79rem;color:var(--text-2);line-height:1.5">${detail}</div>
+      ${bar(pct, CLR[color]||CLR.gray)}
     </div>`;
 
   const tipHtml = shownTips.map(t => `
@@ -1195,7 +1212,7 @@ function renderPortfolioHealthCard() {
   // رسم الكارت
   // ══════════════════════════════════════════════════════════
   el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px">
       <span style="font-weight:700;font-size:.95rem">🏥 محلل صحة المحفظة</span>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         ${targetYear > 0
@@ -1206,11 +1223,24 @@ function renderPortfolioHealthCard() {
       </div>
     </div>
 
-    <div style="margin-bottom:14px">
-      ${dimRow(aScore, aLabel, aScore, aDetail)}
-      ${dimRow(bScore, bLabel, bScore, bDetail)}
-      ${dimRow(cScore, cLabel, cScore, cDetail)}
-      ${dimRow(dScore, dLabel, dScore, dDetail)}
+    <!-- النتيجة الإجمالية -->
+    <div style="display:flex;align-items:center;gap:14px;padding:12px 14px;background:var(--bg-3);border:1px solid ${overallColor}33;border-radius:12px;margin-bottom:14px">
+      <div style="position:relative;width:54px;height:54px;flex-shrink:0;border-radius:50%;
+        background:conic-gradient(${overallColor} ${overall||0}%, var(--bg-2) 0);display:flex;align-items:center;justify-content:center">
+        <div style="width:42px;height:42px;border-radius:50%;background:var(--bg-3);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:.92rem;color:${overallColor}">${overall == null ? '—' : overall}</div>
+      </div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:700;font-size:.95rem;color:${overallColor}">صحة المحفظة: ${overallLabel}</div>
+        <div class="small text-muted">${overall == null ? 'حدّد هدف التقاعد لإكمال التقييم' : `${greenCount} من ${scored.length} محاور خضراء · متوسط 4 أبعاد`}</div>
+      </div>
+    </div>
+
+    <!-- الأبعاد الأربعة -->
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin-bottom:14px">
+      ${dimCard('🧩', 'التنوع',                  aScore, aLabel, aDetail, null)}
+      ${dimCard('⚖️', 'التركيز',                 bScore, bLabel, bDetail, null)}
+      ${dimCard('💵', 'تغطية الدخل الشهري',       cScore, cLabel, cDetail, cProgress)}
+      ${dimCard('🎯', 'التقدم نحو الاستقلال FIRE', dScore, dLabel, dDetail, dProgress)}
     </div>
 
     ${shownTips.length ? `
