@@ -32,7 +32,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   buildAreaFilter();
   renderDash();
-  renderTable();
+  renderGoals();
 });
 
 // ─── Area filter ──────────────────────────────────────────────────────────────
@@ -51,22 +51,32 @@ function buildAreaFilter() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
+function isOverdue(g) {
+  if (!g.date || g.status === 'مكتمل' || g.status === 'ملغي') return false;
+  const d = new Date(g.date); d.setHours(0,0,0,0);
+  const t = new Date();      t.setHours(0,0,0,0);
+  return d < t;
+}
+
 function renderDash() {
   const total    = goals.length;
   const active   = goals.filter(g => g.status === 'قيد التنفيذ').length;
   const done     = goals.filter(g => g.status === 'مكتمل').length;
-  const delayed  = goals.filter(g => g.status === 'مؤجل').length;
-  const canceled = goals.filter(g => g.status === 'ملغي').length;
+  const overdue  = goals.filter(isOverdue).length;
   const avgProg  = total ? Math.round(goals.reduce((s,g)=>s+(+g.progress||0),0)/total) : 0;
+  const totalTgt = goals.reduce((s,g)=>s+(+g.amount||0),0);
+  const savedTgt = goals.reduce((s,g)=>s+(+g.amount||0)*(Math.min(100,+g.progress||0)/100),0);
 
   document.getElementById('gl-dash').innerHTML = `
     <div class="gl-card"><div class="lbl">إجمالي الأهداف</div><div class="val">${total}</div></div>
     <div class="gl-card c-active"><div class="lbl">قيد التنفيذ</div><div class="val" style="color:#4ade80">${active}</div></div>
-    <div class="gl-card c-done">  <div class="lbl">مكتملة</div>     <div class="val" style="color:#60a5fa">${done}</div></div>
-    <div class="gl-card c-delay"> <div class="lbl">مؤجلة</div>      <div class="val" style="color:#fb923c">${delayed}</div></div>
-    <div class="gl-card c-cancel"><div class="lbl">ملغية</div>       <div class="val" style="color:#f87171">${canceled}</div></div>
+    <div class="gl-card c-done"><div class="lbl">مكتملة</div><div class="val" style="color:#60a5fa">${done}</div></div>
+    <div class="gl-card ${overdue?'c-cancel':''}"><div class="lbl">متأخّرة عن موعدها</div><div class="val" style="color:${overdue?'#f87171':'var(--text)'}">${overdue}</div></div>
     <div class="gl-card"><div class="lbl">متوسط الإنجاز</div><div class="val">${avgProg}%</div>
       <div class="progress-wrap" style="margin-top:8px"><div class="progress-bar" style="width:${avgProg}%"></div></div>
+    </div>
+    <div class="gl-card"><div class="lbl">المبلغ المستهدف</div><div class="val" style="font-size:1.1rem">${formatSAR(totalTgt)}</div>
+      ${totalTgt>0?`<div class="lbl" style="margin-top:5px">أُنجز ≈ ${formatSAR(savedTgt)} (${Math.round(savedTgt/totalTgt*100)}%)</div>`:''}
     </div>`;
 }
 
@@ -98,49 +108,116 @@ function getFiltered() {
   });
 }
 
-function renderTable() {
-  const list = getFiltered();
-  document.getElementById('gl-thead').innerHTML = `
-    <th>وصف الهدف</th><th>المجال</th><th>الأولوية</th><th>الحالة</th>
-    <th>الإنجاز</th><th>المبلغ</th><th>التاريخ</th><th>ملاحظات</th><th>إجراءات</th>`;
+const PRI_COLOR = {
+  'هام وعاجل':'#f87171', 'هام وغير عاجل':'#fbbf24',
+  'عاجل وغير هام':'#60a5fa', 'غير عاجل وغير هام':'#9ca3af'
+};
+const PRI_ORDER = { 'هام وعاجل':1, 'هام وغير عاجل':2, 'عاجل وغير هام':3, 'غير عاجل وغير هام':4 };
+const ST_ORDER  = { 'قيد التنفيذ':1, 'مؤجل':2, 'مكتمل':3, 'ملغي':4 };
 
-  if (!list.length) {
-    document.getElementById('gl-tbody').innerHTML = `
-      <tr><td colspan="9">
-        <div class="empty-state"><div class="big">🎯</div>لا توجد أهداف — أضف هدفك الأول!</div>
-      </td></tr>`;
-    return;
+// مدة مقروءة من عدد الأيام
+function fmtDur(days) {
+  if (days < 30)  return `${days} يوم`;
+  const m = Math.round(days / 30.44);
+  if (m < 12)     return `${m} شهر`;
+  return `${(days / 365.25).toFixed(1)} سنة`;
+}
+
+// معلومات الموعد: متبقّى / متأخّر / اليوم (تُخفى للمكتمل والملغي)
+function deadlineInfo(g) {
+  if (!g.date) return null;
+  if (g.status === 'مكتمل' || g.status === 'ملغي') return null;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const d = new Date(g.date); d.setHours(0,0,0,0);
+  const days = Math.round((d - today) / 86400000);
+  if (days < 0)  return { cls:'overdue', icon:'⚠️', txt:`متأخّر ${fmtDur(-days)}` };
+  if (days === 0) return { cls:'soon', icon:'⏰', txt:'موعده اليوم' };
+  return { cls: days <= 30 ? 'soon' : 'ok', icon:'📅', txt:`متبقّى ${fmtDur(days)}` };
+}
+
+function sortGoals(list, mode) {
+  const arr = [...list];
+  if (mode === 'deadline') {
+    arr.sort((a,b) => (a.date?+new Date(a.date):Infinity) - (b.date?+new Date(b.date):Infinity));
+  } else if (mode === 'progress') {
+    arr.sort((a,b) => (+b.progress||0) - (+a.progress||0));
+  } else if (mode === 'priority') {
+    arr.sort((a,b) => (PRI_ORDER[a.priority]||9) - (PRI_ORDER[b.priority]||9));
+  } else { // smart: نشِط أولاً ← أولوية ← أقرب موعداً
+    arr.sort((a,b) =>
+      (ST_ORDER[a.status]||9) - (ST_ORDER[b.status]||9) ||
+      (PRI_ORDER[a.priority]||9) - (PRI_ORDER[b.priority]||9) ||
+      ((a.date?+new Date(a.date):Infinity) - (b.date?+new Date(b.date):Infinity))
+    );
   }
+  return arr;
+}
 
-  document.getElementById('gl-tbody').innerHTML = list.map(g => {
-    const prog = +g.progress || 0;
-    const priC = PRI_CLASS[g.priority] || 'pri-4';
-    const stC  = ST_CLASS[g.status]   || 'st-active';
-    const amt  = g.amount ? formatSAR(g.amount) : '—';
-    const dt   = g.date   ? formatDate(g.date)  : '—';
-    const noteBtn = g.notes && g.notes.trim()
-      ? `<button class="notes-badge" data-note="${esc(g.notes)}" onclick="showNotePopup(this)" title="عرض الملاحظة">💬</button>`
-      : '';
-    return `<tr>
-      <td style="font-weight:600;max-width:240px">${esc(g.desc)}</td>
-      <td><span class="area-badge">${esc(g.area||'—')}</span></td>
-      <td><span class="pri-badge ${priC}">${esc(g.priority||'—')}</span></td>
-      <td><span class="st-badge ${stC}">${esc(g.status)}</span></td>
-      <td style="min-width:110px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <div class="progress-wrap" style="flex:1;min-width:60px"><div class="progress-bar" style="width:${prog}%"></div></div>
-          <span style="font-size:0.78rem;color:var(--text-2)">${prog}%</span>
-        </div>
-      </td>
-      <td class="num">${amt}</td>
-      <td style="white-space:nowrap;color:var(--text-2)">${dt}</td>
-      <td style="text-align:center">${noteBtn}</td>
-      <td class="actions-cell">
+function goalCardHtml(g) {
+  const prog  = Math.max(0, Math.min(100, +g.progress || 0));
+  const priC  = PRI_CLASS[g.priority] || 'pri-4';
+  const stC   = ST_CLASS[g.status]   || 'st-active';
+  const priClr = PRI_COLOR[g.priority] || '#9ca3af';
+  const dl    = deadlineInfo(g);
+  const target = +g.amount || 0;
+  const saved  = Math.round(target * prog / 100);
+  const progClr = prog >= 100 ? '#4ade80' : prog >= 50 ? 'var(--accent)' : '#fb923c';
+  const dimmed  = (g.status === 'مكتمل' || g.status === 'ملغي') ? 'opacity:.72;' : '';
+
+  const dlHtml = dl
+    ? `<span class="deadline ${dl.cls}">${dl.icon} ${dl.txt}</span>`
+    : (g.date ? `<span class="deadline ok">📅 ${formatDate(g.date)}</span>` : '');
+
+  const amountHtml = target
+    ? `<div class="gc-amount">
+         <span style="color:var(--text-2)">أُنجز ≈ ${formatSAR(saved)}</span>
+         <span style="font-weight:700">${formatSAR(target)}</span>
+       </div>`
+    : '';
+
+  return `<div class="goal-card" style="border-top:3px solid ${priClr};${dimmed}">
+    <div class="gc-head">
+      <div class="gc-title">${esc(g.desc)}</div>
+      <span class="st-badge ${stC}">${esc(g.status)}</span>
+    </div>
+    <div class="gc-meta">
+      <span class="area-badge">${esc(g.area||'—')}</span>
+      <span class="pri-badge ${priC}">${esc(g.priority||'—')}</span>
+      ${dlHtml}
+    </div>
+    <div>
+      <div class="progress-wrap" style="height:8px"><div class="progress-bar" style="width:${prog}%;background:${progClr}"></div></div>
+      <div style="display:flex;justify-content:space-between;margin-top:5px">
+        <span style="font-size:.74rem;color:var(--text-2)">نسبة الإنجاز</span>
+        <span style="font-size:.8rem;font-weight:700;color:${progClr}">${prog}%</span>
+      </div>
+    </div>
+    ${amountHtml}
+    ${g.notes && g.notes.trim() ? `<div class="gc-notes">💬 ${esc(g.notes)}</div>` : ''}
+    <div class="gc-foot">
+      <div style="display:flex;gap:6px">
         <button class="btn-icon" onclick="openEditModal('${g.id}')" title="تعديل">✏️</button>
         <button class="btn-icon danger" onclick="openDelModal('${g.id}')" title="حذف">🗑️</button>
-      </td>
-    </tr>`;
-  }).join('');
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderGoals() {
+  const sort = document.getElementById('flt-sort')?.value || 'smart';
+  const list = sortGoals(getFiltered(), sort);
+  const grid = document.getElementById('goals-grid');
+  if (!grid) return;
+
+  if (!list.length) {
+    const hasAny = goals.length > 0;
+    grid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">
+      <div class="big">🎯</div>
+      ${hasAny ? 'لا توجد أهداف مطابقة للفلاتر الحالية.' : 'لا توجد أهداف بعد — أضف هدفك الأول وابدأ التتبّع!'}
+    </div>`;
+    return;
+  }
+  grid.innerHTML = list.map(goalCardHtml).join('');
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
@@ -208,7 +285,7 @@ function saveGoal() {
   closeModal();
   buildAreaFilter();
   renderDash();
-  renderTable();
+  renderGoals();
 }
 
 // ─── Delete ───────────────────────────────────────────────────────────────────
@@ -221,7 +298,7 @@ function confirmDelete() {
   closeDelModal();
   buildAreaFilter();
   renderDash();
-  renderTable();
+  renderGoals();
   showToast('تم الحذف', 'success');
 }
 
