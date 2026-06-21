@@ -83,6 +83,29 @@
     #sensitivityTable th { background: var(--bg-3); color: var(--text); font-weight: 600; }
     #sensitivityTable td:first-child { background: var(--bg-2); font-weight: 600; color: var(--text); }
     @media(max-width:768px) { .calc-grid { grid-template-columns:1fr; } .dashboard-grid { grid-template-columns:1fr 1fr; } .method-grid { grid-template-columns:1fr; } }
+    /* History */
+    .history-empty { text-align:center; color:var(--text-muted); padding:30px; font-size:0.9rem; }
+    .hist-item { background:var(--bg-2); border:1px solid var(--border); border-radius:10px; padding:16px; margin-bottom:12px; }
+    .hist-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; gap:10px; flex-wrap:wrap; }
+    .hist-title { font-weight:700; color:var(--text); font-size:0.95rem; }
+    .hist-date { color:var(--text-muted); font-size:0.78rem; }
+    .hist-result { font-size:1.1rem; font-weight:900; color:var(--success); margin-bottom:10px; }
+    .hist-toggle-btn { background:var(--bg-3); border:1px solid var(--border); color:var(--text-muted); border-radius:6px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-family:'Tajawal',sans-serif; transition:background 0.2s; }
+    .hist-toggle-btn:hover { background:var(--bg-1); }
+    .hist-del-btn { background:rgba(239,68,68,0.15); border:1px solid rgba(239,68,68,0.3); color:#ef4444; border-radius:6px; padding:5px 12px; font-size:0.8rem; cursor:pointer; font-family:'Tajawal',sans-serif; transition:background 0.2s; }
+    .hist-del-btn:hover { background:rgba(239,68,68,0.3); }
+    .hist-details { display:none; margin-top:10px; }
+    .hist-details.open { display:block; }
+    .hist-inputs-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:6px 14px; margin-bottom:12px; }
+    .hist-inp { font-size:0.8rem; }
+    .hist-inp span:first-child { color:var(--text-muted); }
+    .hist-inp span:last-child { color:var(--text); font-weight:600; margin-right:4px; }
+    .hist-models-tbl { width:100%; border-collapse:collapse; font-size:0.82rem; }
+    .hist-models-tbl th { background:var(--bg-3); color:var(--text); padding:7px 10px; text-align:right; border-bottom:1px solid var(--border); }
+    .hist-models-tbl td { padding:7px 10px; border-bottom:1px solid var(--border); color:var(--text-muted); }
+    .hist-models-tbl tr:last-child td { border-bottom:none; }
+    .hist-clear-btn { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; border-radius:7px; padding:8px 16px; font-size:0.85rem; cursor:pointer; font-family:'Tajawal',sans-serif; }
+    .hist-clear-btn:hover { background:rgba(239,68,68,0.25); }
   </style>
 </head>
 <body>
@@ -281,6 +304,15 @@
         <div class="dash-card"><h4>جودة الأرباح ROE</h4><div class="dash-val" id="dashboardEarnings">-</div></div>
         <div class="dash-card"><h4>هامش الأمان</h4>   <div class="dash-val" id="dashboardMargin">-</div></div>
       </div>
+    </div>
+
+    <!-- سجل العمليات -->
+    <div class="card" id="historySection" style="display:none;">
+      <div class="section-hdr" style="display:flex;justify-content:space-between;align-items:center;">
+        <span>🗂️ سجل العمليات الحسابية</span>
+        <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
+      </div>
+      <div id="historyList"></div>
     </div>
 
     <!-- المنهجية -->
@@ -649,6 +681,184 @@
       document.getElementById('waccInputs').style.display = this.checked ? '' : 'none';
     });
 
+    // ===== سجل العمليات =====
+    const HIST_KEY = 'valuation_history_v1';
+
+    function loadHistory() { try { return JSON.parse(localStorage.getItem(HIST_KEY) || '[]'); } catch { return []; } }
+    function saveHistory(arr) { localStorage.setItem(HIST_KEY, JSON.stringify(arr)); }
+
+    function captureInputs() {
+      const companyType = document.getElementById('companyType').value;
+      const base = {
+        companyType,
+        growth5yr:    document.getElementById('growth5yr').value,
+        growthPerp:   document.getElementById('growthPerp').value,
+        discountRate: document.getElementById('discountRate').value,
+        currentPe:    document.getElementById('currentPe').value,
+        sectorPe:     document.getElementById('sectorPe').value,
+        dividends:    document.getElementById('dividends').value,
+        bookValue:    document.getElementById('bookValue').value,
+        bondYield:    document.getElementById('bondYield').value,
+        currentPrice: document.getElementById('currentPrice').value,
+        fairPb:       document.getElementById('fairPb').value,
+        scenario:     document.getElementById('scenario').value,
+        debtRatio:    document.getElementById('debtRatio').value,
+        liquidityRatio: document.getElementById('liquidityRatio').value,
+        earningsQuality: document.getElementById('earningsQuality').value,
+      };
+      if (companyType === 'reit') {
+        Object.assign(base, {
+          nav:          document.getElementById('nav').value,
+          totalUnits:   document.getElementById('totalUnits').value,
+          ffo:          document.getElementById('ffo').value,
+          pffoMultiple: document.getElementById('pffoMultiple').value,
+          capRate:      document.getElementById('capRate').value,
+          totalDebt:    document.getElementById('totalDebt').value,
+        });
+      } else {
+        Object.assign(base, {
+          eps:     document.getElementById('eps').value,
+          fcf:     document.getElementById('fcf').value,
+          netDebt: document.getElementById('netDebt').value,
+        });
+      }
+      if (document.getElementById('useWacc').checked) {
+        Object.assign(base, {
+          useWacc: true,
+          riskFree:    document.getElementById('riskFree').value,
+          beta:        document.getElementById('beta').value,
+          marketReturn:document.getElementById('marketReturn').value,
+          debtCost:    document.getElementById('debtCost').value,
+          taxRate:     document.getElementById('taxRate').value,
+          debtEquity:  document.getElementById('debtEquity').value,
+        });
+      }
+      return base;
+    }
+
+    function saveCalcToHistory(inputs, results) {
+      const arr = loadHistory();
+      arr.unshift({
+        id: Date.now(),
+        date: new Date().toLocaleString('ar-SA'),
+        inputs,
+        results
+      });
+      if (arr.length > 50) arr.splice(50);
+      saveHistory(arr);
+      renderHistory();
+    }
+
+    function deleteHistoryItem(id) {
+      const arr = loadHistory().filter(e => e.id !== id);
+      saveHistory(arr);
+      renderHistory();
+    }
+
+    function clearAllHistory() {
+      if (!confirm('هل أنت متأكد من حذف جميع العمليات؟')) return;
+      saveHistory([]);
+      renderHistory();
+    }
+
+    function toggleHistDetail(id) {
+      const el = document.getElementById('hist-detail-' + id);
+      const btn = document.getElementById('hist-btn-' + id);
+      if (el.classList.contains('open')) {
+        el.classList.remove('open');
+        btn.textContent = '👁️ عرض التفاصيل';
+      } else {
+        el.classList.add('open');
+        btn.textContent = '🙈 إخفاء التفاصيل';
+      }
+    }
+
+    const INPUT_LABELS = {
+      companyType:'نوع الشركة', eps:'EPS', fcf:'FCF', netDebt:'الدين الصافي/سهم',
+      growth5yr:'نمو 5 سنوات %', growthPerp:'نمو دائم %', discountRate:'WACC %',
+      currentPe:'P/E الحالي', sectorPe:'P/E القطاع', dividends:'توزيعات',
+      bookValue:'القيمة الدفترية', bondYield:'عائد السندات %', currentPrice:'السعر الحالي',
+      fairPb:'P/B العادل', scenario:'السيناريو', debtRatio:'نسبة الدين %',
+      liquidityRatio:'السيولة', earningsQuality:'ROE %',
+      nav:'NAV الإجمالي', totalUnits:'عدد الوحدات', ffo:'FFO', pffoMultiple:'مضاعف P/FFO',
+      capRate:'Cap Rate %', totalDebt:'إجمالي الديون',
+      riskFree:'معدل خالي مخاطر %', beta:'Beta', marketReturn:'عائد السوق %',
+      debtCost:'تكلفة الدين %', taxRate:'معدل الضريبة %', debtEquity:'D/E',
+    };
+
+    function renderHistory() {
+      const arr = loadHistory();
+      const section = document.getElementById('historySection');
+      const list    = document.getElementById('historyList');
+      if (arr.length === 0) {
+        section.style.display = 'none';
+        list.innerHTML = '';
+        return;
+      }
+      section.style.display = '';
+      list.innerHTML = arr.map(entry => {
+        const inp = entry.inputs;
+        const res = entry.results;
+        const typeLabel = inp.companyType === 'reit' ? '🏢 ريت عقاري' : '📊 شركة عادية';
+
+        const inputsHtml = Object.entries(inp)
+          .filter(([k]) => k !== 'companyType' && k !== 'useWacc' && k !== 'scenario')
+          .map(([k,v]) => `<div class="hist-inp"><span>${INPUT_LABELS[k]||k}:</span><span>${v}</span></div>`)
+          .join('');
+
+        const modelsHtml = res.models && res.models.length
+          ? `<div style="overflow-x:auto;"><table class="hist-models-tbl"><thead><tr><th>النموذج</th><th>القيمة العادلة</th></tr></thead><tbody>
+              ${res.models.map(m => `<tr><td>${m.name}</td><td>${m.value}</td></tr>`).join('')}
+            </tbody></table></div>`
+          : '';
+
+        const scenarioMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
+
+        return `<div class="hist-item">
+          <div class="hist-header">
+            <div>
+              <div class="hist-title">${typeLabel} — ${scenarioMap[inp.scenario]||inp.scenario}</div>
+              <div class="hist-date">🕐 ${entry.date}</div>
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+              <button id="hist-btn-${entry.id}" class="hist-toggle-btn" onclick="toggleHistDetail(${entry.id})">👁️ عرض التفاصيل</button>
+              <button class="hist-del-btn" onclick="deleteHistoryItem(${entry.id})">🗑️ حذف</button>
+            </div>
+          </div>
+          <div class="hist-result">${res.fairValueRange||'—'}</div>
+          <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;">${res.fairValueDetail||''}</div>
+          ${res.marginText ? `<div style="font-size:0.82rem;margin-bottom:4px;">${res.marginText}</div>` : ''}
+          <div id="hist-detail-${entry.id}" class="hist-details">
+            <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;margin-top:10px;">📥 المدخلات:</div>
+            <div class="hist-inputs-grid">${inputsHtml}</div>
+            ${modelsHtml}
+          </div>
+        </div>`;
+      }).join('');
+    }
+
+    // patch calculateFairValue to save history
+    const _origCalc = calculateFairValue;
+    calculateFairValue = function() {
+      const inputs = captureInputs();
+      _origCalc();
+      // collect results after rendering
+      setTimeout(() => {
+        const fairRange  = document.getElementById('fairValueRange').textContent;
+        const fairDetail = document.getElementById('fairValueDetails').textContent;
+        const marginEl   = document.getElementById('dashboardMargin').textContent;
+        const models = [];
+        document.querySelectorAll('#modelsTable tr').forEach(tr => {
+          const tds = tr.querySelectorAll('td');
+          if (tds.length >= 2) models.push({ name: tds[0].innerText, value: tds[1].innerText });
+        });
+        if (fairRange && fairRange !== '-' && fairRange !== '—') {
+          saveCalcToHistory(inputs, { fairValueRange: fairRange, fairValueDetail: fairDetail, marginText: marginEl !== '—' ? marginEl : '', models });
+        }
+      }, 300);
+    };
+
+    renderHistory();
     init();
   </script>
 </body>

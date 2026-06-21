@@ -50,6 +50,8 @@ const LS_KEYS = [
   'tharwa-price-timestamps',
   'tharwa-benchmark_v1',
   'tharwa-benchmark-seeded-v1',  // flag: هل تمت البذرة الأولى لبيانات تاسي؟
+  'valuation_history_v1',        // سجل عمليات حاسبة القيمة العادلة (stock-valuation.html)
+  'hide-salary-convention',      // حالة إخفاء لافتة اتفاقية الراتب (salary.html)
 ];
 
 async function init() {
@@ -306,9 +308,14 @@ async function restoreBackup(input) {
     }
 
     // ── 3. استعادة إعدادات localStorage ─────────────────────
+    // نكتب للمفتاح الخام AND المؤطَّر بـ userLsKey:
+    // — الخام: لأن بعض الوحدات (life-goals, inventory, school-kanda, benchmark) تقرأ المفتاح الخام مباشرة
+    // — المؤطَّر: لأن وحدات أخرى (salary, sukuk, alerts) تقرأ userLsKey أولاً ثم تسقط للخام
+    // الكتابة للاثنين تضمن 100% توافق بصرف النظر عن طريقة القراءة في كل وحدة
     if (backup._local_settings) {
       Object.entries(backup._local_settings).forEach(([k, v]) => {
         try { localStorage.setItem(k, v); } catch (_) {}
+        try { localStorage.setItem(userLsKey(k), v); } catch (_) {}
       });
     }
 
@@ -673,7 +680,8 @@ async function exportMonthlyReviewMD() {
     setStatus('md-export-status', 'info', 'جارٍ تحميل البيانات…');
     const [holdings, transactions, dividends, cashflows, snapshots,
            assets, liabilities, realEstate, stockTargets, sectorTargets,
-           watchlist, tasks, userStocks, reviewLog, portfolioCashRows] = await Promise.all([
+           watchlist, tasks, userStocks, reviewLog, portfolioCashRows,
+           reviewAttachments] = await Promise.all([
       fetchTable('holdings'),
       fetchTable('transactions', 'date'),
       fetchTable('dividends', 'date'),
@@ -687,8 +695,9 @@ async function exportMonthlyReviewMD() {
       fetchTable('watchlist'),
       fetchTable('portfolio_tasks', 'created_at'),
       fetchTable('user_stocks'),
-      fetchTable('review_log', 'review_date'),   // دفتر المراجعة — notes المستخدم عن كل سهم
-      fetchTable('portfolio_cash'),              // النقد غير المستثمر في المحفظة
+      fetchTable('review_log', 'review_date'),
+      fetchTable('portfolio_cash'),
+      fetchTable('review_log_attachments', 'created_at'),
     ]);
 
     // النقد غير المستثمر (صف واحد عادةً)
@@ -1535,11 +1544,10 @@ async function exportMonthlyReviewMD() {
           .map(c => [c.name, SAR(c.total), PCT(totalSalary > 0 ? c.total / totalSalary * 100 : 0)]);
         if (catRows.length) p(mdTable(['الفئة', 'الإجمالي', '% من الدخل'], catRows));
 
-        // آخر 12 شهراً
-        h3('آخر 12 شهراً');
-        const last12 = entries.slice(-12);
-        const last12Headers = ['السنة', 'الشهر', 'الراتب', ...cats.map(c => c.name), 'المتبقي'];
-        const last12Rows = last12.map(e => {
+        // كامل السجل
+        h3(`كامل السجل (${entries.length} شهر)`);
+        const allEntriesHeaders = ['السنة', 'الشهر', 'الراتب', ...cats.map(c => c.name), 'المتبقي'];
+        const allEntriesRows = entries.map(e => {
           const allocs = cats.map(c => {
             const al = (e.allocations || []).find(a => a.catId === c.id);
             return al ? SAR(al.amount) : '—';
@@ -1548,7 +1556,7 @@ async function exportMonthlyReviewMD() {
           const remaining  = (+e.salary || 0) - totalAlloc;
           return [String(e.year), MONTHS[(e.month || 1) - 1], SAR(e.salary), ...allocs, SAR(remaining)];
         });
-        p(mdTable(last12Headers, last12Rows));
+        p(mdTable(allEntriesHeaders, allEntriesRows));
 
         // مساهمة محفظة التقاعد تحديداً
         const retCat = cats.find(c => c.id === 'cat_retirement' || c.name.includes('تقاعد'));
@@ -1747,6 +1755,287 @@ async function exportMonthlyReviewMD() {
       }
     } else {
       p('_لم تُدخَل بيانات للمؤشر المرجعي (تاسي) بعد._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 20. مخزون المنزل
+    // ════════════════════════════════════════════════════════
+    h2('20. مخزون المنزل (Inventory)');
+    p('قائمة محتويات المنزل والمقتنيات بقيمتها التقديرية — مفيد للتأمين والجرد الكامل.');
+    {
+      const inventory = lsGet('inventory_v1', []);
+      if (Array.isArray(inventory) && inventory.length) {
+        const totalVal = inventory.reduce((s, i) => s + ((+i.value || 0) * (+i.qty || 1)), 0);
+        const good    = inventory.filter(i => i.cond === 'جيد').length;
+        const replace = inventory.filter(i => i.cond === 'للاستبدال').length;
+        const missing = inventory.filter(i => i.cond === 'مفقود').length;
+        p(`**إجمالي العناصر:** ${inventory.length} | **جيد:** ${good} | **للاستبدال:** ${replace} | **مفقود:** ${missing}  `);
+        p(`**القيمة التقديرية الإجمالية:** ${SAR(totalVal)} ر.س`);
+        const catMap = {};
+        inventory.forEach(i => {
+          const cat = i.cat || 'غير مصنف';
+          if (!catMap[cat]) catMap[cat] = [];
+          catMap[cat].push(i);
+        });
+        Object.entries(catMap).sort(([a],[b]) => a.localeCompare(b)).forEach(([cat, items]) => {
+          h3(cat);
+          const rows = items.map(i => [
+            i.name || '—', i.loc || '—', i.cond || '—',
+            String(+i.qty || 1),
+            i.value ? SAR((+i.value) * (+i.qty || 1)) : '—',
+            (i.notes || '').replace(/\n/g, ' ').slice(0, 80),
+          ]);
+          p(mdTable(['الاسم', 'الموقع', 'الحالة', 'الكمية', 'القيمة', 'ملاحظات'], rows));
+        });
+      } else {
+        p('_لا توجد عناصر مسجّلة في مخزون المنزل._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 21. المتابعة المدرسية
+    // ════════════════════════════════════════════════════════
+    h2('21. المتابعة المدرسية (School Tracker)');
+    p('بيانات كل طفل: الملف الشخصي، الأهداف الحياتية والدراسية، الدرجات، الغياب.');
+    {
+      const schoolData = await syncedGet('school_tracker_v2', { children: [] });
+      const children = schoolData.children || [];
+      if (children.length) {
+        p(`**عدد الأطفال:** ${children.length}`);
+        children.forEach(c => {
+          h3(`${c.emoji || '👧'} ${c.name}`);
+          const prof = [];
+          if (c.birth)  prof.push(`تاريخ الميلاد: ${c.birth}`);
+          if (c.school) prof.push(`المدرسة: ${c.school}`);
+          if (c.grade)  prof.push(`الصف: ${c.grade}`);
+          if (c.notes)  prof.push(`ملاحظات: ${c.notes}`);
+          if (prof.length) p(prof.join(' | '));
+          if (c.extraFields?.length)
+            p('**بيانات إضافية:** ' + c.extraFields.map(f => `${f.label}: ${f.value}`).join(' | '));
+
+          // الأهداف الحياتية
+          if ((c.lifeGoals || []).length) {
+            p('\n**الأهداف الحياتية:**');
+            p(mdTable(
+              ['الهدف','الفئة','الأولوية','الحالة','الإنجاز','السنة','التكلفة','ملاحظات'],
+              c.lifeGoals.map(g => [
+                g.desc||'—', g.cat||'—', g.priority||'—', g.status||'—',
+                `${+g.progress||0}%`, g.year||'—',
+                g.amount ? SAR(g.amount) : '—',
+                (g.notes||'').replace(/\n/g,' ').slice(0,50),
+              ])
+            ));
+          }
+
+          // الأهداف الدراسية
+          if ((c.schoolGoals || []).length) {
+            p('\n**الأهداف الدراسية:**');
+            p(mdTable(
+              ['الهدف','الفئة','الأولوية','الحالة','الإنجاز','السنة','ملاحظات'],
+              c.schoolGoals.map(g => [
+                g.desc||'—', g.cat||'—', g.priority||'—', g.status||'—',
+                `${+g.progress||0}%`, g.year||'—',
+                (g.notes||'').replace(/\n/g,' ').slice(0,50),
+              ])
+            ));
+          }
+
+          // الدرجات
+          const years    = c.years    || [];
+          const subjects = c.subjects || [];
+          const grds     = c.grades   || {};
+          if (years.length && subjects.length) {
+            p('\n**الدرجات الدراسية:**');
+            years.forEach(y => {
+              p(`\n*${y.label || y.id}${y.class ? ' — الصف: ' + y.class : ''}${y.school ? ' — ' + y.school : ''}*`);
+              const terms = y.terms || [{ id: 't1', label: 'الفصل الأول' }, { id: 't2', label: 'الفصل الثاني' }];
+              const yg = grds[y.id] || {};
+              const gradeRows = subjects.map(s => {
+                const sg = yg[s.id] || {};
+                const scores = terms.map(t => { const sc = sg[t.id]; return sc != null ? String(sc) : '—'; });
+                const nums = scores.filter(v => v !== '—').map(Number);
+                const avg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1) : '—';
+                return [s.name || s.id, ...scores, avg];
+              });
+              p(mdTable(['المادة', ...terms.map(t => t.label), 'المعدل'], gradeRows));
+            });
+          }
+
+          // الغياب (أحدث 20 سجل)
+          const att = c.attendance || [];
+          if (att.length) {
+            p(`\n**سجل الغياب والحضور** (${att.length} سجل — آخر 20):`);
+            p(mdTable(
+              ['التاريخ','النوع','المادة','ملاحظات'],
+              att.slice(-20).map(a => [a.date||'—', a.type||'—', a.subject||'—', (a.notes||'—').slice(0,60)])
+            ));
+          }
+
+          // الاختبارات
+          const exams = c.exams || [];
+          if (exams.length) {
+            p(`\n**الاختبارات** (${exams.length}):`);
+            p(mdTable(
+              ['التاريخ','المادة','الدرجة','من','ملاحظات'],
+              exams.map(e => [e.date||'—', e.subject||'—', e.score!=null?String(e.score):'—', e.maxScore!=null?String(e.maxScore):'—', (e.notes||'—').slice(0,60)])
+            ));
+          }
+        });
+      } else {
+        p('_لا توجد بيانات أطفال مسجّلة._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 22. متابعة كندة (School Kanda)
+    // ════════════════════════════════════════════════════════
+    h2('22. متابعة كندة الخاصة (School Kanda)');
+    {
+      const kanda = lsGet('school_kanda_v1', { profile:{name:'كندة',birth:''}, lifeGoals:[], schoolGoals:[], years:[], subjects:[], grades:{} });
+      const kp = kanda.profile || {};
+      p(`**الاسم:** ${kp.name || 'كندة'}${kp.birth ? ' | تاريخ الميلاد: ' + kp.birth : ''}`);
+
+      if ((kanda.lifeGoals||[]).length) {
+        p('\n**الأهداف الحياتية:**');
+        p(mdTable(['الهدف','السنة','الحالة'], kanda.lifeGoals.map(g => [g.desc||'—', g.year||'—', g.status||'—'])));
+      }
+      if ((kanda.schoolGoals||[]).length) {
+        p('\n**الأهداف الدراسية:**');
+        p(mdTable(['الهدف','السنة','الحالة'], kanda.schoolGoals.map(g => [g.desc||'—', g.year||'—', g.status||'—'])));
+      }
+
+      const ky = kanda.years || [], ks = kanda.subjects || [], kg = kanda.grades || {};
+      if (ky.length && ks.length) {
+        p('\n**الدرجات الدراسية:**');
+        ky.forEach(y => {
+          p(`\n*${y.label || y.id}${y.class ? ' — الصف: ' + y.class : ''}${y.school ? ' — ' + y.school : ''}*`);
+          const yg = kg[y.id] || {};
+          p(mdTable(
+            ['المادة','الفصل 1','الفصل 2','الفصل 3','المعدل'],
+            ks.map(s => {
+              const sg = yg[s.id] || {};
+              const v = [sg.t1, sg.t2, sg.t3];
+              const nums = v.filter(x => x != null);
+              const avg = nums.length ? (nums.reduce((a,b)=>a+b,0)/nums.length).toFixed(1) : '—';
+              return [s.name||s.id, v[0]!=null?String(v[0]):'—', v[1]!=null?String(v[1]):'—', v[2]!=null?String(v[2]):'—', avg];
+            })
+          ));
+        });
+      }
+
+      if (!(kanda.lifeGoals||[]).length && !(kanda.schoolGoals||[]).length && !ky.length)
+        p('_لا توجد بيانات مسجّلة لمتابعة كندة._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 23. سجل حاسبة القيمة العادلة
+    // ════════════════════════════════════════════════════════
+    h2('23. سجل حاسبة القيمة العادلة للأسهم');
+    p('جميع عمليات التقييم المحفوظة — المدخلات الكاملة ونتائج كل نموذج لكل عملية.');
+    {
+      const valHist = lsGet('valuation_history_v1', []);
+      if (Array.isArray(valHist) && valHist.length) {
+        p(`**إجمالي العمليات المحفوظة:** ${valHist.length}`);
+        const scenMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
+        valHist.forEach((entry, idx) => {
+          const inp = entry.inputs || {};
+          const res = entry.results || {};
+          const typeLabel = inp.companyType === 'reit' ? 'ريت عقاري' : 'شركة عادية';
+          p(`\n---\n**[${idx + 1}] ${entry.date || '—'}** — ${typeLabel} — سيناريو: ${scenMap[inp.scenario] || inp.scenario || '—'}  `);
+          p(`**القيمة العادلة: ${res.fairValueRange || '—'}**  `);
+          if (res.fairValueDetail) p(`${res.fairValueDetail}  `);
+          if (res.marginText)      p(`هامش الأمان: ${res.marginText}  `);
+
+          // المدخلات كاملة
+          const inputPairs = [];
+          if (inp.companyType !== 'reit') {
+            if (inp.eps     != null) inputPairs.push(['EPS (ربح/سهم)', inp.eps]);
+            if (inp.fcf     != null) inputPairs.push(['FCF (تدفق نقدي حر/سهم)', inp.fcf]);
+            if (inp.netDebt != null) inputPairs.push(['الدين الصافي/سهم', inp.netDebt]);
+          } else {
+            if (inp.nav          != null) inputPairs.push(['NAV الإجمالي', Number(inp.nav).toLocaleString()]);
+            if (inp.totalUnits   != null) inputPairs.push(['عدد الوحدات', Number(inp.totalUnits).toLocaleString()]);
+            if (inp.ffo          != null) inputPairs.push(['FFO/وحدة', inp.ffo]);
+            if (inp.pffoMultiple != null) inputPairs.push(['مضاعف P/FFO', inp.pffoMultiple + 'x']);
+            if (inp.capRate      != null) inputPairs.push(['Cap Rate', inp.capRate + '%']);
+            if (inp.totalDebt    != null) inputPairs.push(['إجمالي الديون', Number(inp.totalDebt).toLocaleString()]);
+          }
+          if (inp.growth5yr    != null) inputPairs.push(['نمو 5 سنوات', inp.growth5yr + '%']);
+          if (inp.growthPerp   != null) inputPairs.push(['نمو دائم', inp.growthPerp + '%']);
+          if (inp.discountRate != null) inputPairs.push(['WACC / معدل الخصم', inp.discountRate + '%']);
+          if (inp.currentPe    != null) inputPairs.push(['P/E الحالي', inp.currentPe]);
+          if (inp.sectorPe     != null) inputPairs.push(['P/E القطاع', inp.sectorPe]);
+          if (inp.dividends    != null) inputPairs.push(['توزيعات/سهم', inp.dividends]);
+          if (inp.bookValue    != null) inputPairs.push(['القيمة الدفترية/سهم', inp.bookValue]);
+          if (inp.bondYield    != null) inputPairs.push(['عائد السندات', inp.bondYield + '%']);
+          if (inp.currentPrice != null) inputPairs.push(['السعر الحالي', inp.currentPrice]);
+          if (inp.fairPb       != null) inputPairs.push(['P/B العادل', inp.fairPb]);
+          if (inp.debtRatio    != null) inputPairs.push(['نسبة الدين', inp.debtRatio + '%']);
+          if (inp.liquidityRatio != null) inputPairs.push(['نسبة السيولة', inp.liquidityRatio]);
+          if (inp.earningsQuality != null) inputPairs.push(['ROE', inp.earningsQuality + '%']);
+          if (inp.useWacc) {
+            if (inp.riskFree     != null) inputPairs.push(['معدل خالي مخاطر', inp.riskFree + '%']);
+            if (inp.beta         != null) inputPairs.push(['Beta', inp.beta]);
+            if (inp.marketReturn != null) inputPairs.push(['عائد السوق', inp.marketReturn + '%']);
+            if (inp.debtCost     != null) inputPairs.push(['تكلفة الدين', inp.debtCost + '%']);
+            if (inp.taxRate      != null) inputPairs.push(['معدل الضريبة', inp.taxRate + '%']);
+            if (inp.debtEquity   != null) inputPairs.push(['D/E', inp.debtEquity]);
+          }
+
+          if (inputPairs.length)
+            p(mdTable(['المدخل','القيمة'], inputPairs));
+
+          // نتائج كل نموذج
+          if (res.models?.length)
+            p(mdTable(['النموذج','القيمة العادلة'], res.models.map(m => [m.name, m.value])));
+        });
+      } else {
+        p('_لا توجد عمليات محفوظة في سجل القيمة العادلة._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 24. مرفقات دفتر المراجعة
+    // ════════════════════════════════════════════════════════
+    h2('24. مرفقات دفتر المراجعة (Review Log Attachments)');
+    p('قائمة الملفات المرفقة بمراجعات الأسهم — metadata فقط؛ المحتوى الثنائي محفوظ في قاعدة البيانات ويُستعاد بالنسخة الاحتياطية JSON.');
+    if (reviewAttachments.length) {
+      p(`**إجمالي المرفقات:** ${reviewAttachments.length} ملف`);
+      const attRows = reviewAttachments.map(a => {
+        const entry    = reviewLog.find(r => r.id === a.entry_id);
+        const label    = entry ? `${entry.ticker} — ${entry.review_date}` : String(a.entry_id || '—');
+        const sizeStr  = a.size_bytes ? (a.size_bytes / 1024).toFixed(1) + ' KB' : '—';
+        return [a.filename || '—', a.ext || '—', sizeStr, label, (a.created_at || '—').slice(0,10)];
+      });
+      p(mdTable(['اسم الملف','الامتداد','الحجم','المراجعة المرتبطة','تاريخ الرفع'], attRows));
+    } else {
+      p('_لا توجد مرفقات في دفتر المراجعة._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 25. إعدادات التطبيق
+    // ════════════════════════════════════════════════════════
+    h2('25. إعدادات التطبيق');
+    p('الإعدادات الشخصية المحفوظة محلياً في المتصفح.');
+    {
+      const get = k => localStorage.getItem(userLsKey(k)) ?? localStorage.getItem(k);
+      const alertGreen  = get('tharwa-alert-green')  ?? '1';
+      const alertYellow = get('tharwa-alert-yellow') ?? '3';
+      const theme       = get('tharwa-theme')        ?? 'dark';
+      const zoom        = get('tharwa-zoom')         ?? '16';
+      p('```');
+      p(`الثيم (dark/light)        : ${theme}`);
+      p(`حجم الخط (zoom)           : ${zoom}px`);
+      p(`حد تنبيه أخضر  ≤          : ${alertGreen}%`);
+      p(`حد تنبيه أصفر  ≤          : ${alertYellow}%`);
+      p(`حد تنبيه أحمر  >          : ${alertYellow}%`);
+      p('```');
     }
     hr();
 
