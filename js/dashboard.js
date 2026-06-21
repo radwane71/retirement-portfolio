@@ -1012,10 +1012,13 @@ function renderPortfolioHealthCard() {
   const monthlyTarget = goal.monthly || 0;
 
   // ── 4. التوافق مع هدف الاستقلال المالي ──────────────────────
+  // AUDIT-FIX (M3): قاعدة السحب الآمن تنطبق على الأصول السائلة القابلة للسحب
+  // (لا العقار). نستخدم نفس fireBase في بطاقة التقاعد لتطابق النسبتين عبر اللوحة
+  // بدل s.latestNW (الذي يشمل العقار ولقطة ثروة قد تكون قديمة).
   const fireNumber = goal.monthly > 0 && goal.swr > 0
     ? (goal.monthly * 12) / (goal.swr / 100) : 0;
-  const latestNW    = s.latestNW || totalVal;
-  const fireProgress = fireNumber > 0 ? Math.min(latestNW / fireNumber * 100, 100) : null;
+  const fireBase     = totalVal + (portfolioCash || 0) + getSukukActiveTotal();
+  const fireProgress = fireNumber > 0 ? Math.min(fireBase / fireNumber * 100, 100) : null;
   const targetYear  = goal.target_year || 0;
   const yearsLeft   = targetYear > 0 ? targetYear - new Date().getFullYear() : null;
 
