@@ -451,14 +451,8 @@ async function loadAllData() {
         const sh = sharesAt(h.ticker, divDate(tickerDivs[i]));
         if (sh >= 0.001) dpsSeries.push(+tickerDivs[i].amount / sh);
       }
-      if (!dpsSeries.length) {
-        const tot = tickerDivs.reduce((s, d) => s + +d.amount, 0);
-        const fb  = tot / +h.shares;
-        if (fb < 0.0001) return;
-        dpsSeries.push(fb);
-      }
-
       // L-3: use median inter-dividend gap for frequency — robust to skipped dividends
+      // (يُحسب قبل الاحتياطي لأن الاحتياطي يحتاجه لتفادي مضاعفة الدخل)
       let freq = 1;
       if (tickerDivs.length >= 2) {
         const gaps = [];
@@ -471,6 +465,21 @@ async function loadAllData() {
         const medGap = gaps[Math.floor(gaps.length / 2)];
         if (medGap <= 105)      freq = 4;
         else if (medGap <= 210) freq = 2;
+      }
+
+      if (!dpsSeries.length) {
+        // اشترى السهم بعد كل توزيعاته المسجّلة — نقدّر من آخر سنة مسجّلة (لا الإجمالي
+        // الكلي الذي يضخّم بتراكم السنوات). مجموع السنة الكاملة يُقسَّم على الدورية
+        // ليصبح DPS لكل فترة، وإلا فإن الضرب بـ freq لاحقاً يضخّمه freq أضعاف.
+        const lastYear = Math.max(...tickerDivs.map(d => +d.year || new Date(divDate(d)).getFullYear()));
+        const lastYearTotal = tickerDivs
+          .filter(d => (+d.year || new Date(divDate(d)).getFullYear()) === lastYear)
+          .reduce((s, d) => s + +d.amount, 0);
+        const fb = lastYearTotal > 0
+          ? lastYearTotal / +h.shares / freq
+          : +tickerDivs[tickerDivs.length - 1].amount / +h.shares;
+        if (fb < 0.0001) return;
+        dpsSeries.push(fb);
       }
 
       // AUDIT-FIX (M1): forward DPS = MEDIAN of the last `freq` per-share payments, not the single

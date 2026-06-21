@@ -246,8 +246,11 @@ function _projectedAnnualIncome() {
       const lastYearTotal = tickerDivs
         .filter(d => (+d.year || new Date(_divSortDate(d)).getFullYear()) === lastYear)
         .reduce((s, d) => s + +d.amount, 0);
+      // lastYearTotal مجموع سنة كاملة بالفعل → نقسمه على الدورية ليصبح DPS لكل
+      // فترة، وإلا فإن ضربه بـ freq في السطر الموحّد يضخّمه freq أضعاف.
+      // أما الدفعة المفردة فهي لفترة واحدة → تبقى كما هي لتُسنوى بالضرب بـ freq.
       dps            = lastYearTotal > 0
-        ? lastYearTotal / +holding.shares
+        ? lastYearTotal / +holding.shares / freq
         : +lastDiv.amount / +holding.shares;
       sharesAtRefDiv = +holding.shares;
       lastValidAmt   = +lastDiv.amount;
