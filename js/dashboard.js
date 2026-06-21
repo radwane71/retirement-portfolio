@@ -1022,6 +1022,26 @@ function renderPortfolioHealthCard() {
   const targetYear  = goal.target_year || 0;
   const yearsLeft   = targetYear > 0 ? targetYear - new Date().getFullYear() : null;
 
+  // ── إسقاط المسار: هل تبلغ الهدف في سنته بمساهماتك الحالية + نمو متحفّظ؟ ──
+  // يميّز المحفظة الحديثة النامية «على المسار» عن المتأخرة فعلاً، بدل الحكم
+  // على اللقطة الحالية وحدها. نمو سنوي افتراضي متحفّظ للتخطيط (لا وعد بعائد).
+  // نشترط بيانات إيداع مسجّلة (hasCf12) ومساهمة موجبة حتى لا نُطلق حكم «متأخر»
+  // على محفظة لم تُسجَّل تدفقاتها بعد.
+  const HEALTH_GROWTH = 0.05;
+  const annualContrib = (s.monthlyContrib || 0) * 12;
+  const canAssess     = targetYear > 0 && yearsLeft > 0 && s.hasCf12 && annualContrib > 0;
+  let projFireRatio = null, projCoverRatio = null;
+  if (canAssess) {
+    const g     = Math.pow(1 + HEALTH_GROWTH, yearsLeft);
+    const fvPv  = fireBase * g;
+    const fvPmt = annualContrib * ((g - 1) / HEALTH_GROWTH);
+    const projAssets = Math.max(0, fvPv + fvPmt);
+    if (fireNumber > 0) projFireRatio = projAssets / fireNumber * 100;
+    // الدخل المتوقع مستقبلاً = الأصول المتوقعة × عائد التوزيع الحالي على الأسهم
+    const divYield = totalVal > 0 ? (s.fwdProjected || 0) / totalVal : 0;
+    if (monthlyTarget > 0) projCoverRatio = (projAssets * divYield / 12) / monthlyTarget * 100;
+  }
+
   // ── 5. انضباط الأوزان ──────────────────────────────────────
   const hasTargets = Object.values(stockTargets).some(t => t > 0);
   let redDev = 0, yDev = 0;
@@ -1074,42 +1094,60 @@ function renderPortfolioHealthCard() {
     bDetail = `أكبر سهم: ${top1Pct.toFixed(1)}% · أكبر قطاع (${_largSecE}): ${largestSectorPct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}%`;
   }
 
-  // بُعد C: التوزيعات vs الهدف
+  // بُعد C: تغطية الدخل الشهري — واعٍ بالمسار (لا يُجرّم محفظة نامية على المسار)
   let cScore, cLabel, cDetail;
   if (!monthlyTarget) {
     cScore = 'gray';   cLabel = 'هدف غير محدد';
     cDetail = `دخل متوقع ${formatSAR(fwdMonthly)}/شهر — حدد هدف FIRE لمقارنة التقدم`;
   } else {
-    const ratio = fwdMonthly / monthlyTarget * 100;
-    if (ratio >= 100) {
-      cScore = 'green';  cLabel = 'يغطي الهدف';
+    const curCover = fwdMonthly / monthlyTarget * 100;
+    if (curCover >= 100) {
+      cScore = 'green';  cLabel = 'يغطي مصاريفك الآن';
       cDetail = `${formatSAR(fwdMonthly)}/شهر ≥ الهدف ${formatSAR(monthlyTarget)} ✅`;
-    } else if (ratio >= 60) {
-      cScore = 'yellow'; cLabel = `${ratio.toFixed(0)}% من الهدف`;
-      cDetail = `${formatSAR(fwdMonthly)}/شهر من أصل ${formatSAR(monthlyTarget)} — متقدم في مرحلة البناء`;
+    } else if (projCoverRatio != null) {
+      const projTxt = `الآن ${formatSAR(fwdMonthly)}/شهر (${curCover.toFixed(0)}%) ← متوقع تغطية ${Math.min(projCoverRatio, 999).toFixed(0)}% من مصاريفك بحلول ${targetYear}`;
+      if (projCoverRatio >= 100) {
+        cScore = 'green';  cLabel = 'على المسار';
+        cDetail = `${projTxt} — دخلك التوزيعي في طريقه لتغطية مصاريفك بالكامل.`;
+      } else if (projCoverRatio >= 75) {
+        cScore = 'yellow'; cLabel = 'قريب من المسار';
+        cDetail = `${projTxt} — قريب؛ زيادة بسيطة في الادخار أو العائد تُغلق الفجوة.`;
+      } else {
+        cScore = 'red';    cLabel = 'متأخر عن المسار';
+        cDetail = `${projTxt} — الدخل التوزيعي وحده لن يكفي؛ راجع معدّل الادخار أو اختيار الأسهم.`;
+      }
     } else {
-      cScore = 'yellow'; cLabel = `${ratio.toFixed(0)}% من الهدف`;
-      cDetail = `${formatSAR(fwdMonthly)}/شهر من أصل ${formatSAR(monthlyTarget)} — طبيعي في مراحل التراكم المبكرة`;
+      cScore = 'yellow'; cLabel = 'مرحلة بناء';
+      cDetail = `${formatSAR(fwdMonthly)}/شهر من أصل ${formatSAR(monthlyTarget)} (${curCover.toFixed(0)}%) — طبيعي في مرحلة التراكم. سجّل إيداعاتك وحدّد سنة التقاعد لتقييم مسارك.`;
     }
   }
 
-  // بُعد D: التوافق مع الهدف الزمني
+  // بُعد D: التقدم نحو FIRE — واعٍ بالمسار (يقيس الوتيرة لا اللقطة وحدها)
   let dScore, dLabel, dDetail;
   if (fireProgress === null) {
     dScore = 'gray';   dLabel = 'هدف غير محدد';
     dDetail = yearsLeft != null ? `${yearsLeft} سنة حتى ${targetYear}` : 'حدد هدف FIRE + سنة التقاعد';
   } else if (fireProgress >= 100) {
     dScore = 'green';  dLabel = 'الهدف محقق';
-    dDetail = `100% — صافي ثروتك يكفي للاستقلال المالي${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}`;
+    dDetail = `100% — أصولك السائلة تكفي للاستقلال المالي${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}`;
+  } else if (projFireRatio != null) {
+    const rem     = formatSAR(Math.max(0, fireNumber - fireBase));
+    const projTxt = `الآن ${fireProgress.toFixed(0)}% ← متوقع ${Math.min(projFireRatio, 999).toFixed(0)}% من الهدف بحلول ${targetYear} (بمساهمة ${formatSAR(s.monthlyContrib || 0)}/شهر ونمو ~5%)`;
+    if (projFireRatio >= 100) {
+      dScore = 'green';  dLabel = 'على المسار';
+      dDetail = `${projTxt} — وتيرتك الحالية تبلغ الهدف في موعده. تبقّى ${rem}.`;
+    } else if (projFireRatio >= 80) {
+      dScore = 'yellow'; dLabel = 'قريب من المسار';
+      dDetail = `${projTxt} — قريب؛ زيادة الادخار قليلاً تضمن الوصول. تبقّى ${rem}.`;
+    } else {
+      dScore = 'red';    dLabel = 'متأخر عن المسار';
+      dDetail = `${projTxt} — تبقّى ${rem}. تحتاج رفع الادخار الشهري أو مراجعة الهدف/السنة.`;
+    }
   } else {
     const pStr = fireProgress.toFixed(0) + '%';
     const rem  = formatSAR(Math.max(0, fireNumber - fireBase));
-    if (fireProgress >= 50) {
-      dScore = 'yellow'; dLabel = `${pStr} من الهدف`;
-    } else {
-      dScore = 'yellow'; dLabel = `${pStr} من الهدف`;
-    }
-    dDetail = `${pStr} — متبقي ${rem}${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}`;
+    dScore = 'yellow'; dLabel = `${pStr} من الهدف`;
+    dDetail = `${pStr} — متبقٍّ ${rem}${yearsLeft != null ? ` · ${yearsLeft} سنة حتى ${targetYear}` : ''}. سجّل إيداعاتك لتقييم مسارك بدقة.`;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -1569,11 +1607,13 @@ function showHealthInfo() {
     ['&nbsp;&nbsp;> 30% : مرتفع جداً &nbsp; 20–30% : مرتفع &nbsp; < 20% : مقبول', false],
     ['── تركيز أكبر قطاع ──', false],
     ['&nbsp;&nbsp;> 50% : مرتفع جداً &nbsp; 38–50% : مرتفع &nbsp; < 38% : متوازن', false],
-    ['── التوزيعات vs الهدف ──', false],
-    ['&nbsp;&nbsp;Forward Income الشهري مقارنة بهدف FIRE', false],
-    ['── هدف الاستقلال المالي ──', false],
-    ['&nbsp;&nbsp;نسبة الإنجاز = صافي الثروة ÷ (مصاريف سنوية ÷ SWR)', false],
-    ['&nbsp;&nbsp;مثال: 15,000/شهر × 12 ÷ 4% = 4,500,000 ر.س', false],
+    ['── تغطية الدخل والتقدم نحو FIRE (واعٍ بالمسار) ──', false],
+    ['&nbsp;&nbsp;لا نحكم على اللقطة الحالية وحدها: نُسقِط أصولك حتى سنة الهدف', false],
+    ['&nbsp;&nbsp;بناءً على مساهماتك الشهرية المسجّلة + نمو متحفّظ ~5%/سنة.', false],
+    ['&nbsp;&nbsp;«على المسار» = الإسقاط ≥ 100% من الهدف &nbsp; «قريب» = 80–99%', false],
+    ['&nbsp;&nbsp;«متأخر» = < 80% &nbsp;(محفظة نامية على المسار لا تُعدّ خللاً)', false],
+    ['&nbsp;&nbsp;رقم FIRE = مصاريف سنوية ÷ SWR (مثال: 7,000×12÷4% = 2,100,000)', false],
+    ['&nbsp;&nbsp;يتطلّب تسجيل إيداعاتك وسنة تقاعد؛ بدونها نعرض «مرحلة بناء».', false],
     ['⚠️ ما لا يقيسه هذا المحلل (لعدم توفر البيانات):', false],
     ['&nbsp;&nbsp;Beta، Sharpe Ratio، Volatility — تحتاج أسعار إغلاق تاريخية يومية', false],
   ];

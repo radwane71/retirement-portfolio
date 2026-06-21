@@ -111,14 +111,17 @@ function updateDcaBar() {
 
 // المعالم تُبنى ديناميكياً كل سنة في renderMilestoneTable
 
+// prob = احتمال الحدوث التقريبي (نطاقات مئوية، مجموعها 100%). ليست محاكاة
+// مونت-كارلو بل تقدير تخطيطي: المعتدل هو الأرجح، والطرفان أقل احتمالاً،
+// والاستثنائي نادر. تُعرض بـ«≈» للتأكيد أنها تقديرية لا قطعية.
 const SCENARIO_META = [
-  { key:'conservative', name:'متحفظ',    emoji:'🛡️', cls:'sc-conservative', color:'#8b949e',
+  { key:'conservative', name:'متحفظ',    emoji:'🛡️', cls:'sc-conservative', color:'#8b949e', prob:25,
     desc:'أداء دون التاريخي — لكنه يفترض نمواً موجباً، وليس سيناريو خسارة أو أسوأ-حالة' },
-  { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950',
+  { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950', prob:45,
     desc:'أداؤك التاريخي مُعدَّل بواقعية حسب ثقة بياناتك (مزج بمعيار السوق)' },
-  { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429',
+  { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429', prob:22,
     desc:'أداء أعلى من التاريخي: +2.5% نمو سعري، +1% أرباح — الربع الأعلى الواقعي طويل المدى' },
-  { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7',
+  { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7', prob:8,
     desc:'عقد صاعد قوي: +5% نمو سعري، +2% أرباح — ممكن الحدوث، لكنه ليس المتوسط المتوقَّع' },
 ];
 
@@ -827,6 +830,10 @@ function renderScenarioCards() {
     <div class="scenario-card ${m.cls}${isActive ? ' active' : ''}" id="sc-card-${m.key}" onclick="toggleScenario('${m.key}')">
       <div class="sc-badge">${m.emoji} ${m.name}</div>
       <div class="sc-name">${m.name}</div>
+      <div style="display:flex;align-items:center;gap:6px;margin:2px 0 6px">
+        <span style="font-size:.72rem;font-weight:700;color:${m.color};background:${m.color}22;border-radius:20px;padding:2px 10px;white-space:nowrap">احتمال الحدوث ≈ ${m.prob}%</span>
+        <span style="flex:1;height:5px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${m.prob}%;background:${m.color};border-radius:99px"></span></span>
+      </div>
       <div class="sc-desc">${m.desc}</div>
       <div class="sc-rates">
         <div class="sc-rate-row"><span class="label">نمو رأس المال/سنة</span><span class="val" style="color:${m.color}">${pct(sc.capRate)}</span></div>
