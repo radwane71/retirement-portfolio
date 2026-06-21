@@ -1,6 +1,16 @@
 let holdings    = [];
 let stockTargets = {};   // ticker → target_pct  (من stock_targets)
 let stockZones   = {};   // ticker → { entry_price, exit_price }
+let stockTaskMap = {};   // ticker → نوع المهمة اليدوية الفعّالة (من portfolio_tasks)
+let plannedTickers = {}; // ticker → name  (أسهم user_stocks المخطط لها وغير المملوكة)
+// مهام الأسهم اليدوية — نفس تعريف targets.js
+const STOCK_TASK_META = {
+  liquidation:  { label: 'تصفية',  icon: '🔴', color: '#f85149', desc: 'بيع المركز بالكامل والخروج منه.' },
+  reduction:    { label: 'تخفيف',  icon: '⚖️', color: '#f0b429', desc: 'تقليل حجم المركز تدريجياً.' },
+  monitoring:   { label: 'مراقبة', icon: '👁️', color: '#8b949e', desc: 'متابعة دون إجراء حالياً.' },
+  accumulation: { label: 'تجميع',  icon: '🟢', color: '#3fb950', desc: 'زيادة المركز عند الفرص.' },
+  hold:         { label: 'احتفاظ', icon: '🔵', color: '#3b82f6', desc: 'الاحتفاظ بالمركز كما هو.' },
+};
 let sectorChart = null;
 let _sectorMode = 'donut'; // 'donut' | 'bars' | 'cards'
 let weightChart = null;
@@ -248,7 +258,9 @@ async function loadAllData() {
     supabaseClient.from('real_estate').select('current_value, status').eq('is_active', true),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     supabaseClient.from('sector_targets').select('sector, target_pct'),
-    supabaseClient.from('portfolio_cash').select('amount, updated_at').limit(1).maybeSingle()
+    supabaseClient.from('portfolio_cash').select('amount, updated_at').limit(1).maybeSingle(),
+    supabaseClient.from('portfolio_tasks').select('type, ticker, status').eq('status', 'active'),
+    supabaseClient.from('user_stocks').select('ticker, name')
   ]);
 
   const failed = results.filter(r => r.status === 'rejected');
@@ -256,11 +268,19 @@ async function loadAllData() {
     showToast(`⚠️ تعذّر تحميل ${failed.length} مصدر بيانات — قد تكون بعض الأرقام غير مكتملة`, 'warning');
   }
 
-  const [rH, rTx, rDiv, rCf, rNw, rRe, rSt, rSecT, rCash] = results.map(r =>
+  const [rH, rTx, rDiv, rCf, rNw, rRe, rSt, rSecT, rCash, rTasks, rUserStocks] = results.map(r =>
     r.status === 'fulfilled' ? r.value : { data: null, error: null }
   );
 
   holdings = rH.data || [];
+
+  // المهام اليدوية الفعّالة لكل سهم (أحدث مهمة لكل رمز)
+  stockTaskMap = {};
+  (rTasks?.data || []).forEach(t => { if (t.ticker && !stockTaskMap[t.ticker]) stockTaskMap[t.ticker] = t.type; });
+  // الأسهم المخطط لها = user_stocks غير الموجودة في الحيازات الفعلية
+  plannedTickers = {};
+  const _heldSet = new Set((rH.data || []).map(h => h.ticker));
+  (rUserStocks?.data || []).forEach(u => { if (u.ticker && !_heldSet.has(u.ticker)) plannedTickers[u.ticker] = u.name || u.ticker; });
 
   // AUDIT-FIX: seed _priceTimestamps from DB's price_updated_at so staleness check
   // survives localStorage clearing without showing all prices as stale
@@ -930,8 +950,8 @@ function renderRebalancingAlerts() {
     const warningTag = aboveEntry
       ? `<span title="السعر الحالي ${curPrice} فوق هدف الشراء ${entryPx} — تحقق من القيمة العادلة قبل الشراء" style="font-size:.7rem;background:rgba(248,81,73,.15);color:#f85149;border-radius:4px;padding:1px 5px;margin-right:2px">⚠️ فوق الهدف</span>`
       : '';
-    return `<span style="
-      display:inline-flex;align-items:center;gap:4px;
+    return `<span onclick="showStockAlertDetail('${esc(d.ticker)}')" title="اضغط لتفاصيل ${esc(d.ticker)}" style="
+      display:inline-flex;align-items:center;gap:4px;cursor:pointer;
       background:${color}18;border:1px solid ${color}40;
       border-radius:20px;padding:3px 10px;font-size:.78rem;font-weight:600;
       color:${color};white-space:nowrap
@@ -956,6 +976,64 @@ function renderRebalancingAlerts() {
       ${moreCount > 0 ? `<span class="small text-muted" style="white-space:nowrap">+${moreCount} أخرى</span>` : ''}
       <a href="targets.html" class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-right:auto">⚖️ إعادة التوازن →</a>
     </div>`;
+}
+
+// ── نافذة تفاصيل السهم عند الضغط على تنبيه إعادة التوازن ──────────────
+function showStockAlertDetail(ticker) {
+  const h          = holdings.find(x => x.ticker === ticker);
+  const isPlanned  = !h && plannedTickers[ticker] != null;
+  const name       = h?.name || plannedTickers[ticker] || ticker;
+  const target     = stockTargets[ticker] || 0;                       // الهدف المخطط له
+  const totalVal   = holdings.reduce((s, x) => s + +x.shares * +x.current_price, 0);
+  const current    = (h && totalVal > 0) ? (+h.shares * +h.current_price) / totalVal * 100 : 0; // النسبة الحالية
+  const diff       = current - target;
+  const diffColor  = Math.abs(diff) < 0.01 ? 'var(--text-muted)' : diff > 0 ? '#f85149' : '#f0b429';
+  const taskType   = stockTaskMap[ticker];
+  const task       = taskType ? STOCK_TASK_META[taskType] : null;
+
+  const statusHtml = isPlanned
+    ? `<span style="color:#a371f7">📌 مخطط له (غير مملوك بعد)</span>`
+    : `<span style="color:#3fb950">✅ ضمن المحفظة حالياً</span>`;
+
+  const taskHtml = task
+    ? `<span style="display:inline-flex;align-items:center;gap:5px;background:${task.color}1f;color:${task.color};border-radius:20px;padding:3px 11px;font-weight:700;font-size:.82rem">${task.icon} ${task.label}</span>
+       <div style="font-size:.76rem;color:var(--text-muted);margin-top:5px">${task.desc}</div>`
+    : `<span style="color:var(--text-muted)">— لا توجد مهمة يدوية فعّالة لهذا السهم</span>`;
+
+  const row = (label, valHtml) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">
+      <span class="small" style="color:var(--text-muted)">${label}</span>
+      <span style="font-weight:600;font-size:.9rem;text-align:left">${valHtml}</span>
+    </div>`;
+
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:14px;max-width:420px;width:100%;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.5);direction:rtl">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <span style="font-weight:700;font-size:1.05rem">${esc(name)}</span>
+        <span style="font-family:monospace;font-size:.85rem;color:var(--text-muted)">${esc(ticker)}</span>
+      </div>
+      <div style="margin-bottom:12px">${statusHtml}</div>
+      ${row('النسبة الحالية في المحفظة', isPlanned ? '<span class="text-muted">—</span>' : `${current.toFixed(2)}%`)}
+      ${row('الهدف المخطط له', target ? `${target}%` : '<span class="text-muted">غير محدد</span>')}
+      ${row('الفارق عن الهدف', target ? `<span style="color:${diffColor}">${diff > 0 ? '+' : ''}${diff.toFixed(2)}%</span>` : '<span class="text-muted">—</span>')}
+      <div style="padding:11px 0 0">
+        <div class="small" style="color:var(--text-muted);margin-bottom:6px">المهمة اليدوية (من مهامي)</div>
+        ${taskHtml}
+      </div>
+      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:18px">
+        <a href="targets.html" class="btn btn-secondary btn-sm">⚖️ صفحة الأهداف والمهام</a>
+        <button id="sad-close" class="btn btn-secondary btn-sm" style="min-width:72px">إغلاق</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  overlay.querySelector('#sad-close').onclick = close;
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function escKey(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escKey); }
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
