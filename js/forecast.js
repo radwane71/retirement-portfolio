@@ -679,7 +679,14 @@ function renderDataConfidenceBanner(h) {
 
   const calMonths = Math.round((h.yearsActive || 0) * 12);     // عمر تقويمي
   const cwMonths  = Math.round(h.capitalWeightedMonths || 0);  // عمر فعلي مرجَّح
-  const divYears  = Object.keys(h.divByYear || {}).length;
+
+  // عدد السنوات التقويمية التي ظهر فيها توزيع. ملاحظة: محفظة تمتد على سنتين
+  // تقويميتين (مثلاً بدأت خريف 2025 وتوزيعات في 2025 ثم 2026) تعطي 2 رغم أن
+  // عمرها أقل من سنة. لذا نقيّد العدّاد بعمر المحفظة التقويمي حتى لا نعدّ
+  // «دورة سنوية كاملة» لم تكتمل فعلياً — يمنع تضخيم الثقة والتناقض في العرض.
+  const rawDivYears = Object.keys(h.divByYear || {}).length;
+  const maxCycles   = Math.max(1, Math.ceil(calMonths / 12));
+  const divYears    = Math.min(rawDivYears, maxCycles);
 
   // نستخدم العمر الفعلي (المرجَّح بالتدفقات) في حساب الثقة — أدق بكثير من التقويمي
   const months = cwMonths;
