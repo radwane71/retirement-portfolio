@@ -1297,24 +1297,22 @@ function renderDiversificationCard() {
       💡 <strong>ملاحظة الإدارة:</strong> ${n} سهماً — عدد كبير يرفع تعقيد المتابعة (Lynch: diworsification). تأكد أن كل مركز مدروس وتعرفه جيداً.
     </div>` : '';
 
-  // ── حلقة التقدّم نحو هدف Evans & Archer (15 سهماً فعّالاً) ──
+  // ── حلقة التقدّم نحو نطاق Evans & Archer (15 سهماً متوازناً) ──
   const targetN     = 15;
   const progressPct = Math.min(100, effectiveN / targetN * 100);
-  const remEff      = Math.max(0, Math.round(targetN - effectiveN));
   const circ        = 314.159;                       // 2π·50
   const dashoff     = circ * (1 - progressPct / 100);
-  const remTxt      = remEff === 1 ? 'سهم فعّال واحد'
-                    : remEff === 2 ? 'سهمان فعّالان'
-                    : `${remEff} أسهم فعّالة`;
   const progressTxt = effectiveN >= targetN
-    ? 'بلغت نطاق التنويع المثالي ✓'
-    : `${progressPct.toFixed(0)}% نحو الهدف · تبقّى ${remTxt}`;
+    ? 'بلغت نطاق التنويع الموصى به ✓'
+    : `${progressPct.toFixed(0)}% من نطاق التنويع الموصى به (${targetN} سهماً)`;
 
-  // ── شريطا التركّز (HHI) — أقل = أفضل. مرجع: HHI ≥ 25% = تركّز مرتفع ──
-  const hhiPct   = hhi * 100, secPct = secHHI * 100;
-  const lvlColor = v => v < 15 ? '#3fb950' : v < 25 ? '#f0b429' : '#f85149';
-  const hhiFill  = Math.min(100, hhiPct / 25 * 100);
-  const secFill  = Math.min(100, secPct / 25 * 100);
+  // ── شريطا توازن التوزيع — أعلى = أكثر توازناً = أفضل (عكس التركّز) ──
+  // توازن = كم هي متقاربة أوزان المراكز؛ 100% = أوزان متساوية تماماً.
+  const balColor   = v => v >= 70 ? '#3fb950' : v >= 50 ? '#f0b429' : '#f85149';
+  const balStocks  = Math.round(effectiveN / n * 100);
+  const effSectors = secHHI > 0 ? 1 / secHHI : sectorCount;
+  const balSectors = Math.round(Math.min(1, effSectors / sectorCount) * 100);
+  const hhiPct     = hhi * 100, secPct = secHHI * 100;
 
   el.innerHTML = `
     <div class="section-header" style="margin-bottom:14px">
@@ -1340,7 +1338,12 @@ function renderDiversificationCard() {
       </div>
       <div style="flex:1;min-width:180px">
         <div style="font-size:0.98rem;font-weight:700;color:${zoneColor};margin-bottom:3px">${zoneLabel}</div>
-        <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:9px">${progressTxt}</div>
+        <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:6px">${progressTxt}</div>
+        <div style="font-size:0.74rem;color:var(--text-2);line-height:1.55;margin-bottom:9px">
+          تملك ${n} سهماً، لكن بسبب تفاوت أوزانها فإن تنوّعها يعادل
+          <b style="color:var(--text)">${effectiveN}</b> سهماً متساوي الوزن.
+          كلما اقترب الرقمان كان توزيعك أكثر توازناً.
+        </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
           <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">${n} سهم</span>
           <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">${sectorCount} قطاع</span>
@@ -1349,27 +1352,30 @@ function renderDiversificationCard() {
       </div>
     </div>
 
-    <!-- شريطا التركّز HHI -->
+    <!-- شريطا توازن التوزيع (أطول = أكثر توازناً = أفضل) -->
     <div style="display:flex;flex-direction:column;gap:11px;margin-bottom:14px">
       <div>
         <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
-          <span style="color:var(--text-muted)">تركّز الأسهم (HHI)</span>
-          <span style="font-weight:700;color:${lvlColor(hhiPct)}">${hhiPct.toFixed(1)}%</span>
+          <span style="color:var(--text-muted)">توازن توزيع الأسهم</span>
+          <span style="font-weight:700;color:${balColor(balStocks)}">${balStocks}%</span>
         </div>
-        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden">
-          <div style="height:100%;width:${hhiFill.toFixed(0)}%;background:${lvlColor(hhiPct)};border-radius:99px"></div>
+        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden;direction:ltr">
+          <div style="height:100%;width:${balStocks}%;background:${balColor(balStocks)};border-radius:99px"></div>
         </div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
-          <span style="color:var(--text-muted)">تركّز القطاعات (HHI)</span>
-          <span style="font-weight:700;color:${lvlColor(secPct)}">${secPct.toFixed(1)}%</span>
+          <span style="color:var(--text-muted)">توازن توزيع القطاعات</span>
+          <span style="font-weight:700;color:${balColor(balSectors)}">${balSectors}%</span>
         </div>
-        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden">
-          <div style="height:100%;width:${secFill.toFixed(0)}%;background:${lvlColor(secPct)};border-radius:99px"></div>
+        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden;direction:ltr">
+          <div style="height:100%;width:${balSectors}%;background:${balColor(balSectors)};border-radius:99px"></div>
         </div>
       </div>
-      <div style="font-size:0.68rem;color:var(--text-muted);text-align:center">كلما قلّ HHI زاد التنوّع — 🟢 منخفض/صحي · 🟡 متوسط · 🔴 مرتفع</div>
+      <div style="font-size:0.68rem;color:var(--text-muted);text-align:center;line-height:1.6">
+        الشريط الأطول = توزيع أكثر توازناً (لا مركز يطغى). 🟢 جيد ≥٧٠٪ · 🟡 متوسط · 🔴 ضعيف
+        <br>مقياس HHI الخام: أسهم ${hhiPct.toFixed(1)}% · قطاعات ${secPct.toFixed(1)}%
+      </div>
     </div>
 
     <!-- النصيحة -->
