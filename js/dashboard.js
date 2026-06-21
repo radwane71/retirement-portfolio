@@ -1372,6 +1372,23 @@ function renderPortfolioHealthCard() {
     </p>`;
 }
 
+// تقدير نسبة المخاطر القابلة للتنويع المُزالة عند «عدد فعّال» معيّن.
+// مرتكز على نقاط مرجعية من أبحاث منشورة (تقديري لا قطعي):
+//   • Evans & Archer (1968): ~8–10 أسهم تُزيل معظم المخاطر القابلة للتنويع
+//   • Alexeev & Tapon (2014): 10 أسهم تبقي ~25% من المخاطر الفردية
+//   • Domian et al. (2007): 20 سهماً ≈ 95% مُزالة، و+80 سهماً تُزيل 4% فقط
+//   • مراجعة Zaimovic et al. (2021, 150 دراسة): العدد أكبر اليوم، وأقل في
+//     الأسواق الناشئة، والتنويع لا يُزيل مخاطر الذيل (الانهيارات)
+function _divRiskRemoved(effN) {
+  if (effN < 5)  return { pct: 60, txt: '< ٦٠٪',            clr: '#f85149' };
+  if (effN < 8)  return { pct: 75, txt: '~٧٥٪',             clr: '#f0b429' };
+  if (effN < 11) return { pct: 80, txt: '~٨٠٪',             clr: '#f0b429' };
+  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             clr: '#84cc16' };
+  if (effN < 21) return { pct: 95, txt: '~٩٥٪',             clr: '#3fb950' };
+  if (effN < 31) return { pct: 97, txt: '~٩٦–٩٧٪',          clr: '#3fb950' };
+  return            { pct: 98, txt: '~٩٨٪ (منفعة هامشية)', clr: '#3b82f6' };
+}
+
 // ── مقياس التنويع (HHI gauge) ─────────────────────────────────
 function renderDiversificationCard() {
   const el = document.getElementById('diversification-card');
@@ -1429,6 +1446,7 @@ function renderDiversificationCard() {
   const effSectors = secHHI > 0 ? 1 / secHHI : sectorCount;
   const balSectors = Math.round(Math.min(1, effSectors / sectorCount) * 100);
   const hhiPct     = hhi * 100, secPct = secHHI * 100;
+  const ev         = _divRiskRemoved(effectiveN);   // تقدير المخاطر المُزالة (أبحاث)
 
   el.innerHTML = `
     <div class="section-header" style="margin-bottom:14px">
@@ -1491,6 +1509,42 @@ function renderDiversificationCard() {
       <div style="font-size:0.68rem;color:var(--text-muted);text-align:center;line-height:1.6">
         الشريط الأطول = توزيع أكثر توازناً (لا مركز يطغى). 🟢 جيد ≥٧٠٪ · 🟡 متوسط · 🔴 ضعيف
         <br>مقياس HHI الخام: أسهم ${hhiPct.toFixed(1)}% · قطاعات ${secPct.toFixed(1)}%
+      </div>
+    </div>
+
+    <!-- لوحة الأدلّة العلمية -->
+    <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;direction:rtl">
+      <div style="display:flex;align-items:center;gap:6px;font-size:.78rem;font-weight:700;margin-bottom:9px">
+        📚 وفق الأبحاث <span style="font-weight:400;color:var(--text-muted);font-size:.7rem">(مراجعة Zaimovic et al. 2021 — 150 دراسة)</span>
+      </div>
+
+      <!-- مقياس مرجعي بعلامة موضعك -->
+      <div style="direction:ltr;position:relative;margin:0 4px 6px">
+        <div style="display:flex;height:8px;border-radius:5px;overflow:hidden">
+          <div style="flex:0 0 16%;background:#f85149" title="< 8 فعّال"></div>
+          <div style="flex:0 0 16%;background:#f0b429"></div>
+          <div style="flex:0 0 22%;background:#84cc16"></div>
+          <div style="flex:0 0 24%;background:#3fb950"></div>
+          <div style="flex:0 0 22%;background:#3b82f6"></div>
+        </div>
+        <div style="position:absolute;top:-4px;left:${Math.min(100, Math.max(0, effectiveN / 30 * 100)).toFixed(0)}%;transform:translateX(-50%)">
+          <div style="width:2px;height:16px;background:var(--text);margin:0 auto"></div>
+          <div style="font-size:.62rem;font-weight:700;white-space:nowrap;margin-top:1px">أنت ${effectiveN}</div>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--text-muted);direction:ltr;margin:0 4px 10px">
+        <span>5</span><span>8–10</span><span>15</span><span>20</span><span>30+</span>
+      </div>
+
+      <div style="font-size:.78rem;color:var(--text-2);line-height:1.7">
+        عند <b style="color:var(--text)">${effectiveN}</b> سهماً فعّالاً، أُزيل تقديراً
+        <b style="color:${ev.clr}">${ev.txt}</b> من المخاطر القابلة للتنويع.
+        ${effectiveN < 20
+          ? `الوصول إلى ~٢٠ يرفعها إلى ~٩٥٪ <span style="color:var(--text-muted)">(Domian 2007)</span>؛ بعدها المنفعة هامشية (+٨٠ سهماً = +٤٪ فقط).`
+          : `أنت في منطقة المنفعة الهامشية — زيادة العدد بعد ~٢٠ لا تُضيف تنويعاً يُذكر <span style="color:var(--text-muted)">(Domian 2007)</span>.`}
+        <br>🌍 <b>سوقك ناشئ (تاسي):</b> الأبحاث تُظهر أن الأسواق الناشئة تحتاج عدداً
+        <b>أقل</b> للتنويع الأمثل من المتطورة، لكنها أعلى تذبذباً ومخاطر ذيل —
+        والتنويع <b>لا يحمي من الانهيارات</b> (الارتباطات ترتفع وقت الأزمات).
       </div>
     </div>
 
@@ -1653,9 +1707,14 @@ function showDiversificationAnalysis() {
         <div style="direction:rtl">${rowsHtml}</div>
 
         <!-- ملاحظة -->
-        <div style="margin-top:14px;font-size:0.72rem;color:var(--text-muted);line-height:1.7;direction:rtl">
-          المعايير مبنية على: DOJ HHI thresholds · Evans & Archer (1968) · Statman (1987) · Campbell et al (2001)<br>
-          "تنوع ممتاز" = N_فعّال ≥ 15 · أكبر مركز ≤ 15% · أكبر 3 ≤ 45% · 4+ قطاعات متوازنة
+        <div style="margin-top:14px;font-size:0.72rem;color:var(--text-muted);line-height:1.8;direction:rtl">
+          <b>الأدلّة العلمية (مراجعة Zaimovic et al. 2021 — 150 دراسة 1952–2021):</b><br>
+          • لا يوجد «عدد مثالي» واحد — يعتمد على السوق والمستثمر وقياس المخاطر ودرجة تحمّلك.<br>
+          • ١٠ أسهم تبقي ~٢٥٪ من المخاطر الفردية (Alexeev & Tapon 2014)؛ ٢٠ سهماً ≈ ٩٥٪ مُزالة، و+٨٠ سهماً تُزيل ٤٪ فقط (Domian et al. 2007).<br>
+          • المحفظة جيدة التنويع <b>أكبر اليوم</b> بسبب انخفاض تكاليف التداول وارتفاع المخاطر الفردية.<br>
+          • الأسواق <b>الناشئة (تاسي)</b> تحتاج عدداً أقل للتنويع الأمثل، لكن مخاطر الذيل أعلى والتنويع لا يُزيلها — الارتباطات ترتفع وقت الأزمات.<br>
+          • المتحفّظ يستهدف خفض ٩٩٪ من المخاطر (عدد أكبر)، والمغامِر ٩٠٪ (عدد أقل) (Raju & Agarwalla 2021).<br>
+          المعايير العملية: N_فعّال ≥ ١٥ · أكبر مركز ≤ ١٥٪ · أكبر ٣ ≤ ٤٥٪ · ٤+ قطاعات متوازنة.
         </div>
       </div>
     </div>`;
@@ -3882,6 +3941,15 @@ function showCardInfo(key) {
             <li><span style="color:#10b981">●</span> <strong>تنوع ممتاز</strong>: HHI < 6.7% (N_eff ≥ 15) — يُزيل ~90% من المخاطر القابلة للتنويع</li>
           </ul>
           <p><strong>دور القطاعات:</strong> تنوع القطاعات يُخفّض الدرجة بنسبة تصل لـ 30% إذا تركّزت الأسهم في قطاع واحد (الدرجة الكاملة عند ~6 قطاعات فعّالة — نطاق واقعي للفرد) — لأن الارتباط داخل القطاع الواحد يُلغي فائدة التعدد.</p>
+          <p><strong>📚 ماذا تقول الأبحاث (مراجعة Zaimovic et al. 2021 — 150 دراسة):</strong></p>
+          <ul style="font-size:0.82rem;line-height:1.9;padding-right:16px">
+            <li><strong>لا يوجد رقم سحري واحد</strong> — يعتمد على السوق والمستثمر وقياس المخاطر.</li>
+            <li>١٠ أسهم تبقي ~٢٥٪ من المخاطر الفردية (Alexeev & Tapon 2014).</li>
+            <li>٢٠ سهماً ≈ إزالة ٩٥٪ من المخاطر القابلة للتنويع؛ <strong>+٨٠ سهماً تُزيل ٤٪ فقط</strong> (Domian et al. 2007) — تناقص حاد.</li>
+            <li>المحفظة جيدة التنويع <strong>أكبر اليوم</strong> (تكاليف تداول أقل، مخاطر فردية أعلى).</li>
+            <li><strong>سوقك ناشئ (تاسي):</strong> يحتاج عدداً أقل للتنويع الأمثل من الأسواق المتطورة، لكن مخاطر الذيل أعلى.</li>
+            <li>⚠️ <strong>التنويع لا يحمي من الانهيارات</strong> — الارتباطات ترتفع وقت الأزمات فتتقلّص فائدته وقت الحاجة.</li>
+          </ul>
           <p class="info-note">💡 <strong>تنبيه الإدارة (Diworsification):</strong> يظهر بشكل منفصل عند n > 30 — ليس جزءاً من المقياس لأن المزيد من الأسهم رياضياً لا يزيد المخاطرة، بل يزيد تعقيد المتابعة فقط.</p>`;
       })()
     },
