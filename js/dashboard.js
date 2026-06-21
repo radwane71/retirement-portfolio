@@ -2636,11 +2636,18 @@ function renderBreakEvenCard() {
         <div class="num bold ${cls}" style="font-size:1rem">${val}</div>
         <div class="small text-muted" style="margin-top:2px;font-size:0.72rem">${label}</div>
       </div>`;
+    // نُظهر «النقد من حصيلة البيع» كمكوّن مستقل حين يكون > 0، وإلا لا تتطابق
+    // الصناديق مع صافي الربح (الصافي يشمله لكنه كان مخفياً عن الملخّص).
+    const summaryStats = [
+      statItem('القيمة السوقية', formatSAR(currentValue), 'text-accent'),
+      statItem('الأرباح الموزعة', formatSAR(totalDivAll), 'text-success'),
+      cashReturned > 0 ? statItem('نقد من حصيلة البيع', formatSAR(cashReturned), 'text-success') : '',
+      statItem('رأس المال المنشغل', formatSAR(netCapital)),
+    ].filter(Boolean);
+    const cols = summaryStats.length === 4 ? 2 : 3;
     el.innerHTML = progressBar + bigNumber + `
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px">
-        ${statItem('القيمة السوقية', formatSAR(currentValue), 'text-accent')}
-        ${statItem('الأرباح الموزعة', formatSAR(totalDivAll), 'text-success')}
-        ${statItem('رأس المال المنشغل', formatSAR(netCapital))}
+      <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px">
+        ${summaryStats.join('')}
       </div>`;
     return;
   }
