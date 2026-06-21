@@ -1284,17 +1284,29 @@ function renderDividendQuality() {
     const rawYears   = Object.keys(rawYearMap || {}).map(Number).sort((a,b) => a - b);
     const lastRawAmt = rawYears.length ? (rawYearMap[rawYears[rawYears.length - 1]] || 0) : 0;
 
-    // ── 1. الاستمرارية (0–35 نقطة) ────────────────────────────
+    // السنوات التقويمية المكتملة (انتهت فعلاً) مقابل السنة الجارية الجزئية.
+    // مقارنة سنة جارية ناقصة — أو سنة الدخول الجزئية — تُنتج نمواً/تذبذباً وهمياً
+    // لمحفظة عمرها أشهر، لذا نقيس النمو والثبات على السنوات المكتملة فقط.
+    const completeYears    = years.filter(y => y < currentYear);
+    const nComplete        = completeYears.length;
+    const hasCurrentPartial = years.includes(currentYear);
+
+    // ── 1. الاستمرارية (0–35 نقطة) — تتناسب مع السجل الفعلي ────
+    // عاملان: انتظام (لا فجوات بين السنوات) × نضج (يحتاج ~3 سنوات للدرجة الكاملة).
+    // هكذا لا يأخذ سهم عمره أشهر 35/35 كاملة بل درجة تعكس قِصَر سجله.
     const minYear = years[0], maxYear = years[n - 1];
     const expectedYears = maxYear - minYear + 1;
-    const continuityRatio = expectedYears > 0 ? n / expectedYears : 1;
-    const continuityScore = Math.round(continuityRatio * 35);
+    const regularity    = expectedYears > 0 ? n / expectedYears : 1;     // يعاقب الفجوات
+    const trackYears    = nComplete + (hasCurrentPartial ? 0.5 : 0);      // الجارية تُحسب نصفاً
+    const maturity      = Math.min(1, trackYears / 3);                    // 3 سنوات = درجة كاملة
+    const continuityScore = Math.round(35 * regularity * maturity);
 
-    // ── 2. نمو التوزيعات (0–35 نقطة) — بالـ DPS المُعدَّل ────────
-    let growthScore = 17;
+    // ── 2. نمو التوزيعات (0–35 نقطة) — فقط بين سنتين مكتملتين ───
+    // null = لا تكفي البيانات بعد (لا نختلق رقماً افتراضياً)
+    let growthScore = null;
     let cagr3 = null, cagr5 = null;
 
-    if (n >= 2) {
+    if (nComplete >= 2) {
       const calcCagr = (from, to) => {
         if (!yearMap[from] || !yearMap[to] || yearMap[from] <= 0) return null;
         const periods = to - from;
@@ -1302,17 +1314,17 @@ function renderDividendQuality() {
         return (Math.pow(yearMap[to] / yearMap[from], 1 / periods) - 1) * 100;
       };
 
-      cagr3 = calcCagr(currentYear - 3, currentYear - 1) ??
-              calcCagr(years[Math.max(0, n-4)], years[n-1]);
-      cagr5 = calcCagr(currentYear - 5, currentYear - 1) ??
-              calcCagr(years[0], years[n-1]);
+      const cFrom = completeYears[0], cTo = completeYears[nComplete - 1];
+      cagr3 = calcCagr(Math.max(cFrom, cTo - 3), cTo);
+      cagr5 = calcCagr(cFrom, cTo);
 
       const cagr = cagr3 ?? cagr5 ?? 0;
       growthScore = Math.round(Math.min(35, Math.max(0, (cagr + 10) / 18 * 35)));
     }
 
-    // ── 3. انخفاض التذبذب (0–30 نقطة) — بالـ DPS المُعدَّل ──────
-    let volatilityScore = 15;
+    // ── 3. انخفاض التذبذب (0–30 نقطة) — يحتاج 3 سنوات على الأقل ──
+    // null = غير مقيس بعد (لا قيمة افتراضية مموَّهة)
+    let volatilityScore = null;
     if (n >= 3) {
       const mean     = amounts.reduce((s, v) => s + v, 0) / n;
       const variance = amounts.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / n;
@@ -1320,15 +1332,24 @@ function renderDividendQuality() {
       volatilityScore = Math.round(Math.max(0, (1 - cv) * 30));
     }
 
-    const totalScore = continuityScore + growthScore + volatilityScore;
+    // ── الدرجة الكلية: تُطبَّع على المحاور المتاحة فقط (من 100) ──
+    // إذا لم يتوفر النمو/الثبات بعد، لا نحشو أصفاراً ولا ثوابت — بل نقسم
+    // مجموع المتاح على سقفه المتاح ونرفعه لـ 100، ونؤشّر أنها درجة مبدئية.
+    let sumAvail = continuityScore, maxAvail = 35;
+    if (growthScore     != null) { sumAvail += growthScore;     maxAvail += 35; }
+    if (volatilityScore != null) { sumAvail += volatilityScore; maxAvail += 30; }
+    const totalScore  = Math.round(sumAvail / maxAvail * 100);
+    const provisional = (growthScore == null || volatilityScore == null);
 
-    // الاتجاه: مقارنة DPS آخر سنة بالسابقة
-    let trend = 'neutral';
-    if (n >= 2) {
-      const last = amounts[n - 1];
-      const prev = amounts[n - 2];
-      if (last > prev * 1.02)      trend = 'up';
+    // الاتجاه: فقط عند توفر سنتين مكتملتين (وإلا «جديد» — لا نحكم بعد)
+    let trend = 'new';
+    if (nComplete >= 2) {
+      const cAmounts = completeYears.map(y => yearMap[y]);
+      const last = cAmounts[nComplete - 1];
+      const prev = cAmounts[nComplete - 2];
+      if      (last > prev * 1.02) trend = 'up';
       else if (last < prev * 0.98) trend = 'down';
+      else                         trend = 'neutral';
     }
 
     const h = holdings.find(x => x.ticker === ticker);
@@ -1342,7 +1363,7 @@ function renderDividendQuality() {
       isDPS,                          // هل الدرجة محسوبة من DPS؟
       cagr3, cagr5,
       continuityScore, growthScore, volatilityScore,
-      totalScore,
+      totalScore, provisional,
       trend,
       inPortfolio:     !!h,
     };
@@ -1350,12 +1371,16 @@ function renderDividendQuality() {
 
   // ── رسم الجدول ─────────────────────────────────────────────
   const scoreColor = s => s >= 75 ? '#3fb950' : s >= 50 ? '#f0b429' : '#f85149';
-  const scoreBadge = (s, lbl) =>
-    `<span title="${lbl}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:0.72rem;font-weight:700;
-      background:${scoreColor(s)}22;color:${scoreColor(s)}">${s}</span>`;
+  // s === null ⇒ المحور غير مقيس بعد (بيانات غير كافية) — نعرض «—» بدل رقم مختلق
+  const scoreBadge = (s, lbl, naLbl) =>
+    s == null
+      ? `<span title="${naLbl || lbl}" style="color:var(--text-muted);cursor:help">—</span>`
+      : `<span title="${lbl}" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:0.72rem;font-weight:700;
+        background:${scoreColor(s)}22;color:${scoreColor(s)}">${s}</span>`;
   const trendEl = t =>
     t === 'up'   ? '<span style="color:var(--success)">↑ نامٍ</span>' :
     t === 'down' ? '<span style="color:var(--danger)">↓ تراجع</span>' :
+    t === 'new'  ? '<span style="color:var(--text-muted)" title="يحتاج سنتين مكتملتين للحكم على الاتجاه">🆕 جديد</span>' :
                    '<span style="color:var(--text-muted)">← ثابت</span>';
   const cagrFmt = v =>
     v == null ? '<span class="text-muted">—</span>' :
@@ -1390,7 +1415,7 @@ function renderDividendQuality() {
             <th>نمو التوزيع<br><span class="small text-muted">/35 — بـ DPS</span></th>
             <th>ثبات التوزيع<br><span class="small text-muted">/30 — بـ DPS</span></th>
             <th>سنوات<br>التوزيع</th>
-            <th>نمو 3 سنوات<br><span class="small text-muted">CAGR DPS</span></th>
+            <th>نمو سنوي<br><span class="small text-muted">CAGR DPS — سنوات مكتملة</span></th>
             <th>آخر توزيع<br><span class="small text-muted">المبلغ الفعلي</span></th>
             <th>الاتجاه</th>
           </tr>
@@ -1414,14 +1439,15 @@ function renderDividendQuality() {
               <td>
                 <div style="display:flex;align-items:center;gap:8px">
                   <span style="font-size:1.1rem;font-weight:700;color:${totalColor}">${s.totalScore}</span>
+                  ${s.provisional ? `<span title="درجة مبدئية — مقيسة على المحاور المتاحة فقط (السجل أقصر من اللازم لقياس النمو/الثبات)" style="font-size:.62rem;color:var(--text-muted);cursor:help">مبدئي</span>` : ''}
                   <div style="flex:1;height:6px;background:var(--bg-3);border-radius:3px;min-width:60px">
                     <div style="width:${s.totalScore}%;height:100%;background:${totalColor};border-radius:3px"></div>
                   </div>
                 </div>
               </td>
-              <td style="text-align:center">${scoreBadge(s.continuityScore, 'انتظام سنوات التوزيع')}</td>
-              <td style="text-align:center">${scoreBadge(s.growthScore, 'نمو التوزيعات سنة على سنة')}</td>
-              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض التذبذب بين السنوات')}</td>
+              <td style="text-align:center">${scoreBadge(s.continuityScore, 'انتظام ونضج سجل التوزيع')}</td>
+              <td style="text-align:center">${scoreBadge(s.growthScore, 'نمو التوزيعات سنة على سنة', 'يحتاج سنتين تقويميتين مكتملتين لقياس النمو')}</td>
+              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض التذبذب بين السنوات', 'يحتاج 3 سنوات على الأقل لقياس الثبات')}</td>
               <td class="num">${s.years} <span class="small text-muted">(${s.firstYear}–${s.lastYear})</span></td>
               <td>${cagrFmt(s.cagr3)}</td>
               <td class="num">${formatSAR(s.lastAmount)}</td>
@@ -1433,6 +1459,8 @@ function renderDividendQuality() {
     </div>
     <p class="small text-muted" style="margin-top:10px;padding:0 4px">
       * الدرجات مبنية على بياناتك المُسجّلة فقط — كلما أضفت سنوات أكثر زادت دقة التقييم.<br>
+      <strong>«—»</strong> = المحور لم يُقَس بعد (النمو يحتاج سنتين تقويميتين مكتملتين، الثبات يحتاج 3 سنوات) — لا نعرض رقماً مختلقاً.
+      <strong>«مبدئي»</strong> = الدرجة مطبَّعة على المحاور المتاحة فقط حتى ينضج السجل.<br>
       <span style="color:#58a6ff">DPS ✓</span> = الدرجة محسوبة من التوزيع للسهم الواحد (يُزيل تأثير شراء/بيع جزئي) |
       آخر توزيع = المبلغ الفعلي المُستلَم (ليس DPS)
     </p>
@@ -1446,13 +1474,18 @@ function showDivQualityInfo() {
     'الدرجة من 100 مقسّمة على 3 محاور:',
     '',
     '📅 الاستمرارية (35 نقطة)',
-    'هل الشركة وزّعت بانتظام بدون سنوات قطع؟',
+    'انتظام التوزيع (بلا سنوات قطع) × نضج السجل.',
+    'سهم عمره أشهر لا يأخذ الدرجة كاملة — يحتاج ~3 سنوات.',
     '',
     '📈 نمو التوزيعات (35 نقطة)',
-    'معدل نمو DPS السنوي (CAGR) — يقيس نمو الشركة لا حجم مركزك.',
+    'معدل نمو DPS السنوي (CAGR) بين سنتين تقويميتين مكتملتين.',
+    'لا يُحسب من السنة الجارية الجزئية (يمنع نمواً وهمياً).',
     '',
     '📊 ثبات التوزيعات (30 نقطة)',
-    'معامل الاختلاف (CV) — مبني على DPS، لا المبلغ الإجمالي.',
+    'معامل الاختلاف (CV) — يحتاج 3 سنوات على الأقل.',
+    '',
+    'إذا لم يتوفر محور بعد يظهر «—» ولا يُحشى برقم،',
+    'وتُطبَّع الدرجة على المحاور المتاحة وتُؤشَّر «مبدئي».',
     '',
     '📐 تصحيح DPS (مهم):',
     'الحسابات تعتمد على التوزيع للسهم الواحد (DPS) لا المبلغ الإجمالي.',
