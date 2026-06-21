@@ -199,39 +199,7 @@ function _projectedAnnualIncome() {
 
     if (!tickerDivs.length) return;
 
-    // ابحث عن أحدث توزيعة كان المستخدم يملك أسهماً عندها
-    // (قد تكون آخر توزيعة قبل تاريخ الشراء — نتراجع حتى نجد واحدة صالحة)
-    let refDivIdx = -1;
-    let sharesAtRefDiv = 0;
-    for (let i = tickerDivs.length - 1; i >= 0; i--) {
-      const s = _sharesAtDate(ticker, _divSortDate(tickerDivs[i]));
-      if (s >= 0.001) { refDivIdx = i; sharesAtRefDiv = s; break; }
-    }
-
-    // لا توزيعة مناسبة — قد يكون المستخدم اشترى السهم بعد كل التوزيعات المسجّلة
-    // نقدّر DPS من إجمالي الأرباح المستلمة على الأسهم الحالية (تقدير محافظ)
-    let dps, lastDivDate, usedFallback = false;
-    if (refDivIdx >= 0) {
-      const refDiv = tickerDivs[refDivIdx];
-      lastDivDate  = _divSortDate(refDiv);
-      dps          = +refDiv.amount / sharesAtRefDiv;
-    } else {
-      // H-9 fallback: use last recorded year's dividends ÷ current shares
-      // (NOT all-time total which inflates DPS by multi-year accumulation)
-      const lastDiv  = tickerDivs[tickerDivs.length - 1];
-      lastDivDate    = _divSortDate(lastDiv);
-      const lastYear = Math.max(...tickerDivs.map(d => +d.year || new Date(lastDivDate).getFullYear()));
-      const lastYearTotal = tickerDivs
-        .filter(d => (+d.year || new Date(_divSortDate(d)).getFullYear()) === lastYear)
-        .reduce((s, d) => s + +d.amount, 0);
-      // if last year has recorded divs use those; otherwise fall back to single last payment
-      dps            = lastYearTotal > 0
-        ? lastYearTotal / +holding.shares
-        : +lastDiv.amount / +holding.shares;
-      sharesAtRefDiv = +holding.shares;
-      usedFallback   = true;
-    }
-
+    // الدورية أولاً (وسيط الفجوات الزمنية) — نحتاجها لاختيار آخر freq دفعات
     // AUDIT-FIX: use median inter-dividend gap (matches dashboard.js) — robust to skipped payments
     let freq = 1;
     let freqLabel = 'سنوي';
@@ -248,6 +216,44 @@ function _projectedAnnualIncome() {
       else if (medGap <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
     }
 
+    // سلسلة DPS لكل دفعة كان المستخدم يملك أسهماً عندها (بالترتيب الزمني)
+    let lastValidShares = 0, lastValidDate = null, lastValidAmt = 0;
+    const dpsSeries = [];
+    for (let i = 0; i < tickerDivs.length; i++) {
+      const sh = _sharesAtDate(ticker, _divSortDate(tickerDivs[i]));
+      if (sh >= 0.001) {
+        dpsSeries.push(+tickerDivs[i].amount / sh);
+        lastValidShares = sh;
+        lastValidDate   = _divSortDate(tickerDivs[i]);
+        lastValidAmt    = +tickerDivs[i].amount;
+      }
+    }
+
+    // DPS المتوقع = وسيط آخر freq دفعات (يطابق dashboard.js تماماً —
+    // محصّن ضد توزيع خاص/شاذ يضخّم معدّل التشغيل المستقبلي)
+    let dps, lastDivDate, sharesAtRefDiv, usedFallback = false;
+    if (dpsSeries.length) {
+      const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
+      dps            = recent[Math.floor(recent.length / 2)];
+      lastDivDate    = lastValidDate;
+      sharesAtRefDiv = lastValidShares;
+    } else {
+      // fallback: اشترى السهم بعد كل التوزيعات المسجّلة — نقدّر من آخر سنة
+      // مسجّلة ÷ الأسهم الحالية (H-9: لا الإجمالي الكلي الذي يضخّم DPS)
+      const lastDiv  = tickerDivs[tickerDivs.length - 1];
+      lastDivDate    = _divSortDate(lastDiv);
+      const lastYear = Math.max(...tickerDivs.map(d => +d.year || new Date(lastDivDate).getFullYear()));
+      const lastYearTotal = tickerDivs
+        .filter(d => (+d.year || new Date(_divSortDate(d)).getFullYear()) === lastYear)
+        .reduce((s, d) => s + +d.amount, 0);
+      dps            = lastYearTotal > 0
+        ? lastYearTotal / +holding.shares
+        : +lastDiv.amount / +holding.shares;
+      sharesAtRefDiv = +holding.shares;
+      lastValidAmt   = +lastDiv.amount;
+      usedFallback   = true;
+    }
+
     const currentShares = +holding.shares;
     const projected = dps * freq * currentShares;
     total += projected;
@@ -255,7 +261,7 @@ function _projectedAnnualIncome() {
     breakdown.push({
       ticker, name: holding.name || ticker,
       dps, freq, freqLabel, currentShares,
-      lastDivDate, lastDivAmt: dps * sharesAtRefDiv,
+      lastDivDate, lastDivAmt: lastValidAmt,
       sharesAtLastDiv: sharesAtRefDiv, projected, usedFallback,
     });
   });
