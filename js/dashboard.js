@@ -1297,6 +1297,25 @@ function renderDiversificationCard() {
       💡 <strong>ملاحظة الإدارة:</strong> ${n} سهماً — عدد كبير يرفع تعقيد المتابعة (Lynch: diworsification). تأكد أن كل مركز مدروس وتعرفه جيداً.
     </div>` : '';
 
+  // ── حلقة التقدّم نحو هدف Evans & Archer (15 سهماً فعّالاً) ──
+  const targetN     = 15;
+  const progressPct = Math.min(100, effectiveN / targetN * 100);
+  const remEff      = Math.max(0, Math.round(targetN - effectiveN));
+  const circ        = 314.159;                       // 2π·50
+  const dashoff     = circ * (1 - progressPct / 100);
+  const remTxt      = remEff === 1 ? 'سهم فعّال واحد'
+                    : remEff === 2 ? 'سهمان فعّالان'
+                    : `${remEff} أسهم فعّالة`;
+  const progressTxt = effectiveN >= targetN
+    ? 'بلغت نطاق التنويع المثالي ✓'
+    : `${progressPct.toFixed(0)}% نحو الهدف · تبقّى ${remTxt}`;
+
+  // ── شريطا التركّز (HHI) — أقل = أفضل. مرجع: HHI ≥ 25% = تركّز مرتفع ──
+  const hhiPct   = hhi * 100, secPct = secHHI * 100;
+  const lvlColor = v => v < 15 ? '#3fb950' : v < 25 ? '#f0b429' : '#f85149';
+  const hhiFill  = Math.min(100, hhiPct / 25 * 100);
+  const secFill  = Math.min(100, secPct / 25 * 100);
+
   el.innerHTML = `
     <div class="section-header" style="margin-bottom:14px">
       <span class="section-title">🧩 مقياس التنويع <span class="eng-label">Diversification</span></span>
@@ -1306,67 +1325,57 @@ function renderDiversificationCard() {
       </div>
     </div>
 
-    <!-- المقياس البصري — اتجاه ثابت LTR لوضوح الرسم -->
-    <div style="direction:ltr;padding:0 4px 4px">
-      <!-- تسميات الأطراف -->
-      <div style="display:flex;justify-content:space-between;font-size:0.72rem;margin-bottom:6px">
-        <span style="color:#ef4444;font-weight:600">◀ مركّز</span>
-        <span style="color:#10b981;font-weight:600">متنوع ▶</span>
-      </div>
-
-      <!-- شريط التدرج + مؤشر -->
-      <div style="position:relative;margin-bottom:34px">
-        <div style="height:22px;border-radius:11px;background:linear-gradient(to right,#ef4444 0%,#f97316 18%,#eab308 32%,#84cc16 45%,#22c55e 62%,#10b981 80%,#10b981 100%)"></div>
-        <!-- إطار منطقة "تنوع جيد +" -->
-        <div style="position:absolute;top:0;bottom:0;left:60%;right:0;border:2.5px solid rgba(255,255,255,0.75);border-radius:0 9px 9px 0;pointer-events:none"></div>
-        <!-- المؤشر -->
-        <div style="position:absolute;top:-5px;left:${gaugePos}%;transform:translateX(-50%)">
-          <div style="width:3px;height:32px;background:var(--text);border-radius:2px;margin:0 auto;box-shadow:0 1px 4px rgba(0,0,0,.4)"></div>
-          <div style="width:0;height:0;border-left:7px solid transparent;border-right:7px solid transparent;border-top:9px solid var(--text);margin:0 auto;margin-top:-1px"></div>
+    <!-- حلقة التقدّم + الحُكم -->
+    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px">
+      <div style="position:relative;width:108px;height:108px;flex-shrink:0">
+        <svg viewBox="0 0 120 120" width="108" height="108">
+          <circle cx="60" cy="60" r="50" fill="none" stroke="var(--bg-3)" stroke-width="11"/>
+          <circle cx="60" cy="60" r="50" fill="none" stroke="${zoneColor}" stroke-width="11" stroke-linecap="round"
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${dashoff.toFixed(1)}" transform="rotate(-90 60 60)"/>
+        </svg>
+        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
+          <div style="font-size:1.7rem;font-weight:700;color:var(--text);line-height:1">${effectiveN}</div>
+          <div style="font-size:0.66rem;color:var(--text-muted)">عدد فعّال</div>
         </div>
-        <!-- تسمية المنطقة -->
-        <div style="position:absolute;top:34px;left:${gaugePos}%;transform:translateX(-50%);font-size:0.78rem;font-weight:700;color:${zoneColor};white-space:nowrap">${zoneLabel}</div>
       </div>
-
-      <!-- تسميات المناطق — عرضها يطابق حدود الـ gradient -->
-      <div style="display:grid;grid-template-columns:22% 18% 20% 20% 20%;font-size:0.65rem;text-align:center;margin-bottom:16px">
-        <span style="color:#ef4444">مركّز<br>جداً</span>
-        <span style="color:#f97316">تركيز<br>ملحوظ</span>
-        <span style="color:#84cc16">تنوع<br>معقول</span>
-        <span style="color:#22c55e;font-weight:600">تنوع<br>جيد ●</span>
-        <span style="color:#10b981;font-weight:600">تنوع<br>ممتاز</span>
+      <div style="flex:1;min-width:180px">
+        <div style="font-size:0.98rem;font-weight:700;color:${zoneColor};margin-bottom:3px">${zoneLabel}</div>
+        <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:9px">${progressTxt}</div>
+        <div style="display:flex;gap:7px;flex-wrap:wrap">
+          <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">${n} سهم</span>
+          <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">${sectorCount} قطاع</span>
+          <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">أكبر ${top1Pct.toFixed(1)}% (${esc(top1Name)})</span>
+        </div>
       </div>
     </div>
 
-    <!-- مقاييس سريعة -->
-    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px;direction:rtl">
-      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.3rem;font-weight:700;color:var(--text)">${effectiveN}</div>
-        <div style="font-size:0.68rem;color:var(--text-muted)">عدد فعّال</div>
+    <!-- شريطا التركّز HHI -->
+    <div style="display:flex;flex-direction:column;gap:11px;margin-bottom:14px">
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
+          <span style="color:var(--text-muted)">تركّز الأسهم (HHI)</span>
+          <span style="font-weight:700;color:${lvlColor(hhiPct)}">${hhiPct.toFixed(1)}%</span>
+        </div>
+        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${hhiFill.toFixed(0)}%;background:${lvlColor(hhiPct)};border-radius:99px"></div>
+        </div>
       </div>
-      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.3rem;font-weight:700;color:var(--text)">${n}</div>
-        <div style="font-size:0.68rem;color:var(--text-muted)">سهم</div>
+      <div>
+        <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
+          <span style="color:var(--text-muted)">تركّز القطاعات (HHI)</span>
+          <span style="font-weight:700;color:${lvlColor(secPct)}">${secPct.toFixed(1)}%</span>
+        </div>
+        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden">
+          <div style="height:100%;width:${secFill.toFixed(0)}%;background:${lvlColor(secPct)};border-radius:99px"></div>
+        </div>
       </div>
-      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.3rem;font-weight:700;color:var(--text)">${sectorCount}</div>
-        <div style="font-size:0.68rem;color:var(--text-muted)">قطاع</div>
-      </div>
-      <div style="background:var(--bg-2);border-radius:8px;padding:8px 6px;text-align:center">
-        <div style="font-size:1.1rem;font-weight:700;color:var(--text)">${top1Pct.toFixed(1)}%</div>
-        <div style="font-size:0.68rem;color:var(--text-muted)">أكبر (${esc(top1Name)})</div>
-      </div>
+      <div style="font-size:0.68rem;color:var(--text-muted);text-align:center">كلما قلّ HHI زاد التنوّع — 🟢 منخفض/صحي · 🟡 متوسط · 🔴 مرتفع</div>
     </div>
 
     <!-- النصيحة -->
     <div style="background:${zoneColor}18;border-right:3px solid ${zoneColor};border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.82rem;color:var(--text);line-height:1.65;direction:rtl">${advice}</div>
 
-    ${diworseNote}
-
-    <!-- تفاصيل HHI -->
-    <div style="margin-top:10px;font-size:0.71rem;color:var(--text-muted);text-align:center;direction:rtl">
-      HHI أسهم = ${(hhi * 100).toFixed(1)}% &nbsp;·&nbsp; HHI قطاعات = ${(secHHI * 100).toFixed(1)}% &nbsp;·&nbsp; عدد فعّال = ${effectiveN} سهم
-    </div>`;
+    ${diworseNote}`;
 }
 
 // ── تحليل التنويع المفصّل (popup شخصي) ──────────────────────────
