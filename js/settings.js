@@ -870,6 +870,33 @@ async function exportMonthlyReviewMD() {
         ['الرمز','الاسم','أسهم مشتراة','تكلفة الشراء','أسهم مباعة','عائد البيع','صافي الإنفاق'],
         tkRows
       ));
+
+      // ── فحص اتساق ضريبة القيمة المضافة (غير مدمّر — عرض فقط) ──
+      // القاعدة الثابتة (السوق السعودي و calcCommission): VAT = 15% × العمولة.
+      // أي معاملة تخالف ذلك (غالباً مستوردة بضريبة صفر) تُخفّض إجمالي الضريبة.
+      h3('🔍 فحص اتساق الضريبة (VAT)');
+      const _vatExpected = c => Math.round((+c || 0) * 0.15 * 10000) / 10000;
+      const vatMismatch  = transactions.filter(t =>
+        t.type !== 'grant' && Math.abs((+t.vat || 0) - _vatExpected(t.commission)) > 0.01
+      );
+      if (!vatMismatch.length) {
+        p('✅ كل المعاملات ضريبتها = 15٪ من عمولتها — لا تعارض.');
+      } else {
+        const sumComm = transactions.reduce((s, t) => s + (+t.commission || 0), 0);
+        const sumVat  = transactions.reduce((s, t) => s + (+t.vat || 0), 0);
+        const expVat  = sumComm * 0.15;
+        p(`⚠️ **${vatMismatch.length}** معاملة ضريبتها لا تساوي 15٪ من عمولتها.  `);
+        p(`الضريبة المخزّنة: **${SAR(sumVat)}** ر.س | المتوقعة (15٪ من العمولات): **${SAR(expVat)}** ر.س | الفرق: **${SAR(expVat - sumVat)}** ر.س  `);
+        p('_عرض فقط — لم تُعدَّل أي بيانات. صحّح المعاملات يدوياً من صفحة المعاملات إن أردت._');
+        p(mdTable(
+          ['التاريخ','الرمز','النوع','العمولة','VAT المخزّن','VAT المتوقع','الفرق'],
+          vatMismatch.map(t => {
+            const exp = (+t.commission || 0) * 0.15;
+            return [t.date, t.ticker, t.type === 'buy' ? 'شراء' : 'بيع',
+                    SAR(+t.commission || 0), SAR(+t.vat || 0), SAR(exp), SAR(exp - (+t.vat || 0))];
+          })
+        ));
+      }
     } else {
       p('_لا توجد معاملات مسجّلة._');
     }
