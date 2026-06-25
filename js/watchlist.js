@@ -4,6 +4,8 @@ let holdings     = [];
 let sectorTargets = {};   // sector → target_pct
 let editingWlId  = null;
 let _baseDiv     = null;  // تنويع المحفظة الحالية (computeDiversification) — مرجع المقارنة
+let _livePrices  = {};    // ticker → سعر اليوم اللحظي (من Yahoo عبر Edge Function)
+let _livePricesLoading = false;
 
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
 window.CARD_INFO = {
@@ -29,6 +31,57 @@ async function init() {
   await loadAll();
   renderContext();
   renderTable();
+  refreshWatchlistPrices();   // جلب سعر اليوم اللحظي لكل رمز (نفس آلية لوحة التحكم)
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 💹 سعر اليوم اللحظي — نفس Edge Function المستخدمة في لوحة التحكم
+// (update-prices) لكن نمرّر رموز قائمة المراقبة في جسم الطلب. هذه الأسعار
+// تُعرَض فقط ولا تُحفظ في holdings. أي سهم يُضاف مستقبلاً يُجلب سعره تلقائياً.
+// ══════════════════════════════════════════════════════════════════════
+async function refreshWatchlistPrices() {
+  const tickers = [...new Set(watchlist.map(w => w.ticker).filter(Boolean))];
+  if (!tickers.length) return;
+
+  _livePricesLoading = true;
+  renderTable();   // أظهر «جارٍ…» في عمود سعر اليوم
+
+  try {
+    const { data: json, error } = await supabaseClient.functions.invoke('update-prices', {
+      body: { tickers },
+    });
+    if (error) throw error;
+    if (json?.prices) {
+      Object.entries(json.prices).forEach(([t, p]) => { _livePrices[t] = +p; });
+    }
+  } catch (e) {
+    console.warn('refreshWatchlistPrices error:', e);
+  } finally {
+    _livePricesLoading = false;
+    renderTable();
+  }
+}
+
+// ── خلية «سعر اليوم» داخل الجدول ─────────────────────────────
+function livePriceCell(w) {
+  const p = _livePrices[w.ticker];
+  if (p == null) {
+    return _livePricesLoading
+      ? '<span class="small text-muted">⏳</span>'
+      : '<span class="small text-muted">—</span>';
+  }
+  // تلوين مقارنةً بسعر الدخول المستهدف: عند/تحت الهدف = فرصة (أخضر)
+  let color = 'var(--text)';
+  let hint  = '';
+  if (w.target_price > 0) {
+    if (p <= w.target_price) { color = '#10b981'; hint = ' title="السعر عند هدف الدخول أو أقل"'; }
+    else {
+      const gap = (p - w.target_price) / w.target_price * 100;
+      color = '#f59e0b';
+      hint  = ` title="أعلى من هدف الدخول بـ ${gap.toFixed(1)}%"`;
+    }
+  }
+  return `<span style="color:${color};font-weight:700"${hint}>${formatSAR(p)}</span>`;
 }
 
 async function loadAll() {
@@ -209,7 +262,7 @@ function renderTable() {
   if (!tbody) return;
 
   if (!watchlist.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">
       <div class="icon">👁️</div>
       <p>لا توجد أسهم تحت المراقبة — أضف أول سهم</p>
     </div></td></tr>`;
@@ -224,6 +277,7 @@ function renderTable() {
       <td>${esc(w.name)}</td>
       <td class="small text-muted">${esc(w.sector || '—')}</td>
       <td class="num">${tpStr}</td>
+      <td class="num">${livePriceCell(w)}</td>
       <td class="num text-accent">${ppStr}</td>
       <td>${impactBadge(w)}</td>
       <td class="small text-muted">${esc(w.notes || '—')}</td>
@@ -385,6 +439,7 @@ async function saveItem(e) {
   await loadAll();
   renderContext();
   renderTable();
+  refreshWatchlistPrices();   // اجلب سعر اليوم للسهم الجديد/المعدّل تلقائياً
 }
 
 async function deleteItem(id) {
@@ -401,11 +456,11 @@ async function deleteItem(id) {
 function exportWatchlistCSV() {
   if (!watchlist.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
   exportCSV(`قائمة_مراقبة_${todayISO()}.csv`,
-    ['الرمز', 'الاسم', 'القطاع', 'سعر الدخول المستهدف', 'النسبة المخططة %', 'أثر التنويع', 'ملاحظات', 'تاريخ الإضافة'],
+    ['الرمز', 'الاسم', 'القطاع', 'سعر الدخول المستهدف', 'سعر اليوم', 'النسبة المخططة %', 'أثر التنويع', 'ملاحظات', 'تاريخ الإضافة'],
     watchlist.map(w => {
       const a = analyzeWatchImpact(w);
       const impact = a ? `${a.label} (Δ${a.deltaGauge >= 0 ? '+' : ''}${a.deltaGauge})` : '—';
-      return [w.ticker, w.name, w.sector || '', w.target_price || 0, w.planned_pct || 0, impact, w.notes || '', w.created_at ? new Date(w.created_at).toLocaleDateString('ar-SA-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''];
+      return [w.ticker, w.name, w.sector || '', w.target_price || 0, _livePrices[w.ticker] ?? '', w.planned_pct || 0, impact, w.notes || '', w.created_at ? new Date(w.created_at).toLocaleDateString('ar-SA-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit' }) : ''];
     })
   );
   showToast(`✓ تم تصدير ${watchlist.length} سهم`, 'success');

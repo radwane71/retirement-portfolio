@@ -23,19 +23,35 @@ Deno.serve(async (req) => {
   if (!userRes.ok) return new Response('Unauthorized', { status: 401, headers: cors })
   const { id: userId } = await userRes.json()
 
+  // ── رموز إضافية اختيارية (قائمة المراقبة مثلاً) — لا تُحدَّث في holdings ──
+  // تُرسَل في جسم الطلب: { tickers: ["1234", "5678"] }
+  let extraTickers: string[] = []
+  try {
+    const body = await req.json()
+    if (Array.isArray(body?.tickers)) {
+      extraTickers = body.tickers
+        .map((t: any) => String(t).trim().toUpperCase())
+        .filter((t: string) => /^[A-Z0-9.]{1,12}$/.test(t))
+    }
+  } catch (_) { /* لا جسم / ليس JSON — تجاهل */ }
+
   // ── جلب أسهم المستخدم ────────────────────────────────────────
   const hRes    = await fetch(
     `${SUPABASE_URL}/rest/v1/holdings?select=ticker&user_id=eq.${userId}`,
     { headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY } }
   )
   const holdings = await hRes.json()
-  if (!holdings?.length) {
-    return new Response(JSON.stringify({ updated: 0, message: 'لا توجد أسهم' }), {
+
+  // مجموعة الرموز المملوكة (تُحدَّث في DB) ومجموعة الكل (تُجلب أسعارها)
+  const heldTickers: string[] = (holdings || []).map((h: any) => h.ticker)
+  const allTickerSet = new Set<string>([...heldTickers, ...extraTickers])
+  if (!allTickerSet.size) {
+    return new Response(JSON.stringify({ updated: 0, prices: {}, failed: [], message: 'لا توجد أسهم' }), {
       headers: { ...cors, 'Content-Type': 'application/json' }
     })
   }
 
-  const symbols = holdings.map((h: any) => `${h.ticker}.SR`).join(',')
+  const symbols = [...allTickerSet].map((t) => `${t}.SR`).join(',')
   const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
 
   // ── الحصول على cookie + crumb من Yahoo Finance ───────────────
@@ -90,8 +106,10 @@ Deno.serve(async (req) => {
   }
 
   // Fire all PATCHes in parallel — reduces latency from O(N×RTT) to O(1×RTT)
+  // نحدّث فقط الأسهم المملوكة في holdings — الرموز الإضافية (المراقبة) تُعاد أسعارها دون حفظ
+  const heldSet = new Set(heldTickers)
   const patchResults = await Promise.all(
-    Object.entries(prices).map(([ticker, price]) =>
+    Object.entries(prices).filter(([ticker]) => heldSet.has(ticker)).map(([ticker, price]) =>
       fetch(
         `${SUPABASE_URL}/rest/v1/holdings?user_id=eq.${userId}&ticker=eq.${ticker}`,
         {
@@ -108,8 +126,7 @@ Deno.serve(async (req) => {
   const updated = patchResults.filter(r => r.ok).length
 
   // H-6: report which tickers were not returned by Yahoo so the client can show stale warnings
-  const allTickers   = holdings.map((h: any) => h.ticker)
-  const failedTickers = allTickers.filter((t: string) => !(t in prices))
+  const failedTickers = [...allTickerSet].filter((t) => !(t in prices))
 
   console.log('updated:', updated, 'failed:', failedTickers.length)
   return new Response(JSON.stringify({ updated, total: quotes.length, prices, failed: failedTickers }), {
