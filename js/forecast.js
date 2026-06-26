@@ -13,7 +13,7 @@ window.CARD_INFO = {
       <div class="info-math">
         • <strong>متحفّظ:</strong> الطرف المنخفض للسوق ~2.4% سعري (ارتداد للمتوسط — كامل دورة تاسي).<br>
         • <strong>أساسي:</strong> نموك التاريخي ممزوجاً بمعيار تاسي حسب ثقة البيانات.<br>
-        • <strong>متفائل / استثنائي:</strong> عقد جيّد / أقوى عقود تاسي الفعلية.
+        • <strong>متفائل:</strong> عقد جيّد كالذي شهده تاسي فعلاً (الربع الأعلى الواقعي).
       </div>
       <p class="info-note">⚠️ الأربعة كلها تفترض نمواً موجباً — لكن <strong>30% من سنوات تاسي العشرين الماضية كانت خسارة</strong> (حتى −57% عام 2008، و−52% عام 2006). لا «المتحفظ» ولا غيره يحاكي سنة هابطة أو تتابع عوائد سيئ. استخدمها للتخطيط الاتجاهي لا كأرضية حماية.</p>`
   },
@@ -38,7 +38,7 @@ let _hist            = null;
 let _scenarios       = [];
 let _projections     = [];
 let _forecastChart   = null;
-let _activeScenarios = ['conservative','base','optimistic','exceptional'];
+let _activeScenarios = ['conservative','base','optimistic'];
 let _activeHighlight = 'base';
 let _goalType        = 'portfolio_value';   // 'portfolio_value' | 'monthly_income'
 let _chartMode       = 'line';              // 'line' | 'log' | 'bar' | 'cards'
@@ -134,9 +134,6 @@ const SCENARIO_META = [
   { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429', prob:25, tasiProb:15,
     tasiYears:'2010 ، 2018 ، 2023',
     desc:'عقد جيّد كالذي شهده تاسي فعلاً: نمو سعري ~7% — الربع الأعلى الواقعي طويل المدى' },
-  { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7', prob:10, tasiProb:25,
-    tasiYears:'2005 ، 2007 ، 2009 ، 2013 ، 2021',
-    desc:'أقوى عقود تاسي (ارتدادات ما بعد الأزمات وطفرة 2021): نمو سعري ~9.5% — ممكن لكنه ليس المتوقَّع' },
 ];
 
 // ══════════════════════════════════════════════════════════════════════
@@ -177,21 +174,21 @@ function tasiLongRunCAGRs() {
 // (طريقة النطاقات: حدود عند منتصف المسافة بين معدّلات السيناريوهات المتجاورة).
 // نُرجع أيضاً نسبة النوافذ «الأسوأ من المتحفظ» التي لا يغطّيها أي كرت.
 function scenarioOccurrenceProbs() {
-  const caps  = _scenarios.map(s => s.capRate);            // [cons, base, opt, exc]
+  const caps  = _scenarios.map(s => s.capRate);            // [cons, base, opt, ...]
   const cagrs = tasiLongRunCAGRs();
   const N     = cagrs.length || 1;
-  const mid01 = (caps[0] + caps[1]) / 2;
-  const mid12 = (caps[1] + caps[2]) / 2;
-  const mid23 = (caps[2] + caps[3]) / 2;
+  const K     = caps.length;
   const lowerCons = caps[0] - (caps[1] - caps[0]) / 2;     // الحدّ الأدنى للمتحفظ
-  const cnt = [0, 0, 0, 0];
+  // حدود النطاقات = منتصف المسافة بين معدّلات السيناريوهات المتجاورة (عام لأي عدد)
+  const bounds = [];
+  for (let k = 0; k < K - 1; k++) bounds.push((caps[k] + caps[k + 1]) / 2);
+  const cnt = new Array(K).fill(0);
   let below = 0;
   for (const c of cagrs) {
     if (c < lowerCons) { below++; continue; }
-    if      (c < mid01) cnt[0]++;
-    else if (c < mid12) cnt[1]++;
-    else if (c < mid23) cnt[2]++;
-    else                cnt[3]++;
+    let idx = K - 1;
+    for (let k = 0; k < bounds.length; k++) { if (c < bounds[k]) { idx = k; break; } }
+    cnt[idx]++;
   }
   return {
     probs:   cnt.map(x => Math.round(x / N * 100)),
@@ -473,13 +470,12 @@ function buildScenarios(divOverride) {
   // المرتفع — فمحفظة حقّقت 11% لن تكرّرها 35 سنة؛ الافتراض الحذر هو عودتها للسوق.
   //   • متحفّظ   ≈ 2.4% سعري + توزيعات مخفّضة (≈5% إجمالي) — كامل-دورة تاسي
   //   • متفائل  = عقد جيّد واقعي (≈11% إجمالي)
-  //   • استثنائي = أقوى عقود تاسي ممكنة الحدوث (≈14% إجمالي) لا حلم بعيد المنال
+  // (أُزيل «الاستثنائي»: نمو سعري 9.5%+ على 10-20 سنة لم يحدث في تاريخ تاسي)
   const MARKET_LOW = Math.max(0, MARKET_CAP_BENCHMARK - 0.02);   // ~2.4% — قاع تاسي طويل المدى الواقعي
   _scenarios = [
     { key:'conservative', capRate: Math.max(0,     Math.min(base * 0.8, MARKET_LOW)), divRate: Math.max(0.01, div * 0.80) },
     { key:'base',         capRate: base,                                              divRate: div                         },
     { key:'optimistic',   capRate: Math.min(0.12,  base + 0.025),                     divRate: Math.min(0.06, div + 0.010) },
-    { key:'exceptional',  capRate: Math.min(0.15,  base + 0.05),                      divRate: Math.min(0.08, div + 0.020) },
   ];
 }
 
@@ -1330,7 +1326,7 @@ function renderMilestoneTable(horizonYears) {
       ${valueCells}
       ${incomeCells}
     </tr>`;
-  }).join('') || '<tr><td colspan="10">—</td></tr>';
+  }).join('') || '<tr><td colspan="8">—</td></tr>';
 }
 
 // ── Goal panel ─────────────────────────────────────────────────────────
