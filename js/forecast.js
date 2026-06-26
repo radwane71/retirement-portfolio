@@ -1464,6 +1464,87 @@ function setGoalType(type) {
   if (inp) inp.placeholder = type === 'monthly_income' ? 'مثال: 20,000' : 'مثال: 1,000,000';
 }
 
+// ── تصدير CSV — ملف الحسبة الكامل ───────────────────────────────────────
+function exportForecastCSV() {
+  if (!_hist || !_projections.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+  runForecast();   // ضمان تطابق الملف مع أحدث مدخلات
+
+  const num   = n => (n == null || isNaN(n)) ? '' : Math.round(n);
+  const pctv  = r => (r == null || isNaN(r)) ? '' : (r * 100).toFixed(2) + '%';
+  const yesno = b => b ? 'نعم' : 'لا';
+
+  const startValue   = parseFloat(document.getElementById('inp-current-value').value) || _hist.currentValue || 0;
+  const lumpSum      = parseFloat(document.getElementById('inp-lump-sum').value) || 0;
+  const horizonYears = parseInt(document.getElementById('inp-horizon').value)     || 35;
+  const reinvest     = document.getElementById('inp-reinvest').checked;
+  const inflation    = document.getElementById('inp-inflation').checked;
+  const inflRate     = parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025;
+  const goalAmount   = parseFloat(document.getElementById('inp-goal-amount').value) || 0;
+  const dcaPeriods   = getDcaPeriods();
+  const occ          = scenarioOccurrenceProbs();
+
+  const rows = [];
+  const sec  = t => { rows.push([]); rows.push(['═══ ' + t + ' ═══']); };
+
+  sec('معلومات عامة');
+  rows.push(['تاريخ التصدير', todayISO()]);
+  rows.push(['الأفق الزمني (سنوات)', horizonYears]);
+
+  sec('المدخلات');
+  rows.push(['القيمة الحالية للمحفظة', num(startValue)]);
+  rows.push(['دفعة مقطوعة (فورية)', num(lumpSum)]);
+  rows.push(['إعادة استثمار التوزيعات', yesno(reinvest)]);
+  rows.push(['تعديل التضخم في العرض', yesno(inflation)]);
+  rows.push(['معدل التضخم المستخدم', pctv(inflRate)]);
+  rows.push(['عائد التوزيع المستخدم', pctv(_scenarios[1]?.divRate)]);
+  if (goalAmount > 0) rows.push(['الهدف (' + (_goalType === 'monthly_income' ? 'دخل شهري' : 'قيمة محفظة') + ' — بقوة شراء اليوم)', num(goalAmount)]);
+  rows.push(['فترات الإضافة الشهرية (DCA):']);
+  if (dcaPeriods.length) dcaPeriods.forEach((p, i) => rows.push(['  فترة ' + (i + 1), 'المبلغ/شهر: ' + num(p.amount), 'لمدة (سنوات): ' + p.years]));
+  else rows.push(['  (لا توجد)']);
+
+  sec('البيانات التاريخية المستخرجة من محفظتك');
+  rows.push(['القيمة السوقية الحالية', num(_hist.currentValue)]);
+  rows.push(['التكلفة الأساسية', num(_hist.costBasis)]);
+  rows.push(['XIRR (العائد الداخلي الحقيقي)', _hist.xirr != null ? _hist.xirr.toFixed(2) + '%' : '—']);
+  rows.push(['نمو رأس المال المستخدم (مُمزوج بتاسي)', pctv(_hist.blendedCapGrowth)]);
+  rows.push(['نمو رأس المال الخام (أداؤك)', pctv(_hist.annCapGrowth)]);
+  rows.push(['عائد الأرباح السنوي', pctv(_hist.safeDivYield)]);
+  rows.push(['متوسط الأرباح السنوية', num(_hist.avgAnnualDiv)]);
+  rows.push(['إجمالي الأرباح المتراكمة', num(_hist.totalDivAll)]);
+  rows.push(['متوسط الإضافة الشهرية التاريخية', num(_hist.avgMonthlyDeposit)]);
+  rows.push(['عدد الأسهم', _hist.holdingsCount]);
+  rows.push(['درجة ثقة البيانات', (_hist.confidenceScore || 0) + '%']);
+
+  sec('السيناريوهات (معدّلات سنوية واحتمال الحدوث وفق تاسي)');
+  rows.push(['السيناريو', 'نمو رأس المال', 'عائد الأرباح', 'إجمالي العائد', 'احتمال الحدوث', 'تقييم من 10']);
+  SCENARIO_META.forEach((m, i) => {
+    const s = _scenarios[i], p = occ.probs[i];
+    rows.push([m.name, pctv(s.capRate), pctv(s.divRate), pctv(s.capRate + s.divRate), p + '%', Math.round(p / 10)]);
+  });
+  rows.push(['احتمال نتيجة أسوأ من «المتحفظ»', occ.below + '%']);
+
+  sec('الإسقاط السنوي (القيم اسمية ما لم يُذكر «حقيقية»)');
+  const head = ['السنة', 'العام'];
+  SCENARIO_META.forEach(m => { head.push(m.name + ' — القيمة'); head.push(m.name + ' — الدخل الشهري'); head.push(m.name + ' — القيمة الحقيقية'); });
+  head.push('رأس مالك المُضاف');
+  rows.push(head);
+  for (let y = 1; y <= horizonYears; y++) {
+    const r = [y, _hist.currentYear + y];
+    SCENARIO_META.forEach((m, i) => {
+      const snap = _projections[i]?.data[y];
+      r.push(snap ? num(snap.value) : '');
+      r.push(snap ? num(snap.monthlyIncome) : '');
+      r.push(snap ? num(snap.realValue) : '');
+    });
+    const cap = _projections[0]?.data[y];
+    r.push(cap ? num(cap.yourCapital) : '');
+    rows.push(r);
+  }
+
+  exportCSV(`رؤية_مستقبلية_${todayISO()}.csv`, ['الرؤية المستقبلية — ملف الحسبة الكامل'], rows);
+  showToast('✓ تم تصدير ملف الحسبة الكامل', 'success');
+}
+
 // ── Formatting ─────────────────────────────────────────────────────────
 function fmt(n) {
   if (n == null || isNaN(n)) return '—';
