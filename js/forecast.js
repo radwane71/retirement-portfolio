@@ -1100,18 +1100,18 @@ function renderChart(horizonYears, goalAmount = 0) {
       };
     });
 
-  // خط رأس المال المُضاف (مدخراتك الفعلية بدون عائد) — للخط فقط
+  // خط رأس المال المُضاف (مدخراتك الفعلية بدون عائد) + تظليل «منطقة الربح»
+  // كل ما فوق هذا الخط = ربح فوق مالك (نمو سوق + توزيعات + منح). نظلّله أخضر
+  // للسيناريو المميَّز (وأحمر لو نزل تحته = خسارة فعلية) ليرى المستخدم الفجوة بعينه.
   if (!isBar && _projections.length > 0) {
     const baseProj = _projections[0];  // yourCapital نفسه لكل السيناريوهات
     const capitalValues = baseProj.data.slice(0, horizonYears + 1).map(d => +d.yourCapital.toFixed(0));
-    // أضفه فقط إذا فيه إضافات فعلية (غير ثابت)
-    const hasContribs = capitalValues[capitalValues.length - 1] > capitalValues[0];
-    if (hasContribs) {
+    if (capitalValues[0] > 0) {        // أظهره دائماً ما دام لديك رأس مال (حتى لو ثابتاً)
       datasets.push({
-        label:           '💰 رأس مالك المُضاف',
+        label:           '💰 رأس مالك المُضاف (أرضية)',
         data:            capitalValues,
         borderColor:     '#58a6ff',
-        backgroundColor: 'rgba(88,166,255,0.06)',
+        backgroundColor: 'transparent',
         borderWidth:     2,
         borderDash:      [6, 4],
         pointRadius:     0,
@@ -1120,6 +1120,13 @@ function renderChart(horizonYears, goalAmount = 0) {
         fill:            false,
         order:           99,
       });
+      // ظلّل الفجوة بين «مالك» و«السيناريو المميَّز»: أخضر = ربح، أحمر = خسارة
+      const capIdx = datasets.length - 1;
+      const hlName = SCENARIO_META.find(m => m.key === _activeHighlight)?.name;
+      const hlDataset = datasets.find(d => d.label === hlName);
+      if (hlDataset) {
+        hlDataset.fill = { target: capIdx, above: 'rgba(63,185,80,0.15)', below: 'rgba(248,81,73,0.16)' };
+      }
     }
   }
 
@@ -1213,7 +1220,7 @@ function renderChart(horizonYears, goalAmount = 0) {
 function renderChartLegend() {
   const el = document.getElementById('chart-legend');
   if (!el) return;
-  el.innerHTML = _projections
+  let html = _projections
     .filter(p => _activeScenarios.includes(p.key))
     .map(p => {
       const meta = SCENARIO_META.find(m => m.key === p.key);
@@ -1222,6 +1229,19 @@ function renderChartLegend() {
         <span style="color:${meta.color};font-weight:700">${meta.emoji} ${meta.name}</span>
       </div>`;
     }).join('');
+  // مفتاح الخط الأزرق ومنطقة الربح الخضراء
+  if (_chartMode !== 'bar') {
+    html += `
+      <div class="chart-legend-item">
+        <div class="chart-legend-dot" style="background:#58a6ff"></div>
+        <span style="color:#58a6ff;font-weight:700">💰 رأس مالك المُضاف</span>
+      </div>
+      <div class="chart-legend-item" title="كل ما فوق خط رأس مالك = ربح فوق مالك (نمو السوق + التوزيعات + المنح)">
+        <div class="chart-legend-dot" style="background:rgba(63,185,80,0.45)"></div>
+        <span style="color:#3fb950;font-weight:700">المنطقة الخضراء = ربحك فوق مالك</span>
+      </div>`;
+  }
+  el.innerHTML = html;
 }
 
 function updateChartSubtitle(params) {
