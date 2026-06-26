@@ -947,13 +947,14 @@ function renderScenarioCards() {
   // ملاحظة الدلو غير المُغطّى: نتيجة أسوأ من «المتحفظ» (عقد ضعيف / خسارة)
   const note = document.getElementById('scenario-prob-note');
   if (note) {
-    const sumCards = occ.probs.reduce((s, p) => s + p, 0);
     note.innerHTML = `
-      <div style="border:1px solid rgba(248,81,73,.35);background:rgba(248,81,73,.06);border-radius:10px;padding:11px 14px;line-height:1.7">
-        <span style="font-weight:700;color:#f85149">⚠️ احتمال نتيجة أسوأ من «المتحفظ» ≈ ${occ.below}%</span>
-        <span class="small text-muted"> — أي عقد ضعيف أو خسارة لا يغطّيه أي سيناريو أعلاه.</span>
-        <div class="small text-muted" style="margin-top:4px">
-          مجموع احتمالات الكروت الأربعة ≈ ${sumCards}% (الباقي ${occ.below}% للنتائج الأسوأ) — وهذا هو الفرق بين «تخطيط اتجاهي» و«ضمان».
+      <div style="border:1px solid rgba(240,180,41,.35);background:rgba(240,180,41,.06);border-radius:10px;padding:12px 15px;line-height:1.75">
+        <div style="font-weight:700;color:#f0b429">📊 ${occ.below}% احتمال نمو سعري <u>أبطأ</u> من «المتحفظ» — وليس خسارة</div>
+        <div class="small text-muted" style="margin-top:5px">
+          هذه نسبة <strong>نمو أبطأ</strong>، لا تبخُّر رأس مال. تاريخياً، احتمال <strong>خسارة فعلية</strong> على مدى 10–20 سنة بعد احتساب التوزيعات النقدية ≈ <strong>6% فقط</strong>، وحتى في أسوأ فترة بتاريخ تاسي كان العائد ≈ <strong>−0.8%/سنة (شبه تعادل)</strong> لا انهيار.
+        </div>
+        <div class="small" style="margin-top:7px;color:var(--text-2)">
+          💡 <strong>مهم:</strong> هذه النسب تخصّ <strong>نمو السوق فقط</strong>. توزيعاتك النقدية + أسهم المنحة + إضافاتك الشهرية تُضاف <strong>فوقها</strong> في الإسقاط الفعلي (الرسم والجدول) — وهي ما يجعل محفظتك تتضاعف حتى في السيناريو المتحفظ. الكروت تقيس «هل تفوّق سهمك على السوق؟» لا «هل ستربح؟».
         </div>
       </div>`;
   }
