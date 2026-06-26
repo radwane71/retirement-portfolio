@@ -139,6 +139,66 @@ const SCENARIO_META = [
     desc:'أقوى عقود تاسي (ارتدادات ما بعد الأزمات وطفرة 2021): نمو سعري ~9.5% — ممكن لكنه ليس المتوقَّع' },
 ];
 
+// ══════════════════════════════════════════════════════════════════════
+// 📊 احتمال حدوث كل سيناريو وفق أداء تاسي الفعلي (2005-2024)
+// لا نستخدم عوائد السنة الواحدة (تتأرجح −57% ↔ +104%) بل عوائد الفترات الطويلة
+// المتداخلة (10/15/20 سنة) لأنها الأنسب لإسقاط تقاعدي طويل المدى.
+// المصدر: مستويات تاسي في نهاية كل سنة (Saudi Exchange / Wikipedia).
+// ══════════════════════════════════════════════════════════════════════
+const TASI_PRICE_YE = [
+  8206.23, 16712.64, 7933.29, 11175.96, 4802.99, 6121.76, 6620.75, 6418.13,
+  6801.22, 8536.60, 8333.30, 6911.76, 7210.43, 7226.32, 7826.73, 8389.23,
+  8689.53, 11281.71, 10478.46, 11967.39, 12077.31,
+]; // 2004 … 2024 (نهاية كل سنة)
+
+// ذروة فقاعة 2005-2006 تُستبعَد كنقطة دخول: مستوى نهاية 2005 (16,712) مضخّم
+// اصطناعياً بمضاربة استثنائية انهارت −52% في 2006، فالنوافذ التي تبدأ منه تُشوّه
+// الإحصاء ظلماً. نُبقي 2004 (مستواه عند القيمة العادلة) وكل ما بعد 2006 — بما فيه
+// انهيار 2008 وكل الدورات الطبيعية.
+const TASI_BUBBLE_PEAK_YEARS = [2005];
+
+let _tasiCAGRcache = null;
+// كل عوائد النمو السعري السنوية المركّبة على نوافذ 10 و15 و20 سنة متداخلة
+function tasiLongRunCAGRs() {
+  if (_tasiCAGRcache) return _tasiCAGRcache;
+  const out = [];
+  for (const L of [10, 15, 20]) {
+    for (let i = 0; i + L < TASI_PRICE_YE.length; i++) {
+      const startYear = 2004 + i;
+      if (TASI_BUBBLE_PEAK_YEARS.includes(startYear)) continue;   // تخطّي دخول الفقاعة
+      out.push(Math.pow(TASI_PRICE_YE[i + L] / TASI_PRICE_YE[i], 1 / L) - 1);
+    }
+  }
+  return (_tasiCAGRcache = out);
+}
+
+// لكل سيناريو: نسبة نوافذ تاسي الطويلة التي وقع نموّها السعري في «جوار» معدّله
+// (طريقة النطاقات: حدود عند منتصف المسافة بين معدّلات السيناريوهات المتجاورة).
+// نُرجع أيضاً نسبة النوافذ «الأسوأ من المتحفظ» التي لا يغطّيها أي كرت.
+function scenarioOccurrenceProbs() {
+  const caps  = _scenarios.map(s => s.capRate);            // [cons, base, opt, exc]
+  const cagrs = tasiLongRunCAGRs();
+  const N     = cagrs.length || 1;
+  const mid01 = (caps[0] + caps[1]) / 2;
+  const mid12 = (caps[1] + caps[2]) / 2;
+  const mid23 = (caps[2] + caps[3]) / 2;
+  const lowerCons = caps[0] - (caps[1] - caps[0]) / 2;     // الحدّ الأدنى للمتحفظ
+  const cnt = [0, 0, 0, 0];
+  let below = 0;
+  for (const c of cagrs) {
+    if (c < lowerCons) { below++; continue; }
+    if      (c < mid01) cnt[0]++;
+    else if (c < mid12) cnt[1]++;
+    else if (c < mid23) cnt[2]++;
+    else                cnt[3]++;
+  }
+  return {
+    probs:   cnt.map(x => Math.round(x / N * 100)),
+    below:   Math.round(below / N * 100),
+    windows: N,
+  };
+}
+
 // ── Init ──────────────────────────────────────────────────────────────
 async function init() {
   const user = await requireAuth();
@@ -848,28 +908,31 @@ function _confFactor(label, value, pct, totalScore) {
 function renderScenarioCards() {
   const grid = document.getElementById('scenario-grid');
   if (!grid) return;
+
+  const occ = scenarioOccurrenceProbs();   // احتمالات حقيقية من تاسي حسب معدّلات محفظتك
+
   grid.innerHTML = SCENARIO_META.map((m, i) => {
     const sc = _scenarios[i];
     const isActive = _activeScenarios.includes(m.key);
+    const prob     = occ.probs[i];
+    // ≤2% = نادر تاريخياً (لم يحدث فعلياً على المدى الطويل في عيّنة تاسي)
+    const rare     = prob <= 2;
+    const probTxt  = rare ? `~${prob}%` : `≈${prob}%`;
+    const probTip  = `نسبة فترات تاسي الطويلة (${occ.windows} نافذة متداخلة 10-20 سنة) التي وقع نموّها السعري في جوار هذا السيناريو`;
     return `
     <div class="scenario-card ${m.cls}${isActive ? ' active' : ''}" id="sc-card-${m.key}" onclick="toggleScenario('${m.key}')">
       <div class="sc-badge">${m.emoji} ${m.name}</div>
       <div class="sc-name">${m.name}</div>
 
       <div style="display:flex;flex-direction:column;gap:5px;margin:4px 0 8px">
-        <!-- شريط الاحتمال التخطيطي -->
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap;min-width:80px">احتمال النموذج</span>
-          <span style="flex:1;height:6px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${m.prob}%;background:${m.color};border-radius:99px"></span></span>
-          <span style="font-size:.75rem;font-weight:800;color:${m.color};min-width:32px;text-align:left">≈${m.prob}%</span>
+        <!-- احتمال الحدوث الحقيقي وفق تاسي -->
+        <div style="display:flex;align-items:center;gap:6px" title="${probTip}">
+          <span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap;min-width:96px">احتمال حدوثه (تاسي 🇸🇦)</span>
+          <span style="flex:1;height:6px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${Math.min(100, prob)}%;background:${m.color};border-radius:99px"></span></span>
+          <span style="font-size:.82rem;font-weight:800;color:${m.color};min-width:40px;text-align:left">${probTxt}</span>
         </div>
-        <!-- شريط تاسي التاريخي -->
-        <div style="display:flex;align-items:center;gap:6px">
-          <span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap;min-width:80px">تاسي تاريخياً 🇸🇦</span>
-          <span style="flex:1;height:6px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${m.tasiProb * 2.5}%;background:${m.color};opacity:.55;border-radius:99px"></span></span>
-          <span style="font-size:.75rem;font-weight:800;color:${m.color};opacity:.75;min-width:32px;text-align:left">≈${m.tasiProb}%</span>
-        </div>
-        <div style="font-size:.67rem;color:var(--text-muted);margin-top:1px;padding-right:2px" title="السنوات التي وقع فيها تاسي ضمن نطاق هذا السيناريو">📅 ${m.tasiYears}</div>
+        ${rare ? `<div style="font-size:.64rem;color:var(--text-muted);padding-right:2px">لم يتحقق على أي فترة 10-20 سنة في تاريخ تاسي</div>` : ''}
+        <div style="font-size:.67rem;color:var(--text-muted);margin-top:1px;padding-right:2px" title="فترات تاريخية وقع فيها تاسي ضمن نطاق هذا السيناريو">📅 ${m.tasiYears}</div>
       </div>
 
       <div class="sc-desc">${m.desc}</div>
@@ -880,6 +943,20 @@ function renderScenarioCards() {
       </div>
     </div>`;
   }).join('');
+
+  // ملاحظة الدلو غير المُغطّى: نتيجة أسوأ من «المتحفظ» (عقد ضعيف / خسارة)
+  const note = document.getElementById('scenario-prob-note');
+  if (note) {
+    const sumCards = occ.probs.reduce((s, p) => s + p, 0);
+    note.innerHTML = `
+      <div style="border:1px solid rgba(248,81,73,.35);background:rgba(248,81,73,.06);border-radius:10px;padding:11px 14px;line-height:1.7">
+        <span style="font-weight:700;color:#f85149">⚠️ احتمال نتيجة أسوأ من «المتحفظ» ≈ ${occ.below}%</span>
+        <span class="small text-muted"> — أي عقد ضعيف أو خسارة لا يغطّيه أي سيناريو أعلاه.</span>
+        <div class="small text-muted" style="margin-top:4px">
+          مجموع احتمالات الكروت الأربعة ≈ ${sumCards}% (الباقي ${occ.below}% للنتائج الأسوأ) — وهذا هو الفرق بين «تخطيط اتجاهي» و«ضمان».
+        </div>
+      </div>`;
+  }
 }
 
 // ── Toggle scenario ────────────────────────────────────────────────────
