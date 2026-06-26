@@ -918,22 +918,24 @@ function renderScenarioCards() {
     const prob     = occ.probs[i];
     // ≤2% = نادر تاريخياً (لم يحدث فعلياً على المدى الطويل في عيّنة تاسي)
     const rare     = prob <= 2;
-    const probTxt  = rare ? `~${prob}%` : `≈${prob}%`;
-    const probTip  = `نسبة فترات تاسي الطويلة (${occ.windows} نافذة متداخلة 10-20 سنة) التي وقع نموّها السعري في جوار هذا السيناريو`;
+    const score10  = Math.round(prob / 10);   // تقييم احتمالية من 10
+    const probTip  = `احتمال فعلي ≈${prob}% — نسبة فترات تاسي الطويلة (${occ.windows} نافذة متداخلة 10-20 سنة) التي وقع نموّها السعري في جوار هذا السيناريو`;
     return `
     <div class="scenario-card ${m.cls}${isActive ? ' active' : ''}" id="sc-card-${m.key}" onclick="toggleScenario('${m.key}')">
       <div class="sc-badge">${m.emoji} ${m.name}</div>
       <div class="sc-name">${m.name}</div>
 
-      <div style="display:flex;flex-direction:column;gap:5px;margin:4px 0 8px">
-        <!-- احتمال الحدوث الحقيقي وفق تاسي -->
-        <div style="display:flex;align-items:center;gap:6px" title="${probTip}">
-          <span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap;min-width:96px">احتمال حدوثه (تاسي 🇸🇦)</span>
-          <span style="flex:1;height:6px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${Math.min(100, prob)}%;background:${m.color};border-radius:99px"></span></span>
-          <span style="font-size:.82rem;font-weight:800;color:${m.color};min-width:40px;text-align:left">${probTxt}</span>
+      <div style="display:flex;align-items:center;gap:11px;margin:6px 0 9px" title="${probTip}">
+        <!-- دائرة تقييم الاحتمالية من 10 -->
+        <div style="width:48px;height:48px;border-radius:50%;border:2.5px solid ${m.color};background:${m.color}1a;display:flex;flex-direction:column;align-items:center;justify-content:center;flex-shrink:0;line-height:1">
+          <span style="font-size:1.2rem;font-weight:800;color:${m.color}">${score10}</span>
+          <span style="font-size:.5rem;color:var(--text-muted);margin-top:1px">من 10</span>
         </div>
-        ${rare ? `<div style="font-size:.64rem;color:var(--text-muted);padding-right:2px">لم يتحقق على أي فترة 10-20 سنة في تاريخ تاسي</div>` : ''}
-        <div style="font-size:.67rem;color:var(--text-muted);margin-top:1px;padding-right:2px" title="فترات تاريخية وقع فيها تاسي ضمن نطاق هذا السيناريو">📅 ${m.tasiYears}</div>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+          <span style="font-size:.7rem;font-weight:600;color:var(--text-2)">احتمال حدوثه (تاسي 🇸🇦)</span>
+          <span style="font-size:.63rem;color:var(--text-muted)">${rare ? 'لم يتحقق على أي فترة 10-20 سنة' : 'تقييم احتمالية على مدى 10-20 سنة'}</span>
+          <span style="font-size:.66rem;color:var(--text-muted)" title="فترات تاريخية وقع فيها تاسي ضمن نطاق هذا السيناريو">📅 ${m.tasiYears}</span>
+        </div>
       </div>
 
       <div class="sc-desc">${m.desc}</div>
