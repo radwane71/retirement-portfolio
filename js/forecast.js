@@ -9,13 +9,13 @@ window.CARD_INFO = {
   'scenarios': {
     title: '🔮 السيناريوهات الأربعة',
     body: `
-      <p>بدل توقّع رقم واحد للمستقبل (وهمٌ مستحيل)، نعرض أربعة مسارات للنمو مبنية على أداء محفظتك التاريخي ومعايير السوق السعودي (تاسي ≈ 5% نمو سعري + 3.5% توزيعات).</p>
+      <p>بدل توقّع رقم واحد للمستقبل (وهمٌ مستحيل)، نعرض أربعة مسارات للنمو مُعايَرة بأداء تاسي الفعلي 2005-2024 (نمو سعري CAGR ~1.95% للفترة كاملة بأزماتها، ~4.4% للفترة الحديثة 2010-2024، + توزيعات ~3.5%).</p>
       <div class="info-math">
-        • <strong>متحفّظ:</strong> ~65% من نموك التاريخي.<br>
-        • <strong>أساسي:</strong> نموك التاريخي الفعلي (ممزوجاً بمعيار السوق حسب ثقة البيانات).<br>
-        • <strong>متفائل / استثنائي:</strong> ربع أعلى واقعي / عقد صاعد قوي.
+        • <strong>متحفّظ:</strong> الطرف المنخفض للسوق ~2.4% سعري (ارتداد للمتوسط — كامل دورة تاسي).<br>
+        • <strong>أساسي:</strong> نموك التاريخي ممزوجاً بمعيار تاسي حسب ثقة البيانات.<br>
+        • <strong>متفائل / استثنائي:</strong> عقد جيّد / أقوى عقود تاسي الفعلية.
       </div>
-      <p class="info-note">⚠️ الأربعة كلها تفترض نمواً موجباً — حتى «المتحفظ» ليس أسوأ-حالة ولا يحاكي ركوداً. استخدمها للتخطيط الاتجاهي لا كأرضية حماية.</p>`
+      <p class="info-note">⚠️ الأربعة كلها تفترض نمواً موجباً — لكن <strong>30% من سنوات تاسي العشرين الماضية كانت خسارة</strong> (حتى −57% عام 2008، و−52% عام 2006). لا «المتحفظ» ولا غيره يحاكي سنة هابطة أو تتابع عوائد سيئ. استخدمها للتخطيط الاتجاهي لا كأرضية حماية.</p>`
   },
   'forecast-inputs': {
     title: '⚙️ معطيات الإسقاط',
@@ -111,18 +111,32 @@ function updateDcaBar() {
 
 // المعالم تُبنى ديناميكياً كل سنة في renderMilestoneTable
 
-// prob = احتمال الحدوث التقريبي (نطاقات مئوية، مجموعها 100%). ليست محاكاة
-// مونت-كارلو بل تقدير تخطيطي: المعتدل هو الأرجح، والطرفان أقل احتمالاً،
-// والاستثنائي نادر. تُعرض بـ«≈» للتأكيد أنها تقديرية لا قطعية.
+// ── معيار تاسي طويل المدى (نمو سعري فقط) ──────────────────────────────
+// مشتق من أداء مؤشر تاسي الفعلي 2005-2024 (المصدر: Saudi Exchange / Wikipedia):
+//   • CAGR سعري للفترة كاملة ≈ 1.95% (تشمل انهياري 2006 −52% و2008 −57%)
+//   • CAGR سعري 2010-2024 (تاسي الحديثة) ≈ 4.4%  ← نعتمده كمعيار السوق
+//   • توزيعات تاسي ~3.5% سنوياً
+const MARKET_CAP_BENCHMARK = 0.044;
+
+// prob     = وزن تخطيطي للنموذج (مجموعه 100%) — ليس محاكاة مونت-كارلو
+// tasiProb = النسبة الفعلية لسنوات تاسي التي وقع نموّها السعري ضمن نطاق السيناريو
+//            من أصل 20 سنة (2005-2024). المجموع 70% فقط لأن:
+//            ⚠️ 30% من سنوات تاسي (6 من 20) كانت خسارة سعرية —
+//               2006(−52%)، 2008(−57%)، 2011، 2014، 2015(−17%)، 2022(−7%) —
+//               ولا يُغطّيها أي سيناريو هنا (كلها تفترض نمواً موجباً).
 const SCENARIO_META = [
-  { key:'conservative', name:'متحفظ',    emoji:'🛡️', cls:'sc-conservative', color:'#8b949e', prob:25,
-    desc:'أداء دون التاريخي — لكنه يفترض نمواً موجباً، وليس سيناريو خسارة أو أسوأ-حالة' },
-  { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950', prob:45,
-    desc:'أداؤك التاريخي مُعدَّل بواقعية حسب ثقة بياناتك (مزج بمعيار السوق)' },
-  { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429', prob:22,
-    desc:'أداء أعلى من التاريخي: +2.5% نمو سعري، +1% أرباح — الربع الأعلى الواقعي طويل المدى' },
-  { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7', prob:8,
-    desc:'عقد صاعد قوي: +5% نمو سعري، +2% أرباح — ممكن الحدوث، لكنه ليس المتوسط المتوقَّع' },
+  { key:'conservative', name:'متحفظ',    emoji:'🛡️', cls:'sc-conservative', color:'#8b949e', prob:30, tasiProb:15,
+    tasiYears:'2017 ، 2020 ، 2024',
+    desc:'الطرف المنخفض للسوق (ارتداد للمتوسط): نمو سعري ~2.4% — يماثل سنوات تاسي الباهتة، وليس سيناريو خسارة' },
+  { key:'base',         name:'معتدل',    emoji:'📊', cls:'sc-base',         color:'#3fb950', prob:35, tasiProb:15,
+    tasiYears:'2012 ، 2016 ، 2019',
+    desc:'أداؤك التاريخي ممزوجاً بمعيار تاسي الحديث (~4.4% سعري + توزيعاتك) حسب ثقة بياناتك' },
+  { key:'optimistic',   name:'متفائل',   emoji:'🚀', cls:'sc-optimistic',   color:'#f0b429', prob:25, tasiProb:15,
+    tasiYears:'2010 ، 2018 ، 2023',
+    desc:'عقد جيّد كالذي شهده تاسي فعلاً: نمو سعري ~7% — الربع الأعلى الواقعي طويل المدى' },
+  { key:'exceptional',  name:'استثنائي', emoji:'⚡', cls:'sc-exceptional',  color:'#a371f7', prob:10, tasiProb:25,
+    tasiYears:'2005 ، 2007 ، 2009 ، 2013 ، 2021',
+    desc:'أقوى عقود تاسي (ارتدادات ما بعد الأزمات وطفرة 2021): نمو سعري ~9.5% — ممكن لكنه ليس المتوقَّع' },
 ];
 
 // ── Init ──────────────────────────────────────────────────────────────
@@ -319,18 +333,17 @@ async function loadHistoricalData() {
   const confidenceScore = Math.round(_agePct * 45 + _divPct * 35 + _holdPct * 20);
 
   // ── المزج الواقعي للسيناريو المعتدل ────────────────────────────────
-  // معيار السوق السعودي (تاسي) طويل المدى: نمو السعر ~5% سنوياً (محافظ)
+  // معيار السوق (تاسي الحديثة 2010-2024): نمو سعري ~4.4% سنوياً — MARKET_CAP_BENCHMARK
   // كلما ارتفعت ثقة البيانات → نعتمد أداءك الشخصي أكثر
-  // عند ثقة 0%  → 5% (معيار السوق فقط)
+  // عند ثقة 0%  → 4.4% (معيار تاسي فقط)
   // عند ثقة 50% → متوسط 50/50
   // عند ثقة 100% → أداؤك الشخصي بالكامل
-  const MARKET_CAP_BENCHMARK = 0.05;
   const confWeight = confidenceScore / 100;
-  // السقف 11% (وليس 35%): نمو سعري سنوي 11% مُركَّب 35 سنة هو بالفعل الحدّ
-  // الأعلى المُدافَع عنه لأداء شخصي مُثبت بسجل كافٍ. أي رقم أعلى يُنتج إسقاطات
-  // فلكية تُعشِّم على غلط. هذا السقف لا «يبتر» إلا الحالات المتطرفة (محفظة حارّة
-  // قصيرة العمر) — المحافظ الاعتيادية تقع تحته بكثير.
-  const blendedCapGrowth = Math.min(0.11, Math.max(0.02,
+  // السقف 11%: نمو سعري سنوي 11% مُركَّب 35 سنة هو بالفعل الحدّ الأعلى المُدافَع
+  // عنه لأداء شخصي مُثبت بسجل كافٍ. أي رقم أعلى يُنتج إسقاطات فلكية تُعشِّم على غلط.
+  // الأرضية 0 (وليست +2%): محفظة لم تُثبت نمواً تُسقَط مسطّحة لا صاعدة — هذا يرفع
+  // التناقض السابق مع تحذير «الأداء السلبي» الذي كان يظهر بينما النموذج يفرض +2%.
+  const blendedCapGrowth = Math.min(0.11, Math.max(0,
     annCapGrowth * confWeight + MARKET_CAP_BENCHMARK * (1 - confWeight)
   ));
 
@@ -367,6 +380,8 @@ async function loadHistoricalData() {
 function applyFireGoal() {
   const fg = _hist?.fireGoal;
   if (!fg?.monthly || !fg?.target_year) return;
+  // رقم FIRE بقوة شراء اليوم — computeGoalYear يخصم الإسقاطات بالتضخم تلقائياً،
+  // فالهدف يبقى بريال اليوم (لا نُضخّمه هنا) ويُقاس الوصول بقوة الشراء الحقيقية.
   const fireNumber = (fg.monthly * 12) / (fg.swr / 100);
   const goalInp = document.getElementById('inp-goal-amount');
   if (goalInp) { goalInp.value = Math.round(fireNumber); }
@@ -381,25 +396,29 @@ function applyFireGoal() {
     horizonSel.value = best;
   }
   runForecast();
-  showToast(`✓ تطبيق هدف FIRE: محفظة ${fmt(fireNumber)} بحلول ${fg.target_year}`, 'success');
+  showToast(`✓ تطبيق هدف FIRE: محفظة ${fmt(fireNumber)} (بقوة شراء اليوم) بحلول ${fg.target_year}`, 'success');
 }
 
 // ── Build 4 scenarios ──────────────────────────────────────────────────
 function buildScenarios(divOverride) {
   // نستخدم blendedCapGrowth بدلاً من annCapGrowth الخام
-  // هذا يُدخل واقعية: بيانات أقل ثقة → نمزج نحو معيار السوق (5%)
+  // هذا يُدخل واقعية: بيانات أقل ثقة → نمزج نحو معيار تاسي (~4.4%)
   const base = _hist.blendedCapGrowth;
   const div  = divOverride !== undefined ? divOverride : _hist.safeDivYield;
-  // المعايرة مُرساة لمعيار السوق السعودي طويل المدى (تاسي): نمو سعري ~5% +
-  // توزيعات ~3.5% ≈ 8.5% إجمالي. العلاوات صغيرة والسقوف منخفضة عمداً لأن
-  // الأرقام تُركَّب حتى 35 سنة — أي علاوة كبيرة تتحوّل لرقم خيالي بالتركيب.
-  //   • متفائل  = الربع الأعلى الواقعي (≈12–13% إجمالي)
-  //   • استثنائي = عقد صاعد قوي ممكن الحدوث (≈15–16% إجمالي) لا حلم بعيد المنال
+  // المعايرة مُرساة على أداء تاسي الفعلي 2005-2024 (20 سنة):
+  //   • نمو سعري CAGR: ~1.95% (الفترة كاملة بأزماتها) — ~4.4% (2010-2024 الحديثة)
+  //   • توزيعات ~3.5%  • 30% من السنوات كانت خسارة (غير مُغطّاة هنا)
+  // المتحفّظ يُرسى على «الطرف المنخفض للسوق» (ارتداد للمتوسط) لا على أداء الفرد
+  // المرتفع — فمحفظة حقّقت 11% لن تكرّرها 35 سنة؛ الافتراض الحذر هو عودتها للسوق.
+  //   • متحفّظ   ≈ 2.4% سعري + توزيعات مخفّضة (≈5% إجمالي) — كامل-دورة تاسي
+  //   • متفائل  = عقد جيّد واقعي (≈11% إجمالي)
+  //   • استثنائي = أقوى عقود تاسي ممكنة الحدوث (≈14% إجمالي) لا حلم بعيد المنال
+  const MARKET_LOW = Math.max(0, MARKET_CAP_BENCHMARK - 0.02);   // ~2.4% — قاع تاسي طويل المدى الواقعي
   _scenarios = [
-    { key:'conservative', capRate: Math.max(0.02,  base * 0.65),  divRate: Math.max(0.01, div * 0.75)  },
-    { key:'base',         capRate: base,                          divRate: div                          },
-    { key:'optimistic',   capRate: Math.min(0.13,  base + 0.025), divRate: Math.min(0.07, div + 0.010) },
-    { key:'exceptional',  capRate: Math.min(0.155, base + 0.05),  divRate: Math.min(0.09, div + 0.020) },
+    { key:'conservative', capRate: Math.max(0,     Math.min(base * 0.8, MARKET_LOW)), divRate: Math.max(0.01, div * 0.80) },
+    { key:'base',         capRate: base,                                              divRate: div                         },
+    { key:'optimistic',   capRate: Math.min(0.12,  base + 0.025),                     divRate: Math.min(0.06, div + 0.010) },
+    { key:'exceptional',  capRate: Math.min(0.15,  base + 0.05),                      divRate: Math.min(0.08, div + 0.020) },
   ];
 }
 
@@ -474,13 +493,19 @@ function projectScenario(scenario, params) {
 }
 
 // ── Goal year computation ──────────────────────────────────────────────
-function computeGoalYear(snapshots, divRate, goalType, goalAmount) {
+// الهدف يُقاس دائماً بقوة شراء اليوم (الريال الحقيقي): نخصم القيمة الاسمية
+// المستقبلية بالتضخم قبل المقارنة — وإلا «يصل» النموذج للهدف اسمياً قبل سنوات
+// من وصولك إليه فعلياً بقوة الشراء (تفاؤل زائف). مستقل عن مفتاح عرض التضخم.
+function computeGoalYear(snapshots, goalType, goalAmount, inflRate = 0) {
   if (!goalAmount || goalAmount <= 0) return null;
   for (let i = 1; i < snapshots.length; i++) {
-    const metric = goalType === 'monthly_income'
+    const nominal = goalType === 'monthly_income'
       ? snapshots[i].monthlyIncome
       : snapshots[i].value;
-    if (metric >= goalAmount) return i;
+    const realMetric = inflRate > 0
+      ? nominal / Math.pow(1 + inflRate, snapshots[i].year)
+      : nominal;
+    if (realMetric >= goalAmount) return i;
   }
   return null;
 }
@@ -549,7 +574,7 @@ function renderHistSummary() {
   }
   // H-8: warn when historical performance is genuinely negative
   if (h.annCapGrowth < 0) {
-    showToast('⚠️ أداؤك التاريخي سلبي — الإسقاطات قد تُظهر تراجعاً في القيمة مع الوقت', 'warning');
+    showToast('⚠️ أداؤك التاريخي سلبي — محفظتك لم تُثبت نمواً بعد؛ تُسقَط مسطّحة (لا صاعدة) وقد تكون الإسقاطات مفرطة التفاؤل', 'warning');
   }
 
   // XIRR: المصدر الأصدق للعائد التاريخي الحقيقي
@@ -564,7 +589,7 @@ function renderHistSummary() {
   const isBlended  = Math.abs(rawCap - blended) > 0.001;
   const growthLabel = isBlended
     ? `${pct(blended)} <span style="font-size:0.63rem;color:var(--text-muted)"
-        title="أداؤك الشخصي ${pct(rawCap)} مُمزوج بمعيار السوق (5%)&#10;بوزن ثقة البيانات ${conf}%&#10;كلما زادت بيانات محفظتك → نعتمد أداءك أكثر">
+        title="أداؤك الشخصي ${pct(rawCap)} مُمزوج بمعيار تاسي (~4.4%)&#10;بوزن ثقة البيانات ${conf}%&#10;كلما زادت بيانات محفظتك → نعتمد أداءك أكثر">
         (خامك ${pct(rawCap)} · ثقة ${conf}%)
       </span>`
     : `${pct(blended)} <span style="font-size:0.63rem;color:var(--success)" title="ثقة بيانات عالية — أداؤك الشخصي مُستخدَم بالكامل">✓ثقة ${conf}%</span>`;
@@ -830,10 +855,23 @@ function renderScenarioCards() {
     <div class="scenario-card ${m.cls}${isActive ? ' active' : ''}" id="sc-card-${m.key}" onclick="toggleScenario('${m.key}')">
       <div class="sc-badge">${m.emoji} ${m.name}</div>
       <div class="sc-name">${m.name}</div>
-      <div style="display:flex;align-items:center;gap:6px;margin:2px 0 6px">
-        <span style="font-size:.72rem;font-weight:700;color:${m.color};background:${m.color}22;border-radius:20px;padding:2px 10px;white-space:nowrap">احتمال الحدوث ≈ ${m.prob}%</span>
-        <span style="flex:1;height:5px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${m.prob}%;background:${m.color};border-radius:99px"></span></span>
+
+      <div style="display:flex;flex-direction:column;gap:5px;margin:4px 0 8px">
+        <!-- شريط الاحتمال التخطيطي -->
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap;min-width:80px">احتمال النموذج</span>
+          <span style="flex:1;height:6px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${m.prob}%;background:${m.color};border-radius:99px"></span></span>
+          <span style="font-size:.75rem;font-weight:800;color:${m.color};min-width:32px;text-align:left">≈${m.prob}%</span>
+        </div>
+        <!-- شريط تاسي التاريخي -->
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:.68rem;color:var(--text-muted);white-space:nowrap;min-width:80px">تاسي تاريخياً 🇸🇦</span>
+          <span style="flex:1;height:6px;background:var(--bg-3,#222);border-radius:99px;overflow:hidden"><span style="display:block;height:100%;width:${m.tasiProb * 2.5}%;background:${m.color};opacity:.55;border-radius:99px"></span></span>
+          <span style="font-size:.75rem;font-weight:800;color:${m.color};opacity:.75;min-width:32px;text-align:left">≈${m.tasiProb}%</span>
+        </div>
+        <div style="font-size:.67rem;color:var(--text-muted);margin-top:1px;padding-right:2px" title="السنوات التي وقع فيها تاسي ضمن نطاق هذا السيناريو">📅 ${m.tasiYears}</div>
       </div>
+
       <div class="sc-desc">${m.desc}</div>
       <div class="sc-rates">
         <div class="sc-rate-row"><span class="label">نمو رأس المال/سنة</span><span class="val" style="color:${m.color}">${pct(sc.capRate)}</span></div>
@@ -1007,11 +1045,14 @@ function renderChart(horizonYears, goalAmount = 0) {
     }
   }
 
-  // خط الهدف (للخط فقط)
+  // خط الهدف (للخط فقط) — يرتفع بالتضخم ليمثّل الريالات الاسمية اللازمة كل سنة
+  // لتعادل هدفك بقوة شراء اليوم، فيتقاطع مع منحنى السيناريو الاسمي عند سنة الوصول
+  // الحقيقية نفسها التي يحسبها computeGoalYear (تناسق بصري + رقمي).
   if (!isBar && goalAmount > 0 && _goalType === 'portfolio_value') {
+    const goalInfl = (parseFloat(document.getElementById('inp-inflation-rate')?.value) / 100) || 0.025;
     datasets.push({
-      label:           `🎯 الهدف: ${fmtShort(goalAmount)}`,
-      data:            Array(horizonYears + 1).fill(goalAmount),
+      label:           `🎯 الهدف: ${fmtShort(goalAmount)} (بقوة شراء اليوم)`,
+      data:            Array.from({ length: horizonYears + 1 }, (_, y) => Math.round(goalAmount * Math.pow(1 + goalInfl, y))),
       borderColor:     '#ff6b6b',
       backgroundColor: 'transparent',
       borderWidth:     2,
@@ -1196,6 +1237,8 @@ function renderGoalPanel(horizonYears, goalAmount) {
   card.style.display = 'block';
 
   const today    = new Date();
+  // الهدف مُدخَل بقوة شراء اليوم → نخصم الإسقاطات بالتضخم قبل قياس الوصول
+  const inflRate = (parseFloat(document.getElementById('inp-inflation-rate')?.value) / 100) || 0.025;
   const goalLabel = _goalType === 'monthly_income'
     ? `دخل شهري ${fmt(goalAmount)}`
     : `قيمة محفظة ${fmt(goalAmount)}`;
@@ -1205,7 +1248,7 @@ function renderGoalPanel(horizonYears, goalAmount) {
     const sc   = _scenarios.find(s  => s.key === m.key);
     if (!proj || !sc) return '';
 
-    const goalYr  = computeGoalYear(proj.data, sc.divRate, _goalType, goalAmount);
+    const goalYr  = computeGoalYear(proj.data, _goalType, goalAmount, inflRate);
     const reached = goalYr !== null && goalYr <= horizonYears;
     const snap    = reached ? proj.data[goalYr] : proj.data[proj.data.length - 1];
 
@@ -1230,6 +1273,7 @@ function renderGoalPanel(horizonYears, goalAmount) {
   body.innerHTML = `
     <div class="goal-header-label">
       الهدف المحدد: <strong class="text-accent">${goalLabel}</strong>
+      <span class="small text-muted" style="font-weight:400">— مقيس بقوة شراء اليوم (مخصوم بتضخم ${pct(inflRate)})</span>
     </div>
     <div class="goal-rows">${rows}</div>`;
 }
