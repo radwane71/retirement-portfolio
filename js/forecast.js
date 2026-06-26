@@ -948,6 +948,14 @@ function renderScenarioCards() {
   // ملاحظة الدلو غير المُغطّى: نتيجة أسوأ من «المتحفظ» (عقد ضعيف / خسارة)
   const note = document.getElementById('scenario-prob-note');
   if (note) {
+    const N = _hist?.holdingsCount || 0;
+    const concentrationNote = N > 0 ? `
+      <div style="border:1px solid rgba(88,166,255,.30);background:rgba(88,166,255,.06);border-radius:10px;padding:11px 14px;margin-top:8px;line-height:1.75">
+        <div style="font-weight:700;color:#58a6ff">🎯 محفظتك ${N} ${N === 1 ? 'سهم' : N === 2 ? 'سهمان' : N <= 10 ? 'أسهم' : 'سهماً'} — لا مؤشر 159 شركة</div>
+        <div class="small text-muted" style="margin-top:5px">
+          مرجع هذه الاحتمالات هو <strong>مؤشر تاسي</strong> (متوسط السوق المنوّع على ~159 شركة). محفظتك أكثر تركيزاً، فتشتّت نتائجها الفعلي <strong>أوسع في الاتجاهين</strong>: احتمال تفوّقك على هذه الأرقام أكبر، واحتمال نتيجة أسوأ أكبر أيضاً (تعثّر شركة واحدة يؤثّر فيك أكثر). اعتبرها <strong>بوصلة للسوق</strong> لا ضماناً لمحفظتك بعينها — وكلّما نوّعت أكثر اقتربت نتائجك من سلوك المؤشر.
+        </div>
+      </div>` : '';
     note.innerHTML = `
       <div style="border:1px solid rgba(240,180,41,.35);background:rgba(240,180,41,.06);border-radius:10px;padding:12px 15px;line-height:1.75">
         <div style="font-weight:700;color:#f0b429">📊 ${occ.below}% احتمال نمو سعري <u>أبطأ</u> من «المتحفظ» — وليس خسارة</div>
@@ -957,7 +965,7 @@ function renderScenarioCards() {
         <div class="small" style="margin-top:7px;color:var(--text-2)">
           💡 <strong>مهم:</strong> هذه النسب تخصّ <strong>نمو السوق فقط</strong>. توزيعاتك النقدية + أسهم المنحة + إضافاتك الشهرية تُضاف <strong>فوقها</strong> في الإسقاط الفعلي (الرسم والجدول) — وهي ما يجعل محفظتك تتضاعف حتى في السيناريو المتحفظ. الكروت تقيس «هل تفوّق سهمك على السوق؟» لا «هل ستربح؟».
         </div>
-      </div>`;
+      </div>${concentrationNote}`;
   }
 }
 
