@@ -1117,12 +1117,15 @@ function renderChart(horizonYears, goalAmount = 0) {
         fill:            false,
         order:           99,
       });
-      // ظلّل الفجوة بين «مالك» و«السيناريو المميَّز»: أخضر = ربح، أحمر = خسارة
+      // ظلّل الفجوة بين «مالك» و«السيناريو المميَّز» باللون الأخضر = ربحك فوق مالك.
+      // ملاحظة: عند استهداف خط آخر (لا قيمة ثابتة) يتجاهل Chart.js above/below،
+      // فنحدّد اللون عبر backgroundColor مباشرةً ليظهر التظليل فعلاً.
       const capIdx = datasets.length - 1;
       const hlName = SCENARIO_META.find(m => m.key === _activeHighlight)?.name;
       const hlDataset = datasets.find(d => d.label === hlName);
       if (hlDataset) {
-        hlDataset.fill = { target: capIdx, above: 'rgba(63,185,80,0.15)', below: 'rgba(248,81,73,0.16)' };
+        hlDataset.fill = { target: capIdx };
+        hlDataset.backgroundColor = 'rgba(63,185,80,0.20)';
       }
     }
   }
