@@ -114,8 +114,24 @@ function fairValueOf(h) {
     return { value: +cfg.fairValueManual, source: 'يدوي' };
   }
   const fv = valuationFV[h.ticker];
-  if (fv && fv.value > 0) return { value: fv.value, source: `حاسبة القيمة العادلة (${fv.date})` };
+  if (fv && fv.value > 0) {
+    const age = fvAgeDays(fv);
+    return { value: fv.value, min: fv.min, max: fv.max,
+             source: `حاسبة القيمة العادلة (${fv.date})`, ageDays: age };
+  }
   return null; // غير متوفرة — يُعلَن صراحةً
+}
+
+// ملاحظات الدستور الخاصة (§3) — تُعرَض كلافتة تحذيرية، لا تُغيّر منطق المحرّك آلياً
+const SPECIAL_NOTES = {
+  '5110': 'مرساة دفاعية (الدستور §3): توزيع 5110 محمي بمرسوم ملكي 2020 وملكية صندوق الاستثمارات. التدفق النقدي السالب = مصاريف رأسمالية مخططة، ليس تعثراً. لا تُفشِل بوابة الاستدامة لمجرد التدفق السالب.',
+};
+function specialNoteOf(h) {
+  if (SPECIAL_NOTES[h.ticker]) return SPECIAL_NOTES[h.ticker];
+  if (assetTypeOf(h) === 'cement_petro') {
+    return 'سياق دوري (الدستور §3): في شركة إسمنت قديمة راسخة، نسبة توزيع مرتفعة قد تعكس قاع دورة أرباح مع توزيع مدعوم بميزانية نظيفة — لا تعثر. السياق قبل التصنيف.';
+  }
+  return null;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -135,15 +151,21 @@ function evaluateHolding(h, ctx) {
 
   const fv  = fairValueOf(h);
   const sus = sustainabilityOf(h);
+  const priceOk = price > 0 && +h.shares > 0; // حارس: بلا سعر/أسهم لا تُبنى إشارة سعرية
+  const fvStale = fv && fv.ageDays != null && fv.ageDays > FV_STALE_DAYS;
   const gaps = [];
+  if (!priceOk) gaps.push('السعر الحالي');
   if (!fv) gaps.push('القيمة العادلة');
   if (sus.status === 'unknown') gaps.push('بوابة الاستدامة');
+  const note = specialNoteOf(h);
 
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector,
     weight, cap, price, value, banned, assetType,
     fairValue: fv ? fv.value : null, fairSource: fv ? fv.source : null,
-    sustain: sus, targetWeight, gaps,
+    fairMin: fv ? fv.min : null, fairMax: fv ? fv.max : null,
+    fvAgeDays: fv ? fv.ageDays : null, fvStale,
+    sustain: sus, targetWeight, gaps, specialNote: note,
     blueChip: isBlueChip(h),
   };
 
@@ -173,14 +195,18 @@ function evaluateHolding(h, ctx) {
 
   // ── P2: سقف الوزن (الفلتر 4) — تركيز فوق السقف يفرض القصّ ──
   const overWeight = weight > cap + 0.05; // هامش تقريب بسيط
-  // ── P2: سقف القيمة (الفلتر 3) — مبالغة في التسعير تفرض القصّ ──
-  const overValued = fv ? price > fv.value * (1 + VALUE_CAP_MARGIN) : false;
+  // ── P2: سقف القيمة (الفلتر 3) — مبالغة في التسعير تفرض القصّ (يلزم سعر صالح) ──
+  const overValued = fv && priceOk ? price > fv.value * (1 + VALUE_CAP_MARGIN) : false;
 
   if (overWeight || overValued) {
     // أي سقف ينكسر أول يفرض القصّ (الدستور §5). سقف الوزن يحكم القصّ للنسبة.
     const reasons = [];
     if (overWeight) reasons.push(`كسر سقف الوزن (الفلتر 4): الوزن ${formatNum(weight)}% > السقف ${cap}%`);
-    if (overValued) reasons.push(`تجاوز القيمة العادلة +${Math.round(VALUE_CAP_MARGIN*100)}% (الفلتر 3): السعر ${formatNum(price)} > العادلة ${formatNum(fv.value)}`);
+    if (overValued) {
+      let r = `تجاوز القيمة العادلة +${Math.round(VALUE_CAP_MARGIN*100)}% (الفلتر 3): السعر ${formatNum(price)} > العادلة ${formatNum(fv.value)}`;
+      if (fvStale) r += ` ⚠ القيمة العادلة متقادمة (${fv.ageDays} يوم) — راجع الأرقام`;
+      reasons.push(r);
+    }
     return { ...base, action: 'trim',
       label: overWeight ? `قصّ لإرجاع الوزن إلى ${cap}%` : 'قصّ (مبالغة في التسعير)',
       cutToWeight: overWeight ? cap : null, priority: 2,
@@ -188,9 +214,31 @@ function evaluateHolding(h, ctx) {
   }
 
   // ── P3: فرصة إضافة (الفلتر 3) — تحت القيمة + استدامة سليمة + وزن تحت الهدف ──
-  if (fv && !banned && sus.status === 'pass'
+  // شروط إضافية لمنع توصيات خاطئة: سعر صالح، قيمة عادلة غير متقادمة،
+  // وألّا يكون القطاع متجاوزاً سقف 25% (الفلتر 4 / §6).
+  const inBuyZone = fv && priceOk && !banned && sus.status === 'pass'
       && price < fv.value * (1 - BUY_ZONE_MARGIN)
-      && weight < targetWeight - 0.05) {
+      && weight < targetWeight - 0.05;
+  if (inBuyZone) {
+    const sectorPct = (ctx.sectorPct && ctx.sectorPct[(h.sector || '').trim() || 'غير مصنّف']) || 0;
+    const hasExplicitTarget = tgt.target_pct != null && +tgt.target_pct > 0;
+    if (fvStale) {
+      // لا نوصي بالشراء بناءً على تقييم متقادم — أعلِن الحاجة لتحديثه
+      return { ...base, action: 'hold', label: 'احتفظ', priority: 9,
+        reason: `في منطقة الشراء لكن القيمة العادلة متقادمة (${fv.ageDays} يوم) — حدّثها قبل أي إضافة (الدستور: الدورة 6 أشهر)` };
+    }
+    if (sectorPct > CAPS.sector) {
+      // الإضافة تخالف سقف القطاع — لا تُرشَّح للإضافة
+      return { ...base, action: 'hold', label: 'احتفظ', priority: 9,
+        reason: `في منطقة الشراء لكن القطاع «${h.sector}» عند ${formatNum(sectorPct)}% > سقف ${CAPS.sector}% — الإضافة تضخّم تركيزاً قطاعياً (الفلتر 4)` };
+    }
+    if (!hasExplicitTarget) {
+      // الدستور يفرّق السقف عن الهدف، والشراء «مشروط مو آلي». بلا نسبة هدف
+      // صريحة لا تُطلَق توصية إضافة آلية — يُعرَض كمرشّح مع إرشاد لضبط الهدف.
+      return { ...base, action: 'hold', label: 'مرشّح إضافة (يحتاج هدف)', priority: 4,
+        buyZone: true,
+        reason: `في منطقة الشراء (السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% = ${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة، لكن لا توجد نسبة هدف صريحة. حدّد الهدف في صفحة «أهداف الأسهم» لتفعيل توصية الإضافة (§4: الإضافة مشروطة مو آلية، والسقف ≠ الهدف)` };
+    }
     return { ...base, action: 'add', label: 'أضف (مشروط)', priority: 3,
       reason: `منطقة شراء (الفلتر 3): السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% (${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}%` };
   }
@@ -231,21 +279,36 @@ async function loadAll() {
   (rVal || []).forEach(entry => {
     const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
     if (!tk) return;
-    const val = parseFairValueRange(entry.results?.fairValueRange);
-    if (val == null) return;
-    // السجل مرتّب بالأحدث أولاً (unshift) → أول ظهور هو الأحدث
-    if (!valuationFV[tk]) valuationFV[tk] = { value: val, date: (entry.date || '').split('،')[0] || '' };
+    const parsed = parseFairValueRange(entry.results?.fairValueRange);
+    if (parsed == null) return;
+    // السجل مرتّب بالأحدث أولاً (unshift) → أول ظهور هو الأحدث.
+    // entry.id = Date.now() وقت الحفظ → نستخدمه لحساب عمر القيمة العادلة بدقّة
+    // (نص التاريخ بتقويم هجري يصعب تحليله، أما الـid فطابع زمني موثوق).
+    if (!valuationFV[tk]) {
+      const ts = typeof entry.id === 'number' ? entry.id : null;
+      valuationFV[tk] = { value: parsed.avg, min: parsed.min, max: parsed.max,
+                         date: (entry.date || '').split('،')[0] || '', ts };
+    }
   });
 }
 
-// يحوّل نص نتيجة الحاسبة ("12.50 — 18.30" أو "15.40 ر.س") إلى رقم (المتوسط)
+// عمر القيمة العادلة بالأيام (أو null إن لم يتوفر طابع زمني)
+const FV_STALE_DAYS = 180; // دورة الدستور 6 أشهر — أقدم من ذلك = متقادمة
+function fvAgeDays(fv) {
+  if (!fv || !fv.ts) return null;
+  return Math.floor((Date.now() - fv.ts) / 86400000);
+}
+
+// يحوّل نص نتيجة الحاسبة ("12.50 — 18.30" أو "15.40 ر.س") إلى { avg, min, max }
+// avg = نقطة الوسط (للإشارة بهوامش المالك)، min/max = حدّا النطاق (للشفافية)
 function parseFairValueRange(str) {
   if (!str) return null;
   const nums = String(str).replace(/,/g, '').match(/\d+(?:\.\d+)?/g);
   if (!nums || !nums.length) return null;
   const vals = nums.map(Number).filter(n => n > 0);
   if (!vals.length) return null;
-  return vals.reduce((a, b) => a + b, 0) / vals.length;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, min, max };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -253,7 +316,14 @@ function parseFairValueRange(str) {
 // ══════════════════════════════════════════════════════════════════════
 function runEngine() {
   const totalValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
-  const ctx = { totalValue };
+
+  // نِسَب القطاعات — تُستخدم لمنع توصية «أضف» في قطاع متجاوز سقف 25% (الفلتر 4 / §6)
+  const sectorPct = {};
+  holdings.forEach(h => {
+    const sec = (h.sector || '').trim() || 'غير مصنّف';
+    sectorPct[sec] = (sectorPct[sec] || 0) + (totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0);
+  });
+  const ctx = { totalValue, sectorPct };
 
   _results = holdings.map(h => evaluateHolding(h, ctx));
 
@@ -288,7 +358,7 @@ function renderActionTable() {
   const tbody = document.getElementById('de-action-tbody');
   if (!tbody) return;
   const actionable = _results
-    .filter(r => r.action !== 'hold')
+    .filter(r => r.action !== 'hold' || r.buyZone)
     .sort((a, b) => a.priority - b.priority || b.weight - a.weight);
 
   if (!actionable.length) {
@@ -297,7 +367,7 @@ function renderActionTable() {
   }
   tbody.innerHTML = actionable.map(r => `
     <tr>
-      <td><span class="de-badge ${badgeClass(r.action)}">${r.label}</span></td>
+      <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
       <td><strong>${r.ticker}</strong><br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
       <td>${formatNum(r.weight)}%<br><span class="small text-muted">السقف ${r.cap}%</span></td>
       <td>${formatNum(r.price)}</td>
@@ -341,18 +411,22 @@ function renderAllTable() {
   const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   tbody.innerHTML = sorted.map(r => {
     const susBadge = { pass: '🟢 سليمة', fail: '🔴 فاشلة', unknown: '⚪ غير متوفرة' }[r.sustain.status];
+    const staleTag = r.fvStale ? `<br><span class="small" style="color:#f59e0b" title="أقدم من ${FV_STALE_DAYS} يوم">⏳ متقادمة (${r.fvAgeDays} يوم)</span>` : '';
+    const rangeTag = (r.fairMin != null && r.fairMax != null && r.fairMax > r.fairMin)
+      ? `<br><span class="small text-muted" title="نطاق النماذج">النطاق: ${formatNum(r.fairMin)} – ${formatNum(r.fairMax)}</span>` : '';
     const fvCell = r.fairValue != null
-      ? `${formatNum(r.fairValue)}<br><span class="small text-muted">${escapeHtmlSafe(r.fairSource||'')}</span>`
+      ? `${formatNum(r.fairValue)}${rangeTag}<br><span class="small text-muted">${escapeHtmlSafe(r.fairSource||'')}</span>${staleTag}`
       : '<span class="text-muted">غير متوفرة</span>';
+    const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
     return `
     <tr>
-      <td><strong>${r.ticker}</strong> ${r.banned ? '<span title="ممنوع من توصية الشراء" class="de-banned">⛔</span>' : ''} ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
+      <td><strong>${r.ticker}</strong> ${r.banned ? '<span title="ممنوع من توصية الشراء" class="de-banned">⛔</span>' : ''} ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}${noteTag}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
       <td>${escapeHtmlSafe(ASSET_LABEL[r.assetType])}<br><span class="small text-muted">${escapeHtmlSafe(SUSTAIN_METRIC[r.assetType])}</span></td>
       <td>${formatNum(r.weight)}%<br><span class="small text-muted">السقف ${r.cap}%</span></td>
       <td>${formatNum(r.price)}</td>
       <td>${fvCell}</td>
       <td>${susBadge}</td>
-      <td><span class="de-badge ${badgeClass(r.action)}">${r.label}</span></td>
+      <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
       <td class="de-reason small">${escapeHtmlSafe(r.reason)}</td>
       <td><button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">⚙️</button></td>
     </tr>`;
@@ -362,6 +436,8 @@ function renderAllTable() {
 function badgeClass(action) {
   return { exit: 'de-b-exit', trim: 'de-b-trim', add: 'de-b-add', hold: 'de-b-hold' }[action] || 'de-b-hold';
 }
+// شارة النتيجة: مرشّح منطقة الشراء (يحتاج هدف) له لون مميّز
+function badgeFor(r) { return r.buyZone ? 'de-b-watch' : badgeClass(r.action); }
 function escapeHtmlSafe(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
@@ -393,9 +469,19 @@ function openStockCard(ticker) {
   document.getElementById('de-card-notes').value = cfg.notes || '';
 
   const fvHint = document.getElementById('de-card-fvhint');
-  fvHint.textContent = fv
-    ? `قيمة عادلة محفوظة من الحاسبة: ${formatNum(fv.value)} (${fv.date}). اتركه فارغاً لاستخدامها.`
-    : 'لا توجد قيمة عادلة محفوظة لهذا السهم — أدخلها يدوياً أو شغّل حاسبة القيمة العادلة.';
+  if (fv) {
+    const age = fvAgeDays(fv);
+    const staleMsg = age != null && age > FV_STALE_DAYS ? ` ⏳ متقادمة (${age} يوم) — حدّثها بإعادة تشغيل الحاسبة.` : '';
+    fvHint.textContent = `قيمة عادلة محفوظة من الحاسبة: ${formatNum(fv.value)} (${fv.date}). اتركه فارغاً لاستخدامها.${staleMsg}`;
+  } else {
+    fvHint.textContent = 'لا توجد قيمة عادلة محفوظة لهذا السهم — أدخلها يدوياً أو شغّل حاسبة القيمة العادلة.';
+  }
+
+  // ملاحظة الدستور الخاصة (5110 / سياق الإسمنت الدوري)
+  const noteEl = document.getElementById('de-card-note');
+  const note = specialNoteOf(h);
+  if (note) { noteEl.textContent = '📌 ' + note; noteEl.style.display = ''; }
+  else      { noteEl.textContent = ''; noteEl.style.display = 'none'; }
 
   document.getElementById('de-card-modal').style.display = 'flex';
 }
