@@ -24,8 +24,8 @@ const FIXED_TRIGGERS = Object.freeze([
     label: 'بيع عند 85 ريال' },
 ]);
 
-// أسهم ممنوعة نهائياً من أي توصية شراء (الدستور §1)
-const BANNED_TICKERS = Object.freeze(['4339', '1111']);
+// ملاحظة: المحرّك يقيّم فقط الأسهم الموجودة داخل المحفظة — لا علاقة له بأي
+// قائمة أسهم ممنوعة (أُزيلت بقرار المالك؛ وظيفة الصفحة القرار داخل المحفظة فقط).
 
 // مفتاح حفظ مدخلات المحرّك لكل سهم (يُزامن عبر user_settings)
 const ENGINE_STORE_KEY = 'decision_engine_v1';
@@ -145,9 +145,11 @@ function evaluateHolding(h, ctx) {
   const price  = +h.current_price;
   const cap    = capOf(h);
   const assetType = assetTypeOf(h);
-  const banned = BANNED_TICKERS.includes(h.ticker);
   const tgt    = stockTargets[h.ticker] || {};
-  const targetWeight = (tgt.target_pct != null && +tgt.target_pct > 0) ? +tgt.target_pct : cap;
+  // الهدف الفردي للسهم: نسبته المسجّلة في صفحة الأهداف، وإلا السقف الافتراضي
+  // (7% عادي / 12% قيادي). هذا هدف السهم الفردي — لا علاقة له بسقف القطاع.
+  const hasExplicitTarget = tgt.target_pct != null && +tgt.target_pct > 0;
+  const targetWeight = hasExplicitTarget ? +tgt.target_pct : cap;
 
   const fv  = fairValueOf(h);
   const sus = sustainabilityOf(h);
@@ -161,7 +163,7 @@ function evaluateHolding(h, ctx) {
 
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector,
-    weight, cap, price, value, banned, assetType,
+    weight, cap, price, value, assetType,
     fairValue: fv ? fv.value : null, fairSource: fv ? fv.source : null,
     fairMin: fv ? fv.min : null, fairMax: fv ? fv.max : null,
     fvAgeDays: fv ? fv.ageDays : null, fvStale,
@@ -175,79 +177,70 @@ function evaluateHolding(h, ctx) {
     base.trigger = { ...trig, fired: trig.cmp === 'gte' ? price >= trig.price : price <= trig.price };
     if (base.trigger.fired) {
       if (trig.kind === 'sell') {
-        return { ...base, action: 'exit', label: 'خروج', priority: 0,
+        return { ...base, action: 'exit', label: 'تصفية', priority: 0,
           reason: `trigger ثابت: ${trig.label} — انطبق (السعر ${formatNum(price)} ${trig.cmp === 'gte' ? '≥' : '≤'} ${trig.price})` };
       }
-      // reduce → قصّ لإرجاع الوزن لهدف الـtrigger
+      // reduce → تخفيف لإرجاع الوزن لهدف الـtrigger
       const cutTo = trig.toWeight;
       return { ...base, action: weight > cutTo ? 'trim' : 'hold',
-        label: weight > cutTo ? `قصّ إلى ${cutTo}%` : 'احتفظ',
+        label: weight > cutTo ? `تخفيف إلى ${cutTo}%` : 'احتفاظ',
         cutToWeight: cutTo, priority: 0,
         reason: `trigger ثابت: ${trig.label} — انطبق (السعر ${formatNum(price)} ≤ ${trig.price})` };
     }
   }
 
-  // ── P1: بوابة الاستدامة (الفلتر 1) — فشل = خروج بغض النظر عن السعر ──
+  // ── P1: بوابة الاستدامة (الفلتر 1) — فشل = تصفية بغض النظر عن السعر ──
   if (sus.status === 'fail') {
-    return { ...base, action: 'exit', label: 'خروج', priority: 1,
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1,
       reason: `فشل بوابة الاستدامة (الفلتر 1): ${sus.reason}` };
   }
 
-  // ── P2: سقف الوزن (الفلتر 4) — تركيز فوق السقف يفرض القصّ ──
-  const overWeight = weight > cap + 0.05; // هامش تقريب بسيط
-  // ── P2: سقف القيمة (الفلتر 3) — مبالغة في التسعير تفرض القصّ (يلزم سعر صالح) ──
+  // ── P2: تجاوز هدف الوزن الفردي (الفلتر 4) — يفرض التخفيف للهدف ──
+  const overWeight = weight > targetWeight + 0.05; // مقارنة بهدف السهم الفردي
+  // ── P2: سقف القيمة (الفلتر 3) — مبالغة في التسعير تفرض التخفيف (يلزم سعر صالح) ──
   const overValued = fv && priceOk ? price > fv.value * (1 + VALUE_CAP_MARGIN) : false;
 
   if (overWeight || overValued) {
-    // أي سقف ينكسر أول يفرض القصّ (الدستور §5). سقف الوزن يحكم القصّ للنسبة.
+    // أي حدّ ينكسر أول يفرض التخفيف (الدستور §5). هدف الوزن يحكم نسبة التخفيف.
     const reasons = [];
-    if (overWeight) reasons.push(`كسر سقف الوزن (الفلتر 4): الوزن ${formatNum(weight)}% > السقف ${cap}%`);
+    if (overWeight) reasons.push(`تجاوز هدف الوزن (الفلتر 4): الوزن ${formatNum(weight)}% > الهدف ${formatNum(targetWeight)}%`);
     if (overValued) {
       let r = `تجاوز القيمة العادلة +${Math.round(VALUE_CAP_MARGIN*100)}% (الفلتر 3): السعر ${formatNum(price)} > العادلة ${formatNum(fv.value)}`;
       if (fvStale) r += ` ⚠ القيمة العادلة متقادمة (${fv.ageDays} يوم) — راجع الأرقام`;
       reasons.push(r);
     }
     return { ...base, action: 'trim',
-      label: overWeight ? `قصّ لإرجاع الوزن إلى ${cap}%` : 'قصّ (مبالغة في التسعير)',
-      cutToWeight: overWeight ? cap : null, priority: 2,
+      label: overWeight ? `تخفيف لإرجاع الوزن إلى ${formatNum(targetWeight)}%` : 'تخفيف (مبالغة في التسعير)',
+      cutToWeight: overWeight ? targetWeight : null, priority: 2,
       reason: reasons.join(' | ') };
   }
 
-  // ── P3: فرصة إضافة (الفلتر 3) — تحت القيمة + استدامة سليمة + وزن تحت الهدف ──
-  // شروط إضافية لمنع توصيات خاطئة: سعر صالح، قيمة عادلة غير متقادمة،
-  // وألّا يكون القطاع متجاوزاً سقف 25% (الفلتر 4 / §6).
-  const inBuyZone = fv && priceOk && !banned && sus.status === 'pass'
+  // ── P3: فرصة تجميع (الفلتر 3) — تحت القيمة + استدامة سليمة + وزن تحت الهدف ──
+  const inBuyZone = fv && priceOk && sus.status === 'pass'
       && price < fv.value * (1 - BUY_ZONE_MARGIN)
       && weight < targetWeight - 0.05;
   if (inBuyZone) {
-    const sectorPct = (ctx.sectorPct && ctx.sectorPct[(h.sector || '').trim() || 'غير مصنّف']) || 0;
-    const hasExplicitTarget = tgt.target_pct != null && +tgt.target_pct > 0;
     if (fvStale) {
-      // لا نوصي بالشراء بناءً على تقييم متقادم — أعلِن الحاجة لتحديثه
-      return { ...base, action: 'hold', label: 'احتفظ', priority: 9,
-        reason: `في منطقة الشراء لكن القيمة العادلة متقادمة (${fv.ageDays} يوم) — حدّثها قبل أي إضافة (الدستور: الدورة 6 أشهر)` };
-    }
-    if (sectorPct > CAPS.sector) {
-      // الإضافة تخالف سقف القطاع — لا تُرشَّح للإضافة
-      return { ...base, action: 'hold', label: 'احتفظ', priority: 9,
-        reason: `في منطقة الشراء لكن القطاع «${h.sector}» عند ${formatNum(sectorPct)}% > سقف ${CAPS.sector}% — الإضافة تضخّم تركيزاً قطاعياً (الفلتر 4)` };
+      // لا نوصي بالتجميع بناءً على تقييم متقادم — أعلِن الحاجة لتحديثه
+      return { ...base, action: 'hold', label: 'احتفاظ', priority: 9,
+        reason: `في منطقة الشراء لكن القيمة العادلة متقادمة (${fv.ageDays} يوم) — حدّثها قبل أي تجميع (الدستور: الدورة 6 أشهر)` };
     }
     if (!hasExplicitTarget) {
-      // الدستور يفرّق السقف عن الهدف، والشراء «مشروط مو آلي». بلا نسبة هدف
-      // صريحة لا تُطلَق توصية إضافة آلية — يُعرَض كمرشّح مع إرشاد لضبط الهدف.
-      return { ...base, action: 'hold', label: 'مرشّح إضافة (يحتاج هدف)', priority: 4,
+      // الهدف الفردي للسهم غير محدَّد، والشراء «مشروط مو آلي». بلا نسبة هدف
+      // صريحة لا تُطلَق توصية تجميع آلية — يُعرَض كمرشّح مع إرشاد لضبط الهدف.
+      return { ...base, action: 'hold', label: 'مرشّح تجميع (يحتاج هدف)', priority: 4,
         buyZone: true,
-        reason: `في منطقة الشراء (السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% = ${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة، لكن لا توجد نسبة هدف صريحة. حدّد الهدف في صفحة «أهداف الأسهم» لتفعيل توصية الإضافة (§4: الإضافة مشروطة مو آلية، والسقف ≠ الهدف)` };
+        reason: `في منطقة الشراء (السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% = ${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة، لكن لا يوجد هدف فردي مسجَّل. حدّد هدف السهم في صفحة «أهداف الأسهم» لتفعيل توصية التجميع (§4: الشراء مشروط مو آلي)` };
     }
-    return { ...base, action: 'add', label: 'أضف (مشروط)', priority: 3,
+    return { ...base, action: 'add', label: 'تجميع (مشروط)', priority: 3,
       reason: `منطقة شراء (الفلتر 3): السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% (${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}%` };
   }
 
-  // ── احتفظ ──
+  // ── احتفاظ ──
   let holdReason;
-  if (gaps.length) holdReason = `احتفظ — لا قاعدة قصّ/خروج انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
-  else             holdReason = 'احتفظ — ضمن سقف الوزن وسقف القيمة، الاستدامة سليمة';
-  return { ...base, action: 'hold', label: 'احتفظ', priority: 9, reason: holdReason };
+  if (gaps.length) holdReason = `احتفاظ — لا قاعدة تخفيف/تصفية انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
+  else             holdReason = 'احتفاظ — ضمن هدف الوزن وسقف القيمة، الاستدامة سليمة';
+  return { ...base, action: 'hold', label: 'احتفاظ', priority: 9, reason: holdReason };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -316,14 +309,9 @@ function parseFairValueRange(str) {
 // ══════════════════════════════════════════════════════════════════════
 function runEngine() {
   const totalValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
-
-  // نِسَب القطاعات — تُستخدم لمنع توصية «أضف» في قطاع متجاوز سقف 25% (الفلتر 4 / §6)
-  const sectorPct = {};
-  holdings.forEach(h => {
-    const sec = (h.sector || '').trim() || 'غير مصنّف';
-    sectorPct[sec] = (sectorPct[sec] || 0) + (totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0);
-  });
-  const ctx = { totalValue, sectorPct };
+  // قرار كل سهم فردي يعتمد على وزنه وهدفه الفرديين فقط — سقف القطاع 25%
+  // يُفحَص على مستوى المحفظة في قسم منفصل (renderSectorCheck)، لا يُطبَّق على السهم.
+  const ctx = { totalValue };
 
   _results = holdings.map(h => evaluateHolding(h, ctx));
 
@@ -344,10 +332,10 @@ function renderSummaryStrip(totalValue) {
   const sizeOk = count >= PORTFOLIO_SIZE.min && count <= PORTFOLIO_SIZE.max;
 
   el.innerHTML = `
-    <div class="de-stat de-stat-exit"><div class="de-stat-num">${n('exit')}</div><div class="de-stat-lbl">خروج</div></div>
-    <div class="de-stat de-stat-trim"><div class="de-stat-num">${n('trim')}</div><div class="de-stat-lbl">قصّ</div></div>
-    <div class="de-stat de-stat-add"><div class="de-stat-num">${n('add')}</div><div class="de-stat-lbl">فرص إضافة</div></div>
-    <div class="de-stat de-stat-hold"><div class="de-stat-num">${n('hold')}</div><div class="de-stat-lbl">احتفظ</div></div>
+    <div class="de-stat de-stat-exit"><div class="de-stat-num">${n('exit')}</div><div class="de-stat-lbl">تصفية</div></div>
+    <div class="de-stat de-stat-trim"><div class="de-stat-num">${n('trim')}</div><div class="de-stat-lbl">تخفيف</div></div>
+    <div class="de-stat de-stat-add"><div class="de-stat-num">${n('add')}</div><div class="de-stat-lbl">تجميع</div></div>
+    <div class="de-stat de-stat-hold"><div class="de-stat-num">${n('hold')}</div><div class="de-stat-lbl">احتفاظ</div></div>
     <div class="de-stat"><div class="de-stat-num">${count} <span style="font-size:.6em;color:${sizeOk?'#10b981':'#f59e0b'}">${sizeOk?'✓':'⚠'}</span></div><div class="de-stat-lbl">عدد الأسهم (الهدف ${PORTFOLIO_SIZE.min}–${PORTFOLIO_SIZE.max})</div></div>
     <div class="de-stat de-stat-gap"><div class="de-stat-num">${gapsFV} / ${gapsSus}</div><div class="de-stat-lbl">ناقص: قيمة عادلة / استدامة</div></div>
   `;
@@ -369,7 +357,7 @@ function renderActionTable() {
     <tr>
       <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
       <td><strong>${r.ticker}</strong><br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small text-muted">السقف ${r.cap}%</span></td>
+      <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}%</span></td>
       <td>${formatNum(r.price)}</td>
       <td>${r.fairValue != null ? formatNum(r.fairValue) : '<span class="text-muted">غير متوفرة</span>'}</td>
       <td class="de-reason">${escapeHtmlSafe(r.reason)}</td>
@@ -420,9 +408,9 @@ function renderAllTable() {
     const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
     return `
     <tr>
-      <td><strong>${r.ticker}</strong> ${r.banned ? '<span title="ممنوع من توصية الشراء" class="de-banned">⛔</span>' : ''} ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}${noteTag}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
+      <td><strong>${r.ticker}</strong> ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}${noteTag}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
       <td>${escapeHtmlSafe(ASSET_LABEL[r.assetType])}<br><span class="small text-muted">${escapeHtmlSafe(SUSTAIN_METRIC[r.assetType])}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small text-muted">السقف ${r.cap}%</span></td>
+      <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}%</span></td>
       <td>${formatNum(r.price)}</td>
       <td>${fvCell}</td>
       <td>${susBadge}</td>
@@ -523,9 +511,9 @@ function exportActionsCSV() {
     .filter(r => r.action !== 'hold')
     .sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   if (!rows.length) { showToast('لا توجد إجراءات للتصدير', 'info'); return; }
-  const head = ['الرمز','الاسم','الإجراء','الوزن%','السقف%','السعر','القيمة العادلة','السبب'];
+  const head = ['الرمز','الاسم','الإجراء','الوزن%','الهدف%','السعر','القيمة العادلة','السبب'];
   const lines = rows.map(r => [
-    r.ticker, r.name, r.label, formatNum(r.weight), r.cap, formatNum(r.price),
+    r.ticker, r.name, r.label, formatNum(r.weight), formatNum(r.targetWeight), formatNum(r.price),
     r.fairValue != null ? formatNum(r.fairValue) : 'غير متوفرة', r.reason,
   ].map(csvCell).join(','));
   const csv = '﻿' + [head.map(csvCell).join(','), ...lines].join('\r\n');
