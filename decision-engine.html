@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon-32x32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="favicon-16x16.png">
+  <link rel="manifest" href="site.webmanifest">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="ثروة">
+  <meta name="theme-color" content="#6366f1">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>محرّك القرار - ثروة</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    /* ── محرّك القرار — ستايل خاص ── */
+    .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
+    .de-stat { flex:1 1 130px; background:var(--bg-2); border:1px solid var(--border);
+               border-radius:12px; padding:12px 14px; text-align:center; }
+    .de-stat-num { font-size:1.6rem; font-weight:900; line-height:1.1; }
+    .de-stat-lbl { font-size:.74rem; color:var(--text-muted); margin-top:4px; }
+    .de-stat-exit .de-stat-num { color:#ef4444; }
+    .de-stat-trim .de-stat-num { color:#f59e0b; }
+    .de-stat-add  .de-stat-num { color:#10b981; }
+    .de-stat-hold .de-stat-num { color:var(--text-muted); }
+    .de-stat-gap  .de-stat-num { color:#8b5cf6; font-size:1.2rem; }
+
+    .de-badge { display:inline-block; padding:3px 10px; border-radius:999px;
+                font-size:.78rem; font-weight:700; white-space:nowrap; }
+    .de-b-exit { background:rgba(239,68,68,.15);  color:#ef4444; }
+    .de-b-trim { background:rgba(245,158,11,.15); color:#f59e0b; }
+    .de-b-add  { background:rgba(16,185,129,.15); color:#10b981; }
+    .de-b-hold { background:var(--bg-3, rgba(148,163,184,.15)); color:var(--text-muted); }
+
+    .de-reason { font-size:.82rem; line-height:1.5; color:var(--text); max-width:420px; }
+    .de-alert-line { padding:8px 12px; border-radius:8px; background:rgba(245,158,11,.10);
+                     border:1px solid rgba(245,158,11,.3); margin-bottom:8px; font-size:.9rem; }
+    .de-banned { cursor:help; }
+
+    .de-const-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+                     gap:10px; margin-top:10px; }
+    .de-const { background:var(--bg-2); border:1px solid var(--border); border-radius:10px;
+                padding:10px 12px; font-size:.84rem; }
+    .de-const b { display:block; font-size:1.05rem; color:var(--accent); }
+    .de-const small { color:var(--text-muted); }
+
+    .de-card-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+    .de-card-grid .full { grid-column:1 / -1; }
+    .de-card-meta { background:var(--bg-2); border:1px solid var(--border); border-radius:10px;
+                    padding:10px 12px; font-size:.84rem; margin-bottom:14px; line-height:1.8; }
+    .de-card-meta strong { color:var(--text); }
+    @media (max-width:640px){ .de-card-grid{ grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-logo"><h2><img src="apple-touch-icon.png" alt="" style="width:28px;height:28px;border-radius:6px;vertical-align:middle;margin-left:8px">ثروة</h2><p>مفكرة حسابية شخصية</p></div>
+    <nav class="sidebar-nav">
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-portfolio')">
+          <span class="icon">📈</span><span>محفظة التقاعد</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-portfolio">
+          <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
+          <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
+          <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
+          <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
+          <a href="targets.html"      class="nav-link nav-sub" id="nav-targets">     <span class="icon">🎯</span><span>أهداف الأسهم والقطاعات</span></a>
+          <a href="watchlist.html"    class="nav-link nav-sub" id="nav-watchlist">   <span class="icon">👁️</span><span>أسهم تحت المراقبة</span></a>
+          <a href="decision-engine.html" class="nav-link nav-sub" id="nav-decision-engine"><span class="icon">🧭</span><span>محرّك القرار</span></a>
+          <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
+          <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-finance')">
+          <span class="icon">💼</span><span>الإدارة المالية</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-finance">
+          <a href="networth.html" class="nav-link nav-sub" id="nav-networth"><span class="icon">🏦</span><span>صافي الثروة</span></a>
+          <a href="salary.html"   class="nav-link nav-sub" id="nav-salary">  <span class="icon">💵</span><span>مقسّم الراتب</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-other')">
+          <span class="icon">🏗️</span><span>استثمارات أخرى</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-other">
+          <a href="realestate.html" class="nav-link nav-sub" id="nav-realestate"><span class="icon">🏠</span><span>العقارات</span></a>
+          <a href="sukuk.html"      class="nav-link nav-sub" id="nav-sukuk">     <span class="icon">📜</span><span>الصكوك</span></a>
+        </div>
+      </div>
+      <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-life')">
+          <span class="icon">🌱</span><span>إدارة الحياة</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-life">
+          <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
+          <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
+          <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
+        </div>
+      </div>
+            <div class="nav-group">
+        <button class="nav-group-btn" onclick="toggleNavGroup('grp-learn')">
+          <span class="icon">📚</span><span>تعليم الاستثمار</span>
+          <span class="nav-group-chevron">▾</span>
+        </button>
+        <div class="nav-group-body" id="grp-learn">
+          <a href="invest-tips.html"      class="nav-link nav-sub" id="nav-invest-tips">      <span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="emergency-fund.html"   class="nav-link nav-sub" id="nav-emergency-fund">   <span class="icon">🛡️</span><span>صندوق الطوارئ</span></a>
+          <a href="avg-calculator.html"   class="nav-link nav-sub" id="nav-avg-calc">         <span class="icon">📊</span><span>متوسط سعر الشراء</span></a>
+          <a href="portfolio-rating.html" class="nav-link nav-sub" id="nav-portfolio-rating"> <span class="icon">🛡️</span><span>تقييم أمان المحفظة</span></a>
+          <a href="stock-valuation.html"  class="nav-link nav-sub" id="nav-stock-valuation">  <span class="icon">💹</span><span>القيمة العادلة للأسهم</span></a>
+          <a href="profit-taking.html"    class="nav-link nav-sub" id="nav-profit-taking">    <span class="icon">💸</span><span>متى أجني أرباحي؟</span></a>
+        </div>
+      </div>
+      <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
+      <a href="admin.html"    class="nav-link" id="nav-admin" style="display:none"><span class="icon">🛡️</span><span>لوحة الإدارة</span></a>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="logout-btn" onclick="logout()"><span>🚪</span><span>تسجيل الخروج</span></button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header">
+      <div class="page-header-text">
+        <h1>🧭 محرّك القرار</h1>
+        <p>يطبّق دستور المحفظة آلياً على بياناتك الحيّة — احتفظ / قصّ / أضف / خروج، مع السبب مربوطاً بالقاعدة</p>
+      </div>
+      <button class="btn btn-secondary btn-sm" onclick="exportActionsCSV()">⬇ تصدير الإجراءات CSV</button>
+    </div>
+
+    <!-- ── الثوابت والقواعد ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">القواعد الثابتة المُطبَّقة
+          <button class="info-btn" type="button" onclick="showCardInfo('decisionEngine')" title="كيف يعمل المحرّك؟" style="position:static;opacity:.7">ⓘ</button>
+        </span>
+      </div>
+      <div class="de-const-grid">
+        <div class="de-const"><b>7% / 12%</b><small>سقف السهم العادي / القيادي</small></div>
+        <div class="de-const"><b>25%</b><small>سقف القطاع الواحد</small></div>
+        <div class="de-const"><b>+20%</b><small>فوق العادلة → مرشّح قصّ</small></div>
+        <div class="de-const"><b>−10%</b><small>تحت العادلة → منطقة شراء</small></div>
+        <div class="de-const"><b>أرامكو 29</b><small>تخفيض الوزن إلى 12%</small></div>
+        <div class="de-const"><b>المواساة 85</b><small>trigger بيع</small></div>
+        <div class="de-const"><b>4339 · 1111</b><small>ممنوعة من الشراء</small></div>
+        <div class="de-const"><b>18–25</b><small>حجم المحفظة المستهدف</small></div>
+      </div>
+    </div>
+
+    <!-- ── شريط الملخص ── -->
+    <div class="de-summary" id="de-summary"></div>
+
+    <!-- ── جدول الإجراءات (الأولوية) ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">📋 جدول الإجراءات — مرتّب بالأولوية</span>
+        <span class="small text-muted">triggers ثابتة → كسر سقف → فشل استدامة → فرص إضافة</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>الإجراء</th><th>السهم</th><th>الوزن</th><th>السعر</th>
+              <th>القيمة العادلة</th><th>السبب (القاعدة)</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="de-action-tbody">
+            <tr><td colspan="7"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ تشغيل الفلاتر…</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── سقف القطاع ── -->
+    <div class="card">
+      <div class="section-header"><span class="section-title">🏭 فحص سقف القطاع (25%)</span></div>
+      <div id="de-sector-check"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
+    </div>
+
+    <!-- ── الجدول الكامل ── -->
+    <div class="card">
+      <div class="section-header">
+        <span class="section-title">🔬 تفصيل كل الأسهم</span>
+        <span class="small text-muted">اضغط ⚙️ لإدخال بيانات الاستدامة والقيمة العادلة لكل سهم</span>
+      </div>
+      <div class="table-wrapper">
+        <table>
+          <thead>
+            <tr>
+              <th>السهم</th><th>نوع الأصل / مقياس الاستدامة</th><th>الوزن</th><th>السعر</th>
+              <th>القيمة العادلة</th><th>الاستدامة</th><th>الإجراء</th><th>السبب</th><th></th>
+            </tr>
+          </thead>
+          <tbody id="de-all-tbody">
+            <tr><td colspan="9"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية
+    </footer>
+  </main>
+
+  <!-- ── بطاقة السهم (إدخال مدخلات المحرّك) ── -->
+  <div class="modal-overlay" id="de-card-modal" style="display:none">
+    <div class="modal">
+      <div class="modal-header">
+        <span class="modal-title" id="de-card-title">بطاقة السهم</span>
+        <button class="modal-close" onclick="closeStockCard()">✕</button>
+      </div>
+      <div class="de-card-meta">
+        القطاع: <strong id="de-card-sector">—</strong><br>
+        نوع الأصل المستنتج: <strong id="de-card-autotype">—</strong> ·
+        مقياس الاستدامة: <strong id="de-card-metric">—</strong>
+      </div>
+      <form id="de-card-form" onsubmit="saveStockCard(event)">
+        <div class="de-card-grid">
+          <div class="form-group">
+            <label>نوع الأصل (تجاوز يدوي)</label>
+            <select id="de-card-assettype">
+              <option value="">— استخدم المستنتج —</option>
+              <option value="reit">REIT — صندوق عقاري</option>
+              <option value="bank">بنك</option>
+              <option value="cement_petro">إسمنت/بتروكيماويات</option>
+              <option value="general">بقية القطاعات</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>سهم قيادي؟ (سقف 12%)</label>
+            <select id="de-card-bluechip">
+              <option value="">— تلقائي —</option>
+              <option value="yes">نعم — قيادي (12%)</option>
+              <option value="no">لا — عادي (7%)</option>
+            </select>
+          </div>
+
+          <div class="form-group full" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
+            <label style="font-weight:700;color:var(--accent)">بوابة الاستدامة (الفلتر 1)</label>
+          </div>
+          <div class="form-group">
+            <label>التوزيع مغطّى بالمقياس الصحيح؟</label>
+            <select id="de-card-covered">
+              <option value="">— غير متوفر —</option>
+              <option value="yes">نعم — مغطّى</option>
+              <option value="no">لا — غير مغطّى</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>الأساسيات سليمة / EPS موجب؟</label>
+            <select id="de-card-healthy">
+              <option value="">— غير متوفر —</option>
+              <option value="yes">نعم — سليمة</option>
+              <option value="no">لا — متدهورة</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>إشارة قطع/خفض توزيع؟</label>
+            <select id="de-card-cut">
+              <option value="">— غير متوفر —</option>
+              <option value="no">لا — مستقر</option>
+              <option value="yes">نعم — قطع/خفض</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>القيمة العادلة (تجاوز يدوي، ر.س)</label>
+            <input type="number" id="de-card-fairmanual" step="0.01" min="0" placeholder="اتركه فارغاً لاستخدام المحفوظة">
+            <small id="de-card-fvhint" class="text-muted" style="display:block;margin-top:4px;font-size:.76rem"></small>
+          </div>
+
+          <div class="form-group full">
+            <label>ملاحظات</label>
+            <input type="text" id="de-card-notes" placeholder="اختياري — سياق الاستدامة، مصدر القيمة العادلة…">
+          </div>
+        </div>
+        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+          <button type="button" class="btn btn-secondary" onclick="closeStockCard()">إلغاء</button>
+          <button type="submit" class="btn btn-primary">حفظ وإعادة التشغيل</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+  <script src="js/supabase.js"></script>
+  <script src="js/auth.js"></script>
+  <script src="js/utils.js"></script>
+  <script src="js/tickerdb.js"></script>
+  <script>
+    // شرح الكارت (نمط showCardInfo المشترك في utils.js)
+    window.CARD_INFO = {
+      'decisionEngine': {
+        title: '🧭 كيف يعمل محرّك القرار؟',
+        body: `
+          <p>المحرّك يطبّق دستور محفظتك (CLAUDE.md) على بياناتك الحيّة — لا يجتهد ولا يتخذ قراراً من نفسه. يطبّق الفلاتر بالترتيب الإجباري:</p>
+          <div class="info-math">
+            1️⃣ <b>بوابة الاستدامة</b> — فشل = خروج بغض النظر عن السعر<br>
+            2️⃣ <b>إعادة تسعير القيمة العادلة</b> — ترتفع فقط لو الأرقام ارتفعت<br>
+            3️⃣ <b>سقف القيمة</b> — السعر &gt; العادلة +20% → قصّ · السعر &lt; العادلة −10% → فرصة شراء<br>
+            4️⃣ <b>سقف الوزن</b> — الوزن &gt; 7%/12% → قصّ للسقف<br>
+            5️⃣ <b>الأولوية</b> — triggers الثابتة فوق الكل، وأي سقف ينكسر يفرض القصّ
+          </div>
+          <p class="info-note">⛔ ما يقدر يحسبه آلياً (triggers، سقف الوزن، سقف القطاع، الأسهم الممنوعة) يشتغل فوراً. أما الاستدامة والقيمة العادلة فيحتاج بياناتها لكل سهم عبر زر ⚙️ — وأي رقم ناقص يُعلَن «غير متوفرة» ولا يُقدَّر بصمت.</p>`
+      },
+    };
+  </script>
+  <script src="js/decision-engine.js"></script>
+</body>
+</html>
