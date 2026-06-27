@@ -12,19 +12,40 @@ window.CARD_INFO = {
   },
 };
 
-function loadGoals() {
-  try { return JSON.parse(localStorage.getItem(GOALS_KEY)) || []; } catch { return []; }
-}
-function saveGoals(list) { localStorage.setItem(GOALS_KEY, JSON.stringify(list)); }
-
-let goals = loadGoals();
+let goals = [];
 let editingId = null;
 let deletingId = null;
+
+// ── تخزين سحابي متزامن عبر الأجهزة (user_settings) + cache محلي ──
+function loadGoalsLocal() {
+  try {
+    const raw = localStorage.getItem(userLsKey(GOALS_KEY)) || localStorage.getItem(GOALS_KEY);
+    return JSON.parse(raw) || [];
+  } catch { return []; }
+}
+
+async function loadGoalsRemote() {
+  const remote = await loadUserSetting(GOALS_KEY);
+  if (Array.isArray(remote)) {
+    goals = remote;
+    try { localStorage.setItem(userLsKey(GOALS_KEY), JSON.stringify(goals)); } catch {}
+    return;
+  }
+  // أول مرة على السحابة → رحّل أهداف هذا الجهاز (إن وُجدت) لتظهر على بقية أجهزتك
+  goals = loadGoalsLocal();
+  if (goals.length) await saveUserSetting(GOALS_KEY, goals);
+}
+
+function saveGoals(list) {
+  try { localStorage.setItem(userLsKey(GOALS_KEY), JSON.stringify(list)); } catch {}
+  saveUserSetting(GOALS_KEY, list).catch(() => {});   // مزامنة سحابية عبر الأجهزة
+}
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await requireAuth();
   if (!user) return;
+  await loadGoalsRemote();           // ← تحميل من السحابة قبل العرض (يزامن الجوال واللابتوب)
   // Sync range display on load
   const rng = document.getElementById('g-progress');
   rng.addEventListener('input', () => {

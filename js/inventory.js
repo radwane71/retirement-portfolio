@@ -10,10 +10,32 @@ window.CARD_INFO = {
       <p class="info-note">💡 القيمة الإجمالية هنا يمكن إضافتها يدوياً كأصل في صفحة «صافي الثروة» لاكتمال صورة ثروتك. صوّر الفواتير المهمة واحتفظ بها.</p>`
   },
 };
-function loadItems() { try { return JSON.parse(localStorage.getItem(INV_KEY)) || []; } catch { return []; } }
-function saveItems(list) { localStorage.setItem(INV_KEY, JSON.stringify(list)); }
+// ── تخزين سحابي متزامن عبر الأجهزة (user_settings) + cache محلي ──
+function loadItemsLocal() {
+  try {
+    const raw = localStorage.getItem(userLsKey(INV_KEY)) || localStorage.getItem(INV_KEY);
+    return JSON.parse(raw) || [];
+  } catch { return []; }
+}
 
-let items = loadItems();
+async function loadItemsRemote() {
+  const remote = await loadUserSetting(INV_KEY);
+  if (Array.isArray(remote)) {
+    items = remote;
+    try { localStorage.setItem(userLsKey(INV_KEY), JSON.stringify(items)); } catch {}
+    return;
+  }
+  // أول مرة على السحابة → رحّل مخزون هذا الجهاز (إن وُجد) لتظهر على بقية أجهزتك
+  items = loadItemsLocal();
+  if (items.length) await saveUserSetting(INV_KEY, items);
+}
+
+function saveItems(list) {
+  try { localStorage.setItem(userLsKey(INV_KEY), JSON.stringify(list)); } catch {}
+  saveUserSetting(INV_KEY, list).catch(() => {});   // مزامنة سحابية عبر الأجهزة
+}
+
+let items = [];
 let editingId = null, deletingId = null;
 
 const COND_CLASS = {
@@ -27,6 +49,7 @@ const COND_CLASS = {
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await requireAuth();
   if (!user) return;
+  await loadItemsRemote();           // ← تحميل من السحابة قبل العرض (يزامن الجوال واللابتوب)
   buildFilters();
   renderDash();
   renderTable();
