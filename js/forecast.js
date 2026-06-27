@@ -943,27 +943,17 @@ function renderScenarioCards() {
     </div>`;
   }).join('');
 
-  // ملاحظة الدلو غير المُغطّى: نتيجة أسوأ من «المتحفظ» (عقد ضعيف / خسارة)
+  // ملاحظة تركيز المحفظة فقط (أُزيلت بطاقة «أسوأ من المتحفظ» بطلب المستخدم)
   const note = document.getElementById('scenario-prob-note');
   if (note) {
     const N = _hist?.holdingsCount || 0;
-    const concentrationNote = N > 0 ? `
-      <div style="border:1px solid rgba(88,166,255,.30);background:rgba(88,166,255,.06);border-radius:10px;padding:11px 14px;margin-top:8px;line-height:1.75">
+    note.innerHTML = N > 0 ? `
+      <div style="border:1px solid rgba(88,166,255,.30);background:rgba(88,166,255,.06);border-radius:10px;padding:11px 14px;line-height:1.75">
         <div style="font-weight:700;color:#58a6ff">🎯 محفظتك ${N} ${N === 1 ? 'سهم' : N === 2 ? 'سهمان' : N <= 10 ? 'أسهم' : 'سهماً'}، والمؤشر 159 شركة</div>
         <div class="small text-muted" style="margin-top:5px">
           المؤشر مثل <strong>معدّل الفصل كامل</strong> (159 طالب). أنت معك ${N} بس. ولأن عددك أقل، نتيجتك ممكن تطلع <strong>أحسن من المعدّل بكثير</strong>، أو <strong>أسوأ منه</strong> (لأن تعثّر شركة وحدة يأثّر فيك أكثر). يعني هذي الأرقام <strong>دليل عام للسوق، مو وعد مضمون</strong> لمحفظتك بالذات. وكل ما زاد عدد شركاتك، صارت نتيجتك أقرب للسوق.
         </div>
       </div>` : '';
-    note.innerHTML = `
-      <div style="border:1px solid rgba(240,180,41,.35);background:rgba(240,180,41,.06);border-radius:10px;padding:12px 15px;line-height:1.75">
-        <div style="font-weight:700;color:#f0b429">📊 وش تعني ${occ.below}%؟ احتمال نموّك يكون أبطأ — مو إنك تخسر</div>
-        <div class="small text-muted" style="margin-top:5px">
-          تخيّل شجرة تثمر كل سنة: الرقم يعني احتمال إنها <strong>تكبر ببطء</strong>، مو إنها تموت. على المدى الطويل (10–20 سنة)، احتمال خسارة فلوسك فعلاً <strong>6% بس</strong> — وحتى لو صارت، تكون <strong>شبه تعادل</strong> (لا ربح كبير ولا خسارة كبيرة)، مو انهيار.
-        </div>
-        <div class="small" style="margin-top:7px;color:var(--text-2)">
-          💡 <strong>الزبدة:</strong> هذي الأرقام تقيس <strong>نمو السوق بس</strong>. لكن فلوسك تزيد من 3 طرق فوق كذا: <strong>الأرباح النقدية</strong> اللي توزّعها الشركات لك، <strong>الأسهم المجانية (المنحة)</strong>، و<strong>المبلغ اللي تضيفه كل شهر</strong>. عشان كذا محفظتك تكبر حتى في أسوأ سيناريو. الكروت تسأل «هل سهمك أحسن من السوق؟» — مو «هل بتربح؟» (إنت بتربح غالباً).
-        </div>
-      </div>${concentrationNote}`;
   }
 }
 
