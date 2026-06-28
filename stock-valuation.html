@@ -676,7 +676,14 @@
           _lastFairAvg        = avg_fair;
           values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'Cap Rate (مرجع)': caprate_check };
           fair_value_range  = formatCurrency(avg_fair);
-          fair_value_detail = `متوسط NAV (${formatCurrency(nav_per_unit)}) و P/FFO (${formatCurrency(pffo_value)}) | عائد FFO: ${ffo_yield.toFixed(2)}%`;
+          // صياغة واضحة: نُسمّي كل طريقة وقيمتها، ولا نذكر إلا الطرق التي ساهمت فعلاً في المتوسط
+          const reitParts = [];
+          if (nav_per_unit > 0)            reitParts.push(`NAV للوحدة = ${formatCurrency(nav_per_unit)}`);
+          if (pffo_value && pffo_value > 0) reitParts.push(`تقييم P/FFO = ${formatCurrency(pffo_value)}`);
+          const reitAvgLabel = reitParts.length > 1
+            ? `القيمة العادلة (${formatCurrency(avg_fair)}) = متوسط ${reitParts.length} طرق`
+            : `القيمة العادلة = ${formatCurrency(avg_fair)}`;
+          fair_value_detail = `${reitAvgLabel}: ${reitParts.join('  ·  ')}  |  عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`;
           if (currentPrice > 0 && avg_fair > 0) { const margin=((avg_fair-currentPrice)/avg_fair*100); document.getElementById('dashboardMargin').textContent=`${margin>0?'✅':'⚠️'} ${Math.abs(margin).toFixed(1)}% ${margin>0?'هامش أمان':'مبالغ فيه'}`; }
           else { document.getElementById('dashboardMargin').textContent='—'; }
         } else {
