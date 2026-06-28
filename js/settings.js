@@ -1975,7 +1975,8 @@ async function exportMonthlyReviewMD() {
 
         h3('دليل أعمدة جدول القرار — كيف تُحسب كل قيمة');
         p('- **الوزن الحالي** = (عدد الأسهم × السعر الحالي) ÷ إجمالي قيمة المحفظة × 100');
-        p('- **الهدف** = نسبة السهم المسجّلة في صفحة الأهداف، وإلا السقف الافتراضي (7% عادي / 12% قيادي)');
+        p('- **الهدف** = نسبة السهم المسجّلة في صفحة «أهداف الأسهم» فقط. إن لم تُسجَّل يُعرَض «بلا هدف · سقف X%» (لا يُلفَّق هدف من السقف)');
+        p('- **السقف الدستوري** = حدّ صلب 7% عادي / 12% قيادي (§1)؛ كسره يفرض التخفيف ولو بلا هدف مسجّل');
         p('- **الانحراف** = الوزن الحالي − الهدف (+ فوق الهدف / − تحته)، مصنّف بعتبات الألوان');
         p('- **نوع الأصل** = يُستنتج من القطاع (ريت/بنك/إسمنت-بتروكيماويات/عام) أو يُحدَّد يدوياً');
         p('- **الاستدامة** = بوابة الفلتر 1 (نجاح/قلق مؤقت/فشل/غير متوفرة) حسب مقياس نوع الأصل');
@@ -1986,15 +1987,21 @@ async function exportMonthlyReviewMD() {
         const ACT = { exit:'🔴 تصفية', trim:'⚖️ تخفيف', add:'🟢 تجميع', monitor:'👁️ مراقبة', hold:'✅ احتفاظ' };
         const SUS = { pass:'نجاح', watch:'قلق مؤقت', fail:'فشل', unknown:'غير متوفرة' };
         const sorted = [...deSnap.results].sort((a, b) => (a.priority - b.priority) || (b.weight - a.weight));
-        const deRows = sorted.map(r => [
-          r.ticker, r.name || '—',
-          deSnap.assetLabels?.[r.assetType] || r.assetType || '—',
-          PCT(r.weight), PCT(r.targetWeight),
-          (r.dev >= 0 ? '+' : '') + PCT(r.dev),
-          SUS[r.sustain?.status] || '—',
-          r.fairValue != null ? SAR(r.fairValue) : '—',
-          ACT[r.action] || r.action, cell(r.label),
-        ]);
+        const deRows = sorted.map(r => {
+          // الهدف: إن لم يُسجَّل في صفحة الأهداف يُعرَض «بلا هدف · سقف X%» بدل رقم ملفّق
+          const tgtCell = r.hasTarget === false
+            ? `بلا هدف · سقف ${PCT(r.cap)}`
+            : (r.targetWeight != null ? PCT(r.targetWeight) : (r.cap != null ? `سقف ${PCT(r.cap)}` : '—'));
+          const devCell = r.dev != null ? ((r.dev >= 0 ? '+' : '') + PCT(r.dev)) : (r.overCap ? '⚠️ كسر السقف' : '—');
+          return [
+            r.ticker, r.name || '—',
+            deSnap.assetLabels?.[r.assetType] || r.assetType || '—',
+            PCT(r.weight), tgtCell, devCell,
+            SUS[r.sustain?.status] || '—',
+            r.fairValue != null ? SAR(r.fairValue) : '—',
+            ACT[r.action] || r.action, cell(r.label),
+          ];
+        });
         p(mdTable(['الرمز','الاسم','نوع الأصل','الوزن%','الهدف%','الانحراف','الاستدامة','القيمة العادلة','الإجراء','التفصيل'], deRows));
 
         h3('الأسباب التفصيلية لكل قرار');

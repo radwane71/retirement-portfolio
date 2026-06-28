@@ -63,6 +63,44 @@
     tr.de-row-add    td:first-child,
     tr.de-row-green  td:first-child { box-shadow: inset 3px 0 0 #10b981; }
 
+    /* ── بطاقات الشركات (العرض الرئيسي) ── */
+    .de-cards-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:14px; }
+    .de-card { background:var(--bg-2); border:1px solid var(--border); border-radius:14px;
+               padding:14px; display:flex; flex-direction:column; gap:10px; position:relative; }
+    .de-card-red    { box-shadow: inset 4px 0 0 #ef4444; }
+    .de-card-yellow { box-shadow: inset 4px 0 0 #f59e0b; }
+    .de-card-monitor{ box-shadow: inset 4px 0 0 #3b82f6; }
+    .de-card-add,
+    .de-card-green  { box-shadow: inset 4px 0 0 #10b981; }
+    .de-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+    .de-card-id strong { font-size:1.05rem; }
+    .de-card-kvs { display:grid; grid-template-columns:1fr 1fr; gap:7px 12px; }
+    .de-kv { display:flex; justify-content:space-between; gap:6px; font-size:.82rem;
+             border-bottom:1px dashed var(--border); padding-bottom:4px; }
+    .de-kv span { color:var(--text-muted); }
+    .de-kv b { text-align:left; }
+    .de-card-trend { font-size:.8rem; }
+    .de-card-zones { color:var(--text); background:var(--bg-1); border-radius:8px; padding:6px 9px; }
+    .de-card-reason { line-height:1.55; color:var(--text); background:var(--bg-1);
+                      border-radius:8px; padding:8px 10px; max-height:80px; overflow:auto; }
+    .de-card-foot { display:flex; gap:8px; margin-top:auto; }
+    .de-card-foot .btn { flex:1; }
+
+    /* ── البطاقة التفصيلية ── */
+    .de-detail-body { max-height:72vh; overflow:auto; padding:4px 2px; }
+    .de-d-verdict { background:var(--bg-2); border:1px solid var(--border); border-radius:12px; padding:12px 14px; margin-bottom:8px; }
+    .de-d-h { margin:16px 0 8px; font-size:.92rem; color:var(--accent); border-bottom:1px solid var(--border); padding-bottom:6px; }
+    .de-d-row { display:flex; gap:10px; align-items:flex-start; padding:9px 10px; border-radius:10px;
+                background:var(--bg-2); border:1px solid var(--border); margin-bottom:7px; }
+    .de-d-ic { font-size:1rem; flex-shrink:0; line-height:1.5; }
+    .de-d-title { font-weight:700; font-size:.85rem; }
+    .de-d-body { color:var(--text); line-height:1.6; margin-top:3px; }
+    .de-d-ok   { border-color:rgba(16,185,129,.4); }
+    .de-d-warn { border-color:rgba(245,158,11,.4); }
+    .de-d-bad  { border-color:rgba(239,68,68,.5); }
+    .de-d-kvs { display:grid; grid-template-columns:1fr 1fr; gap:7px 12px; margin-top:6px; }
+    @media (max-width:560px){ .de-d-kvs, .de-card-kvs { grid-template-columns:1fr; } }
+
     .de-card-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
     .de-card-grid .full { grid-column:1 / -1; }
     .de-card-meta { background:var(--bg-2); border:1px solid var(--border); border-radius:10px;
@@ -204,24 +242,14 @@
       <div id="de-sector-check"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
     </div>
 
-    <!-- ── الجدول الكامل ── -->
+    <!-- ── بطاقات كل الأسهم ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">🔬 تفصيل كل الأسهم</span>
-        <span class="small text-muted">اضغط ⚙️ لإدخال بيانات الاستدامة لكل سهم — خطة الأسعار من صفحة المهام</span>
+        <span class="section-title">🔬 بطاقة كل شركة</span>
+        <span class="small text-muted">كل بطاقة تعرض الأساسيات — اضغط «تفاصيل كاملة» لكل شيء (الفلاتر المكسورة/السليمة، المالية، الأرباح، التقييم)</span>
       </div>
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>السهم</th><th>نوع الأصل / مقياس الاستدامة</th><th>الوزن</th><th>السعر</th>
-              <th>خطة الأسعار</th><th>الاستدامة</th><th>الإجراء</th><th>السبب</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="de-all-tbody">
-            <tr><td colspan="9"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
-          </tbody>
-        </table>
+      <div id="de-cards" class="de-cards-grid">
+        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div>
       </div>
     </div>
 
@@ -313,6 +341,17 @@
           <button type="submit" class="btn btn-primary">حفظ وإعادة التشغيل</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- ── البطاقة التفصيلية (قراءة فقط — كل شيء) ── -->
+  <div class="modal-overlay" id="de-detail-modal" style="display:none">
+    <div class="modal" style="max-width:680px">
+      <div class="modal-header">
+        <span class="modal-title" id="de-detail-title">تفاصيل السهم</span>
+        <button class="modal-close" onclick="closeDetailCard()">✕</button>
+      </div>
+      <div id="de-detail-body" class="de-detail-body"></div>
     </div>
   </div>
 

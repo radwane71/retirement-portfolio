@@ -261,10 +261,13 @@ function evaluateHolding(h, ctx) {
   const cap    = capOf(h);
   const assetType = assetTypeOf(h);
   const tgt    = stockTargets[h.ticker] || {};
-  // الهدف الفردي للسهم: نسبته المسجّلة في صفحة الأهداف، وإلا السقف الافتراضي
-  // (7% عادي / 12% قيادي). هذا هدف السهم الفردي — لا علاقة له بسقف القطاع.
+  // فصل صارم بين مفهومين (إصلاح: لا نُلفّق هدفاً من السقف):
+  //   • الهدف المسجّل: نسبة السهم من صفحة «أهداف الأسهم» — قد لا تكون موجودة.
+  //   • السقف الدستوري: 7% عادي / 12% قيادي (الدستور §1) — حدّ صلب دائماً.
+  // إذا لم يُسجَّل هدف (أو 0%) → لا نعرض هدفاً مفبركاً؛ نعرض «بلا هدف» ونراقب
+  // السقف فقط. الانحراف يُحسب عن الهدف المسجّل حصراً.
   const hasExplicitTarget = tgt.target_pct != null && +tgt.target_pct > 0;
-  const targetWeight = hasExplicitTarget ? +tgt.target_pct : cap;
+  const targetWeight = hasExplicitTarget ? +tgt.target_pct : null;
 
   const zones = priceZonesOf(h);      // خطة الأسعار من المهام (أو null)
   const sus = sustainabilityOf(h);
@@ -273,15 +276,18 @@ function evaluateHolding(h, ctx) {
   if (!priceOk) gaps.push('السعر الحالي');
   if (!zones)   gaps.push('خطة الأسعار (المهام)');
   if (sus.status === 'unknown') gaps.push('بوابة الاستدامة');
+  if (!hasExplicitTarget) gaps.push('هدف الوزن (صفحة الأهداف)');
   const note = specialNoteOf(h);
 
-  // انحراف الوزن عن الهدف الفردي، مصنّفاً حسب عتبات الألوان من الإعدادات.
-  // (أخضر = ضمن الهدف فلا تنبيه · أصفر = تنبيه · أحمر = إجراء)
+  // انحراف الوزن عن الهدف المسجّل حصراً، مصنّفاً بعتبات الألوان من الإعدادات.
+  // بلا هدف مسجّل: لا يوجد «انحراف هدف» (dev=null)؛ نراقب كسر السقف فقط.
   const thr = ctx.thresholds;
-  const dev = weight - targetWeight;                 // + فوق الهدف / − تحته
-  const absDev = Math.abs(dev);
-  const devBand = absDev <= thr.green ? 'green' : absDev <= thr.yellow ? 'yellow' : 'red';
-  const devTxt = `${dev >= 0 ? '+' : '−'}${formatNum(absDev)} نقطة`;
+  const dev = hasExplicitTarget ? weight - targetWeight : null; // + فوق / − تحت
+  const absDev = dev != null ? Math.abs(dev) : null;
+  const devBand = dev == null ? 'none'
+    : absDev <= thr.green ? 'green' : absDev <= thr.yellow ? 'yellow' : 'red';
+  const devTxt = dev != null ? `${dev >= 0 ? '+' : '−'}${formatNum(absDev)} نقطة` : 'بلا هدف مسجّل';
+  const overCap = weight > cap;   // كسر السقف الدستوري (§1/§4) — حدّ صلب دائماً
 
   const taskType = taskTypes[h.ticker] || null; // قرار المالك من صفحة المهام
   const userWatching = taskType === 'monitoring';
@@ -292,12 +298,16 @@ function evaluateHolding(h, ctx) {
   const valStale = valAge != null && valAge > VAL_STALE_DAYS;
 
   const base = {
-    ticker: h.ticker, name: h.name, sector: h.sector,
+    ticker: h.ticker, name: h.name, sector: h.sector, shares: +h.shares,
     weight, cap, price, value, assetType, zones, taskType,
-    sustain: sus, targetWeight, gaps, specialNote: note,
+    sustain: sus, targetWeight, hasTarget: hasExplicitTarget,
+    entryPrice: tgt.entry_price != null ? +tgt.entry_price : null,
+    exitPrice:  tgt.exit_price  != null ? +tgt.exit_price  : null,
+    gaps, specialNote: note,
     fairValue: val && val.fair ? val.fair.avg : null, valDate: val ? val.date : null,
+    valFair: val && val.fair ? val.fair : null, valInputs: val ? val.inputs : null,
     valAgeDays: valAge, valStale,
-    blueChip: isBlueChip(h), dev, devBand, severity: 'green',
+    blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
   };
 
   // ── P0: triggers الثابتة — فوق كل شي (الدستور §5) ──
@@ -342,25 +352,34 @@ function evaluateHolding(h, ctx) {
 
   // ── P2: نطاق التخفيف من المهام (الفلتر 3) — السعر دخل نطاق بيع الزائد ──
   const inTrimBand = zones && zones.trimFrom && priceOk && price >= zones.trimFrom;
-  // ── P2: تجاوز هدف الوزن — فقط خارج العتبة الخضراء (لا تنبيه على فروق تافهة) ──
-  const overWeight = dev > thr.green; // أصفر أو أحمر فوق الهدف
+  // ── P2: كسر السقف الدستوري (دائماً) أو تجاوز الهدف المسجّل خارج العتبة الخضراء ──
+  const overTarget = hasExplicitTarget && dev > thr.green; // فوق الهدف المسجّل
 
-  if (overWeight || inTrimBand) {
+  if (overCap || overTarget || inTrimBand) {
     const reasons = [];
+    let cutTo = null, severity = 'green', label = '';
     if (inTrimBand) {
       const to = zones.trimTo ? `–${formatNum(zones.trimTo)}` : '';
       reasons.push(`نطاق التخفيف (المهام): السعر ${formatNum(price)} ≥ ${formatNum(zones.trimFrom)}${to} → بيع الزائد`);
     }
-    if (overWeight) reasons.push(`الوزن ${formatNum(weight)}% مقابل الهدف ${formatNum(targetWeight)}% (انحراف ${devTxt}، عتبة ${devBand === 'red' ? 'حمراء' : 'صفراء'})`);
-    // اللون: نطاق السعر = أحمر (سعر صريح)، أو لون عتبة الوزن
-    const severity = inTrimBand ? 'red' : devBand;
-    const label = inTrimBand
-      ? 'تخفيف (نطاق السعر)'
-      : severity === 'red'
-        ? `تخفيف لإرجاع الوزن إلى ${formatNum(targetWeight)}%`
-        : `تنبيه: اقترب من تجاوز الهدف (${formatNum(weight)}%)`;
+    if (overCap) {
+      // كسر السقف = خطر تركيز (الفلتر 4) — يفرض الإرجاع للسقف بغضّ النظر عن الهدف/القيمة
+      reasons.push(`الوزن ${formatNum(weight)}% كسر السقف الدستوري ${formatNum(cap)}% (الفلتر 4 — خطر تركيز)`);
+      cutTo = cap; severity = 'red';
+      label = `تخفيف لإرجاع الوزن إلى السقف ${formatNum(cap)}%`;
+    } else if (overTarget) {
+      reasons.push(`الوزن ${formatNum(weight)}% فوق الهدف المسجّل ${formatNum(targetWeight)}% (انحراف ${devTxt}، عتبة ${devBand === 'red' ? 'حمراء' : 'صفراء'})`);
+      cutTo = targetWeight; severity = devBand;
+      label = severity === 'red'
+        ? `تخفيف لإرجاع الوزن إلى الهدف ${formatNum(targetWeight)}%`
+        : `تنبيه: فوق الهدف (${formatNum(weight)}%)`;
+    }
+    if (inTrimBand) {                         // نطاق السعر صريح = أحمر دائماً
+      severity = 'red';
+      if (!overCap) { label = 'تخفيف (نطاق السعر)'; if (cutTo == null) cutTo = targetWeight; }
+    }
     return { ...base, action: 'trim', severity,
-      label, cutToWeight: overWeight ? targetWeight : null,
+      label, cutToWeight: cutTo,
       priority: severity === 'red' ? 2 : 2.5,
       reason: reasons.join(' | ') };
   }
@@ -368,7 +387,7 @@ function evaluateHolding(h, ctx) {
   // ── P3: تجميع من المهام (الفلتر 3) — السعر ≤ حدّ التجميع + استدامة سليمة + وزن تحت الهدف بعتبة ──
   const inBuyZone = zones && zones.accumulate && priceOk && sus.status === 'pass'
       && price <= zones.accumulate
-      && dev < -thr.green; // تحت الهدف خارج العتبة الخضراء
+      && (hasExplicitTarget ? dev < -thr.green : weight < cap); // تحت الهدف، أو (بلا هدف) دون السقف
   if (inBuyZone) {
     if (!hasExplicitTarget) {
       // الهدف الفردي للسهم غير محدَّد، والشراء «مشروط مو آلي». بلا نسبة هدف
@@ -389,9 +408,17 @@ function evaluateHolding(h, ctx) {
 
   // ── احتفاظ ── (ضمن العتبة الخضراء أو لا قاعدة انطبقت)
   let holdReason;
-  if (gaps.length)            holdReason = `احتفاظ — لا قاعدة انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
-  else if (devBand !== 'green') holdReason = `احتفاظ — الانحراف ${devTxt} ضمن المتابعة، لا قاعدة سعر/استدامة انطبقت`;
-  else                        holdReason = `احتفاظ — الوزن ضمن العتبة الخضراء (انحراف ${devTxt})، الاستدامة سليمة`;
+  if (!hasExplicitTarget) {
+    holdReason = `احتفاظ — لا هدف وزن مسجّل لهذا السهم؛ الوزن ${formatNum(weight)}% ضمن السقف ${formatNum(cap)}%. سجّل هدفاً في صفحة «أهداف الأسهم» لتفعيل مراقبة الانحراف`;
+    const otherGaps = gaps.filter(g => g !== 'هدف الوزن (صفحة الأهداف)');
+    if (otherGaps.length) holdReason += `. بيانات أخرى ناقصة: ${otherGaps.join('، ')}`;
+  } else if (gaps.length) {
+    holdReason = `احتفاظ — لا قاعدة انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
+  } else if (devBand !== 'green') {
+    holdReason = `احتفاظ — الانحراف ${devTxt} ضمن المتابعة، لا قاعدة سعر/استدامة انطبقت`;
+  } else {
+    holdReason = `احتفاظ — الوزن ضمن العتبة الخضراء (انحراف ${devTxt})، الاستدامة سليمة`;
+  }
   return { ...base, action: 'hold', label: 'احتفاظ', priority: 9, severity: 'green', reason: holdReason };
 }
 
@@ -416,7 +443,7 @@ async function loadAll() {
       .eq('status', 'active').order('updated_at', { ascending: false }),
     supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
     loadUserSetting(ENGINE_VAL_KEY),
-    supabaseClient.from('transactions').select('ticker, type, shares, date').eq('is_archived', false),
+    supabaseClient.from('transactions').select('ticker, type, shares, date, total, price').eq('is_archived', false),
   ]);
 
   holdings = rH.data || [];
@@ -437,7 +464,7 @@ async function loadAll() {
   (rTx.data || []).forEach(t => {
     const tk = (t.ticker || '').trim().toUpperCase();
     if (!tk || !t.date) return;
-    (txByTicker[tk] = txByTicker[tk] || []).push({ type: t.type, shares: +t.shares || 0, date: new Date(t.date) });
+    (txByTicker[tk] = txByTicker[tk] || []).push({ type: t.type, shares: +t.shares || 0, total: +t.total || 0, price: +t.price || 0, date: new Date(t.date) });
   });
   Object.values(txByTicker).forEach(rows => rows.sort((a, b) => a.date - b.date));
 
@@ -495,7 +522,7 @@ function runEngine() {
   renderSummaryStrip(totalValue);
   renderActionTable();
   renderSectorCheck(totalValue);
-  renderAllTable();
+  renderCards();
 
   // حفظ لقطة كاملة لمخرجات المحرّك → user_settings (تُدرَج في تقرير المراجعة وتُنسَخ احتياطياً)
   saveEngineSnapshot(totalValue, thresholds).catch(() => {});
@@ -548,6 +575,15 @@ function renderSummaryStrip(totalValue) {
   `;
 }
 
+// سطر الوزن الفرعي: الهدف المسجّل + الانحراف، أو «بلا هدف · السقف» (إصلاح الهدف الملفّق)
+function weightSubLine(r) {
+  if (r.hasTarget) {
+    return `الهدف ${formatNum(r.targetWeight)}% (${r.dev >= 0 ? '+' : '−'}${formatNum(Math.abs(r.dev))})`;
+  }
+  const capHit = r.overCap ? ' ⚠️ كُسر' : '';
+  return `بلا هدف مسجّل · السقف ${formatNum(r.cap)}%${capHit}`;
+}
+
 // ── جدول الإجراءات مرتّب بالأولوية (الدستور §7) ──
 function renderActionTable() {
   const tbody = document.getElementById('de-action-tbody');
@@ -564,11 +600,11 @@ function renderActionTable() {
     <tr class="de-row-${r.severity || 'green'}">
       <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
       <td><strong>${r.ticker}</strong><br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}% (${r.dev>=0?'+':'−'}${formatNum(Math.abs(r.dev))})</span></td>
+      <td>${formatNum(r.weight)}%<br><span class="small text-muted">${escapeHtmlSafe(weightSubLine(r))}</span></td>
       <td>${formatNum(r.price)}</td>
       <td class="small">${zonesText(r.zones) ? escapeHtmlSafe(zonesText(r.zones)) : '<span class="text-muted">غير متوفرة</span>'}</td>
       <td class="de-reason">${escapeHtmlSafe(r.reason)}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">بطاقة</button></td>
+      <td><button class="btn btn-secondary btn-sm" onclick="openDetailCard('${r.ticker}')">تفاصيل</button></td>
     </tr>`).join('');
 }
 
@@ -595,39 +631,58 @@ function renderSectorCheck(totalValue) {
   ).join('');
 }
 
-// ── الجدول الكامل لكل الأسهم (تفصيل خط الأنابيب) ──
-function renderAllTable() {
-  const tbody = document.getElementById('de-all-tbody');
-  if (!tbody) return;
+// نصوص مساعدة مشتركة لإشارة الاستدامة واتجاه التوزيع
+const SUS_BADGE = { pass: '🟢 سليمة', watch: '🟡 قلق مؤقت', fail: '🔴 تدهور مؤكّد', unknown: '⚪ غير متوفرة' };
+function trendChip(tr) {
+  if (!tr || tr.signal === 'insufficient') return '';
+  const color = (tr.signal === 'cut' || tr.signal === 'stopped') ? '#ef4444' : tr.signal === 'growing' ? '#10b981' : 'var(--text-muted)';
+  const txt = ({ growing:'📈 توزيع ينمو', stable:'➡️ توزيع مستقر', cut:'📉 توزيع منخفض', stopped:'🛑 توزيع متوقّف' })[tr.signal] || '';
+  return `<span class="small" title="${escapeHtmlSafe(tr.note)}" style="color:${color}">${txt}</span>`;
+}
+
+// ── العرض الرئيسي: بطاقة لكل شركة (تشمل البيانات الأساسية + زر تفاصيل) ──
+function renderCards() {
+  const wrap = document.getElementById('de-cards');
+  if (!wrap) return;
   if (!holdings.length) {
-    tbody.innerHTML = `<tr><td colspan="9"><div class="empty-state"><div class="icon">📭</div><p>لا توجد أسهم في المحفظة بعد.</p></div></td></tr>`;
+    wrap.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>لا توجد أسهم في المحفظة بعد.</p></div>`;
     return;
   }
   const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
-  tbody.innerHTML = sorted.map(r => {
-    const susBadge = { pass: '🟢 سليمة', watch: '🟡 قلق مؤقت', fail: '🔴 تدهور مؤكّد', unknown: '⚪ غير متوفرة' }[r.sustain.status];
-    const tr = r.sustain.trend;
-    const trendLine = (tr && tr.signal !== 'insufficient')
-      ? `<br><span class="small" title="${escapeHtmlSafe(tr.note)}" style="color:${tr.signal==='cut'||tr.signal==='stopped'?'#ef4444':tr.signal==='growing'?'#10b981':'var(--text-muted)'}">${({growing:'📈 توزيع ينمو',stable:'➡️ توزيع مستقر',cut:'📉 توزيع منخفض',stopped:'🛑 توزيع متوقّف'})[tr.signal]}</span>`
-      : '';
-    const zt = zonesText(r.zones);
-    const fvCell = zt
-      ? `<span class="small">${escapeHtmlSafe(zt)}</span>`
-      : '<span class="text-muted">غير متوفرة</span>';
+  wrap.innerHTML = sorted.map(r => {
     const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
-    const devColor = { red: '#ef4444', yellow: '#f59e0b' }[r.devBand] || 'var(--text-muted)';
+    const star    = r.blueChip ? ' <span title="سهم قيادي — سقف 12%">⭐</span>' : '';
+    const fvLine  = r.fairValue != null
+      ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}</b>`
+      : '<b class="text-muted">—</b>';
+    const zt = zonesText(r.zones);
     return `
-    <tr class="de-row-${r.severity || 'green'}">
-      <td><strong>${r.ticker}</strong> ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}${noteTag}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
-      <td>${escapeHtmlSafe(ASSET_LABEL[r.assetType])}<br><span class="small text-muted">${escapeHtmlSafe(SUSTAIN_METRIC[r.assetType])}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small" style="color:${devColor}">الهدف ${formatNum(r.targetWeight)}% (${r.dev>=0?'+':'−'}${formatNum(Math.abs(r.dev))})</span></td>
-      <td>${formatNum(r.price)}${r.fairValue != null ? `<br><span class="small text-muted" title="القيمة العادلة من آخر تقييم${r.valDate ? ' بتاريخ '+escapeHtmlSafe(r.valDate) : ''}">عادلة ${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="آخر تقييم أقدم من 6 أشهر">📅 قديم</span>' : ''}</span>` : ''}</td>
-      <td>${fvCell}</td>
-      <td>${susBadge}${trendLine}</td>
-      <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
-      <td class="de-reason small">${escapeHtmlSafe(r.reason)}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">⚙️</button></td>
-    </tr>`;
+    <div class="de-card de-card-${r.severity || 'green'}">
+      <div class="de-card-top">
+        <div class="de-card-id">
+          <strong>${r.ticker}</strong>${star}${noteTag}
+          <div class="small text-muted">${escapeHtmlSafe(r.name || '')}</div>
+        </div>
+        <span class="de-badge ${badgeFor(r)}">${escapeHtmlSafe(r.label)}</span>
+      </div>
+      <div class="de-card-kvs">
+        <div class="de-kv"><span>الوزن</span><b>${formatNum(r.weight)}%</b></div>
+        <div class="de-kv"><span>${r.hasTarget ? 'الهدف' : 'السقف'}</span><b>${r.hasTarget
+          ? `${formatNum(r.targetWeight)}% (${r.dev >= 0 ? '+' : '−'}${formatNum(Math.abs(r.dev))})`
+          : `${formatNum(r.cap)}%${r.overCap ? ' ⚠️' : ''}`}</b></div>
+        <div class="de-kv"><span>السعر</span><b>${formatNum(r.price)}</b></div>
+        <div class="de-kv"><span>القيمة العادلة</span>${fvLine}</div>
+        <div class="de-kv"><span>الاستدامة</span><b>${SUS_BADGE[r.sustain.status]}</b></div>
+        <div class="de-kv"><span>نوع الأصل</span><b class="small">${escapeHtmlSafe(ASSET_LABEL[r.assetType])}</b></div>
+      </div>
+      ${trendChip(r.sustain.trend) ? `<div class="de-card-trend">${trendChip(r.sustain.trend)}</div>` : ''}
+      ${zt ? `<div class="de-card-zones small">🎯 خطة الأسعار: ${escapeHtmlSafe(zt)}</div>` : '<div class="de-card-zones small text-muted">🎯 لا خطة أسعار</div>'}
+      <div class="de-card-reason small">${escapeHtmlSafe(r.reason)}</div>
+      <div class="de-card-foot">
+        <button class="btn btn-primary btn-sm" onclick="openDetailCard('${r.ticker}')">🔍 تفاصيل كاملة</button>
+        <button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">⚙️ إدخال يدوي</button>
+      </div>
+    </div>`;
   }).join('');
 }
 
@@ -643,6 +698,203 @@ function escapeHtmlSafe(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// مالية السهم — تُشتق من holdings + المعاملات + الأرباح (للبطاقة التفصيلية)
+// ══════════════════════════════════════════════════════════════════════
+function stockFinancials(ticker) {
+  const h  = holdings.find(x => x.ticker === ticker);
+  const tx = txByTicker[ticker] || [];
+  let buyShares = 0, buyCost = 0, sellShares = 0, sellRev = 0, grantShares = 0;
+  tx.forEach(t => {
+    if (t.type === 'buy')        { buyShares += t.shares; buyCost += t.total; }
+    else if (t.type === 'grant') { grantShares += t.shares; }
+    else if (t.type === 'sell')  { sellShares += t.shares; sellRev += t.total; }
+  });
+  const avgCost   = buyShares > 0 ? buyCost / buyShares : 0;
+  const shares    = h ? +h.shares : 0;
+  const costBasis = h ? shares * +h.avg_price : 0;
+  const mktVal    = h ? shares * +h.current_price : 0;
+  const unreal    = mktVal - costBasis;
+  const unrealPct = costBasis > 0 ? unreal / costBasis * 100 : 0;
+  const realized  = avgCost > 0 ? sellRev - avgCost * sellShares : sellRev;
+  const divs      = divByTicker[ticker] || [];
+  const divTotal  = divs.reduce((s, d) => s + (d.amount || 0), 0);
+  const yoc       = costBasis > 0 ? divTotal / costBasis * 100 : 0;
+  const byYear    = {};
+  divs.forEach(d => { const y = d.date.getFullYear(); byYear[y] = (byYear[y] || 0) + d.amount; });
+  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, byYear, divCount: divs.length, buyShares, sellShares, grantShares };
+}
+
+function sectorPctOf(sector, totalValue) {
+  const sec = (sector || '').trim();
+  const val = holdings.filter(h => (h.sector || '').trim() === sec)
+    .reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  return totalValue > 0 ? val / totalValue * 100 : 0;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// البطاقة التفصيلية (قراءة فقط) — كل شيء: الفلاتر بالترتيب (كسر/سليم)،
+// المالية، الأرباح، آخر تقييم، خطة الأسعار، الهدف/السقف، سقف القطاع.
+// ══════════════════════════════════════════════════════════════════════
+function _dRow(status, title, body) {
+  // status: ok | warn | bad | neutral | off
+  const ic = { ok:'✅', warn:'⚠️', bad:'🔴', neutral:'⚪', off:'➖' }[status] || '•';
+  return `<div class="de-d-row de-d-${status}">
+    <div class="de-d-ic">${ic}</div>
+    <div class="de-d-txt"><div class="de-d-title">${title}</div>${body ? `<div class="de-d-body small">${body}</div>` : ''}</div>
+  </div>`;
+}
+
+function openDetailCard(ticker) {
+  const r = _results.find(x => x.ticker === ticker);
+  const h = holdings.find(x => x.ticker === ticker);
+  if (!r || !h) return;
+  const totalValue = holdings.reduce((s, x) => s + +x.shares * +x.current_price, 0);
+  const fin = stockFinancials(ticker);
+  const E = escapeHtmlSafe;
+  const sign = n => (n >= 0 ? '+' : '−') + formatNum(Math.abs(n));
+
+  document.getElementById('de-detail-title').textContent = `🔍 ${ticker} — ${h.name || ''}`;
+  const out = [];
+
+  // رأس: الإجراء النهائي
+  out.push(`<div class="de-d-verdict de-row-${r.severity || 'green'}">
+    <span class="de-badge ${badgeFor(r)}" style="font-size:.95rem">${E(r.label)}</span>
+    <div class="small" style="margin-top:6px;line-height:1.6">${E(r.reason)}</div>
+  </div>`);
+
+  // ── الفلاتر بالترتيب الإجباري (الدستور §4/§5) ──
+  out.push('<h4 class="de-d-h">الفلاتر بالترتيب — ما الذي كُسر وما الذي سليم</h4>');
+
+  // P0 — triggers ثابتة
+  if (r.trigger) {
+    out.push(_dRow(r.trigger.fired ? 'bad' : 'ok',
+      `المشغّل الثابت (الدستور §5): ${E(r.trigger.label)}`,
+      r.trigger.fired
+        ? `انطبق الآن — السعر ${formatNum(r.price)} ${r.trigger.cmp === 'gte' ? '≥' : '≤'} ${r.trigger.price}`
+        : `لم ينطبق بعد — السعر ${formatNum(r.price)} (الشرط ${r.trigger.cmp === 'gte' ? '≥' : '≤'} ${r.trigger.price})`));
+  } else {
+    out.push(_dRow('off', 'لا يوجد مشغّل ثابت لهذا الرمز', ''));
+  }
+
+  // الفلتر 1 — الاستدامة
+  const sus = r.sustain;
+  const susStatus = { pass:'ok', watch:'warn', fail:'bad', unknown:'neutral' }[sus.status];
+  let susBody = E(sus.reason);
+  if (sus.autoSrc && Object.keys(sus.autoSrc).length) {
+    susBody += '<br><span class="text-muted">مصادر آلية: ' +
+      Object.values(sus.autoSrc).map(E).join(' · ') + '</span>';
+  }
+  if (sus.trend && sus.trend.note) susBody += `<br>اتجاه التوزيع: ${E(sus.trend.note)}`;
+  out.push(_dRow(susStatus, `الفلتر 1 — بوابة الاستدامة (${SUS_BADGE[sus.status]})`, susBody));
+  out.push(_dRow('neutral', `مقياس الاستدامة لنوع الأصل (${E(ASSET_LABEL[r.assetType])})`, E(SUSTAIN_METRIC[r.assetType])));
+
+  // الفلتر 2 — القيمة العادلة
+  if (r.fairValue != null) {
+    const margin = (r.fairValue - r.price) / r.fairValue * 100;
+    const mStatus = margin >= 10 ? 'ok' : margin <= -10 ? 'bad' : 'warn';
+    const rangeTxt = r.valFair && r.valFair.max > r.valFair.min
+      ? ` (نطاق ${formatNum(r.valFair.min)}–${formatNum(r.valFair.max)})` : '';
+    out.push(_dRow(mStatus, 'الفلتر 2 — القيمة العادلة مقابل السعر',
+      `العادلة ${formatNum(r.fairValue)}${rangeTxt} · السعر ${formatNum(r.price)} → ` +
+      `${margin >= 0 ? `هامش أمان ${formatNum(margin)}%` : `مبالغ فيه ${formatNum(Math.abs(margin))}%`}` +
+      (r.valDate ? `<br><span class="text-muted">آخر تقييم: ${E(r.valDate)}${r.valStale ? ` · 📅 قديم (${r.valAgeDays} يوم)` : ''}</span>` : '')));
+  } else {
+    out.push(_dRow('neutral', 'الفلتر 2 — القيمة العادلة', 'لا يوجد تقييم محفوظ — احسبه في صفحة القيمة العادلة ليُقارن بالسعر.'));
+  }
+
+  // الفلتر 3 — خطة الأسعار (المهام)
+  const zt = zonesText(r.zones);
+  if (zt) {
+    let pos = '';
+    if (r.zones.liquidate && r.price > r.zones.liquidate) pos = `🔴 السعر فوق حدّ التصفية (${formatNum(r.zones.liquidate)})`;
+    else if (r.zones.trimFrom && r.price >= r.zones.trimFrom) pos = `⚠️ السعر داخل نطاق التخفيف`;
+    else if (r.zones.accumulate && r.price <= r.zones.accumulate) pos = `✅ السعر داخل منطقة التجميع`;
+    else pos = 'السعر بين النطاقات (لا إشارة سعرية)';
+    out.push(_dRow(pos.startsWith('🔴') ? 'bad' : pos.startsWith('⚠️') ? 'warn' : pos.startsWith('✅') ? 'ok' : 'neutral',
+      'الفلتر 3 — خطة الأسعار (من المهام)', `${E(zt)}<br>${E(pos)}`));
+  } else {
+    out.push(_dRow('neutral', 'الفلتر 3 — خطة الأسعار', 'غير متوفرة — أضِفها في صفحة مهام المحفظة.'));
+  }
+
+  // الفلتر 4 — الوزن: الهدف المسجّل + السقف الدستوري
+  if (r.hasTarget) {
+    out.push(_dRow(r.devBand === 'red' ? 'bad' : r.devBand === 'yellow' ? 'warn' : 'ok',
+      'الفلتر 4 — الوزن مقابل الهدف المسجّل',
+      `الوزن ${formatNum(r.weight)}% · الهدف ${formatNum(r.targetWeight)}% · الانحراف ${E(r.devTxt || sign(r.dev))} (عتبة ${r.devBand === 'red' ? 'حمراء' : r.devBand === 'yellow' ? 'صفراء' : 'خضراء'})`));
+  } else {
+    out.push(_dRow('neutral', 'الفلتر 4 — الوزن مقابل الهدف',
+      `لا هدف وزن مسجّل لهذا السهم. سجّله في صفحة «أهداف الأسهم». نُراقب السقف فقط.`));
+  }
+  out.push(_dRow(r.overCap ? 'bad' : 'ok', 'السقف الدستوري للوزن (§1)',
+    `الوزن ${formatNum(r.weight)}% مقابل السقف ${formatNum(r.cap)}%${r.blueChip ? ' (قيادي)' : ''} → ${r.overCap ? 'كُسر — يفرض التخفيف (الفلتر 4)' : 'ضمن السقف'}`));
+
+  // سقف القطاع (§4 على مستوى المحفظة)
+  const secPct = sectorPctOf(h.sector, totalValue);
+  out.push(_dRow(secPct > CAPS.sector ? 'bad' : 'ok', `سقف القطاع (${CAPS.sector}%)`,
+    `قطاع «${E((h.sector || '').trim() || 'غير مصنّف')}» = ${formatNum(secPct)}% من المحفظة → ${secPct > CAPS.sector ? 'تجاوز السقف' : 'ضمن السقف'}`));
+
+  // ملاحظة دستورية خاصة
+  if (r.specialNote) out.push(_dRow('warn', 'ملاحظة دستورية (§3)', E(r.specialNote)));
+
+  // ── المالية التفصيلية ──
+  out.push('<h4 class="de-d-h">المالية التفصيلية لهذا السهم</h4>');
+  const kv = (k, v) => `<div class="de-kv"><span>${k}</span><b>${v}</b></div>`;
+  out.push('<div class="de-d-kvs">' + [
+    kv('عدد الأسهم', formatNum(fin.shares)),
+    kv('متوسط التكلفة', formatNum(+h.avg_price)),
+    kv('تكلفة الحيازة', formatNum(fin.costBasis)),
+    kv('القيمة السوقية', formatNum(fin.mktVal)),
+    kv('ر/خ غير محقق', `<span style="color:${fin.unreal >= 0 ? '#10b981' : '#ef4444'}">${sign(fin.unreal)} (${formatNum(fin.unrealPct)}%)</span>`),
+    kv('ر/خ محقق (مبيعات)', sign(fin.realized)),
+    kv('إجمالي الأرباح الموزعة', formatNum(fin.divTotal)),
+    kv('العائد على التكلفة YOC', formatNum(fin.yoc) + '%'),
+  ].join('') + '</div>');
+
+  // الأرباح السنوية
+  const years = Object.keys(fin.byYear).map(Number).sort((a, b) => b - a);
+  if (years.length) {
+    out.push(`<div class="small text-muted" style="margin-top:8px">الأرباح الموزعة سنوياً (${fin.divCount} دفعة):</div>`);
+    out.push('<div class="de-d-kvs">' + years.map(y => kv(String(y), formatNum(fin.byYear[y]))).join('') + '</div>');
+  }
+
+  // آخر تقييم — أهم المدخلات
+  if (r.valInputs) {
+    const inp = r.valInputs;
+    const keyInputs = [];
+    const pushIf = (lbl, v, suf = '') => { if (v != null && v !== '') keyInputs.push([lbl, v + suf]); };
+    if (inp.companyType === 'reit') {
+      pushIf('FFO/وحدة', inp.ffo); pushIf('مضاعف P/FFO', inp.pffoMultiple, 'x'); pushIf('Cap Rate', inp.capRate, '%');
+    } else if (inp.companyType === 'bank') {
+      pushIf('BVPS', inp.bvps); pushIf('ROE', inp.bankRoe, '%'); pushIf('P/B عادل', inp.bankFairPb, 'x'); pushIf('DPS', inp.bankDps);
+    } else {
+      pushIf('EPS', inp.eps); pushIf('FCF', inp.fcf); pushIf('توزيع/سهم', inp.dividends);
+    }
+    pushIf('نمو 5سنوات', inp.growth5yr, '%'); pushIf('Beta', inp.betaMain);
+    if (keyInputs.length) {
+      out.push('<h4 class="de-d-h">أهم مدخلات آخر تقييم</h4>');
+      out.push('<div class="de-d-kvs">' + keyInputs.map(([k, v]) => kv(k, E(String(v)))).join('') + '</div>');
+    }
+    if (inp.notes)         out.push(`<div class="small" style="margin-top:6px"><b>📝 ملاحظات التقييم:</b> ${E(inp.notes)}</div>`);
+    if (inp.perplexityEval) out.push(`<div class="small" style="margin-top:6px"><b>🔍 تقييم Perplexity:</b> ${E(inp.perplexityEval)}</div>`);
+  }
+
+  // المدخلات اليدوية المحفوظة للمحرّك
+  const cfg = engineCfg[ticker];
+  if (cfg && Object.keys(cfg).length) {
+    out.push('<h4 class="de-d-h">مدخلاتك اليدوية المحفوظة للمحرّك</h4>');
+    out.push(`<div class="small">${E(JSON.stringify(cfg))}</div>`);
+  }
+
+  out.push(`<div class="de-card-foot" style="margin-top:14px">
+    <button class="btn btn-secondary btn-sm" onclick="closeDetailCard(); openStockCard('${ticker}')">⚙️ تعديل المدخلات اليدوية</button>
+  </div>`);
+
+  document.getElementById('de-detail-body').innerHTML = out.join('');
+  document.getElementById('de-detail-modal').style.display = 'flex';
+}
+function closeDetailCard() { document.getElementById('de-detail-modal').style.display = 'none'; }
 
 // ══════════════════════════════════════════════════════════════════════
 // بطاقة السهم — إدخال مدخلات المحرّك يدوياً (الاستدامة/قيادي/نوع/عادلة)
