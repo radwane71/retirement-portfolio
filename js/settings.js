@@ -106,7 +106,7 @@ async function exportBackup() {
 
   try {
     const backup = {
-      version:     2,
+      version:     3,
       exported_at: new Date().toISOString(),
       _meta:       { tables: TABLES, app: 'tharwa' }
     };
@@ -140,6 +140,24 @@ async function exportBackup() {
       if (v !== null) backup._local_settings[k] = v;
     });
 
+    // ── مسح شامل حرفي لكل مفاتيح localStorage (ضمان 100% — لا يعتمد على قائمة ثابتة) ──
+    // يلتقط أي مفتاح يخص هذا المستخدم/التطبيق حتى لو لم يُسجَّل في LS_KEYS مطلقاً،
+    // فلا يمكن لأي إعداد/ثيم/تفصيل جديد أن يضيع بصمت إن نُسي تسجيله في القائمة.
+    // يُستبعد فقط: توكنات Supabase (أمان)، النسخة الطارئة، أعلام transient، ومفاتيح مستخدمين آخرين.
+    backup._local_all = {};
+    const _uid = exportUser.id;
+    const _userScopePrefix = `u:${_uid}:`;
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k) continue;
+      if (k.startsWith('sb-')) continue;                                   // توكن مصادقة Supabase — لا يُنسخ أبداً
+      if (k === 'tharwa_emergency_backup') continue;                       // نسخة طارئة محلية مؤقتة
+      if (k.startsWith('tharwa-dirty-tickers')) continue;                  // علم تعافٍ transient (يُعاد بناؤه)
+      if (k.startsWith('u:') && !k.startsWith(_userScopePrefix)) continue; // بيانات مستخدم آخر على نفس الجهاز
+      backup._local_all[k] = localStorage.getItem(k);
+    }
+    backup._meta.local_keys = Object.keys(backup._local_all).length;
+
     // ── إنشاء الملف ───────────────────────────────────────────
     const json = JSON.stringify(backup, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -156,8 +174,9 @@ async function exportBackup() {
     const totalRows     = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
     const tablesSummary = TABLES.map(t => `${t} (${backup[t]?.length || 0})`).join(' | ');
     const sizeKB        = (new Blob([json]).size / 1024).toFixed(1);
+    const lsCount = Object.keys(backup._local_all || {}).length;
     setStatus('export-status', 'success',
-      `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جداول | حجم الملف: ${sizeKB} KB\n${tablesSummary}`);
+      `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جداول + ${lsCount} مفتاح إعدادات محلي | حجم الملف: ${sizeKB} KB\n${tablesSummary}`);
     showToast(`✓ تم تصدير ${totalRows} سجل — ${sizeKB} KB`, 'success');
 
   } catch (err) {
@@ -319,8 +338,28 @@ async function restoreBackup(input) {
       });
     }
 
+    // (ب) الاستعادة الحرفية الشاملة (v3+): تضمن إرجاع أي مفتاح لم تشمله القائمة المنطقية أعلاه.
+    //     • مفتاح خام (theme/zoom/…): يُكتب كما هو حرفياً.
+    //     • مفتاح مؤطَّر بمستخدم قديم (u:OLDID:logical): يُعاد تأطيره للمستخدم الحالي + خاماً
+    //       حتى تعمل الاستعادة على حساب مختلف دون فقد أي بيانات.
+    //     • توكنات Supabase لا تُكتب أبداً (أمان) — مُستبعدة أصلاً من النسخة لكن نحرس هنا أيضاً.
+    if (backup._local_all && typeof backup._local_all === 'object') {
+      Object.entries(backup._local_all).forEach(([k, v]) => {
+        if (k.startsWith('sb-')) return;
+        const m = k.match(/^u:[^:]+:(.+)$/);
+        if (m) {
+          const logical = m[1];
+          try { localStorage.setItem(userLsKey(logical), v); } catch (_) {}
+          try { localStorage.setItem(logical, v); } catch (_) {}
+        } else {
+          try { localStorage.setItem(k, v); } catch (_) {}
+        }
+      });
+    }
+
+    const lsRestored = Object.keys(backup._local_all || backup._local_settings || {}).length;
     setStatus('restore-status', 'success',
-      `✓ تمت الاستعادة بنجاح — تم استعادة ${inserted} سجل`);
+      `✓ تمت الاستعادة بنجاح — ${inserted} سجل + ${lsRestored} مفتاح إعدادات محلي`);
     showToast('تمت الاستعادة بنجاح ✓', 'success');
 
     setTimeout(async () => {
@@ -340,6 +379,22 @@ async function restoreBackup(input) {
     btn.disabled = false;
     btn.textContent = 'استعادة من نسخة احتياطية';
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// مسح شامل لكل مفاتيح localStorage الخاصة بالتطبيق/المستخدم
+// يُستخدم في التصفير وحذف الحساب — يضمن عدم بقاء أي مفتاح يتيم
+// (خام أو مؤطَّر u:uid:…). يُستبعد توكن مصادقة Supabase دائماً.
+// ══════════════════════════════════════════════════════════════
+function clearAllAppLocalStorage() {
+  const toRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (k.startsWith('sb-')) continue;   // توكن مصادقة Supabase — لا يُمسّ
+    toRemove.push(k);
+  }
+  toRemove.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -405,7 +460,8 @@ async function resetAllData() {
       }
     }
     // مسح جميع مفاتيح localStorage بما فيها الثيم والزوم ونقد المحفظة
-    LS_KEYS.forEach(k => localStorage.removeItem(k));
+    // (شامل: خام + مؤطَّر u:uid:… + أي مفتاح غير مُسجَّل — لا يبقى يتيم)
+    clearAllAppLocalStorage();
     setStatus('reset-status', 'success', '✓ تم مسح جميع البيانات بنجاح');
     showToast('تم التصفير — جميع بياناتك مُمسحة', 'success');
     setTimeout(() => { window.location.href = 'dashboard.html'; }, 1500);
@@ -450,8 +506,8 @@ async function deleteAccount() {
     for (const table of FK_ORDER_FOR_DELETE) {
       await supabaseClient.from(table).delete().eq('user_id', user.id);
     }
-    // مسح جميع مفاتيح localStorage
-    LS_KEYS.forEach(k => localStorage.removeItem(k));
+    // مسح جميع مفاتيح localStorage (شامل: خام + مؤطَّر + غير مُسجَّل)
+    clearAllAppLocalStorage();
 
     // 2. حذف الحساب عبر دالة قاعدة البيانات
     const { error } = await supabaseClient.rpc('delete_own_account');
