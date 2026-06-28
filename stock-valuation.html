@@ -338,6 +338,11 @@
         </div>
         <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
       </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;">
+        <input type="search" id="hist-search" placeholder="🔎 ابحث برمز السهم أو اسمه…" oninput="onHistSearch()"
+               style="flex:1;min-width:200px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.88rem;">
+        <span id="hist-count" class="text-muted" style="font-size:0.8rem;"></span>
+      </div>
       <div id="historyList"></div>
     </div>
 
@@ -710,6 +715,12 @@
     // ===== سجل العمليات — Supabase =====
     const HIST_DB_KEY = 'valuation_history_v1';
     let _history = [];
+    let _histSearch = '';
+
+    function onHistSearch() {
+      _histSearch = (document.getElementById('hist-search').value || '').trim().toLowerCase();
+      renderHistory();
+    }
 
     // ── تحميل السجل من Supabase مع migrate تلقائي من localStorage ──
     async function loadHistoryFromDB() {
@@ -810,7 +821,9 @@
 
     async function saveCalcToHistory(inputs, results) {
       _history.unshift({ id: Date.now(), date: new Date().toLocaleString('ar-SA'), inputs, results });
-      if (_history.length > 100) _history.splice(100);
+      // حفظ دائم — لا يُحذف شيء إلا بقرار المالك. حدّ علوي تقني عالٍ جداً فقط
+      // لحماية حجم التخزين (آلاف العمليات = سنوات استخدام).
+      if (_history.length > 5000) _history.splice(5000);
       renderHistory();
       showHistSaving(true);
       await persistHistory();
@@ -872,7 +885,26 @@
       section.style.display = '';
       const scenarioMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
 
-      list.innerHTML = _history.map(entry => {
+      // فلترة بالبحث (رمز أو اسم)
+      const filtered = _histSearch
+        ? _history.filter(e => {
+            const t = (e.inputs?.ticker || '').toLowerCase();
+            const n = (e.inputs?.stockName || '').toLowerCase();
+            return t.includes(_histSearch) || n.includes(_histSearch);
+          })
+        : _history;
+
+      const countEl = document.getElementById('hist-count');
+      if (countEl) countEl.textContent = _histSearch
+        ? `${filtered.length} من ${_history.length} عملية`
+        : `${_history.length} عملية محفوظة`;
+
+      if (!filtered.length) {
+        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">لا توجد عمليات مطابقة لـ «${_histSearch}»</div>`;
+        return;
+      }
+
+      list.innerHTML = filtered.map(entry => {
         const inp = entry.inputs || {};
         const res = entry.results || {};
         const typeLabel  = inp.companyType === 'reit' ? '🏢 ريت عقاري' : '📊 شركة عادية';

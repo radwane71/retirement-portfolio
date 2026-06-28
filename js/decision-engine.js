@@ -42,6 +42,9 @@ let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
 let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
 let taskTypes  = {};   // ticker → نوع المهمة (monitoring/accumulation/…) — قرار المالك
 let divByTicker = {};  // ticker → [{ amount, date }] من سجل الأرباح الفعلي
+let valByTicker = {};  // ticker → آخر تقييم من حاسبة القيمة العادلة {fair, ts, date, inputs}
+const ENGINE_VAL_KEY = 'valuation_history_v1';
+const VAL_STALE_DAYS = 180; // آخر تقييم أقدم من 6 أشهر = قديم
 let engineCfg    = {}; // ticker → مدخلات المحرّك اليدوية (استدامة/قيادي/نوع/عادلة يدوية)
 let _results     = []; // مخرجات التقييم لكل سهم (للتصدير)
 
@@ -83,6 +86,23 @@ function isBlueChip(h) {
 }
 function capOf(h) { return isBlueChip(h) ? CAPS.blueChip : CAPS.single; }
 
+// رقم صالح من حقل نصّي (أو null)
+function numOf(v) { if (v == null || v === '') return null; const n = +v; return isFinite(n) ? n : null; }
+
+// يحوّل نص نتيجة الحاسبة ("12.50 — 18.30" أو "15.40 ر.س") إلى { avg, min, max }
+function parseFairValueRange(str) {
+  if (!str) return null;
+  const nums = String(str).replace(/,/g, '').match(/\d+(?:\.\d+)?/g);
+  if (!nums || !nums.length) return null;
+  const vals = nums.map(Number).filter(n => n > 0);
+  if (!vals.length) return null;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, min, max };
+}
+
+// عمر آخر تقييم بالأيام (من entry.id الطابع الزمني)، أو null
+function valAgeDays(v) { return (v && v.ts) ? Math.floor((Date.now() - v.ts) / 86400000) : null; }
+
 // ══════════════════════════════════════════════════════════════════════
 // كشف اتجاه التوزيع آلياً من سجل الأرباح الفعلي (مقارنة آخر 12 شهراً بسابقها)
 //   growing | stable | cut (خفض ≥25%) | stopped (توقّف) | insufficient (سجل قصير)
@@ -111,47 +131,68 @@ function dividendTrendOf(ticker) {
 
 // ══════════════════════════════════════════════════════════════════════
 // بوابة الاستدامة (الفلتر 1) — ثلاثة محاور، كل واحد على 3 مستويات:
-//   التغطية:    covered (سليم) | weak (ضعف ربع واحد) | uncovered (مزمن)
-//   الأساسيات:  healthy (سليم) | soft (ضعف ربع) | deteriorating (تدهور مستمر)
-//   إشارة القطع: stable (مستقر) | temp (تأجيل/تخفيف مؤقت) | cut (قطع مؤكّد)
-// إشارة القطع تُملأ آلياً من سجل الأرباح إن لم تُدخَل يدوياً (بوسم واضح).
-// النتيجة (حدّث العاقل بما يعقل):
-//   fail  = تدهور مؤكّد/مزمن → تصفية · watch = قلق مؤقت → مراقبة
-//   pass  = كل المحاور سليمة | unknown = بيانات ناقصة
-// (توافق رجعي: قيم yes/no القديمة تُترجَم لمستوى أصفر «مراقبة» لا أحمر)
+//   التغطية:    covered | weak | uncovered    الأساسيات: healthy | soft | deteriorating
+//   إشارة القطع: stable | temp | cut
+// تُملأ المحاور آلياً من بياناتك عند غياب الإدخال اليدوي (لا تقدير صامت §8):
+//   • الأساسيات والتغطية ← آخر تقييم في حاسبة القيمة العادلة (EPS/FFO/التوزيع)
+//   • إشارة التوزيع ← اتجاه سجل الأرباح الفعلي
+// مهم: الكشف الآلي أقصاه «أصفر/مراقبة» — التصفية (الأحمر) تتطلب تأكيدك اليدوي.
+// النتيجة: fail=تدهور مؤكّد→تصفية · watch=قلق→مراقبة · pass=سليم · unknown=ناقص
 // ══════════════════════════════════════════════════════════════════════
 function sustainabilityOf(h) {
   const cfg = engineCfg[h.ticker] || {};
-  const cov = cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
-  const fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
-  let   sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
+  let cov = cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
+  let fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
+  let sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
+  const autoSrc = {}; // محور → مصدر الاشتقاق الآلي (للوسم)
 
-  // كشف آلي من سجل الأرباح الفعلي — فقط عند غياب الإدخال اليدوي (لا تقدير صامت)
-  const trend = dividendTrendOf(h.ticker);
-  let sigAuto = false;
-  if (!sig && trend) {
-    if (trend.signal === 'stopped')                                   { sig = 'cut';    sigAuto = true; }
-    else if (trend.signal === 'cut')                                  { sig = 'temp';   sigAuto = true; }
-    else if (trend.signal === 'growing' || trend.signal === 'stable') { sig = 'stable'; sigAuto = true; }
+  // ① من آخر تقييم: الأساسيات (EPS/FFO) والتغطية (التوزيع÷الأرباح) — أقصاه أصفر
+  const val = valByTicker[h.ticker];
+  if (val) {
+    const inp = val.inputs || {};
+    const isReit = inp.companyType === 'reit';
+    const eps = numOf(inp.eps), ffo = numOf(inp.ffo), div = numOf(inp.dividends);
+    const earn = isReit ? ffo : eps;
+    if (!fun && earn != null) {
+      fun = earn > 0 ? 'healthy' : 'soft';        // سالب → مراقبة لا تصفية
+      autoSrc.fun = `تقييم: ${isReit ? 'FFO' : 'EPS'} ${formatNum(earn)}`;
+    }
+    if (!cov && div != null && div > 0 && earn != null && earn > 0) {
+      const payout = div / earn;
+      cov = payout <= 1.0 ? 'covered' : 'weak';    // توزيع فوق الأرباح → مراقبة
+      autoSrc.cov = `تقييم: توزيع/${isReit ? 'FFO' : 'EPS'} = ${(payout * 100).toFixed(0)}%`;
+    }
   }
-  const autoTag = sigAuto ? ` (آلي من سجل أرباحك: ${trend.note})` : '';
 
+  // ② من سجل الأرباح الفعلي: إشارة التوزيع — أقصاه أصفر
+  const trend = dividendTrendOf(h.ticker);
+  if (!sig && trend) {
+    if (trend.signal === 'cut' || trend.signal === 'stopped')         { sig = 'temp';   autoSrc.sig = `أرباح: ${trend.note}`; }
+    else if (trend.signal === 'growing' || trend.signal === 'stable') { sig = 'stable'; autoSrc.sig = `أرباح: ${trend.note}`; }
+  }
+  // وإلا: تقييم حديث بتوزيع قائم وموجب = لا إشارة قطع (مستقر) — استدلال معلَن
+  if (!sig && val && numOf(val.inputs.dividends) > 0) {
+    sig = 'stable'; autoSrc.sig = 'تقييم: توزيع قائم، لا إشارة قطع بالسجل';
+  }
+  const tag = k => autoSrc[k] ? ` (آلي — ${autoSrc[k]})` : '';
+
+  // مستوى أحمر (مزمن/مؤكّد) لا يأتي إلا من إدخالك اليدوي
   const structural = [];
   if (cov === 'uncovered')     structural.push('التوزيع غير مغطّى بشكل مزمن');
   if (fun === 'deteriorating') structural.push('تدهور أساسيات مستمر / EPS سالب متكرر');
-  if (sig === 'cut')           structural.push('قطع توزيع مؤكّد' + autoTag);
-  if (structural.length) return { status: 'fail', reason: structural.join('، '), trend };
+  if (sig === 'cut')           structural.push('قطع توزيع مؤكّد');
+  if (structural.length) return { status: 'fail', reason: structural.join('، '), trend, autoSrc };
 
   const soft = [];
-  if (cov === 'weak') soft.push('ضعف تغطية التوزيع في ربع واحد');
-  if (fun === 'soft') soft.push('ضعف ربع واحد بالأساسيات');
-  if (sig === 'temp') soft.push('انخفاض/تأجيل توزيع' + autoTag);
-  if (soft.length) return { status: 'watch', reason: soft.join('، '), trend };
+  if (cov === 'weak') soft.push('ضعف تغطية التوزيع' + tag('cov'));
+  if (fun === 'soft') soft.push('ضعف بالأساسيات' + tag('fun'));
+  if (sig === 'temp') soft.push('انخفاض/تأجيل توزيع' + tag('sig'));
+  if (soft.length) return { status: 'watch', reason: soft.join('، '), trend, autoSrc };
 
   if (cov === 'covered' && fun === 'healthy' && sig === 'stable') {
-    return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع', trend };
+    return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع', trend, autoSrc };
   }
-  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة', trend };
+  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة', trend, autoSrc };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -216,10 +257,17 @@ function evaluateHolding(h, ctx) {
   const taskType = taskTypes[h.ticker] || null; // قرار المالك من صفحة المهام
   const userWatching = taskType === 'monitoring';
 
+  // مرجع التقييم: القيمة العادلة من آخر تقييم + عمره (للسياق والتحذير من القِدم)
+  const val = valByTicker[h.ticker] || null;
+  const valAge = valAgeDays(val);
+  const valStale = valAge != null && valAge > VAL_STALE_DAYS;
+
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector,
     weight, cap, price, value, assetType, zones, taskType,
     sustain: sus, targetWeight, gaps, specialNote: note,
+    fairValue: val && val.fair ? val.fair.avg : null, valDate: val ? val.date : null,
+    valAgeDays: valAge, valStale,
     blueChip: isBlueChip(h), dev, devBand, severity: 'green',
   };
 
@@ -330,7 +378,7 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks, rDiv] = await Promise.all([
+  const [rH, rT, rEng, rTasks, rDiv, rVal] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
@@ -338,6 +386,7 @@ async function loadAll() {
       .select('ticker, type, accumulate_at, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
       .eq('status', 'active').order('updated_at', { ascending: false }),
     supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
+    loadUserSetting(ENGINE_VAL_KEY),
   ]);
 
   holdings = rH.data || [];
@@ -351,6 +400,19 @@ async function loadAll() {
     const tk = (d.ticker || '').trim().toUpperCase();
     if (!tk || !d.date) return;
     (divByTicker[tk] = divByTicker[tk] || []).push({ amount: +d.amount || 0, date: new Date(d.date) });
+  });
+
+  // آخر تقييم لكل رمز من حاسبة القيمة العادلة (السجل مرتّب بالأحدث أولاً)
+  valByTicker = {};
+  (Array.isArray(rVal) ? rVal : []).forEach(entry => {
+    const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
+    if (!tk || valByTicker[tk]) return; // أول ظهور = الأحدث
+    valByTicker[tk] = {
+      ts: typeof entry.id === 'number' ? entry.id : null,
+      date: (entry.date || '').split('،')[0] || '',
+      fair: parseFairValueRange(entry.results?.fairValueRange),
+      inputs: entry.inputs || {},
+    };
   });
 
   // خطة الأسعار + نوع المهمة لكل رمز من المهام النشطة — أحدث مهمة هي المرجع
@@ -499,7 +561,7 @@ function renderAllTable() {
       <td><strong>${r.ticker}</strong> ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}${noteTag}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
       <td>${escapeHtmlSafe(ASSET_LABEL[r.assetType])}<br><span class="small text-muted">${escapeHtmlSafe(SUSTAIN_METRIC[r.assetType])}</span></td>
       <td>${formatNum(r.weight)}%<br><span class="small" style="color:${devColor}">الهدف ${formatNum(r.targetWeight)}% (${r.dev>=0?'+':'−'}${formatNum(Math.abs(r.dev))})</span></td>
-      <td>${formatNum(r.price)}</td>
+      <td>${formatNum(r.price)}${r.fairValue != null ? `<br><span class="small text-muted" title="القيمة العادلة من آخر تقييم${r.valDate ? ' بتاريخ '+escapeHtmlSafe(r.valDate) : ''}">عادلة ${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="آخر تقييم أقدم من 6 أشهر">📅 قديم</span>' : ''}</span>` : ''}</td>
       <td>${fvCell}</td>
       <td>${susBadge}${trendLine}</td>
       <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
@@ -564,6 +626,22 @@ function openStockCard(ticker) {
   fvHint.innerHTML = zt
     ? `خطة الأسعار (من المهام): <strong>${escapeHtmlSafe(zt)}</strong>`
     : 'لا توجد خطة أسعار لهذا السهم — أضِفها في صفحة <a href="tasks.html" style="color:var(--accent)">مهام المحفظة</a>.';
+
+  // مرجع التقييم: القيمة العادلة + تاريخها + تحذير القِدم
+  const valEl = document.getElementById('de-card-valhint');
+  const val = valByTicker[ticker];
+  if (valEl) {
+    if (val && val.fair) {
+      const age = valAgeDays(val);
+      const stale = age != null && age > VAL_STALE_DAYS;
+      valEl.innerHTML = `🧮 آخر تقييم: <strong>عادلة ${formatNum(val.fair.avg)}</strong>` +
+        (val.fair.max > val.fair.min ? ` (نطاق ${formatNum(val.fair.min)}–${formatNum(val.fair.max)})` : '') +
+        (val.date ? ` · ${escapeHtmlSafe(val.date)}` : '') +
+        (stale ? ` · <span style="color:#f59e0b">📅 قديم (${age} يوم) — حدّثه في الحاسبة</span>` : '');
+    } else {
+      valEl.innerHTML = 'لا يوجد تقييم محفوظ — احسبه في <a href="stock-valuation.html" style="color:var(--accent)">القيمة العادلة للأسهم</a> ليغذّي الاستدامة.';
+    }
+  }
 
   // ملاحظة الدستور الخاصة (5110 / سياق الإسمنت الدوري)
   const noteEl = document.getElementById('de-card-note');
