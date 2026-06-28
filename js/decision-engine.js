@@ -42,6 +42,7 @@ let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
 let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
 let taskTypes  = {};   // ticker → نوع المهمة (monitoring/accumulation/…) — قرار المالك
 let divByTicker = {};  // ticker → [{ amount, date }] من سجل الأرباح الفعلي
+let txByTicker  = {};  // ticker → [{ type, shares, date }] مرتّبة — لاستخراج DPS
 let valByTicker = {};  // ticker → آخر تقييم من حاسبة القيمة العادلة {fair, ts, date, inputs}
 const ENGINE_VAL_KEY = 'valuation_history_v1';
 const VAL_STALE_DAYS = 180; // آخر تقييم أقدم من 6 أشهر = قديم
@@ -103,30 +104,58 @@ function parseFairValueRange(str) {
 // عمر آخر تقييم بالأيام (من entry.id الطابع الزمني)، أو null
 function valAgeDays(v) { return (v && v.ts) ? Math.floor((Date.now() - v.ts) / 86400000) : null; }
 
+// عدد الأسهم المملوكة لرمز في تاريخ معيّن (من المعاملات المرتّبة) — لاستخراج DPS
+function sharesAtDateOf(ticker, date) {
+  const rows = txByTicker[ticker] || [];
+  let sh = 0;
+  for (const t of rows) {
+    if (t.date > date) break; // مرتّبة تصاعدياً
+    if (t.type === 'buy' || t.type === 'grant') sh += t.shares;
+    else if (t.type === 'sell') sh -= t.shares;
+  }
+  return Math.max(0, sh);
+}
+
 // ══════════════════════════════════════════════════════════════════════
-// كشف اتجاه التوزيع آلياً من سجل الأرباح الفعلي (مقارنة آخر 12 شهراً بسابقها)
-//   growing | stable | cut (خفض ≥25%) | stopped (توقّف) | insufficient (سجل قصير)
+// كشف اتجاه التوزيع آلياً — بالـDPS (المبلغ ÷ الأسهم وقتها) ومقارنة سنوية:
+//   • يحوّل كل توزيع إلى DPS لعزل سياسة الشركة عن تغيّر حجم مركزك
+//   • يقارن آخر سنة ميلادية كاملة بسابقتها (يتجنّب ازدواج نوافذ 12 شهر)
+//   • يكتشف التوقّف من «أشهر منذ آخر توزيع» مقاسةً من اليوم
+//   growing | stable | cut (خفض ≥25%) | stopped (>18 شهراً) | insufficient
 // ══════════════════════════════════════════════════════════════════════
 function dividendTrendOf(ticker) {
   const recs = divByTicker[ticker];
-  if (!recs || recs.length < 2) return null;
-  const sorted = recs.slice().sort((a, b) => a.date - b.date);
-  const latest = sorted[sorted.length - 1].date;
-  const shifted = (months) => { const d = new Date(latest); d.setMonth(d.getMonth() - months); return d; };
-  const sumIn = (startMonths, endMonths) => {
-    const start = shifted(startMonths), end = shifted(endMonths); // (start, end]
-    return sorted.filter(r => r.date > start && r.date <= end).reduce((s, r) => s + r.amount, 0);
-  };
-  const last12 = sumIn(12, 0);   // (latest-12m, latest]
-  const prev12 = sumIn(24, 12);  // (latest-24m, latest-12m]
-  if (prev12 <= 0) return { signal: 'insufficient', last12, prev12, note: 'سجل أقل من سنتين — غير كافٍ للمقارنة' };
-  const changePct = (last12 - prev12) / prev12 * 100;
+  if (!recs || !recs.length) return null;
+  const now = new Date();
+
+  // DPS لكل توزيع = المبلغ ÷ الأسهم المملوكة وقت التوزيع (تجاهل ما لا أسهم له)
+  const dps = [];
+  recs.forEach(r => {
+    const sh = sharesAtDateOf(ticker, r.date);
+    if (sh > 0 && r.amount > 0) dps.push({ dps: r.amount / sh, date: r.date });
+  });
+  if (!dps.length) return { signal: 'insufficient', note: 'تعذّر اشتقاق DPS (لا معاملات مطابقة)' };
+
+  // التوقّف: آخر توزيع أقدم من 18 شهراً من اليوم
+  const lastDate = dps.reduce((m, r) => (r.date > m ? r.date : m), dps[0].date);
+  const monthsSince = (now - lastDate) / (30.44 * 86400000);
+  if (monthsSince > 18) return { signal: 'stopped', note: `آخر توزيع قبل ~${Math.round(monthsSince)} شهراً — توقّف/تعليق محتمل` };
+
+  // DPS سنوي (جمع دفعات السنة) ثم مقارنة آخر سنتين كاملتين (نستبعد السنة الجارية)
+  const byYear = {};
+  dps.forEach(r => { const y = r.date.getFullYear(); byYear[y] = (byYear[y] || 0) + r.dps; });
+  const fullYears = Object.keys(byYear).map(Number).filter(y => y < now.getFullYear()).sort((a, b) => b - a);
+  if (fullYears.length < 2) return { signal: 'insufficient', note: 'أقل من سنتين كاملتين — غير كافٍ للمقارنة' };
+
+  const y1 = byYear[fullYears[0]], y0 = byYear[fullYears[1]];
+  if (y0 <= 0) return { signal: 'insufficient', note: 'سنة المقارنة بلا توزيع' };
+  const changePct = (y1 - y0) / y0 * 100;
+  const yrs = `${fullYears[1]}→${fullYears[0]}`;
   let signal, note;
-  if (last12 <= 0)            { signal = 'stopped'; note = 'توقّف التوزيع آخر 12 شهراً بعد دفعات سابقة'; }
-  else if (changePct <= -25) { signal = 'cut';     note = `انخفض التوزيع ${Math.abs(changePct).toFixed(0)}% آخر 12 شهراً`; }
-  else if (changePct >= 5)   { signal = 'growing'; note = `نما التوزيع ${changePct.toFixed(0)}% آخر 12 شهراً`; }
-  else                       { signal = 'stable';  note = 'التوزيع مستقر تقريباً (±5%)'; }
-  return { signal, last12, prev12, changePct, note };
+  if (changePct <= -25)    { signal = 'cut';     note = `DPS انخفض ${Math.abs(changePct).toFixed(0)}% (${yrs})`; }
+  else if (changePct >= 5) { signal = 'growing'; note = `DPS نما ${changePct.toFixed(0)}% (${yrs})`; }
+  else                     { signal = 'stable';  note = `DPS مستقر (±5%، ${yrs})`; }
+  return { signal, changePct, note, years: yrs };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -378,7 +407,7 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks, rDiv, rVal] = await Promise.all([
+  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
@@ -387,6 +416,7 @@ async function loadAll() {
       .eq('status', 'active').order('updated_at', { ascending: false }),
     supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
     loadUserSetting(ENGINE_VAL_KEY),
+    supabaseClient.from('transactions').select('ticker, type, shares, date').eq('is_archived', false),
   ]);
 
   holdings = rH.data || [];
@@ -401,6 +431,15 @@ async function loadAll() {
     if (!tk || !d.date) return;
     (divByTicker[tk] = divByTicker[tk] || []).push({ amount: +d.amount || 0, date: new Date(d.date) });
   });
+
+  // المعاملات لكل رمز (مرتّبة تصاعدياً) — لاستخراج عدد الأسهم وقت كل توزيع → DPS
+  txByTicker = {};
+  (rTx.data || []).forEach(t => {
+    const tk = (t.ticker || '').trim().toUpperCase();
+    if (!tk || !t.date) return;
+    (txByTicker[tk] = txByTicker[tk] || []).push({ type: t.type, shares: +t.shares || 0, date: new Date(t.date) });
+  });
+  Object.values(txByTicker).forEach(rows => rows.sort((a, b) => a.date - b.date));
 
   // آخر تقييم لكل رمز من حاسبة القيمة العادلة (السجل مرتّب بالأحدث أولاً)
   valByTicker = {};
