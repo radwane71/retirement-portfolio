@@ -41,6 +41,7 @@ let holdings   = [];   // من جدول holdings
 let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
 let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
 let taskTypes  = {};   // ticker → نوع المهمة (monitoring/accumulation/…) — قرار المالك
+let divByTicker = {};  // ticker → [{ amount, date }] من سجل الأرباح الفعلي
 let engineCfg    = {}; // ticker → مدخلات المحرّك اليدوية (استدامة/قيادي/نوع/عادلة يدوية)
 let _results     = []; // مخرجات التقييم لكل سهم (للتصدير)
 
@@ -83,13 +84,39 @@ function isBlueChip(h) {
 function capOf(h) { return isBlueChip(h) ? CAPS.blueChip : CAPS.single; }
 
 // ══════════════════════════════════════════════════════════════════════
+// كشف اتجاه التوزيع آلياً من سجل الأرباح الفعلي (مقارنة آخر 12 شهراً بسابقها)
+//   growing | stable | cut (خفض ≥25%) | stopped (توقّف) | insufficient (سجل قصير)
+// ══════════════════════════════════════════════════════════════════════
+function dividendTrendOf(ticker) {
+  const recs = divByTicker[ticker];
+  if (!recs || recs.length < 2) return null;
+  const sorted = recs.slice().sort((a, b) => a.date - b.date);
+  const latest = sorted[sorted.length - 1].date;
+  const shifted = (months) => { const d = new Date(latest); d.setMonth(d.getMonth() - months); return d; };
+  const sumIn = (startMonths, endMonths) => {
+    const start = shifted(startMonths), end = shifted(endMonths); // (start, end]
+    return sorted.filter(r => r.date > start && r.date <= end).reduce((s, r) => s + r.amount, 0);
+  };
+  const last12 = sumIn(12, 0);   // (latest-12m, latest]
+  const prev12 = sumIn(24, 12);  // (latest-24m, latest-12m]
+  if (prev12 <= 0) return { signal: 'insufficient', last12, prev12, note: 'سجل أقل من سنتين — غير كافٍ للمقارنة' };
+  const changePct = (last12 - prev12) / prev12 * 100;
+  let signal, note;
+  if (last12 <= 0)            { signal = 'stopped'; note = 'توقّف التوزيع آخر 12 شهراً بعد دفعات سابقة'; }
+  else if (changePct <= -25) { signal = 'cut';     note = `انخفض التوزيع ${Math.abs(changePct).toFixed(0)}% آخر 12 شهراً`; }
+  else if (changePct >= 5)   { signal = 'growing'; note = `نما التوزيع ${changePct.toFixed(0)}% آخر 12 شهراً`; }
+  else                       { signal = 'stable';  note = 'التوزيع مستقر تقريباً (±5%)'; }
+  return { signal, last12, prev12, changePct, note };
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // بوابة الاستدامة (الفلتر 1) — ثلاثة محاور، كل واحد على 3 مستويات:
 //   التغطية:    covered (سليم) | weak (ضعف ربع واحد) | uncovered (مزمن)
 //   الأساسيات:  healthy (سليم) | soft (ضعف ربع) | deteriorating (تدهور مستمر)
 //   إشارة القطع: stable (مستقر) | temp (تأجيل/تخفيف مؤقت) | cut (قطع مؤكّد)
+// إشارة القطع تُملأ آلياً من سجل الأرباح إن لم تُدخَل يدوياً (بوسم واضح).
 // النتيجة (حدّث العاقل بما يعقل):
-//   fail  = تدهور مؤكّد/مزمن (مستوى أحمر بأي محور) → يستحق التصفية
-//   watch = قلق مؤقت (ربع واحد، مستوى أصفر) → القرار الأمثل: مراقبة لا تصفية
+//   fail  = تدهور مؤكّد/مزمن → تصفية · watch = قلق مؤقت → مراقبة
 //   pass  = كل المحاور سليمة | unknown = بيانات ناقصة
 // (توافق رجعي: قيم yes/no القديمة تُترجَم لمستوى أصفر «مراقبة» لا أحمر)
 // ══════════════════════════════════════════════════════════════════════
@@ -97,24 +124,34 @@ function sustainabilityOf(h) {
   const cfg = engineCfg[h.ticker] || {};
   const cov = cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
   const fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
-  const sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
+  let   sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
+
+  // كشف آلي من سجل الأرباح الفعلي — فقط عند غياب الإدخال اليدوي (لا تقدير صامت)
+  const trend = dividendTrendOf(h.ticker);
+  let sigAuto = false;
+  if (!sig && trend) {
+    if (trend.signal === 'stopped')                                   { sig = 'cut';    sigAuto = true; }
+    else if (trend.signal === 'cut')                                  { sig = 'temp';   sigAuto = true; }
+    else if (trend.signal === 'growing' || trend.signal === 'stable') { sig = 'stable'; sigAuto = true; }
+  }
+  const autoTag = sigAuto ? ` (آلي من سجل أرباحك: ${trend.note})` : '';
 
   const structural = [];
   if (cov === 'uncovered')     structural.push('التوزيع غير مغطّى بشكل مزمن');
   if (fun === 'deteriorating') structural.push('تدهور أساسيات مستمر / EPS سالب متكرر');
-  if (sig === 'cut')           structural.push('قطع توزيع مؤكّد');
-  if (structural.length) return { status: 'fail', reason: structural.join('، ') };
+  if (sig === 'cut')           structural.push('قطع توزيع مؤكّد' + autoTag);
+  if (structural.length) return { status: 'fail', reason: structural.join('، '), trend };
 
   const soft = [];
   if (cov === 'weak') soft.push('ضعف تغطية التوزيع في ربع واحد');
   if (fun === 'soft') soft.push('ضعف ربع واحد بالأساسيات');
-  if (sig === 'temp') soft.push('تأجيل/تخفيف توزيع مؤقت');
-  if (soft.length) return { status: 'watch', reason: soft.join('، ') };
+  if (sig === 'temp') soft.push('انخفاض/تأجيل توزيع' + autoTag);
+  if (soft.length) return { status: 'watch', reason: soft.join('، '), trend };
 
   if (cov === 'covered' && fun === 'healthy' && sig === 'stable') {
-    return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع' };
+    return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع', trend };
   }
-  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة' };
+  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة', trend };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -293,19 +330,28 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks] = await Promise.all([
+  const [rH, rT, rEng, rTasks, rDiv] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
     supabaseClient.from('portfolio_tasks')
       .select('ticker, type, accumulate_at, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
       .eq('status', 'active').order('updated_at', { ascending: false }),
+    supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
   ]);
 
   holdings = rH.data || [];
   stockTargets = {};
   (rT.data || []).forEach(r => { stockTargets[r.ticker] = r; });
   engineCfg = rEng || {};
+
+  // سجل الأرباح الفعلي لكل رمز — مصدر كشف اتجاه التوزيع آلياً
+  divByTicker = {};
+  (rDiv.data || []).forEach(d => {
+    const tk = (d.ticker || '').trim().toUpperCase();
+    if (!tk || !d.date) return;
+    (divByTicker[tk] = divByTicker[tk] || []).push({ amount: +d.amount || 0, date: new Date(d.date) });
+  });
 
   // خطة الأسعار + نوع المهمة لكل رمز من المهام النشطة — أحدث مهمة هي المرجع
   taskZones = {};
@@ -438,6 +484,10 @@ function renderAllTable() {
   const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   tbody.innerHTML = sorted.map(r => {
     const susBadge = { pass: '🟢 سليمة', watch: '🟡 قلق مؤقت', fail: '🔴 تدهور مؤكّد', unknown: '⚪ غير متوفرة' }[r.sustain.status];
+    const tr = r.sustain.trend;
+    const trendLine = (tr && tr.signal !== 'insufficient')
+      ? `<br><span class="small" title="${escapeHtmlSafe(tr.note)}" style="color:${tr.signal==='cut'||tr.signal==='stopped'?'#ef4444':tr.signal==='growing'?'#10b981':'var(--text-muted)'}">${({growing:'📈 توزيع ينمو',stable:'➡️ توزيع مستقر',cut:'📉 توزيع منخفض',stopped:'🛑 توزيع متوقّف'})[tr.signal]}</span>`
+      : '';
     const zt = zonesText(r.zones);
     const fvCell = zt
       ? `<span class="small">${escapeHtmlSafe(zt)}</span>`
@@ -451,7 +501,7 @@ function renderAllTable() {
       <td>${formatNum(r.weight)}%<br><span class="small" style="color:${devColor}">الهدف ${formatNum(r.targetWeight)}% (${r.dev>=0?'+':'−'}${formatNum(Math.abs(r.dev))})</span></td>
       <td>${formatNum(r.price)}</td>
       <td>${fvCell}</td>
-      <td>${susBadge}</td>
+      <td>${susBadge}${trendLine}</td>
       <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
       <td class="de-reason small">${escapeHtmlSafe(r.reason)}</td>
       <td><button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">⚙️</button></td>
@@ -494,6 +544,19 @@ function openStockCard(ticker) {
   setSelect('de-card-healthy', cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy] || '');
   setSelect('de-card-cut',     cfg.divSignal    || ({ no: 'stable', yes: 'temp' })[cfg.divCut]       || '');
   document.getElementById('de-card-notes').value = cfg.notes || '';
+
+  // كشف اتجاه التوزيع آلياً من سجل الأرباح — يظهر كاقتراح (يبقى إدخالك الأولوية)
+  const dtEl = document.getElementById('de-card-divtrend');
+  const tr = dividendTrendOf(ticker);
+  if (dtEl) {
+    if (tr && tr.signal !== 'insufficient') {
+      const c = (tr.signal === 'cut' || tr.signal === 'stopped') ? '#ef4444' : tr.signal === 'growing' ? '#10b981' : 'var(--text-muted)';
+      dtEl.innerHTML = `🔎 من سجل أرباحك: <span style="color:${c}">${escapeHtmlSafe(tr.note)}</span>` +
+        (cfg.divSignal ? '' : ' — يُطبَّق آلياً ما لم تختر يدوياً');
+    } else {
+      dtEl.textContent = tr ? '🔎 سجل أرباحك أقصر من سنتين — لا كشف آلي' : '🔎 لا سجل أرباح لهذا الرمز';
+    }
+  }
 
   // خطة الأسعار مصدرها صفحة المهام — تُعرَض للقراءة فقط هنا
   const zt = zonesText(taskZones[ticker]);

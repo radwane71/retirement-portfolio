@@ -290,11 +290,12 @@
           <div class="form-group">
             <label>إشارة التوزيع</label>
             <select id="de-card-cut">
-              <option value="">— غير متوفر —</option>
+              <option value="">— غير متوفر (آلي من سجلك) —</option>
               <option value="stable">✅ مستقر</option>
               <option value="temp">🟡 تأجيل/تخفيف مؤقت</option>
               <option value="cut">🔴 قطع مؤكّد</option>
             </select>
+            <small id="de-card-divtrend" class="text-muted" style="display:block;margin-top:3px;font-size:.74rem"></small>
           </div>
           <div class="form-group full">
             <label>خطة الأسعار (من صفحة المهام)</label>
@@ -335,7 +336,8 @@
             4️⃣ <b>هدف الوزن الفردي + عتبات الألوان</b> — الانحراف ضمن الأخضر لا يُنبّه، الأصفر تنبيه، الأحمر إجراء<br>
             5️⃣ <b>الأولوية</b> — triggers الثابتة فوق الكل، وأي حدّ ينكسر يفرض التخفيف
           </div>
-          <p class="info-note" style="margin-top:8px">🎨 عتبات الألوان (انحراف الوزن عن الهدف) تُضبَط من <a href="settings.html" style="color:var(--accent)">الإعدادات</a> وتنطبق فوراً — غيّرها متى شئت.</p>
+          <p class="info-note" style="margin-top:8px">🔎 المحرّك يكشف اتجاه التوزيع آلياً من <b>سجل أرباحك الفعلي</b> (مقارنة آخر 12 شهراً): خفض ≥25% → مراقبة، توقّف → تصفية. إدخالك اليدوي في البطاقة يتجاوز الآلي دائماً.</p>
+          <p class="info-note" style="margin-top:6px">🎨 عتبات الألوان (انحراف الوزن عن الهدف) تُضبَط من <a href="settings.html" style="color:var(--accent)">الإعدادات</a> وتنطبق فوراً — غيّرها متى شئت.</p>
           <p class="info-note">⚙️ السعر الحالي من لوحة التحكم، وخطة الأسعار (تجميع/تخفيف/تصفية) من صفحة <a href="tasks.html" style="color:var(--accent)">مهام المحفظة</a>. الاستدامة وعلم القيادي تُدخَل لكل سهم عبر زر ⚙️. أي بيان ناقص يُعلَن «غير متوفرة». سقف القطاع 25% يُفحَص على مستوى المحفظة لا على السهم الفردي.</p>`
       },
     };
