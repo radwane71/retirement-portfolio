@@ -412,7 +412,11 @@
           <span>🗂️ سجل العمليات الحسابية</span>
           <span id="hist-saving-badge" class="hist-saving" style="display:none;">💾 جاري الحفظ…</span>
         </div>
-        <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-secondary btn-sm" onclick="exportHistoryCSV()">⬇️ تصدير CSV</button>
+          <button class="btn btn-secondary btn-sm" onclick="recomputeAllHistory()" title="يعيد حساب نتائج كل العمليات المحفوظة بالمعادلة المحدّثة من مدخلاتها الأصلية">🔄 إعادة حساب السجل</button>
+          <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
+        </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;">
         <input type="search" id="hist-search" placeholder="🔎 ابحث برمز السهم أو اسمه…" oninput="onHistSearch()"
@@ -644,7 +648,10 @@
 
         const scenario   = document.getElementById('scenario').value;
         const growth_adj = scenario === 'optimistic' ? 0.02 : scenario === 'conservative' ? -0.02 : 0;
-        const growth_perp_final = growth_perp + growth_adj;
+        // إصلاح استثماري: النمو الدائم لا يتجاوز 3% حتى بعد تعديل السيناريو المتفائل
+        // (النمو الأبدي يجب ألا يتخطّى نمو الناتج المحلي طويل الأجل — وإلا تضخّمت القيمة النهائية).
+        let growth_perp_final = growth_perp + growth_adj;
+        if (growth_perp_final > 0.03) growth_perp_final = 0.03;
 
         if (growth_perp_final >= discount_rate) {
           document.getElementById('loadingOverlay').classList.add('hidden');
@@ -933,6 +940,135 @@
       } catch (e) {
         console.warn('تعذّر حفظ السجل في Supabase:', e);
       }
+    }
+
+    // ═══ إعادة حساب نتائج عملية من مدخلاتها الأصلية (نقية — تعكس المعادلة الحالية) ═══
+    // تُستخدم لإعادة حساب السجل القديم بعد أي تعديل على المعادلة. تعيد استخدام
+    // نفس دوال النماذج النقية (calculate_dcf/Graham/pe/gordon/book/WACC) لتفادي الانحراف.
+    function recomputeResults(inp) {
+      if (!inp) return null;
+      const num = (v, d = 0) => { const n = parseFloat(v); return isFinite(n) ? n : d; };
+      const companyType = inp.companyType || 'normal';
+      const scenario = inp.scenario || 'realistic';
+      const scenLabel = scenario === 'optimistic' ? 'متفائل' : scenario === 'conservative' ? 'محتاط' : 'واقعي';
+      const growth_adj = scenario === 'optimistic' ? 0.02 : scenario === 'conservative' ? -0.02 : 0;
+
+      let growth_perp = num(inp.growthPerp) / 100;
+      let discount_rate = num(inp.discountRate) / 100;
+      if (inp.useWacc) {
+        const rf = num(inp.riskFree) / 100, b = num(inp.beta, 1), rm = num(inp.marketReturn) / 100,
+              rd = num(inp.debtCost) / 100, tx = num(inp.taxRate) / 100, de = num(inp.debtEquity);
+        discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
+      }
+      let growth_perp_final = growth_perp + growth_adj;
+      if (growth_perp_final > 0.03) growth_perp_final = 0.03;   // نفس سقف 3% للمعادلة الحية
+
+      const currentPrice = num(inp.currentPrice);
+      const mk = (values, avg) => {
+        const models = Object.entries(values).map(([name, v]) => ({ name, value: (v != null && v > 0) ? formatCurrency(v) : 'لا ينطبق' }));
+        let marginText = '';
+        if (currentPrice > 0 && avg > 0) {
+          const m = (avg - currentPrice) / avg * 100;
+          marginText = `${m > 0 ? '✅' : '⚠️'} ${Math.abs(m).toFixed(1)}% ${m > 0 ? 'هامش أمان' : 'مبالغ فيه'}`;
+        }
+        return { models, marginText };
+      };
+
+      if (companyType === 'reit') {
+        const nav_total = num(inp.nav), totalUnits = Math.max(num(inp.totalUnits, 1), 1),
+              ffo = num(inp.ffo), totalDebtR = num(inp.totalDebt), capRate = num(inp.capRate, 8) / 100,
+              pffo = num(inp.pffoMultiple, 12);
+        const nav_per_unit = (nav_total - totalDebtR) / totalUnits;
+        const pffo_value = ffo > 0 ? ffo * pffo : null;
+        const caprate_check = (ffo > 0 && capRate > 0) ? ffo / capRate : null;
+        const ffo_yield = currentPrice > 0 ? (ffo / currentPrice * 100) : 0;
+        const valid = [nav_per_unit, pffo_value].filter(v => v != null && v > 0);
+        const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
+        const values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'Cap Rate (مرجع)': caprate_check };
+        const { models, marginText } = mk(values, avg);
+        const parts = [];
+        if (nav_per_unit > 0) parts.push(`NAV للوحدة = ${formatCurrency(nav_per_unit)}`);
+        if (pffo_value && pffo_value > 0) parts.push(`تقييم P/FFO = ${formatCurrency(pffo_value)}`);
+        const lbl = parts.length > 1 ? `القيمة العادلة (${formatCurrency(avg)}) = متوسط ${parts.length} طرق` : `القيمة العادلة = ${formatCurrency(avg)}`;
+        return { fairValueRange: formatCurrency(avg), fairValueDetail: `${lbl}: ${parts.join('  ·  ')}  |  عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`, fairValueAvg: avg, marginText, models };
+      }
+
+      if (companyType === 'bank') {
+        const bvps = num(inp.bvps), bankFairPb = num(inp.bankFairPb, 1.2),
+              bankEps = num(inp.bankEps), bankFairPe = num(inp.bankFairPe, 12);
+        const pbVal = bvps > 0 && bankFairPb > 0 ? bvps * bankFairPb : null;
+        const peVal = bankEps > 0 && bankFairPe > 0 ? bankEps * bankFairPe : null;
+        const values = {};
+        if (pbVal) values['P/B Fair Value'] = pbVal;
+        if (peVal) values['P/E Fair Value'] = peVal;
+        const valid = Object.values(values).filter(v => v > 0);
+        if (!valid.length) return null;
+        const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+        const min = Math.min(...valid), max = Math.max(...valid);
+        const { models, marginText } = mk(values, avg);
+        return { fairValueRange: valid.length > 1 ? `${formatCurrency(min)} — ${formatCurrency(max)}` : formatCurrency(avg), fairValueDetail: `المتوسط: ${formatCurrency(avg)}`, fairValueAvg: avg, marginText, models };
+      }
+
+      // شركة عادية
+      const eps = num(inp.eps), fcf = num(inp.fcf), net_debt = num(inp.netDebt),
+            growth_5yr = num(inp.growth5yr) / 100, sector_pe = num(inp.sectorPe),
+            dividends = num(inp.dividends), book_value = num(inp.bookValue),
+            bond_yield = num(inp.bondYield, 6.5), fair_pb = num(inp.fairPb, 1.5);
+      const growth_5yr_adj = growth_5yr + growth_adj;
+      const dcf = calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, discount_rate, net_debt);
+      const values = {
+        'DCF': dcf ? dcf.equityValue : null,
+        'جراهام': calculateGraham(eps, growth_5yr_adj * 100, bond_yield),
+        'مكرر الربحية P/E': calculate_pe(eps, sector_pe),
+        'جوردون': calculate_gordon(dividends, growth_perp_final, discount_rate),
+        'القيمة الدفترية': calculate_book_value(book_value, fair_pb),
+      };
+      const valid = Object.values(values).filter(v => v !== null && v > 0 && isFinite(v));
+      if (!valid.length) return null;
+      const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
+      const min = Math.min(...valid), max = Math.max(...valid);
+      const { models, marginText } = mk(values, avg);
+      return { fairValueRange: `${formatCurrency(min)} — ${formatCurrency(max)}`, fairValueDetail: `المتوسط: ${formatCurrency(avg)} | السيناريو: ${scenLabel}`, fairValueAvg: avg, marginText, models };
+    }
+
+    // ═══ إعادة حساب كل السجل بالمعادلة المحدّثة (المدخلات لا تتغيّر) ═══
+    async function recomputeAllHistory() {
+      if (!_history.length) { showToast('لا توجد عمليات في السجل', 'info'); return; }
+      if (!await confirmAsync(`إعادة حساب ${_history.length} عملية بالمعادلة المحدّثة من مدخلاتها الأصلية؟\n\nالمدخلات لا تتغيّر — فقط النتائج المحفوظة تُحدَّث.`)) return;
+      let changed = 0, failed = 0;
+      _history.forEach(entry => {
+        const res = recomputeResults(entry.inputs);
+        if (!res) { failed++; return; }
+        const before = entry.results ? entry.results.fairValueAvg : null;
+        entry.results = res;
+        if (before == null || Math.abs((+before || 0) - (res.fairValueAvg || 0)) > 0.001) changed++;
+      });
+      await persistHistory();
+      renderHistory();
+      showToast(`✅ أُعيد حساب السجل — ${changed} نتيجة تغيّرت${failed ? ` · ${failed} تعذّرت (مدخلات ناقصة)` : ''}`, 'success');
+    }
+
+    // ═══ تصدير كل العمليات الحسابية إلى CSV (كل المدخلات + النتائج) ═══
+    function exportHistoryCSV() {
+      if (!_history.length) { showToast('لا توجد عمليات للتصدير', 'info'); return; }
+      const inputKeys = new Set();
+      _history.forEach(e => Object.keys(e.inputs || {}).forEach(k => inputKeys.add(k)));
+      const ik = [...inputKeys];
+      const header = ['id', 'التاريخ', ...ik, 'القيمة_العادلة_المدى', 'المتوسط_الرقمي', 'هامش_الأمان', 'النماذج'];
+      const cell = v => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      const rows = _history.map(e => {
+        const inp = e.inputs || {}, res = e.results || {};
+        const models = (res.models || []).map(m => `${m.name}=${m.value}`).join(' ; ');
+        return [e.id, e.date, ...ik.map(k => inp[k]), res.fairValueRange, res.fairValueAvg, res.marginText, models].map(cell).join(',');
+      });
+      const csv = '﻿' + [header.map(cell).join(','), ...rows].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `valuation-history-${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      showToast(`✅ صُدِّرت ${_history.length} عملية إلى CSV`, 'success');
     }
 
     // ── البحث التلقائي عن اسم الشركة من قاعدة بيانات الأسهم ──
