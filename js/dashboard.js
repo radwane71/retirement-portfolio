@@ -260,7 +260,7 @@ async function loadAllData() {
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     supabaseClient.from('sector_targets').select('sector, target_pct'),
     supabaseClient.from('portfolio_cash').select('amount, updated_at').limit(1).maybeSingle(),
-    supabaseClient.from('portfolio_tasks').select('type, ticker, status, trim_from').eq('status', 'active'),
+    supabaseClient.from('portfolio_tasks').select('type, ticker, status, accumulate_at, trim_from, liquidate_above').eq('status', 'active'),
     supabaseClient.from('user_stocks').select('ticker, name')
   ]);
 
@@ -283,6 +283,8 @@ async function loadAllData() {
     if (!stockTaskMap[t.ticker]) stockTaskMap[t.ticker] = t.type;
     if (!trimZonesMap[t.ticker] && t.trim_from != null) trimZonesMap[t.ticker] = +t.trim_from;
   });
+  // تطبيق قيم portfolio_tasks فوق stockZones (المصدر الصحيح للمناطق)
+  // يُنفَّذ بعد بناء stockZones من stock_targets أدناه — سيُعاد التطبيق هناك
   // الأسهم المخطط لها = user_stocks غير الموجودة في الحيازات الفعلية
   plannedTickers = {};
   const _heldSet = new Set((rH.data || []).map(h => h.ticker));
@@ -307,12 +309,19 @@ async function loadAllData() {
     _loadCashFromLS(); // fallback للـ localStorage (أو قيمة صفر إن لم يوجد)
   }
 
-  // بناء خريطة الأهداف — stock_targets هو المصدر الأساسي
+  // بناء خريطة الأهداف — stock_targets للنسب، portfolio_tasks للمناطق السعرية
   stockTargets = {};
   stockZones   = {};
   (rSt.data || []).forEach(r => {
     stockTargets[r.ticker] = +r.target_pct;
     stockZones[r.ticker]   = { entry_price: r.entry_price ?? null, exit_price: r.exit_price ?? null };
+  });
+  // portfolio_tasks هو المصدر الصحيح للمناطق السعرية — يُطغى على stock_targets
+  (rTasks?.data || []).forEach(t => {
+    if (!t.ticker) return;
+    if (!stockZones[t.ticker]) stockZones[t.ticker] = { entry_price: null, exit_price: null };
+    if (t.accumulate_at   != null) stockZones[t.ticker].entry_price = +t.accumulate_at;
+    if (t.liquidate_above != null) stockZones[t.ticker].exit_price  = +t.liquidate_above;
   });
   holdings.forEach(h => {
     if (stockTargets[h.ticker] !== undefined) h.target_weight = stockTargets[h.ticker];
@@ -605,15 +614,24 @@ async function loadAllData() {
 }
 
 async function reloadHoldings() {
-  const [{ data: hData }, { data: stData }] = await Promise.all([
+  const [{ data: hData }, { data: stData }, { data: taskData }] = await Promise.all([
     supabaseClient.from('holdings').select('*').order('ticker'),
-    supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price')
+    supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
+    supabaseClient.from('portfolio_tasks').select('ticker, accumulate_at, trim_from, liquidate_above').eq('status', 'active'),
   ]);
   stockTargets = {};
   stockZones   = {};
+  trimZonesMap = {};
   (stData || []).forEach(r => {
     stockTargets[r.ticker] = +r.target_pct;
     stockZones[r.ticker]   = { entry_price: r.entry_price ?? null, exit_price: r.exit_price ?? null };
+  });
+  (taskData || []).forEach(t => {
+    if (!t.ticker) return;
+    if (!stockZones[t.ticker]) stockZones[t.ticker] = { entry_price: null, exit_price: null };
+    if (t.accumulate_at   != null) stockZones[t.ticker].entry_price = +t.accumulate_at;
+    if (t.liquidate_above != null) stockZones[t.ticker].exit_price  = +t.liquidate_above;
+    if (t.trim_from       != null && !trimZonesMap[t.ticker]) trimZonesMap[t.ticker] = +t.trim_from;
   });
   holdings = (hData || []).map(h => {
     if (stockTargets[h.ticker] !== undefined) h.target_weight = stockTargets[h.ticker];
