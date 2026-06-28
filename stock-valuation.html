@@ -25,6 +25,12 @@
     .ig input:focus, .ig select:focus { outline: none; border-color: var(--primary); }
     .ig select option { background: var(--bg-2); }
     .ig .hint { font-size: 0.75rem; color: var(--text-muted); margin-top: 4px; line-height: 1.4; }
+    .unit-tag { display:inline-block; background:var(--accent-dim,rgba(99,102,241,.15)); color:var(--accent,#6366f1);
+                font-size:0.68rem; font-weight:700; padding:1px 7px; border-radius:10px; margin-inline-start:6px;
+                vertical-align:middle; white-space:nowrap; }
+    .calc-grid textarea { width:100%; padding:9px 11px; background:var(--bg-1); border:1px solid var(--border);
+                border-radius:7px; color:var(--text); font-size:0.9rem; font-family:'Tajawal',sans-serif; resize:vertical; min-height:80px; }
+    .calc-grid textarea:focus { outline:none; border-color:var(--primary); }
     .cg label { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: 0.88rem; cursor: pointer; }
     .cg input[type="checkbox"] { cursor: pointer; transform: scale(1.15);   accent-color: var(--accent);
 }
@@ -227,37 +233,37 @@
         </div>
 
         <div id="normalCompanyInputs">
-          <div class="ig"><label>الربح للسهم (EPS) <button class="help-icon" onclick="showHelp('eps')">ℹ️</button></label><input type="number" id="eps" value="5.0" step="0.01"></div>
-          <div class="ig"><label>التدفق النقدي الحر للسهم (FCF) <button class="help-icon" onclick="showHelp('fcf')">ℹ️</button></label><input type="number" id="fcf" value="3.0" step="0.1"></div>
+          <div class="ig"><label>الربح للسهم (EPS) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('eps')">ℹ️</button></label><input type="number" id="eps" value="5.0" step="0.01"></div>
+          <div class="ig"><label>التدفق النقدي الحر للسهم (FCF) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('fcf')">ℹ️</button></label><input type="number" id="fcf" value="3.0" step="0.1"></div>
           <div class="ig">
-            <label>الدين الصافي للسهم <button class="help-icon" onclick="showHelp('netDebt')">ℹ️</button></label>
+            <label>الدين الصافي للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('netDebt')">ℹ️</button></label>
             <input type="number" id="netDebt" value="0" step="0.1">
             <p class="hint">= (إجمالي الديون − النقد) ÷ عدد الأسهم. سالب إذا كانت الشركة نقدية صافية.</p>
           </div>
         </div>
 
         <div id="reitInputs" style="display:none;">
-          <div class="ig"><label>صافي قيمة الأصول الإجمالية NAV (بالريال) <button class="help-icon" onclick="showHelp('nav')">ℹ️</button></label><input type="number" id="nav" value="500000000" step="1000000" min="0"><p class="hint">أدخل القيمة الإجمالية بالريال. مثال: 500 مليون → 500000000</p></div>
-          <div class="ig"><label>عدد وحدات الريت <button class="help-icon" onclick="showHelp('totalUnits')">ℹ️</button></label><input type="number" id="totalUnits" value="10000000" step="100000" min="1"></div>
-          <div class="ig"><label>التدفقات النقدية التشغيلية للوحدة (FFO) <button class="help-icon" onclick="showHelp('ffo')">ℹ️</button></label><input type="number" id="ffo" value="8.0" step="0.1" min="0"></div>
-          <div class="ig"><label>مضاعف P/FFO العادل <button class="help-icon" onclick="showHelp('pffoMultiple')">ℹ️</button></label><input type="number" id="pffoMultiple" value="12" step="0.5" min="1" max="40"><p class="hint">الريتات السعودية: 10–16x</p></div>
-          <div class="ig"><label>معدل الرسملة العقارية Cap Rate (%) <button class="help-icon" onclick="showHelp('capRate')">ℹ️</button></label><input type="number" id="capRate" value="8.0" step="0.1" min="0.1" max="30"></div>
-          <div class="ig"><label>إجمالي الديون (بالريال) <button class="help-icon" onclick="showHelp('totalDebt')">ℹ️</button></label><input type="number" id="totalDebt" value="0" step="1000" min="0"></div>
+          <div class="ig"><label>إجمالي قيمة الأصول العقارية (قبل خصم الدين) <span class="unit-tag">ر.س إجمالي</span> <button class="help-icon" onclick="showHelp('nav')">ℹ️</button></label><input type="number" id="nav" value="500000000" step="1000000" min="0"><p class="hint">القيمة الإجمالية للأصول بالريال قبل الدين (المعادلة تطرح «إجمالي الديون» تلقائياً). مثال: 500 مليون → 500000000</p></div>
+          <div class="ig"><label>عدد وحدات الريت <span class="unit-tag">وحدة</span> <button class="help-icon" onclick="showHelp('totalUnits')">ℹ️</button></label><input type="number" id="totalUnits" value="10000000" step="100000" min="1"></div>
+          <div class="ig"><label>التدفقات النقدية التشغيلية للوحدة (FFO) <span class="unit-tag">ر.س/وحدة</span> <button class="help-icon" onclick="showHelp('ffo')">ℹ️</button></label><input type="number" id="ffo" value="8.0" step="0.1" min="0"></div>
+          <div class="ig"><label>مضاعف P/FFO العادل <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('pffoMultiple')">ℹ️</button></label><input type="number" id="pffoMultiple" value="12" step="0.5" min="1" max="40"><p class="hint">الريتات السعودية: 10–16x</p></div>
+          <div class="ig"><label>معدل الرسملة العقارية Cap Rate <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('capRate')">ℹ️</button></label><input type="number" id="capRate" value="8.0" step="0.1" min="0.1" max="30"></div>
+          <div class="ig"><label>إجمالي الديون <span class="unit-tag">ر.س إجمالي</span> <button class="help-icon" onclick="showHelp('totalDebt')">ℹ️</button></label><input type="number" id="totalDebt" value="0" step="1000" min="0"></div>
         </div>
 
-        <div class="ig"><label>نسبة النمو للسنوات 5 القادمة (%) <button class="help-icon" onclick="showHelp('growth5yr')">ℹ️</button></label><input type="number" id="growth5yr" value="10.0" step="0.1" min="0"></div>
+        <div class="ig"><label>نسبة النمو للسنوات 5 القادمة <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('growth5yr')">ℹ️</button></label><input type="number" id="growth5yr" value="10.0" step="0.1" min="0"></div>
         <div class="ig">
-          <label>نسبة النمو الدائم (%) — max 3% <button class="help-icon" onclick="showHelp('growthPerp')">ℹ️</button></label>
+          <label>نسبة النمو الدائم — max 3% <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('growthPerp')">ℹ️</button></label>
           <input type="number" id="growthPerp" value="2.5" step="0.1" min="0" max="3" oninput="validateGrowthPerp()">
           <div id="growthPerpWarning">⚠️ النمو الدائم لا يتجاوز 3% — تم التصحيح تلقائياً</div>
         </div>
-        <div class="ig"><label>معدل الخصم WACC (%) <button class="help-icon" onclick="showHelp('discountRate')">ℹ️</button></label><input type="number" id="discountRate" value="8.0" step="0.1" min="0.1"></div>
-        <div class="ig"><label>مكرر الربحية الحالي P/E <button class="help-icon" onclick="showHelp('currentPe')">ℹ️</button></label><input type="number" id="currentPe" value="15.0" step="0.1" min="0"></div>
-        <div class="ig"><label>مكرر ربحية القطاع <button class="help-icon" onclick="showHelp('sectorPe')">ℹ️</button></label><input type="number" id="sectorPe" value="18.0" step="0.1" min="0"></div>
-        <div class="ig"><label>توزيعات الأرباح السنوية للسهم <button class="help-icon" onclick="showHelp('dividends')">ℹ️</button></label><input type="number" id="dividends" value="1.0" step="0.1" min="0"></div>
-        <div class="ig"><label>القيمة الدفترية للسهم <button class="help-icon" onclick="showHelp('bookValue')">ℹ️</button></label><input type="number" id="bookValue" value="20.0" step="0.1" min="0"></div>
-        <div class="ig"><label>عائد السندات الحكومية 10 سنوات (%) <button class="help-icon" onclick="showHelp('bondYield')">ℹ️</button></label><input type="number" id="bondYield" value="6.5" step="0.1" min="0.1" max="30"></div>
-        <div class="ig"><label>السعر الحالي للسهم <button class="help-icon" onclick="showHelp('currentPrice')">ℹ️</button></label><input type="number" id="currentPrice" value="50.0" step="0.1" min="0"></div>
+        <div class="ig"><label>معدل الخصم WACC <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('discountRate')">ℹ️</button></label><input type="number" id="discountRate" value="8.0" step="0.1" min="0.1"></div>
+        <div class="ig"><label>مكرر الربحية الحالي P/E <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('currentPe')">ℹ️</button></label><input type="number" id="currentPe" value="15.0" step="0.1" min="0"></div>
+        <div class="ig"><label>مكرر ربحية القطاع <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('sectorPe')">ℹ️</button></label><input type="number" id="sectorPe" value="18.0" step="0.1" min="0"></div>
+        <div class="ig"><label>توزيعات الأرباح السنوية للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('dividends')">ℹ️</button></label><input type="number" id="dividends" value="1.0" step="0.1" min="0"></div>
+        <div class="ig"><label>القيمة الدفترية للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('bookValue')">ℹ️</button></label><input type="number" id="bookValue" value="20.0" step="0.1" min="0"></div>
+        <div class="ig"><label>عائد السندات الحكومية 10 سنوات <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('bondYield')">ℹ️</button></label><input type="number" id="bondYield" value="6.5" step="0.1" min="0.1" max="30"></div>
+        <div class="ig"><label>السعر الحالي للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('currentPrice')">ℹ️</button></label><input type="number" id="currentPrice" value="50.0" step="0.1" min="0"></div>
       </div>
 
       <!-- بطاقة الإعدادات المتقدمة -->
@@ -265,29 +271,35 @@
         <div class="section-hdr">⚙️ الإعدادات المتقدمة</div>
         <div class="ig cg"><label><input type="checkbox" id="useWacc"> حساب WACC تلقائياً <button class="help-icon" onclick="showHelp('useWacc')">ℹ️</button></label></div>
         <div id="waccInputs" style="display:none;">
-          <div class="ig"><label>معدل العائد الخالي من المخاطر (%) <button class="help-icon" onclick="showHelp('riskFree')">ℹ️</button></label><input type="number" id="riskFree" value="4.0" step="0.1" min="0"></div>
-          <div class="ig"><label>بيتا Beta <button class="help-icon" onclick="showHelp('beta')">ℹ️</button></label><input type="number" id="beta" value="1.2" step="0.05" min="0"></div>
-          <div class="ig"><label>عائد السوق المتوقع (%) <button class="help-icon" onclick="showHelp('marketReturn')">ℹ️</button></label><input type="number" id="marketReturn" value="8.0" step="0.1" min="0"></div>
-          <div class="ig"><label>تكلفة الدين (%) <button class="help-icon" onclick="showHelp('debtCost')">ℹ️</button></label><input type="number" id="debtCost" value="5.0" step="0.1" min="0"></div>
-          <div class="ig"><label>معدل الضريبة (%) <button class="help-icon" onclick="showHelp('taxRate')">ℹ️</button></label><input type="number" id="taxRate" value="20.0" step="0.1" min="0" max="100"></div>
-          <div class="ig"><label>نسبة الدين إلى حقوق الملكية D/E <button class="help-icon" onclick="showHelp('debtEquity')">ℹ️</button></label><input type="number" id="debtEquity" value="0.5" step="0.05" min="0"></div>
+          <div class="ig"><label>معدل العائد الخالي من المخاطر <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('riskFree')">ℹ️</button></label><input type="number" id="riskFree" value="4.0" step="0.1" min="0"></div>
+          <div class="ig"><label>بيتا Beta <span class="unit-tag">معامل (بلا وحدة)</span> <button class="help-icon" onclick="showHelp('beta')">ℹ️</button></label><input type="number" id="beta" value="1.2" step="0.05" min="0"></div>
+          <div class="ig"><label>عائد السوق المتوقع <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('marketReturn')">ℹ️</button></label><input type="number" id="marketReturn" value="8.0" step="0.1" min="0"></div>
+          <div class="ig"><label>تكلفة الدين <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('debtCost')">ℹ️</button></label><input type="number" id="debtCost" value="5.0" step="0.1" min="0"></div>
+          <div class="ig"><label>معدل الضريبة <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('taxRate')">ℹ️</button></label><input type="number" id="taxRate" value="20.0" step="0.1" min="0" max="100"></div>
+          <div class="ig"><label>نسبة الدين إلى حقوق الملكية D/E <span class="unit-tag">نسبة ×</span> <button class="help-icon" onclick="showHelp('debtEquity')">ℹ️</button></label><input type="number" id="debtEquity" value="0.5" step="0.05" min="0"></div>
         </div>
         <div class="ig">
           <label>السيناريو <button class="help-icon" onclick="showHelp('scenario')">ℹ️</button></label>
           <select id="scenario"><option value="realistic">واقعي</option><option value="optimistic">متفائل (+2%)</option><option value="conservative">محتاط (-2%)</option></select>
         </div>
-        <div class="ig"><label>مكرر القيمة الدفترية العادل P/B <button class="help-icon" onclick="showHelp('fairPb')">ℹ️</button></label><input type="number" id="fairPb" value="1.5" step="0.1" min="0.1"></div>
+        <div class="ig"><label>مكرر القيمة الدفترية العادل P/B <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('fairPb')">ℹ️</button></label><input type="number" id="fairPb" value="1.5" step="0.1" min="0.1"></div>
 
         <div class="section-hdr" style="margin-top:16px;">🎯 نطاقات تحليل الحساسية (DCF)</div>
-        <div class="ig"><label>الحد الأدنى للنمو (%) <button class="help-icon" onclick="showHelp('growthMin')">ℹ️</button></label><input type="number" id="growthMin" value="5.0" step="0.1" min="0"></div>
-        <div class="ig"><label>الحد الأعلى للنمو (%) <button class="help-icon" onclick="showHelp('growthMax')">ℹ️</button></label><input type="number" id="growthMax" value="15.0" step="0.1" min="0"></div>
-        <div class="ig"><label>الحد الأدنى للخصم (%) <button class="help-icon" onclick="showHelp('discountMin')">ℹ️</button></label><input type="number" id="discountMin" value="6.0" step="0.1" min="0.1"></div>
-        <div class="ig"><label>الحد الأعلى للخصم (%) <button class="help-icon" onclick="showHelp('discountMax')">ℹ️</button></label><input type="number" id="discountMax" value="12.0" step="0.1" min="0.1"></div>
+        <div class="ig"><label>الحد الأدنى للنمو <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('growthMin')">ℹ️</button></label><input type="number" id="growthMin" value="5.0" step="0.1" min="0"></div>
+        <div class="ig"><label>الحد الأعلى للنمو <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('growthMax')">ℹ️</button></label><input type="number" id="growthMax" value="15.0" step="0.1" min="0"></div>
+        <div class="ig"><label>الحد الأدنى للخصم <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('discountMin')">ℹ️</button></label><input type="number" id="discountMin" value="6.0" step="0.1" min="0.1"></div>
+        <div class="ig"><label>الحد الأعلى للخصم <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('discountMax')">ℹ️</button></label><input type="number" id="discountMax" value="12.0" step="0.1" min="0.1"></div>
 
         <div class="section-hdr" style="margin-top:16px;">📐 النسب المالية (للعرض)</div>
-        <div class="ig"><label>نسبة الدين (%) <button class="help-icon" onclick="showHelp('debtRatio')">ℹ️</button></label><input type="number" id="debtRatio" value="30.0" step="0.1" min="0"></div>
-        <div class="ig"><label>نسبة السيولة <button class="help-icon" onclick="showHelp('liquidityRatio')">ℹ️</button></label><input type="number" id="liquidityRatio" value="1.5" step="0.1" min="0"></div>
-        <div class="ig"><label>جودة الأرباح ROE (%) <button class="help-icon" onclick="showHelp('earningsQuality')">ℹ️</button></label><input type="number" id="earningsQuality" value="15.0" step="0.1" min="0"></div>
+        <div class="ig"><label>نسبة الدين <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('debtRatio')">ℹ️</button></label><input type="number" id="debtRatio" value="30.0" step="0.1" min="0"></div>
+        <div class="ig"><label>نسبة السيولة <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('liquidityRatio')">ℹ️</button></label><input type="number" id="liquidityRatio" value="1.5" step="0.1" min="0"></div>
+        <div class="ig"><label>جودة الأرباح ROE <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('earningsQuality')">ℹ️</button></label><input type="number" id="earningsQuality" value="15.0" step="0.1" min="0"></div>
+
+        <!-- تقييم Perplexity — نص حر يُحفظ مع العملية في السجل -->
+        <div class="ig" style="margin-top:16px;">
+          <label>تقييم Perplexity <span class="unit-tag">نص</span> <button class="help-icon" onclick="showHelp('perplexity')">ℹ️</button></label>
+          <textarea id="perplexityEval" placeholder="الصق هنا تقييم/تحليل Perplexity للسهم — يُحفظ مع هذه العملية في السجل."></textarea>
+        </div>
 
         <button class="calc-btn" onclick="calculateFairValue()">احسب القيمة العادلة</button>
       </div>
@@ -394,7 +406,7 @@
       eps:         { title: 'الربح للسهم (EPS)',         body: '<p>صافي ربح الشركة ÷ عدد الأسهم. يستخدم في نماذج جراهام و P/E.</p><p><strong>أين تجده:</strong> موقع تداول → البيانات المالية → الربح للسهم.</p>' },
       fcf:         { title: 'التدفق النقدي الحر للسهم',  body: '<p>النقد المتاح بعد النفقات التشغيلية والاستثمارية. الأساس في نموذج DCF.</p><p>حساب: التدفق التشغيلي − نفقات رأس المال</p>' },
       netDebt:     { title: 'الدين الصافي للسهم',        body: '<p>= (إجمالي الديون − النقد والمعادلات) ÷ عدد الأسهم.</p><p>يُطرح من قيمة المنشأة (EV) للوصول إلى قيمة حقوق الملكية الفعلية.</p><p>إذا كان النقد أكبر من الديون، أدخل قيمة سالبة (مثال: −5).</p>' },
-      nav:         { title: 'NAV — صافي قيمة الأصول',   body: '<p>إجمالي قيمة أصول الريت بالسوق بالريال. يُقسم على عدد الوحدات بعد طرح الديون.</p>' },
+      nav:         { title: 'إجمالي قيمة الأصول (قبل الدين)', body: '<p>إجمالي قيمة أصول الريت بالسوق بالريال — <strong>قبل</strong> خصم الدين. المعادلة تطرح «إجمالي الديون» ثم تقسم على عدد الوحدات. لا تُدخل قيمة صافية هنا حتى لا يُطرح الدين مرتين.</p>' },
       totalUnits:  { title: 'عدد وحدات الريت',           body: '<p>عدد الوحدات الاستثمارية المصدرة. يُستخدم لتحويل NAV الإجمالي إلى NAV للوحدة.</p>' },
       ffo:         { title: 'FFO — التدفق النقدي التشغيلي', body: '<p>معيار أساسي لتقييم الريتات. يقيس التدفق النقدي بعد خصم الديون وبدون الاستهلاك.</p>' },
       pffoMultiple:{ title: 'مضاعف P/FFO العادل',        body: '<p>يشبه P/E للأسهم العادية. الريتات السعودية: 10–14x عادة. ريتات النمو: 14–18x.</p>' },
@@ -426,6 +438,7 @@
       liquidityRatio:{ title: 'نسبة السيولة',            body: '<p>&lt; 1 خطر | 1-1.5 مقبول | &gt; 1.5 جيد.</p>' },
       earningsQuality:{ title: 'ROE',                    body: '<p>&lt; 10% ضعيف | 10-15% جيد | &gt; 15% ممتاز.</p>' },
       companyType: { title: 'نوع الشركة',                body: '<p><strong>شركة عادية:</strong> DCF + جراهام + P/E + Gordon + القيمة الدفترية.</p><p><strong>ريت عقاري:</strong> NAV للوحدة + مضاعف P/FFO.</p>' },
+      perplexity:  { title: 'تقييم Perplexity',          body: '<p>حقل نصّي حر لتدوين تقييم/تحليل Perplexity (أو أي مصدر) لهذا السهم. لا يدخل في الحساب — يُحفظ مع العملية في السجل للرجوع إليه لاحقاً.</p>' },
     };
 
     function showHelp(field) {
@@ -788,6 +801,7 @@
         debtRatio:       document.getElementById('debtRatio').value,
         liquidityRatio:  document.getElementById('liquidityRatio').value,
         earningsQuality: document.getElementById('earningsQuality').value,
+        perplexityEval:  (document.getElementById('perplexityEval').value || '').trim(),
       };
       if (companyType === 'reit') {
         Object.assign(base, {
@@ -830,8 +844,17 @@
       showHistSaving(false);
     }
 
+    // تهريب HTML لأي نص حر يُعرَض في السجل (تقييم Perplexity وغيره)
+    function escHist(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+        ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+    }
+
     async function deleteHistoryItem(id) {
-      _history = _history.filter(e => e.id !== id);
+      const e = _history.find(x => x.id === id);
+      const lbl = e?.inputs?.ticker ? ` لـ «${e.inputs.ticker}»` : '';
+      if (!await confirmAsync(`هل تريد حذف هذه العملية${lbl}؟ لا يمكن التراجع.`)) return;
+      _history = _history.filter(x => x.id !== id);
       renderHistory();
       await persistHistory();
     }
@@ -900,7 +923,7 @@
         : `${_history.length} عملية محفوظة`;
 
       if (!filtered.length) {
-        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">لا توجد عمليات مطابقة لـ «${_histSearch}»</div>`;
+        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">لا توجد عمليات مطابقة لـ «${escHist(_histSearch)}»</div>`;
         return;
       }
 
@@ -912,9 +935,14 @@
         const stockName  = inp.stockName || '';
 
         const inputsHtml = Object.entries(inp)
-          .filter(([k]) => !['companyType','useWacc','scenario','ticker','stockName'].includes(k))
-          .map(([k,v]) => `<div class="hist-inp"><span>${INPUT_LABELS[k]||k}:</span><span>${v}</span></div>`)
+          .filter(([k]) => !['companyType','useWacc','scenario','ticker','stockName','perplexityEval'].includes(k))
+          .map(([k,v]) => `<div class="hist-inp"><span>${INPUT_LABELS[k]||k}:</span><span>${escHist(v)}</span></div>`)
           .join('');
+
+        const perplexityHtml = inp.perplexityEval
+          ? `<div style="margin-top:12px;"><div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:4px;">🔍 تقييم Perplexity:</div>
+               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;padding:10px;">${escHist(inp.perplexityEval)}</div></div>`
+          : '';
 
         const modelsHtml = res.models?.length
           ? `<div style="overflow-x:auto;"><table class="hist-models-tbl">
@@ -943,6 +971,7 @@
             <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;margin-top:10px;">📥 المدخلات:</div>
             <div class="hist-inputs-grid">${inputsHtml}</div>
             ${modelsHtml}
+            ${perplexityHtml}
           </div>
         </div>`;
       }).join('');
