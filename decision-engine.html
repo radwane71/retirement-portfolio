@@ -49,6 +49,17 @@
     .de-const b { display:block; font-size:1.05rem; color:var(--accent); }
     .de-const small { color:var(--text-muted); }
 
+    .de-legend-row { display:flex; flex-wrap:wrap; gap:16px; }
+    .de-leg { font-size:.84rem; color:var(--text); display:flex; align-items:center; gap:7px; }
+    .de-dot { display:inline-block; width:11px; height:11px; border-radius:50%; flex-shrink:0; }
+    .de-thresholds { margin-top:10px; font-size:.8rem; color:var(--text-muted);
+                     border-top:1px solid var(--border); padding-top:10px; }
+    .de-thresholds a { color:var(--accent); }
+    tr.de-row-red    td:first-child { box-shadow: inset 3px 0 0 #ef4444; }
+    tr.de-row-yellow td:first-child { box-shadow: inset 3px 0 0 #f59e0b; }
+    tr.de-row-add    td:first-child,
+    tr.de-row-green  td:first-child { box-shadow: inset 3px 0 0 #10b981; }
+
     .de-card-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
     .de-card-grid .full { grid-column:1 / -1; }
     .de-card-meta { background:var(--bg-2); border:1px solid var(--border); border-radius:10px;
@@ -139,26 +150,24 @@
     <div class="page-header">
       <div class="page-header-text">
         <h1>🧭 محرّك القرار</h1>
-        <p>يطبّق دستور المحفظة آلياً على بياناتك الحيّة — احتفظ / قصّ / أضف / خروج، مع السبب مربوطاً بالقاعدة</p>
+        <p>تنبيهات آلية لكل سهم حسب وزنه وخطة أسعاره وعتباتك اللونية — تصفية · تخفيف · تجميع · احتفاظ، مع سبب كل قرار</p>
       </div>
       <button class="btn btn-secondary btn-sm" onclick="exportActionsCSV()">⬇ تصدير الإجراءات CSV</button>
     </div>
 
-    <!-- ── الثوابت والقواعد ── -->
+    <!-- ── دليل القراءة: الألوان + العتبات ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">القواعد الثابتة المُطبَّقة
+        <span class="section-title">كيف تُقرأ هذه الصفحة؟
           <button class="info-btn" type="button" onclick="showCardInfo('decisionEngine')" title="كيف يعمل المحرّك؟" style="position:static;opacity:.7">ⓘ</button>
         </span>
       </div>
-      <div class="de-const-grid">
-        <div class="de-const"><b>7% / 12%</b><small>سقف السهم العادي / القيادي</small></div>
-        <div class="de-const"><b>25%</b><small>سقف القطاع الواحد</small></div>
-        <div class="de-const"><b>خطة الأسعار</b><small>تجميع/تخفيف/تصفية من المهام</small></div>
-        <div class="de-const"><b>أرامكو 29</b><small>تخفيض الوزن إلى 12%</small></div>
-        <div class="de-const"><b>المواساة 85</b><small>trigger بيع</small></div>
-        <div class="de-const"><b>18–25</b><small>حجم المحفظة المستهدف</small></div>
+      <div class="de-legend-row">
+        <span class="de-leg"><span class="de-dot" style="background:#ef4444"></span> أحمر: إجراء — تصفية أو تخفيف حادّ</span>
+        <span class="de-leg"><span class="de-dot" style="background:#f59e0b"></span> أصفر: تنبيه — اقترب من تجاوز الهدف</span>
+        <span class="de-leg"><span class="de-dot" style="background:#10b981"></span> أخضر: تجميع أو ضمن الهدف</span>
       </div>
+      <div id="de-thresholds" class="de-thresholds"></div>
     </div>
 
     <!-- ── شريط الملخص ── -->
@@ -167,8 +176,8 @@
     <!-- ── جدول الإجراءات (الأولوية) ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">📋 جدول الإجراءات — مرتّب بالأولوية</span>
-        <span class="small text-muted">triggers ثابتة → كسر سقف → فشل استدامة → فرص إضافة</span>
+        <span class="section-title">📋 ما الذي يحتاج إجراءً الآن؟</span>
+        <span class="small text-muted">الأعلى أهمّية في الأعلى — اضغط «بطاقة» لتفاصيل السهم</span>
       </div>
       <div class="table-wrapper">
         <table>
@@ -315,9 +324,10 @@
             1️⃣ <b>بوابة الاستدامة</b> — فشل = تصفية بغض النظر عن السعر<br>
             2️⃣ <b>خطة الأسعار (من المهام)</b> — تجميع عند ≤ · تخفيف من–إلى · تصفية فوق<br>
             3️⃣ <b>سعر التصفية</b> — تجاوز السعر حدّ التصفية → تصفية فوراً<br>
-            4️⃣ <b>هدف الوزن الفردي</b> — الوزن &gt; هدف السهم → تخفيف للهدف<br>
+            4️⃣ <b>هدف الوزن الفردي + عتبات الألوان</b> — الانحراف ضمن الأخضر لا يُنبّه، الأصفر تنبيه، الأحمر إجراء<br>
             5️⃣ <b>الأولوية</b> — triggers الثابتة فوق الكل، وأي حدّ ينكسر يفرض التخفيف
           </div>
+          <p class="info-note" style="margin-top:8px">🎨 عتبات الألوان (انحراف الوزن عن الهدف) تُضبَط من <a href="settings.html" style="color:var(--accent)">الإعدادات</a> وتنطبق فوراً — غيّرها متى شئت.</p>
           <p class="info-note">⚙️ السعر الحالي من لوحة التحكم، وخطة الأسعار (تجميع/تخفيف/تصفية) من صفحة <a href="tasks.html" style="color:var(--accent)">مهام المحفظة</a>. الاستدامة وعلم القيادي تُدخَل لكل سهم عبر زر ⚙️. أي بيان ناقص يُعلَن «غير متوفرة». سقف القطاع 25% يُفحَص على مستوى المحفظة لا على السهم الفردي.</p>`
       },
     };

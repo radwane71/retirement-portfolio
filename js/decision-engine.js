@@ -161,11 +161,19 @@ function evaluateHolding(h, ctx) {
   if (sus.status === 'unknown') gaps.push('بوابة الاستدامة');
   const note = specialNoteOf(h);
 
+  // انحراف الوزن عن الهدف الفردي، مصنّفاً حسب عتبات الألوان من الإعدادات.
+  // (أخضر = ضمن الهدف فلا تنبيه · أصفر = تنبيه · أحمر = إجراء)
+  const thr = ctx.thresholds;
+  const dev = weight - targetWeight;                 // + فوق الهدف / − تحته
+  const absDev = Math.abs(dev);
+  const devBand = absDev <= thr.green ? 'green' : absDev <= thr.yellow ? 'yellow' : 'red';
+  const devTxt = `${dev >= 0 ? '+' : '−'}${formatNum(absDev)} نقطة`;
+
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector,
     weight, cap, price, value, assetType, zones,
     sustain: sus, targetWeight, gaps, specialNote: note,
-    blueChip: isBlueChip(h),
+    blueChip: isBlueChip(h), dev, devBand, severity: 'green',
   };
 
   // ── P0: triggers الثابتة — فوق كل شي (الدستور §5) ──
@@ -174,70 +182,77 @@ function evaluateHolding(h, ctx) {
     base.trigger = { ...trig, fired: trig.cmp === 'gte' ? price >= trig.price : price <= trig.price };
     if (base.trigger.fired) {
       if (trig.kind === 'sell') {
-        return { ...base, action: 'exit', label: 'تصفية', priority: 0,
+        return { ...base, action: 'exit', label: 'تصفية', priority: 0, severity: 'red',
           reason: `trigger ثابت: ${trig.label} — انطبق (السعر ${formatNum(price)} ${trig.cmp === 'gte' ? '≥' : '≤'} ${trig.price})` };
       }
       // reduce → تخفيف لإرجاع الوزن لهدف الـtrigger
       const cutTo = trig.toWeight;
       return { ...base, action: weight > cutTo ? 'trim' : 'hold',
         label: weight > cutTo ? `تخفيف إلى ${cutTo}%` : 'احتفاظ',
-        cutToWeight: cutTo, priority: 0,
+        cutToWeight: cutTo, priority: 0, severity: weight > cutTo ? 'red' : 'green',
         reason: `trigger ثابت: ${trig.label} — انطبق (السعر ${formatNum(price)} ≤ ${trig.price})` };
     }
   }
 
   // ── P1: بوابة الاستدامة (الفلتر 1) — فشل = تصفية بغض النظر عن السعر ──
   if (sus.status === 'fail') {
-    return { ...base, action: 'exit', label: 'تصفية', priority: 1,
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
       reason: `فشل بوابة الاستدامة (الفلتر 1): ${sus.reason}` };
   }
 
   // ── P1: سعر التصفية (تضخّم) من المهام — تجاوز الحدّ يفرض التصفية فوراً ──
   if (zones && zones.liquidate && priceOk && price > zones.liquidate) {
-    return { ...base, action: 'exit', label: 'تصفية', priority: 1,
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
       reason: `سعر التضخّم (المهام): السعر ${formatNum(price)} تجاوز حدّ التصفية ${formatNum(zones.liquidate)} → بيع كامل` };
   }
 
-  // ── P2: تجاوز هدف الوزن الفردي (الفلتر 4) — يفرض التخفيف للهدف ──
-  const overWeight = weight > targetWeight + 0.05; // مقارنة بهدف السهم الفردي
   // ── P2: نطاق التخفيف من المهام (الفلتر 3) — السعر دخل نطاق بيع الزائد ──
   const inTrimBand = zones && zones.trimFrom && priceOk && price >= zones.trimFrom;
+  // ── P2: تجاوز هدف الوزن — فقط خارج العتبة الخضراء (لا تنبيه على فروق تافهة) ──
+  const overWeight = dev > thr.green; // أصفر أو أحمر فوق الهدف
 
   if (overWeight || inTrimBand) {
-    // أي حدّ ينكسر أول يفرض التخفيف (الدستور §5). هدف الوزن يحكم نسبة التخفيف.
     const reasons = [];
-    if (overWeight) reasons.push(`تجاوز هدف الوزن (الفلتر 4): الوزن ${formatNum(weight)}% > الهدف ${formatNum(targetWeight)}%`);
     if (inTrimBand) {
       const to = zones.trimTo ? `–${formatNum(zones.trimTo)}` : '';
       reasons.push(`نطاق التخفيف (المهام): السعر ${formatNum(price)} ≥ ${formatNum(zones.trimFrom)}${to} → بيع الزائد`);
     }
-    return { ...base, action: 'trim',
-      label: overWeight ? `تخفيف لإرجاع الوزن إلى ${formatNum(targetWeight)}%` : 'تخفيف (نطاق السعر)',
-      cutToWeight: overWeight ? targetWeight : null, priority: 2,
+    if (overWeight) reasons.push(`الوزن ${formatNum(weight)}% مقابل الهدف ${formatNum(targetWeight)}% (انحراف ${devTxt}، عتبة ${devBand === 'red' ? 'حمراء' : 'صفراء'})`);
+    // اللون: نطاق السعر = أحمر (سعر صريح)، أو لون عتبة الوزن
+    const severity = inTrimBand ? 'red' : devBand;
+    const label = inTrimBand
+      ? 'تخفيف (نطاق السعر)'
+      : severity === 'red'
+        ? `تخفيف لإرجاع الوزن إلى ${formatNum(targetWeight)}%`
+        : `تنبيه: اقترب من تجاوز الهدف (${formatNum(weight)}%)`;
+    return { ...base, action: 'trim', severity,
+      label, cutToWeight: overWeight ? targetWeight : null,
+      priority: severity === 'red' ? 2 : 2.5,
       reason: reasons.join(' | ') };
   }
 
-  // ── P3: تجميع من المهام (الفلتر 3) — السعر ≤ حدّ التجميع + استدامة سليمة + وزن تحت الهدف ──
+  // ── P3: تجميع من المهام (الفلتر 3) — السعر ≤ حدّ التجميع + استدامة سليمة + وزن تحت الهدف بعتبة ──
   const inBuyZone = zones && zones.accumulate && priceOk && sus.status === 'pass'
       && price <= zones.accumulate
-      && weight < targetWeight - 0.05;
+      && dev < -thr.green; // تحت الهدف خارج العتبة الخضراء
   if (inBuyZone) {
     if (!hasExplicitTarget) {
       // الهدف الفردي للسهم غير محدَّد، والشراء «مشروط مو آلي». بلا نسبة هدف
       // صريحة لا تُطلَق توصية تجميع آلية — يُعرَض كمرشّح مع إرشاد لضبط الهدف.
       return { ...base, action: 'hold', label: 'مرشّح تجميع (يحتاج هدف)', priority: 4,
-        buyZone: true,
+        buyZone: true, severity: 'yellow',
         reason: `في منطقة التجميع (السعر ${formatNum(price)} ≤ حدّ التجميع ${formatNum(zones.accumulate)}) + استدامة سليمة، لكن لا يوجد هدف فردي مسجَّل. حدّد هدف السهم في صفحة «أهداف الأسهم» لتفعيل توصية التجميع (§4: الشراء مشروط مو آلي)` };
     }
-    return { ...base, action: 'add', label: 'تجميع (مشروط)', priority: 3,
-      reason: `منطقة تجميع (المهام): السعر ${formatNum(price)} ≤ حدّ التجميع ${formatNum(zones.accumulate)} + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}%` };
+    return { ...base, action: 'add', label: 'تجميع (مشروط)', priority: 3, severity: 'add',
+      reason: `منطقة تجميع (المهام): السعر ${formatNum(price)} ≤ حدّ التجميع ${formatNum(zones.accumulate)} + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}% (انحراف ${devTxt})` };
   }
 
-  // ── احتفاظ ──
+  // ── احتفاظ ── (ضمن العتبة الخضراء أو لا قاعدة انطبقت)
   let holdReason;
-  if (gaps.length) holdReason = `احتفاظ — لا قاعدة تخفيف/تصفية انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
-  else             holdReason = 'احتفاظ — ضمن هدف الوزن وخطة الأسعار، الاستدامة سليمة';
-  return { ...base, action: 'hold', label: 'احتفاظ', priority: 9, reason: holdReason };
+  if (gaps.length)            holdReason = `احتفاظ — لا قاعدة انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
+  else if (devBand !== 'green') holdReason = `احتفاظ — الانحراف ${devTxt} ضمن المتابعة، لا قاعدة سعر/استدامة انطبقت`;
+  else                        holdReason = `احتفاظ — الوزن ضمن العتبة الخضراء (انحراف ${devTxt})، الاستدامة سليمة`;
+  return { ...base, action: 'hold', label: 'احتفاظ', priority: 9, severity: 'green', reason: holdReason };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -281,14 +296,24 @@ async function loadAll() {
   });
 }
 
+// عتبات ألوان التنبيهات من الإعدادات (نفس مفاتيح لوحة التحكم) — قابلة للتغيير
+// أخضر = انحراف ضمن الهدف · أصفر = تنبيه · أحمر = إجراء. تُقرأ كل تشغيل فتتأقلم.
+function alertThresholds() {
+  const g = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const y = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  return { green: isFinite(g) && g > 0 ? g : 1, yellow: isFinite(y) && y > 0 ? y : 3 };
+}
+
 // ══════════════════════════════════════════════════════════════════════
 // تشغيل المحرّك + الرسم
 // ══════════════════════════════════════════════════════════════════════
 function runEngine() {
   const totalValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  const thresholds = alertThresholds();
   // قرار كل سهم فردي يعتمد على وزنه وهدفه الفرديين فقط — سقف القطاع 25%
   // يُفحَص على مستوى المحفظة في قسم منفصل (renderSectorCheck)، لا يُطبَّق على السهم.
-  const ctx = { totalValue };
+  const ctx = { totalValue, thresholds };
+  window._deThresholds = thresholds;
 
   _results = holdings.map(h => evaluateHolding(h, ctx));
 
@@ -300,6 +325,14 @@ function runEngine() {
 
 // ── شريط ملخص علوي: عدّ الإجراءات + فجوات البيانات ──
 function renderSummaryStrip(totalValue) {
+  // عرض العتبات الفعّالة (من الإعدادات) فوق الجدول
+  const thEl = document.getElementById('de-thresholds');
+  const t = window._deThresholds || { green: 1, yellow: 3 };
+  if (thEl) thEl.innerHTML = `عتباتك الحالية لانحراف الوزن عن الهدف: ` +
+    `<strong style="color:#10b981">ضمن ±${formatNum(t.green)}% أخضر</strong> · ` +
+    `<strong style="color:#f59e0b">حتى ±${formatNum(t.yellow)}% أصفر</strong> · ` +
+    `<strong style="color:#ef4444">أكثر أحمر</strong> — تُغيَّر من <a href="settings.html">الإعدادات</a>.`;
+
   const el = document.getElementById('de-summary');
   if (!el) return;
   const n = (a) => _results.filter(r => r.action === a).length;
@@ -331,10 +364,10 @@ function renderActionTable() {
     return;
   }
   tbody.innerHTML = actionable.map(r => `
-    <tr>
+    <tr class="de-row-${r.severity || 'green'}">
       <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
       <td><strong>${r.ticker}</strong><br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}%</span></td>
+      <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}% (${r.dev>=0?'+':'−'}${formatNum(Math.abs(r.dev))})</span></td>
       <td>${formatNum(r.price)}</td>
       <td class="small">${zonesText(r.zones) ? escapeHtmlSafe(zonesText(r.zones)) : '<span class="text-muted">غير متوفرة</span>'}</td>
       <td class="de-reason">${escapeHtmlSafe(r.reason)}</td>
@@ -381,11 +414,12 @@ function renderAllTable() {
       ? `<span class="small">${escapeHtmlSafe(zt)}</span>`
       : '<span class="text-muted">غير متوفرة</span>';
     const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
+    const devColor = { red: '#ef4444', yellow: '#f59e0b' }[r.devBand] || 'var(--text-muted)';
     return `
-    <tr>
+    <tr class="de-row-${r.severity || 'green'}">
       <td><strong>${r.ticker}</strong> ${r.blueChip ? '<span title="سهم قيادي — سقف 12%">⭐</span>' : ''}${noteTag}<br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
       <td>${escapeHtmlSafe(ASSET_LABEL[r.assetType])}<br><span class="small text-muted">${escapeHtmlSafe(SUSTAIN_METRIC[r.assetType])}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}%</span></td>
+      <td>${formatNum(r.weight)}%<br><span class="small" style="color:${devColor}">الهدف ${formatNum(r.targetWeight)}% (${r.dev>=0?'+':'−'}${formatNum(Math.abs(r.dev))})</span></td>
       <td>${formatNum(r.price)}</td>
       <td>${fvCell}</td>
       <td>${susBadge}</td>
@@ -399,8 +433,11 @@ function renderAllTable() {
 function badgeClass(action) {
   return { exit: 'de-b-exit', trim: 'de-b-trim', add: 'de-b-add', hold: 'de-b-hold' }[action] || 'de-b-hold';
 }
-// شارة النتيجة: مرشّح منطقة الشراء (يحتاج هدف) له لون مميّز
-function badgeFor(r) { return r.buyZone ? 'de-b-watch' : badgeClass(r.action); }
+// لون الشارة حسب درجة الخطورة (عتبات الألوان): أحمر/أصفر/تجميع/أخضر
+function badgeFor(r) {
+  if (r.buyZone) return 'de-b-watch';
+  return { red: 'de-b-exit', yellow: 'de-b-trim', add: 'de-b-add', green: 'de-b-hold' }[r.severity] || 'de-b-hold';
+}
 function escapeHtmlSafe(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
     ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
