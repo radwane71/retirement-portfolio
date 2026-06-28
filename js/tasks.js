@@ -140,8 +140,7 @@ function buildCard(t) {
   const liqVal  = t.liquidate_above;
 
   if (accVal)   priceRows.push(`<div class="vc-price-row"><span class="pr-label">🟢 تجميع عند ≤</span><span class="pr-val pr-acc">${formatSAR(accVal)}</span></div>`);
-  if (trimFrom) priceRows.push(`<div class="vc-price-row"><span class="pr-label">⚖️ تخفيف من</span><span class="pr-val pr-trim">${formatSAR(trimFrom)}</span></div>`);
-  if (trimTo)   priceRows.push(`<div class="vc-price-row"><span class="pr-label">⚖️ تخفيف إلى</span><span class="pr-val pr-trim">${formatSAR(trimTo)}</span></div>`);
+  if (trimFrom) priceRows.push(`<div class="vc-price-row"><span class="pr-label">⚖️ تخفيف عند</span><span class="pr-val pr-trim">${formatSAR(trimFrom)}</span></div>`);
   if (liqVal)   priceRows.push(`<div class="vc-price-row"><span class="pr-label">🔴 متضخّم — تصفية فوق</span><span class="pr-val pr-liq">${formatSAR(liqVal)}</span></div>`);
 
   const pricesHtml = priceRows.length
@@ -195,12 +194,11 @@ function openValModal(id = null) {
     document.getElementById('task-notes').value     = t.notes  || '';
     document.getElementById('task-accumulate').value= t.accumulate_at ?? t.target_price ?? '';
     document.getElementById('task-liquidate').value = t.liquidate_above ?? '';
-    document.getElementById('task-trim-from').value = t.trim_from ?? '';
-    document.getElementById('task-trim-to').value   = t.trim_to ?? '';
+    document.getElementById('task-trim').value      = t.trim_from ?? '';
   } else {
     _selectedType = null;
     document.querySelectorAll('.dec-option').forEach(o => o.classList.remove('selected'));
-    ['task-ticker','task-name','task-notes','task-accumulate','task-liquidate','task-trim-from','task-trim-to'].forEach(id => {
+    ['task-ticker','task-name','task-notes','task-accumulate','task-liquidate','task-trim'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
   }
@@ -231,6 +229,15 @@ function selectDecision(type) {
   });
 }
 
+function onLiquidateInput() {
+  const liqEl  = document.getElementById('task-liquidate');
+  const trimEl = document.getElementById('task-trim');
+  if (!liqEl || !trimEl) return;
+  const liq = +liqEl.value;
+  if (liq > 0) trimEl.value = (liq - 0.1).toFixed(2);
+  else trimEl.value = '';
+}
+
 function onTaskTickerInput() {
   const ticker = document.getElementById('task-ticker')?.value?.trim()?.toUpperCase();
   if (!ticker) return;
@@ -248,17 +255,14 @@ async function saveTask() {
   const notes     = document.getElementById('task-notes').value.trim();
   const accumulate= +document.getElementById('task-accumulate').value || null;
   const liquidate = +document.getElementById('task-liquidate').value  || null;
-  const trimFrom  = +document.getElementById('task-trim-from').value  || null;
-  const trimTo    = +document.getElementById('task-trim-to').value    || null;
+  const trimInput = +document.getElementById('task-trim').value       || null;
+  const trimFrom  = trimInput ?? (liquidate ? +(liquidate - 0.1).toFixed(2) : null);
 
   if (!ticker && !notes) { showToast('أدخل رمز السهم أو ملاحظات على الأقل', 'error'); return; }
 
-  const prices = { 'تجميع عند': accumulate, 'تصفية فوق': liquidate, 'تخفيف من': trimFrom, 'تخفيف إلى': trimTo };
+  const prices = { 'تجميع عند': accumulate, 'تصفية فوق': liquidate, 'تخفيف عند': trimFrom };
   for (const [lbl, v] of Object.entries(prices)) {
     if (v !== null && v <= 0) { showToast(`سعر «${lbl}» يجب أن يكون أكبر من صفر`, 'error'); return; }
-  }
-  if (trimFrom !== null && trimTo !== null && trimTo < trimFrom) {
-    showToast('سعر «تخفيف إلى» يجب أن يكون ≥ «تخفيف من»', 'error'); return;
   }
 
   const confirmMsg = _editingTaskId ? 'هل تريد حفظ التعديلات على التقييم؟' : 'هل تريد إضافة هذا التقييم؟';
@@ -276,7 +280,7 @@ async function saveTask() {
     accumulate_at:   accumulate,
     liquidate_above: liquidate,
     trim_from:       trimFrom,
-    trim_to:         trimTo,
+    trim_to:         null,
     status:          _editingTaskId
                      ? (_tasks.find(t => t.id === _editingTaskId)?.status || 'active')
                      : 'active',

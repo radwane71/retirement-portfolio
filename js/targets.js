@@ -5,6 +5,7 @@ let stockTargets  = {};   // ticker → target_pct
 let stockZones    = {};   // ticker → { entry_price, exit_price }
 let sectorTargets = {};   // sector → target_pct
 let taskMap       = {};   // ticker → latest active task
+let taskZonesMap  = {};   // ticker → { accumulate_at, trim_from, liquidate_above }
 let totalValue    = 0;
 
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
@@ -51,7 +52,7 @@ async function loadAll() {
     supabaseClient.from('holdings').select('*'),
     supabaseClient.from('stock_targets').select('*'),
     supabaseClient.from('sector_targets').select('*'),
-    supabaseClient.from('portfolio_tasks').select('type,ticker,status').eq('status','active'),
+    supabaseClient.from('portfolio_tasks').select('type,ticker,status,accumulate_at,trim_from,liquidate_above').eq('status','active'),
   ]);
 
   userStocks = usRes.data || [];
@@ -71,9 +72,23 @@ async function loadAll() {
   (secRes.data || []).forEach(r => { sectorTargets[r.sector] = +r.target_pct; });
 
   // آخر مهمة فعّالة لكل رمز (أول مهمة نصادفها من الأحدث)
-  taskMap = {};
+  taskMap      = {};
+  taskZonesMap = {};
   (taskRes.data || []).forEach(t => {
-    if (t.ticker && !taskMap[t.ticker]) taskMap[t.ticker] = t.type;
+    if (!t.ticker) return;
+    if (!taskMap[t.ticker]) taskMap[t.ticker] = t.type;
+    if (!taskZonesMap[t.ticker]) taskZonesMap[t.ticker] = {
+      accumulate_at:   t.accumulate_at   ?? null,
+      trim_from:       t.trim_from       ?? null,
+      liquidate_above: t.liquidate_above ?? null,
+    };
+  });
+
+  // تحديث stockZones من portfolio_tasks لضمان دقة محرك إعادة التوازن
+  Object.entries(taskZonesMap).forEach(([ticker, tz]) => {
+    if (!stockZones[ticker]) stockZones[ticker] = {};
+    if (tz.accumulate_at)   stockZones[ticker].entry_price = tz.accumulate_at;
+    if (tz.liquidate_above) stockZones[ticker].exit_price  = tz.liquidate_above;
   });
 
   renderStockTargets();
@@ -120,7 +135,7 @@ function alertStatus(current, target) {
 // ── حساب ومراقبة إجمالي أهداف الأسهم ──────────────────────
 function updateStockTotal() {
   let sum = 0;
-  document.querySelectorAll('#stock-targets-tbody .target-input:not(.zone-input)')
+  document.querySelectorAll('#stock-targets-tbody .target-input')
     .forEach(inp => { sum += +(inp.value) || 0; });
 
   const totalEl = document.getElementById('stock-total-pct');
@@ -149,7 +164,7 @@ function updateStockTotal() {
 
 function updateStockTargetSumInFooter() {
   let sum = 0;
-  document.querySelectorAll('#stock-targets-tbody .target-input:not(.zone-input)')
+  document.querySelectorAll('#stock-targets-tbody .target-input')
     .forEach(inp => { sum += +(inp.value) || 0; });
   const el = document.getElementById('stock-target-sum');
   if (el) {
@@ -159,21 +174,13 @@ function updateStockTargetSumInFooter() {
 }
 
 function attachStockListeners() {
-  // حقول النسبة المئوية فقط (بدون مناطق الشراء/البيع)
-  document.querySelectorAll('#stock-targets-tbody .target-input:not(.zone-input)').forEach(inp => {
+  document.querySelectorAll('#stock-targets-tbody .target-input').forEach(inp => {
     inp.addEventListener('input', () => {
       let v = +(inp.value);
       if (v < 0)   { inp.value = 0;   v = 0; }
       if (v > 100) { inp.value = 100; v = 100; }
       updateStockTotal();
       updateStockTargetSumInFooter();
-    });
-  });
-  // حقول مناطق الشراء/البيع (أسعار — بدون cap عند 100)
-  document.querySelectorAll('#stock-targets-tbody .zone-input').forEach(inp => {
-    inp.addEventListener('input', () => {
-      let v = +(inp.value);
-      if (v < 0) inp.value = 0;
     });
   });
   updateStockTotal();
@@ -315,8 +322,9 @@ function renderStockTargets() {
         case 'ticker':  av = a.ticker;  bv = b.ticker;  break;
         case 'name':    av = a.name;    bv = b.name;    break;
         case 'sector':  av = a.sector;  bv = b.sector;  break;
-        case 'entry':   av = +(aZone.entry_price||0);  bv = +(bZone.entry_price||0);  break;
-        case 'exit':    av = +(aZone.exit_price||0);   bv = +(bZone.exit_price||0);   break;
+        case 'entry':   av = +(taskZonesMap[a.ticker]?.accumulate_at||0);   bv = +(taskZonesMap[b.ticker]?.accumulate_at||0);   break;
+        case 'trim':    av = +(taskZonesMap[a.ticker]?.trim_from||0);       bv = +(taskZonesMap[b.ticker]?.trim_from||0);       break;
+        case 'exit':    av = +(taskZonesMap[a.ticker]?.liquidate_above||0); bv = +(taskZonesMap[b.ticker]?.liquidate_above||0); break;
         case 'target':  av = stockTargets[a.ticker]||0; bv = stockTargets[b.ticker]||0; break;
         case 'current': av = getStockWeight(a.ticker); bv = getStockWeight(b.ticker); break;
         case 'status': {
@@ -346,26 +354,23 @@ function renderStockTargets() {
 
   tbody.innerHTML = allStocks.map(s => {
     const target   = stockTargets[s.ticker] || 0;
-    const zone     = stockZones[s.ticker]   || {};
+    const tz       = taskZonesMap[s.ticker] || {};
     const current  = getStockWeight(s.ticker);   // 0 للمخطط
     const al       = s.planned ? { cls: 'text-muted', icon: '📌', label: 'مخطط', rowCls: 'planned-row' }
                                 : alertStatus(current, target);
     const barPct   = s.planned ? 0 : Math.min(current / (target || 1) * 100, 200);
     const barColor = al.cls === 'text-success' ? '#22c55e' : al.cls === 'text-accent' ? '#f0b429' : '#f85149';
 
+    const fmtZone = v => v ? `<span class="num small">${formatSAR(v)}</span>` : `<span class="text-muted small">—</span>`;
+
     return `<tr class="${al.rowCls || ''}">
       <td>${taskBadgeHtml(s.ticker)}</td>
       <td><strong class="text-accent">${esc(s.ticker)}</strong></td>
       <td>${esc(s.name)}</td>
       <td class="small text-muted">${esc(s.sector)}</td>
-      <td>
-        <input class="target-input zone-input" type="number" min="0" step="0.01"
-               id="ep-${esc(s.ticker)}" value="${zone.entry_price ?? ''}" placeholder="—">
-      </td>
-      <td>
-        <input class="target-input zone-input" type="number" min="0" step="0.01"
-               id="xp-${esc(s.ticker)}" value="${zone.exit_price ?? ''}" placeholder="—">
-      </td>
+      <td>${fmtZone(tz.accumulate_at)}</td>
+      <td style="color:var(--accent)">${fmtZone(tz.trim_from)}</td>
+      <td>${fmtZone(tz.liquidate_above)}</td>
       <td>
         <input class="target-input" type="number" min="0" max="100" step="0.1"
                id="st-${esc(s.ticker)}" value="${target || ''}" placeholder="0">
@@ -387,14 +392,14 @@ function renderStockTargets() {
   tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
     <td></td>
     <td colspan="3"><strong class="small">إجمالي الأوزان الحالية</strong></td>
-    <td colspan="2"></td>
+    <td colspan="3"></td>
     <td class="small text-muted">الهدف الإجمالي: <span id="stock-target-sum">—</span></td>
     <td class="num bold ${currCls}">${totalCurrentPct.toFixed(2)}%</td>
     <td colspan="2"><span class="small text-muted">${Math.abs(totalCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalCurrentPct - 100) < 1 ? '≈ 100%' : totalCurrentPct < 100 ? 'بقي ' + (100 - totalCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalCurrentPct - 100).toFixed(2) + '%'}</span></td>
   </tr>`;
 
   // تحديث سهام الترتيب في الهيدر
-  ['ticker','name','sector','entry','exit','target','current','status'].forEach(f => {
+  ['ticker','name','sector','entry','trim','exit','target','current','status'].forEach(f => {
     const el = document.getElementById('st-arr-' + f);
     if (el) el.outerHTML = _stArrow(f).replace('class="sort-arrow', `id="st-arr-${f}" class="sort-arrow`);
   });
@@ -557,26 +562,14 @@ async function saveAllTargets() {
     ...userStocks.filter(s => !holdingTickers.has(s.ticker)).map(s => s.ticker),
   ];
 
-  // تحقق: منطقة الشراء < منطقة البيع
-  const zoneErrors = allTickers.filter(ticker => {
-    const ep = +document.getElementById('ep-' + ticker)?.value || 0;
-    const xp = +document.getElementById('xp-' + ticker)?.value || 0;
-    return ep > 0 && xp > 0 && ep >= xp;
-  });
-  if (zoneErrors.length) {
-    showToast(`⛔ خطأ في المناطق: ${zoneErrors.join('، ')} — منطقة الشراء يجب أن تكون أقل من منطقة البيع`, 'error');
-    return;
-  }
-
   const rows = allTickers.map(ticker => {
-    const epVal = document.getElementById('ep-' + ticker)?.value;
-    const xpVal = document.getElementById('xp-' + ticker)?.value;
+    const tz = taskZonesMap[ticker] || {};
     return {
       user_id:     user.id,
       ticker,
       target_pct:  +(document.getElementById('st-' + ticker)?.value || 0),
-      entry_price: epVal ? +epVal : null,
-      exit_price:  xpVal ? +xpVal : null,
+      entry_price: tz.accumulate_at   ?? null,
+      exit_price:  tz.liquidate_above ?? null,
     };
   });
 

@@ -395,16 +395,12 @@
           <input type="number" id="task-accumulate" step="0.01" min="0" placeholder="شراء إضافي عند هذا السعر أو أقل">
         </div>
         <div class="form-group">
-          <label>⚖️ تخفيف من سعر (ر.س)</label>
-          <input type="number" id="task-trim-from" step="0.01" min="0" placeholder="بداية بيع الزائد">
-        </div>
-        <div class="form-group">
-          <label>⚖️ تخفيف إلى سعر (ر.س)</label>
-          <input type="number" id="task-trim-to" step="0.01" min="0" placeholder="نهاية نطاق التخفيف">
-        </div>
-        <div class="form-group">
           <label>🔴 متضخّم مالياً — تصفية فوق (ر.س)</label>
-          <input type="number" id="task-liquidate" step="0.01" min="0" placeholder="سعر التضخّم المالي">
+          <input type="number" id="task-liquidate" step="0.01" min="0" placeholder="سعر التضخّم المالي" oninput="onLiquidateInput()">
+        </div>
+        <div class="form-group">
+          <label>⚖️ تخفيف عند (ر.س) <span class="small text-muted">— يُحسب تلقائياً: تصفية − 0.1</span></label>
+          <input type="number" id="task-trim" step="0.01" min="0" placeholder="يُملأ تلقائياً من سعر التصفية">
         </div>
       </div>
 
