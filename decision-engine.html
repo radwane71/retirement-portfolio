@@ -36,6 +36,9 @@
     .de-b-add  { background:rgba(16,185,129,.15); color:#10b981; }
     .de-b-hold { background:var(--bg-3, rgba(148,163,184,.15)); color:var(--text-muted); }
     .de-b-watch{ background:rgba(139,92,246,.15); color:#8b5cf6; }
+    .de-b-monitor{ background:rgba(59,130,246,.15); color:#3b82f6; }
+    .de-stat-monitor .de-stat-num { color:#3b82f6; }
+    tr.de-row-monitor td:first-child { box-shadow: inset 3px 0 0 #3b82f6; }
 
     .de-reason { font-size:.82rem; line-height:1.5; color:var(--text); max-width:420px; }
     .de-alert-line { padding:8px 12px; border-radius:8px; background:rgba(245,158,11,.10);
@@ -165,6 +168,7 @@
       <div class="de-legend-row">
         <span class="de-leg"><span class="de-dot" style="background:#ef4444"></span> أحمر: إجراء — تصفية أو تخفيف حادّ</span>
         <span class="de-leg"><span class="de-dot" style="background:#f59e0b"></span> أصفر: تنبيه — اقترب من تجاوز الهدف</span>
+        <span class="de-leg"><span class="de-dot" style="background:#3b82f6"></span> أزرق: مراقبة — قلق مؤقت أو بقرارك</span>
         <span class="de-leg"><span class="de-dot" style="background:#10b981"></span> أخضر: تجميع أو ضمن الهدف</span>
       </div>
       <div id="de-thresholds" class="de-thresholds"></div>
@@ -263,29 +267,33 @@
 
           <div class="form-group full" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
             <label style="font-weight:700;color:var(--accent)">بوابة الاستدامة (الفلتر 1)</label>
+            <small class="text-muted" style="display:block;font-size:.74rem;margin-top:2px">«ضعف ربع واحد» → مراقبة فقط · «مزمن/مؤكّد» → تصفية</small>
           </div>
           <div class="form-group">
-            <label>التوزيع مغطّى بالمقياس الصحيح؟</label>
+            <label>تغطية التوزيع</label>
             <select id="de-card-covered">
               <option value="">— غير متوفر —</option>
-              <option value="yes">نعم — مغطّى</option>
-              <option value="no">لا — غير مغطّى</option>
+              <option value="covered">✅ مغطّى</option>
+              <option value="weak">🟡 ضعف ربع واحد</option>
+              <option value="uncovered">🔴 غير مغطّى مزمن</option>
             </select>
           </div>
           <div class="form-group">
-            <label>الأساسيات سليمة / EPS موجب؟</label>
+            <label>الأساسيات / EPS</label>
             <select id="de-card-healthy">
               <option value="">— غير متوفر —</option>
-              <option value="yes">نعم — سليمة</option>
-              <option value="no">لا — متدهورة</option>
+              <option value="healthy">✅ سليمة</option>
+              <option value="soft">🟡 ضعف ربع واحد</option>
+              <option value="deteriorating">🔴 تدهور مستمر</option>
             </select>
           </div>
           <div class="form-group">
-            <label>إشارة قطع/خفض توزيع؟</label>
+            <label>إشارة التوزيع</label>
             <select id="de-card-cut">
               <option value="">— غير متوفر —</option>
-              <option value="no">لا — مستقر</option>
-              <option value="yes">نعم — قطع/خفض</option>
+              <option value="stable">✅ مستقر</option>
+              <option value="temp">🟡 تأجيل/تخفيف مؤقت</option>
+              <option value="cut">🔴 قطع مؤكّد</option>
             </select>
           </div>
           <div class="form-group full">
@@ -321,7 +329,7 @@
         body: `
           <p>المحرّك يطبّق دستور محفظتك (CLAUDE.md) على بياناتك الحيّة — لا يجتهد ولا يتخذ قراراً من نفسه. يطبّق الفلاتر بالترتيب الإجباري:</p>
           <div class="info-math">
-            1️⃣ <b>بوابة الاستدامة</b> — فشل = تصفية بغض النظر عن السعر<br>
+            1️⃣ <b>بوابة الاستدامة المتدرّجة</b> — قلق ربع واحد = مراقبة · تدهور مؤكّد/مزمن = تصفية<br>
             2️⃣ <b>خطة الأسعار (من المهام)</b> — تجميع عند ≤ · تخفيف من–إلى · تصفية فوق<br>
             3️⃣ <b>سعر التصفية</b> — تجاوز السعر حدّ التصفية → تصفية فوراً<br>
             4️⃣ <b>هدف الوزن الفردي + عتبات الألوان</b> — الانحراف ضمن الأخضر لا يُنبّه، الأصفر تنبيه، الأحمر إجراء<br>

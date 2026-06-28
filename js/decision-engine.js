@@ -40,6 +40,7 @@ const ENGINE_STORE_KEY = 'decision_engine_v1';
 let holdings   = [];   // من جدول holdings
 let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
 let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
+let taskTypes  = {};   // ticker → نوع المهمة (monitoring/accumulation/…) — قرار المالك
 let engineCfg    = {}; // ticker → مدخلات المحرّك اليدوية (استدامة/قيادي/نوع/عادلة يدوية)
 let _results     = []; // مخرجات التقييم لكل سهم (للتصدير)
 
@@ -82,32 +83,38 @@ function isBlueChip(h) {
 function capOf(h) { return isBlueChip(h) ? CAPS.blueChip : CAPS.single; }
 
 // ══════════════════════════════════════════════════════════════════════
-// بوابة الاستدامة (الفلتر 1) — ثلاثة أسئلة الدستور §4
-//   covered  = هل التوزيع مغطّى بالمقياس الصحيح؟  (yes/no/unknown)
-//   healthy  = هل الأساسيات سليمة / EPS موجب؟       (yes/no/unknown)
-//   cut      = هل في إشارة قطع توزيع أو تدهور؟       (yes/no/unknown)
-// النتيجة: fail لو أي إجابة سلبية | pass لو الكل سليم | unknown لو ناقص
+// بوابة الاستدامة (الفلتر 1) — ثلاثة محاور، كل واحد على 3 مستويات:
+//   التغطية:    covered (سليم) | weak (ضعف ربع واحد) | uncovered (مزمن)
+//   الأساسيات:  healthy (سليم) | soft (ضعف ربع) | deteriorating (تدهور مستمر)
+//   إشارة القطع: stable (مستقر) | temp (تأجيل/تخفيف مؤقت) | cut (قطع مؤكّد)
+// النتيجة (حدّث العاقل بما يعقل):
+//   fail  = تدهور مؤكّد/مزمن (مستوى أحمر بأي محور) → يستحق التصفية
+//   watch = قلق مؤقت (ربع واحد، مستوى أصفر) → القرار الأمثل: مراقبة لا تصفية
+//   pass  = كل المحاور سليمة | unknown = بيانات ناقصة
+// (توافق رجعي: قيم yes/no القديمة تُترجَم لمستوى أصفر «مراقبة» لا أحمر)
 // ══════════════════════════════════════════════════════════════════════
 function sustainabilityOf(h) {
   const cfg = engineCfg[h.ticker] || {};
-  const covered = cfg.divCovered;   // 'yes' | 'no' | undefined
-  const healthy = cfg.fundHealthy;  // 'yes' | 'no' | undefined
-  const cut     = cfg.divCut;       // 'yes' | 'no' | undefined
+  const cov = cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
+  const fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
+  const sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
 
-  if (covered === 'no' || healthy === 'no' || cut === 'yes') {
-    return { status: 'fail', reason: failReason(covered, healthy, cut) };
-  }
-  if (covered === 'yes' && healthy === 'yes' && cut === 'no') {
+  const structural = [];
+  if (cov === 'uncovered')     structural.push('التوزيع غير مغطّى بشكل مزمن');
+  if (fun === 'deteriorating') structural.push('تدهور أساسيات مستمر / EPS سالب متكرر');
+  if (sig === 'cut')           structural.push('قطع توزيع مؤكّد');
+  if (structural.length) return { status: 'fail', reason: structural.join('، ') };
+
+  const soft = [];
+  if (cov === 'weak') soft.push('ضعف تغطية التوزيع في ربع واحد');
+  if (fun === 'soft') soft.push('ضعف ربع واحد بالأساسيات');
+  if (sig === 'temp') soft.push('تأجيل/تخفيف توزيع مؤقت');
+  if (soft.length) return { status: 'watch', reason: soft.join('، ') };
+
+  if (cov === 'covered' && fun === 'healthy' && sig === 'stable') {
     return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع' };
   }
   return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة' };
-}
-function failReason(covered, healthy, cut) {
-  const f = [];
-  if (covered === 'no') f.push('التوزيع غير مغطّى');
-  if (healthy === 'no') f.push('أساسيات متدهورة / EPS سالب');
-  if (cut === 'yes')    f.push('إشارة قطع/خفض توزيع');
-  return f.join('، ');
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -169,9 +176,12 @@ function evaluateHolding(h, ctx) {
   const devBand = absDev <= thr.green ? 'green' : absDev <= thr.yellow ? 'yellow' : 'red';
   const devTxt = `${dev >= 0 ? '+' : '−'}${formatNum(absDev)} نقطة`;
 
+  const taskType = taskTypes[h.ticker] || null; // قرار المالك من صفحة المهام
+  const userWatching = taskType === 'monitoring';
+
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector,
-    weight, cap, price, value, assetType, zones,
+    weight, cap, price, value, assetType, zones, taskType,
     sustain: sus, targetWeight, gaps, specialNote: note,
     blueChip: isBlueChip(h), dev, devBand, severity: 'green',
   };
@@ -194,16 +204,26 @@ function evaluateHolding(h, ctx) {
     }
   }
 
-  // ── P1: بوابة الاستدامة (الفلتر 1) — فشل = تصفية بغض النظر عن السعر ──
-  if (sus.status === 'fail') {
-    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
-      reason: `فشل بوابة الاستدامة (الفلتر 1): ${sus.reason}` };
-  }
-
-  // ── P1: سعر التصفية (تضخّم) من المهام — تجاوز الحدّ يفرض التصفية فوراً ──
+  // ── P1: سعر التصفية (تضخّم) من المهام — قرار بيع صريح، يسبق إشارات الاستدامة ──
   if (zones && zones.liquidate && priceOk && price > zones.liquidate) {
     return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
       reason: `سعر التضخّم (المهام): السعر ${formatNum(price)} تجاوز حدّ التصفية ${formatNum(zones.liquidate)} → بيع كامل` };
+  }
+
+  // ── P1: بوابة الاستدامة (الفلتر 1) — متدرّجة، لا تصفية على فشل ربع واحد ──
+  // تدهور مؤكّد/مزمن = تصفية. لكن لو واضعه «مراقبة» بقرارك → نحترم قرارك ونراقب.
+  if (sus.status === 'fail') {
+    if (userWatching) {
+      return { ...base, action: 'monitor', label: 'مراقبة', priority: 1.5, severity: 'monitor',
+        reason: `تدهور مؤكّد بالاستدامة (${sus.reason}) — لكنك واضعه تحت «المراقبة» بقرارك في المهام، فالقرار: راقب ولا تصفِّ بعد` };
+    }
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
+      reason: `تدهور مؤكّد/مزمن ببوابة الاستدامة (الفلتر 1): ${sus.reason}` };
+  }
+  // قلق مؤقت (ربع واحد) → مراقبة، لا تصفية (حدّث العاقل بما يعقل)
+  if (sus.status === 'watch') {
+    return { ...base, action: 'monitor', label: 'مراقبة', priority: 1.5, severity: 'monitor',
+      reason: `تنبيه استدامة مؤقت (${sus.reason}) — القرار الأمثل مراقبة لا تصفية؛ تأكّد من ربع آخر قبل أي إجراء` };
   }
 
   // ── P2: نطاق التخفيف من المهام (الفلتر 3) — السعر دخل نطاق بيع الزائد ──
@@ -247,6 +267,12 @@ function evaluateHolding(h, ctx) {
       reason: `منطقة تجميع (المهام): السعر ${formatNum(price)} ≤ حدّ التجميع ${formatNum(zones.accumulate)} + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}% (انحراف ${devTxt})` };
   }
 
+  // ── مراقبة بقرارك ── لو واضعه «مراقبة» في المهام ولا قاعدة أقوى انطبقت
+  if (userWatching) {
+    return { ...base, action: 'monitor', label: 'مراقبة', priority: 5, severity: 'monitor',
+      reason: `تحت المراقبة بقرارك (مهمة «مراقبة») — لا قاعدة سعر/وزن/استدامة تفرض إجراءً الآن` };
+  }
+
   // ── احتفاظ ── (ضمن العتبة الخضراء أو لا قاعدة انطبقت)
   let holdReason;
   if (gaps.length)            holdReason = `احتفاظ — لا قاعدة انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
@@ -272,7 +298,7 @@ async function loadAll() {
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
     supabaseClient.from('portfolio_tasks')
-      .select('ticker, accumulate_at, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
+      .select('ticker, type, accumulate_at, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
       .eq('status', 'active').order('updated_at', { ascending: false }),
   ]);
 
@@ -281,8 +307,9 @@ async function loadAll() {
   (rT.data || []).forEach(r => { stockTargets[r.ticker] = r; });
   engineCfg = rEng || {};
 
-  // خطة الأسعار لكل رمز من المهام النشطة — أحدث مهمة فيها سعر هي المرجع
+  // خطة الأسعار + نوع المهمة لكل رمز من المهام النشطة — أحدث مهمة هي المرجع
   taskZones = {};
+  taskTypes = {};
   (rTasks.data || []).forEach(t => {
     const tk = (t.ticker || '').trim().toUpperCase();
     if (!tk || taskZones[tk]) return; // مرتّبة بالأحدث → أول ظهور هو الأحدث
@@ -293,6 +320,7 @@ async function loadAll() {
       trimTo:     num(t.trim_to),
       liquidate:  num(t.liquidate_above),
     };
+    taskTypes[tk] = t.type || null;
   });
 }
 
@@ -344,6 +372,7 @@ function renderSummaryStrip(totalValue) {
   el.innerHTML = `
     <div class="de-stat de-stat-exit"><div class="de-stat-num">${n('exit')}</div><div class="de-stat-lbl">تصفية</div></div>
     <div class="de-stat de-stat-trim"><div class="de-stat-num">${n('trim')}</div><div class="de-stat-lbl">تخفيف</div></div>
+    <div class="de-stat de-stat-monitor"><div class="de-stat-num">${n('monitor')}</div><div class="de-stat-lbl">مراقبة</div></div>
     <div class="de-stat de-stat-add"><div class="de-stat-num">${n('add')}</div><div class="de-stat-lbl">تجميع</div></div>
     <div class="de-stat de-stat-hold"><div class="de-stat-num">${n('hold')}</div><div class="de-stat-lbl">احتفاظ</div></div>
     <div class="de-stat"><div class="de-stat-num">${count} <span style="font-size:.6em;color:${sizeOk?'#10b981':'#f59e0b'}">${sizeOk?'✓':'⚠'}</span></div><div class="de-stat-lbl">عدد الأسهم (الهدف ${PORTFOLIO_SIZE.min}–${PORTFOLIO_SIZE.max})</div></div>
@@ -408,7 +437,7 @@ function renderAllTable() {
   }
   const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   tbody.innerHTML = sorted.map(r => {
-    const susBadge = { pass: '🟢 سليمة', fail: '🔴 فاشلة', unknown: '⚪ غير متوفرة' }[r.sustain.status];
+    const susBadge = { pass: '🟢 سليمة', watch: '🟡 قلق مؤقت', fail: '🔴 تدهور مؤكّد', unknown: '⚪ غير متوفرة' }[r.sustain.status];
     const zt = zonesText(r.zones);
     const fvCell = zt
       ? `<span class="small">${escapeHtmlSafe(zt)}</span>`
@@ -433,10 +462,10 @@ function renderAllTable() {
 function badgeClass(action) {
   return { exit: 'de-b-exit', trim: 'de-b-trim', add: 'de-b-add', hold: 'de-b-hold' }[action] || 'de-b-hold';
 }
-// لون الشارة حسب درجة الخطورة (عتبات الألوان): أحمر/أصفر/تجميع/أخضر
+// لون الشارة حسب درجة الخطورة (عتبات الألوان): أحمر/أصفر/مراقبة/تجميع/أخضر
 function badgeFor(r) {
   if (r.buyZone) return 'de-b-watch';
-  return { red: 'de-b-exit', yellow: 'de-b-trim', add: 'de-b-add', green: 'de-b-hold' }[r.severity] || 'de-b-hold';
+  return { red: 'de-b-exit', yellow: 'de-b-trim', monitor: 'de-b-monitor', add: 'de-b-add', green: 'de-b-hold' }[r.severity] || 'de-b-hold';
 }
 function escapeHtmlSafe(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
@@ -461,9 +490,9 @@ function openStockCard(ticker) {
 
   setSelect('de-card-assettype', cfg.assetType || '');
   setSelect('de-card-bluechip', cfg.blueChip === true ? 'yes' : cfg.blueChip === false ? 'no' : '');
-  setSelect('de-card-covered', cfg.divCovered || '');
-  setSelect('de-card-healthy', cfg.fundHealthy || '');
-  setSelect('de-card-cut', cfg.divCut || '');
+  setSelect('de-card-covered', cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered]  || '');
+  setSelect('de-card-healthy', cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy] || '');
+  setSelect('de-card-cut',     cfg.divSignal    || ({ no: 'stable', yes: 'temp' })[cfg.divCut]       || '');
   document.getElementById('de-card-notes').value = cfg.notes || '';
 
   // خطة الأسعار مصدرها صفحة المهام — تُعرَض للقراءة فقط هنا
@@ -493,10 +522,12 @@ async function saveStockCard(e) {
   cfg.assetType   = v('de-card-assettype') || undefined;
   const bc = v('de-card-bluechip');
   cfg.blueChip    = bc === 'yes' ? true : bc === 'no' ? false : undefined;
-  cfg.divCovered  = v('de-card-covered') || undefined;
-  cfg.fundHealthy = v('de-card-healthy') || undefined;
-  cfg.divCut      = v('de-card-cut') || undefined;
-  cfg.notes       = v('de-card-notes').trim() || undefined;
+  cfg.divCoverage  = v('de-card-covered') || undefined;
+  cfg.fundamentals = v('de-card-healthy') || undefined;
+  cfg.divSignal    = v('de-card-cut') || undefined;
+  cfg.notes        = v('de-card-notes').trim() || undefined;
+  // أزِل المفاتيح القديمة (yes/no) بعد الترحيل للنموذج ثلاثي المستويات
+  delete cfg.divCovered; delete cfg.fundHealthy; delete cfg.divCut;
 
   // نظّف المفاتيح الفارغة
   Object.keys(cfg).forEach(k => { if (cfg[k] === undefined) delete cfg[k]; });
