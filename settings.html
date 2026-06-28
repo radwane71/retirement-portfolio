@@ -237,7 +237,7 @@
         </div>
       </div>
 
-      <p class="small text-muted mb-4">الجداول المشمولة في النسخ الاحتياطي (14 جدول Supabase + 11 مفتاح localStorage):</p>
+      <p class="small text-muted mb-4">النسخة الاحتياطية تنسخ <strong>كل شيء حرفياً (100%)</strong>: جميع أعمدة كل صف في 17 جدول Supabase + 18 مفتاح تفضيلات محلية. عند الاستعادة تُكتب كل القيم كما هي بلا إسقاط أي حقل. جدول <code>user_settings</code> وحده يحمل بيانات محرّك القرار وحاسبة القيمة العادلة والمؤشر المرجعي وهدف التقاعد — فكلها مشمولة.</p>
       <table class="info-table">
         <tbody>
           <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">☁️ Supabase — البيانات الرئيسية</th></tr>
@@ -255,6 +255,9 @@
           <tr><td>watchlist</td><td>أسهم تحت المراقبة</td></tr>
           <tr><td>portfolio_cash</td><td>نقد المحفظة عند الوسيط</td></tr>
           <tr><td>portfolio_tasks</td><td>المهام والتذكيرات</td></tr>
+          <tr><td>review_log</td><td>دفتر المراجعة (ملاحظات كل سهم)</td></tr>
+          <tr><td>review_log_attachments</td><td>مرفقات دفتر المراجعة (الملفات الثنائية كاملة)</td></tr>
+          <tr><td>user_settings</td><td>إعدادات مزامَنة: محرّك القرار + حاسبة القيمة العادلة + المؤشر المرجعي + هدف التقاعد + الراتب + الصكوك + الأهداف + المخزون + المتابعة المدرسية</td></tr>
           <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">💾 localStorage — البيانات المحلية وتفضيلات المستخدم</th></tr>
           <tr><td>salary_planner_v1</td><td>مخطط الراتب والمصاريف</td></tr>
           <tr><td>sukuk_planner_v1</td><td>مخطط الصكوك</td></tr>
@@ -267,6 +270,13 @@
           <tr><td>portfolio_cash_v1</td><td>نقد المحفظة (نسخة محلية)</td></tr>
           <tr><td>tharwa-alert-green</td><td>عتبة التنبيه الأخضر</td></tr>
           <tr><td>tharwa-alert-yellow</td><td>عتبة التنبيه الأصفر</td></tr>
+          <tr><td>school_kanda_v1</td><td>متابعة كندة الخاصة</td></tr>
+          <tr><td>retirement_goal_v1</td><td>هدف الاستقلال المالي (نسخة محلية)</td></tr>
+          <tr><td>tharwa-price-timestamps</td><td>طوابع زمنية لآخر تحديث أسعار</td></tr>
+          <tr><td>tharwa-benchmark_v1</td><td>نقاط مؤشر تاسي (نسخة محلية)</td></tr>
+          <tr><td>tharwa-benchmark-seeded-v1</td><td>علم بذر بيانات تاسي الأولى</td></tr>
+          <tr><td>valuation_history_v1</td><td>سجل حاسبة القيمة العادلة (نسخة محلية)</td></tr>
+          <tr><td>hide-salary-convention</td><td>حالة إخفاء لافتة اتفاقية الراتب</td></tr>
         </tbody>
       </table>
     </div>

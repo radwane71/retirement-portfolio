@@ -343,211 +343,21 @@ async function restoreBackup(input) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// تحويل الصف — ينظّف الحقول ويضع user_id الصحيح
-// القاعدة: لا نحفظ id (يُولَّد تلقائياً)، نحفظ كل الحقول الأخرى
+// تحويل الصف للاستعادة — نسخ حرفي 100% لكل الأعمدة كما خُزّنت
+// القاعدة: لا نُسقط أي عمود إطلاقاً (وفاءً بمتطلّب النسخ 100%).
+//   • نفرض user_id الحالي (يسمح بالاستعادة على حساب مختلف).
+//   • id يُحذف للجداول ذات المفتاح التسلسلي (يُولَّد تلقائياً) ويُبقى
+//     للجداول المرتبطة بمفتاح أجنبي حتى لا تنكسر الروابط.
+//   • user_settings مفتاحه (user_id,key) — نحذف id ونتجاهل الصفوف بلا key.
 // ══════════════════════════════════════════════════════════════
+const KEEP_ID_TABLES = new Set(['review_log', 'review_log_attachments']);
+
 function mapRow(table, row, userId) {
-  if (!row) return null;
-  let r;
-
-  switch (table) {
-
-    case 'holdings':
-      r = {
-        ticker:        row.ticker,
-        name:          row.name          ?? '',
-        sector:        row.sector        ?? '',
-        shares:        row.shares        ?? 0,
-        avg_price:     row.avg_price     ?? 0,
-        current_price: row.current_price ?? 0,
-        target_weight: row.target_weight ?? 0,
-      };
-      break;
-
-    case 'transactions':
-      r = {
-        date:        row.date,
-        ticker:      row.ticker,
-        name:        row.name        ?? '',
-        type:        row.type,
-        shares:      row.shares      ?? 0,
-        price:       row.price       ?? 0,
-        commission:  row.commission  ?? 0,
-        vat:         row.vat         ?? 0,
-        total:       row.total       ?? 0,
-        is_archived: row.is_archived ?? false,
-      };
-      break;
-
-    case 'dividends':
-      r = {
-        date:        row.date,
-        ticker:      row.ticker,
-        name:        row.name        ?? '',
-        amount:      row.amount      ?? 0,
-        month:       row.month       ?? 1,
-        year:        row.year        ?? new Date().getFullYear(),
-        is_archived: row.is_archived ?? false,
-      };
-      break;
-
-    case 'cashflow_entries':
-      r = {
-        date:        row.date,
-        type:        row.type,
-        amount:      row.amount      ?? 0,
-        notes:       row.notes       ?? '',
-        is_archived: row.is_archived ?? false,
-      };
-      break;
-
-    case 'net_worth_snapshots':
-      r = {
-        date:          row.date,
-        total_value:   row.total_value ?? 0,
-        notes:         row.notes       ?? null,
-        snapshot_json: row.snapshot_json ?? null,
-      };
-      break;
-
-    case 'nw_assets':
-      r = {
-        category:    row.category    ?? '',
-        name:        row.name        ?? '',
-        value:       row.value       ?? 0,
-        notes:       row.notes       ?? '',
-        is_active:   row.is_active   ?? true,
-        archived_at: row.is_active === false ? (row.archived_at ?? null) : null,
-      };
-      break;
-
-    case 'nw_liabilities':
-      r = {
-        category:    row.category    ?? '',
-        name:        row.name        ?? '',
-        value:       row.value       ?? 0,
-        notes:       row.notes       ?? '',
-        is_active:   row.is_active   ?? true,
-        archived_at: row.is_active === false ? (row.archived_at ?? null) : null,
-      };
-      break;
-
-    case 'real_estate':
-      r = {
-        name:           row.name           ?? '',
-        type:           row.type           ?? '',
-        purchase_value: row.purchase_value ?? 0,
-        current_value:  row.current_value  ?? 0,
-        status:         row.status         ?? 'owned',
-        monthly_rental: row.monthly_rental ?? 0,
-        purchase_date:  row.purchase_date  ?? null,
-        is_active:      row.is_active      ?? true,
-        archived_at:    row.is_active === false ? (row.archived_at ?? null) : null,
-      };
-      break;
-
-    case 'user_stocks':
-      r = {
-        ticker:       row.ticker,
-        name:         row.name         ?? '',
-        sector:       row.sector       ?? '',
-        in_portfolio: row.in_portfolio ?? false,
-      };
-      break;
-
-    case 'stock_targets':
-      r = {
-        ticker:      row.ticker,
-        target_pct:  row.target_pct  ?? 0,
-        entry_price: row.entry_price ?? null,
-        exit_price:  row.exit_price  ?? null,
-      };
-      break;
-
-    case 'sector_targets':
-      r = {
-        sector:     row.sector,
-        target_pct: row.target_pct ?? 0,
-      };
-      break;
-
-    case 'watchlist':
-      r = {
-        ticker:       row.ticker,
-        name:         row.name         ?? '',
-        sector:       row.sector       ?? '',
-        target_price: row.target_price ?? 0,
-        planned_pct:  row.planned_pct  ?? 0,
-        notes:        row.notes        ?? '',
-        created_at:   row.created_at   ?? new Date().toISOString(),
-      };
-      break;
-
-    case 'portfolio_cash':
-      r = {
-        amount:     row.amount     ?? 0,
-        updated_at: row.updated_at ?? new Date().toISOString(),
-      };
-      break;
-
-    case 'portfolio_tasks':
-      r = {
-        type:           row.type,
-        ticker:         row.ticker         ?? null,
-        name:           row.name           ?? null,
-        status:         row.status         ?? 'active',
-        notes:          row.notes          ?? null,
-        target_price:   row.target_price   ?? null,
-        reduction_pct:  row.reduction_pct  ?? null,
-        year:           row.year           ?? new Date().getFullYear(),
-        auto_generated: row.auto_generated ?? false,
-        created_at:     row.created_at     ?? new Date().toISOString(),
-        updated_at:     row.updated_at     ?? new Date().toISOString(),
-        closed_at:      row.closed_at      ?? null,
-        archived_at:    row.archived_at    ?? null,
-      };
-      break;
-
-    case 'review_log':
-      r = {
-        id:          row.id,
-        ticker:      row.ticker,
-        name:        row.name        ?? '',
-        sector:      row.sector      ?? '',
-        review_date: row.review_date,
-        notes:       row.notes       ?? '',
-        created_at:  row.created_at  ?? new Date().toISOString(),
-        updated_at:  row.updated_at  ?? new Date().toISOString(),
-      };
-      break;
-
-    case 'review_log_attachments':
-      r = {
-        id:         row.id,
-        entry_id:   row.entry_id,
-        filename:   row.filename,
-        ext:        row.ext         ?? '',
-        content:    row.content     ?? '',
-        size_bytes: row.size_bytes  ?? 0,
-        created_at: row.created_at  ?? new Date().toISOString(),
-      };
-      break;
-
-    case 'user_settings':
-      // المفتاح/القيمة فقط — لا نحفظ id (PK مركّب user_id,key)
-      if (!row.key) return null;
-      r = {
-        key:        row.key,
-        value:      row.value      ?? null,
-        updated_at: row.updated_at ?? new Date().toISOString(),
-      };
-      break;
-
-    default:
-      return null;
-  }
-
-  r.user_id = userId;
+  if (!row || typeof row !== 'object') return null;
+  if (table === 'user_settings' && !row.key) return null;
+  const r = { ...row };          // نسخة كاملة — كل عمود يُحفظ كما هو
+  if (!KEEP_ID_TABLES.has(table)) delete r.id;
+  r.user_id = userId;            // فرض هوية المستخدم الحالي
   return r;
 }
 
@@ -1935,35 +1745,57 @@ async function exportMonthlyReviewMD() {
     // 23. سجل حاسبة القيمة العادلة
     // ════════════════════════════════════════════════════════
     h2('23. سجل حاسبة القيمة العادلة للأسهم');
-    p('جميع عمليات التقييم المحفوظة — المدخلات الكاملة ونتائج كل نموذج لكل عملية.');
+    p('جميع عمليات التقييم المحفوظة — المدخلات الكاملة (شركة عادية / ريت / بنك)، الملاحظات، تقييم Perplexity، Beta، ونتائج كل نموذج لكل عملية. المصدر: قاعدة البيانات السحابية (user_settings) مع رجوع للنسخة المحلية.');
     {
-      const valHist = lsGet('valuation_history_v1', []);
+      // مصدر الحقيقة الآن user_settings (الصفحة لم تعد تكتب في localStorage) مع رجوع للكاش المحلي
+      const valHist = await syncedGet('valuation_history_v1', []);
+      // خلية جدول آمنة في markdown: نهرب الأنابيب ونزيل الأسطر الجديدة
+      const cell = v => String(v == null ? '—' : v).replace(/\|/g, '\\|').replace(/\n+/g, ' ');
       if (Array.isArray(valHist) && valHist.length) {
         p(`**إجمالي العمليات المحفوظة:** ${valHist.length}`);
         const scenMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
+        const typeMap = { reit:'ريت عقاري', bank:'بنك / مصرف', normal:'شركة عادية' };
         valHist.forEach((entry, idx) => {
           const inp = entry.inputs || {};
           const res = entry.results || {};
-          const typeLabel = inp.companyType === 'reit' ? 'ريت عقاري' : 'شركة عادية';
-          p(`\n---\n**[${idx + 1}] ${entry.date || '—'}** — ${typeLabel} — سيناريو: ${scenMap[inp.scenario] || inp.scenario || '—'}  `);
-          p(`**القيمة العادلة: ${res.fairValueRange || '—'}**  `);
-          if (res.fairValueDetail) p(`${res.fairValueDetail}  `);
-          if (res.marginText)      p(`هامش الأمان: ${res.marginText}  `);
+          const typeLabel = typeMap[inp.companyType] || 'شركة عادية';
+          const idLine = [inp.ticker, inp.stockName].filter(Boolean).join(' — ');
+          p(`\n---\n**[${idx + 1}] ${idLine || 'بدون رمز'}**  `);
+          p(`🕐 ${entry.date || '—'} — ${typeLabel} — سيناريو: ${scenMap[inp.scenario] || inp.scenario || '—'}  `);
+          p(`**القيمة العادلة: ${cell(res.fairValueRange) || '—'}**  `);
+          if (res.fairValueAvg != null) p(`متوسط القيمة العادلة (رقمي): ${SAR(res.fairValueAvg)} ر.س  `);
+          if (res.fairValueDetail) p(`${cell(res.fairValueDetail)}  `);
+          if (res.marginText)      p(`هامش الأمان: ${cell(res.marginText)}  `);
 
-          // المدخلات كاملة
+          // المدخلات كاملة — كل خانة في الحاسبة
           const inputPairs = [];
-          if (inp.companyType !== 'reit') {
-            if (inp.eps     != null) inputPairs.push(['EPS (ربح/سهم)', inp.eps]);
-            if (inp.fcf     != null) inputPairs.push(['FCF (تدفق نقدي حر/سهم)', inp.fcf]);
-            if (inp.netDebt != null) inputPairs.push(['الدين الصافي/سهم', inp.netDebt]);
-          } else {
+          if (inp.companyType === 'reit') {
             if (inp.nav          != null) inputPairs.push(['NAV الإجمالي', Number(inp.nav).toLocaleString()]);
             if (inp.totalUnits   != null) inputPairs.push(['عدد الوحدات', Number(inp.totalUnits).toLocaleString()]);
             if (inp.ffo          != null) inputPairs.push(['FFO/وحدة', inp.ffo]);
             if (inp.pffoMultiple != null) inputPairs.push(['مضاعف P/FFO', inp.pffoMultiple + 'x']);
             if (inp.capRate      != null) inputPairs.push(['Cap Rate', inp.capRate + '%']);
             if (inp.totalDebt    != null) inputPairs.push(['إجمالي الديون', Number(inp.totalDebt).toLocaleString()]);
+          } else if (inp.companyType === 'bank') {
+            if (inp.bvps          != null) inputPairs.push(['BVPS (دفترية ملموسة/سهم)', inp.bvps]);
+            if (inp.bankRoe       != null) inputPairs.push(['ROE', inp.bankRoe + '%']);
+            if (inp.bankCurrentPb != null) inputPairs.push(['P/B الحالي', inp.bankCurrentPb + 'x']);
+            if (inp.bankFairPb    != null) inputPairs.push(['P/B العادل', inp.bankFairPb + 'x']);
+            if (inp.bankEps       != null) inputPairs.push(['EPS', inp.bankEps]);
+            if (inp.bankCurrentPe != null) inputPairs.push(['P/E الحالي', inp.bankCurrentPe + 'x']);
+            if (inp.bankFairPe    != null) inputPairs.push(['P/E العادل', inp.bankFairPe + 'x']);
+            if (inp.bankDps       != null) inputPairs.push(['DPS (توزيع/سهم)', inp.bankDps]);
+            if (inp.bankPayout    != null) inputPairs.push(['نسبة التوزيع Payout', inp.bankPayout + '%']);
+            if (inp.cet1          != null) inputPairs.push(['CET1 / CAR', inp.cet1 + '%']);
+            if (inp.npl           != null) inputPairs.push(['NPL (قروض متعثرة)', inp.npl + '%']);
+            if (inp.provCoverage  != null) inputPairs.push(['تغطية المخصصات', inp.provCoverage + '%']);
+            if (inp.ldr           != null) inputPairs.push(['LDR (قروض/ودائع)', inp.ldr + '%']);
+          } else {
+            if (inp.eps     != null) inputPairs.push(['EPS (ربح/سهم)', inp.eps]);
+            if (inp.fcf     != null) inputPairs.push(['FCF (تدفق نقدي حر/سهم)', inp.fcf]);
+            if (inp.netDebt != null) inputPairs.push(['الدين الصافي/سهم', inp.netDebt]);
           }
+          // مدخلات مشتركة
           if (inp.growth5yr    != null) inputPairs.push(['نمو 5 سنوات', inp.growth5yr + '%']);
           if (inp.growthPerp   != null) inputPairs.push(['نمو دائم', inp.growthPerp + '%']);
           if (inp.discountRate != null) inputPairs.push(['WACC / معدل الخصم', inp.discountRate + '%']);
@@ -1974,12 +1806,13 @@ async function exportMonthlyReviewMD() {
           if (inp.bondYield    != null) inputPairs.push(['عائد السندات', inp.bondYield + '%']);
           if (inp.currentPrice != null) inputPairs.push(['السعر الحالي', inp.currentPrice]);
           if (inp.fairPb       != null) inputPairs.push(['P/B العادل', inp.fairPb]);
+          if (inp.betaMain     != null && inp.betaMain !== '') inputPairs.push(['Beta (للتسجيل)', inp.betaMain]);
           if (inp.debtRatio    != null) inputPairs.push(['نسبة الدين', inp.debtRatio + '%']);
           if (inp.liquidityRatio != null) inputPairs.push(['نسبة السيولة', inp.liquidityRatio]);
-          if (inp.earningsQuality != null) inputPairs.push(['ROE', inp.earningsQuality + '%']);
+          if (inp.earningsQuality != null) inputPairs.push(['ROE (عرض)', inp.earningsQuality + '%']);
           if (inp.useWacc) {
             if (inp.riskFree     != null) inputPairs.push(['معدل خالي مخاطر', inp.riskFree + '%']);
-            if (inp.beta         != null) inputPairs.push(['Beta', inp.beta]);
+            if (inp.beta         != null) inputPairs.push(['Beta (WACC)', inp.beta]);
             if (inp.marketReturn != null) inputPairs.push(['عائد السوق', inp.marketReturn + '%']);
             if (inp.debtCost     != null) inputPairs.push(['تكلفة الدين', inp.debtCost + '%']);
             if (inp.taxRate      != null) inputPairs.push(['معدل الضريبة', inp.taxRate + '%']);
@@ -1987,11 +1820,21 @@ async function exportMonthlyReviewMD() {
           }
 
           if (inputPairs.length)
-            p(mdTable(['المدخل','القيمة'], inputPairs));
+            p(mdTable(['المدخل','القيمة'], inputPairs.map(([k, v]) => [k, cell(v)])));
 
           // نتائج كل نموذج
           if (res.models?.length)
-            p(mdTable(['النموذج','القيمة العادلة'], res.models.map(m => [m.name, m.value])));
+            p(mdTable(['النموذج','القيمة العادلة'], res.models.map(m => [cell(m.name), cell(m.value)])));
+
+          // الملاحظات وتقييم Perplexity — نص حر يُعرض كاملاً (blockquote يحافظ على المحتوى)
+          if (inp.notes) {
+            p('**📝 ملاحظات التقييم:**');
+            p(String(inp.notes).split('\n').map(l => `> ${l}`).join('\n'));
+          }
+          if (inp.perplexityEval) {
+            p('**🔍 تقييم Perplexity:**');
+            p(String(inp.perplexityEval).split('\n').map(l => `> ${l}`).join('\n'));
+          }
         });
       } else {
         p('_لا توجد عمليات محفوظة في سجل القيمة العادلة._');
@@ -2036,6 +1879,105 @@ async function exportMonthlyReviewMD() {
       p(`حد تنبيه أصفر  ≤          : ${alertYellow}%`);
       p(`حد تنبيه أحمر  >          : ${alertYellow}%`);
       p('```');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 26. محرّك القرار
+    // ════════════════════════════════════════════════════════
+    h2('26. محرّك القرار (Decision Engine) — تطبيق دستور المحفظة آلياً');
+    p('يطبّق القواعد الثابتة في الدستور (CLAUDE.md) على بيانات المحفظة الحيّة. اللقطة أدناه تُحفظ آلياً عند كل فتح لصفحة «محرّك القرار». لتحديثها بأحدث الأسعار: افتح الصفحة مرة واحدة ثم أعد تصدير هذا التقرير.');
+    {
+      const cell   = v => String(v == null ? '—' : v).replace(/\|/g, '\\|').replace(/\n+/g, ' ');
+      const deSnap = await syncedGet('decision_engine_snapshot_v1', null);
+      const deCfg  = await syncedGet('decision_engine_v1', {});
+
+      if (deSnap && Array.isArray(deSnap.results) && deSnap.results.length) {
+        p(`**تاريخ آخر تشغيل للمحرّك:** ${deSnap.generated_at ? new Date(deSnap.generated_at).toLocaleString('ar-SA') : '—'}  `);
+        p(`**إجمالي قيمة المحفظة وقت التشغيل:** ${SAR(deSnap.totalValue)} ر.س`);
+
+        h3('الثوابت والقواعد المطبّقة (الدستور §1)');
+        p('```');
+        p(`سقف السهم الواحد            : ${deSnap.caps?.single}%`);
+        p(`سقف السهم القيادي (Blue)    : ${deSnap.caps?.blueChip}%`);
+        p(`سقف القطاع                  : ${deSnap.caps?.sector}%`);
+        p(`حجم المحفظة المستهدف        : ${deSnap.portfolioSize?.min}–${deSnap.portfolioSize?.max} سهم (الحالي: ${deSnap.portfolioSize?.current})`);
+        p(`عتبة انحراف الوزن — أخضر ≤  : ${deSnap.thresholds?.green}%`);
+        p(`عتبة انحراف الوزن — أصفر ≤  : ${deSnap.thresholds?.yellow}%`);
+        p('```');
+
+        if (deSnap.fixedTriggers?.length) {
+          h3('المشغّلات الثابتة (Fixed Triggers) — أولوية عليا فوق كل حساب');
+          p(mdTable(['الرمز','الاسم','النوع','الشرط','الوصف'],
+            deSnap.fixedTriggers.map(t => [
+              t.ticker, t.name,
+              t.kind === 'sell' ? 'بيع كامل' : 'تخفيف وزن',
+              `${t.cmp === 'gte' ? '≥' : '≤'} ${t.price} ر.س${t.toWeight ? ` → ${t.toWeight}%` : ''}`,
+              cell(t.label),
+            ])));
+        }
+
+        h3('دليل أعمدة جدول القرار — كيف تُحسب كل قيمة');
+        p('- **الوزن الحالي** = (عدد الأسهم × السعر الحالي) ÷ إجمالي قيمة المحفظة × 100');
+        p('- **الهدف** = نسبة السهم المسجّلة في صفحة الأهداف، وإلا السقف الافتراضي (7% عادي / 12% قيادي)');
+        p('- **الانحراف** = الوزن الحالي − الهدف (+ فوق الهدف / − تحته)، مصنّف بعتبات الألوان');
+        p('- **نوع الأصل** = يُستنتج من القطاع (ريت/بنك/إسمنت-بتروكيماويات/عام) أو يُحدَّد يدوياً');
+        p('- **الاستدامة** = بوابة الفلتر 1 (نجاح/قلق مؤقت/فشل/غير متوفرة) حسب مقياس نوع الأصل');
+        p('- **القيمة العادلة** = آخر تقييم من حاسبة القيمة العادلة لنفس الرمز (+ عمره بالأيام)');
+        p('- **الإجراء** = مخرَج الفلاتر المتسلسلة؛ و**السبب** يوضّح القاعدة التي أطلقته');
+
+        h3('قرارات كل سهم (مرتّبة بالأولوية)');
+        const ACT = { exit:'🔴 تصفية', trim:'⚖️ تخفيف', add:'🟢 تجميع', monitor:'👁️ مراقبة', hold:'✅ احتفاظ' };
+        const SUS = { pass:'نجاح', watch:'قلق مؤقت', fail:'فشل', unknown:'غير متوفرة' };
+        const sorted = [...deSnap.results].sort((a, b) => (a.priority - b.priority) || (b.weight - a.weight));
+        const deRows = sorted.map(r => [
+          r.ticker, r.name || '—',
+          deSnap.assetLabels?.[r.assetType] || r.assetType || '—',
+          PCT(r.weight), PCT(r.targetWeight),
+          (r.dev >= 0 ? '+' : '') + PCT(r.dev),
+          SUS[r.sustain?.status] || '—',
+          r.fairValue != null ? SAR(r.fairValue) : '—',
+          ACT[r.action] || r.action, cell(r.label),
+        ]);
+        p(mdTable(['الرمز','الاسم','نوع الأصل','الوزن%','الهدف%','الانحراف','الاستدامة','القيمة العادلة','الإجراء','التفصيل'], deRows));
+
+        h3('الأسباب التفصيلية لكل قرار');
+        sorted.forEach(r => {
+          p(`**${r.ticker} — ${r.name || ''}** → ${ACT[r.action] || r.action} (${cell(r.label)})  `);
+          p(`> ${cell(r.reason || '—')}`);
+          const extra = [];
+          if (r.zones) {
+            const z = [
+              r.zones.accumulate ? `تجميع ≤${r.zones.accumulate}` : null,
+              r.zones.trimFrom   ? `تخفيف ${r.zones.trimFrom}${r.zones.trimTo ? '–' + r.zones.trimTo : ''}` : null,
+              r.zones.liquidate  ? `تصفية >${r.zones.liquidate}` : null,
+            ].filter(Boolean).join(' · ');
+            if (z) extra.push('خطة الأسعار (المهام): ' + z);
+          }
+          if (r.sustain?.reason) extra.push('الاستدامة: ' + r.sustain.reason);
+          if (r.valDate) extra.push(`آخر قيمة عادلة: ${r.valDate}${r.valAgeDays != null ? ` (${r.valAgeDays} يوم${r.valStale ? ' — قديم ⚠️' : ''})` : ''}`);
+          if (r.gaps?.length) extra.push('بيانات ناقصة: ' + r.gaps.join('، '));
+          if (r.specialNote) extra.push('ملاحظة دستورية: ' + r.specialNote);
+          if (r.trigger?.fired) extra.push('⚡ انطبق trigger ثابت');
+          if (extra.length) p(extra.map(e => `> - ${cell(e)}`).join('\n'));
+          p('');
+        });
+      } else {
+        p('_لا توجد لقطة محفوظة لمحرّك القرار بعد. افتح صفحة «محرّك القرار» مرة واحدة ثم أعد تصدير التقرير._');
+      }
+
+      // المدخلات اليدوية المحفوظة للمحرّك
+      if (deCfg && typeof deCfg === 'object' && Object.keys(deCfg).length) {
+        h3('المدخلات اليدوية المحفوظة للمحرّك (لكل رمز)');
+        p('قرارات المالك اليدوية المحفوظة لكل سهم (نوع الأصل، علم القيادي، حالة الاستدامة، القيمة العادلة اليدوية، الملاحظات).');
+        Object.entries(deCfg).forEach(([tk, cfg]) => {
+          if (!cfg || typeof cfg !== 'object') return;
+          const pairs = Object.entries(cfg)
+            .filter(([, v]) => v != null && v !== '')
+            .map(([k, v]) => [k, cell(typeof v === 'object' ? JSON.stringify(v) : v)]);
+          if (pairs.length) { p(`**${tk}:**`); p(mdTable(['الحقل','القيمة'], pairs)); }
+        });
+      }
     }
     hr();
 

@@ -496,6 +496,27 @@ function runEngine() {
   renderActionTable();
   renderSectorCheck(totalValue);
   renderAllTable();
+
+  // حفظ لقطة كاملة لمخرجات المحرّك → user_settings (تُدرَج في تقرير المراجعة وتُنسَخ احتياطياً)
+  saveEngineSnapshot(totalValue, thresholds).catch(() => {});
+}
+
+// مفتاح لقطة المخرجات (مزامَن عبر user_settings ومشمول في النسخة الاحتياطية)
+const ENGINE_SNAPSHOT_KEY = 'decision_engine_snapshot_v1';
+
+async function saveEngineSnapshot(totalValue, thresholds) {
+  const snapshot = {
+    generated_at:  new Date().toISOString(),
+    totalValue,
+    thresholds,
+    caps:          { ...CAPS },
+    portfolioSize: { ...PORTFOLIO_SIZE, current: holdings.length },
+    fixedTriggers: FIXED_TRIGGERS.map(t => ({ ...t })),
+    assetLabels:   { ...ASSET_LABEL },
+    sustainMetric: { ...SUSTAIN_METRIC },
+    results:       _results,   // كائنات بسيطة قابلة للتسلسل (بلا دوال)
+  };
+  try { await saveUserSetting(ENGINE_SNAPSHOT_KEY, snapshot); } catch (_) {}
 }
 
 // ── شريط ملخص علوي: عدّ الإجراءات + فجوات البيانات ──
