@@ -3,9 +3,9 @@ window.CARD_INFO = {
   'tasks': {
     title: '📋 مهام المحفظة',
     body: `
-      <p>قائمة منظّمة بالإجراءات التي قرّرت اتخاذها على محفظتك، حتى لا تنسى قراراً اتخذته بعقلٍ بارد وقت التحليل.</p>
-      <div class="info-math">أنواع المهام: تسييل · تخفيض · مراقبة · تجميع · احتفاظ.</div>
-      <p class="info-note">💡 بعض المهام تُنشأ <strong>تلقائياً</strong> من انحرافات أهدافك (سهم تجاوز هدفه مثلاً) لتربط التحليل بالتنفيذ. لا شيء يُحذف نهائياً — أرشفة فقط.</p>`
+      <p>خطة الأسعار اليدوية لكل سهم في محفظتك — تقرّرها بعقلٍ بارد وقت التحليل، ويستهلكها <strong>محرّك القرار</strong> آلياً.</p>
+      <div class="info-math">🟢 تجميع عند سعر ≤ &nbsp;·&nbsp; ⚖️ تخفيف من–إلى &nbsp;·&nbsp; 🔴 تصفية إذا تجاوز (سعر التضخّم)</div>
+      <p class="info-note">💡 السعر الحالي يأتي من لوحة التحكم. إذا تجاوز السعر حدّ «التصفية» → المحرّك يطلّع تصفية فوراً. لا شيء يُحذف — أرشفة فقط.</p>`
   },
 };
 
@@ -80,7 +80,6 @@ async function init() {
 
   buildYearPills();
   renderKPIs();
-  renderAutoAlerts();
   applyFilters();
 }
 
@@ -124,97 +123,10 @@ function renderKPIs() {
   const active = _tasks.filter(t => t.status === 'active' && !t.auto_generated).length;
   const done   = _tasks.filter(t => t.status === 'done' && new Date(t.closed_at || t.updated_at).getFullYear() === curYr).length;
   const canc   = _tasks.filter(t => t.status === 'cancelled').length;
-  const alerts = buildAutoAlerts().length;
 
   setText('tk-active',    active);
   setText('tk-done',      done);
   setText('tk-cancelled', canc);
-  setText('tk-alerts',    alerts);
-}
-
-// ── Auto-alerts from targets ──────────────────────────────────────────
-function buildAutoAlerts() {
-  const alerts = [];
-  const THRESHOLD = 1.5; // % انحراف عن الهدف
-
-  // أسهم
-  _holdings.forEach(h => {
-    const target  = _stockTargets[h.ticker];
-    if (!target) return;
-    const current = _totalValue > 0 ? (+h.shares * +h.current_price) / _totalValue * 100 : 0;
-    const diff    = current - target;
-    if (Math.abs(diff) > THRESHOLD) {
-      alerts.push({
-        id:     `auto-stock-${h.ticker}`,
-        ticker: h.ticker,
-        name:   h.name || h.ticker,
-        type:   diff > 0 ? 'reduction' : 'accumulation',
-        msg:    diff > 0
-          ? `زاد عن الهدف بـ ${diff.toFixed(1)}% (حالي: ${current.toFixed(1)}% | هدف: ${target}%)`
-          : `نقص عن الهدف بـ ${Math.abs(diff).toFixed(1)}% (حالي: ${current.toFixed(1)}% | هدف: ${target}%)`,
-        diff: Math.abs(diff),
-      });
-    }
-  });
-
-  // قطاعات
-  const sectorValMap = {};
-  _holdings.forEach(h => {
-    const sec = (h.sector || '').trim() || 'غير مصنف';
-    sectorValMap[sec] = (sectorValMap[sec] || 0) + +h.shares * +h.current_price;
-  });
-  Object.entries(_sectorTargets).forEach(([sec, target]) => {
-    if (!target) return;
-    const current = _totalValue > 0 ? (sectorValMap[sec] || 0) / _totalValue * 100 : 0;
-    const diff    = current - target;
-    if (Math.abs(diff) > THRESHOLD) {
-      alerts.push({
-        id:     `auto-sector-${sec}`,
-        ticker: null,
-        name:   `قطاع: ${sec}`,
-        type:   diff > 0 ? 'reduction' : 'accumulation',
-        msg:    diff > 0
-          ? `زاد عن الهدف بـ ${diff.toFixed(1)}% (حالي: ${current.toFixed(1)}% | هدف: ${target}%)`
-          : `نقص عن الهدف بـ ${Math.abs(diff).toFixed(1)}% (حالي: ${current.toFixed(1)}% | هدف: ${target}%)`,
-        diff: Math.abs(diff),
-      });
-    }
-  });
-
-  alerts.sort((a, b) => b.diff - a.diff);
-  return alerts;
-}
-
-function renderAutoAlerts() {
-  const alerts = buildAutoAlerts();
-  const el     = document.getElementById('auto-alerts-body');
-  if (!el) return;
-
-  if (!alerts.length) {
-    document.getElementById('auto-alerts-section').style.display = 'none';
-    return;
-  }
-  document.getElementById('auto-alerts-section').style.display = '';
-
-  el.innerHTML = `<div style="display:flex;flex-direction:column;gap:8px">` +
-    alerts.map(a => {
-      const meta = TYPE_META[a.type] || {};
-      return `<div class="task-item auto-alert" style="background:var(--bg-3)">
-        <div class="task-type-icon">${meta.icon || '⚠️'}</div>
-        <div class="task-body">
-          <div class="task-header">
-            ${a.ticker ? `<span class="task-ticker">${esc(a.ticker)}</span>` : ''}
-            <span class="task-name">${esc(a.name)}</span>
-            <span class="task-badge badge-auto">تلقائي</span>
-            <span class="task-badge ${meta.badge}">${meta.label}</span>
-          </div>
-          <div class="task-notes" style="color:var(--accent)">${esc(a.msg)}</div>
-        </div>
-      </div>`;
-    }).join('') + `</div>
-    <p class="small text-muted" style="margin-top:10px">
-      * الانحراف المعتبر: أكثر من ${1.5}% عن الهدف | لتعديل الأهداف: <a href="targets.html" style="color:var(--accent)">صفحة الأهداف</a>
-    </p>`;
 }
 
 // ── Apply filters & render tasks ──────────────────────────────────────
@@ -265,8 +177,12 @@ function renderTaskBoard(boardId, tasks) {
     const closedStr = t.closed_at ? ' · أُغلقت ' + formatDate(t.closed_at.slice(0,10)) : '';
 
     const extraInfo = [];
-    if (t.type === 'accumulation' && t.target_price)  extraInfo.push(`🎯 سعر التجميع: أقل من ${formatSAR(t.target_price)}`);
-    if (t.type === 'reduction' && t.reduction_pct)    extraInfo.push(`📉 نسبة التخفيف: ${t.reduction_pct}%`);
+    if (t.accumulate_at)   extraInfo.push(`🟢 تجميع عند ≤ ${formatSAR(t.accumulate_at)}`);
+    if (t.trim_from || t.trim_to) extraInfo.push(`⚖️ تخفيف ${t.trim_from ? 'من ' + formatSAR(t.trim_from) : ''}${t.trim_to ? ' إلى ' + formatSAR(t.trim_to) : ''}`.trim());
+    if (t.liquidate_above) extraInfo.push(`🔴 تصفية فوق ${formatSAR(t.liquidate_above)}`);
+    // توافق مع المهام القديمة قبل تحديث الخانات
+    if (t.accumulate_at == null && t.type === 'accumulation' && t.target_price)  extraInfo.push(`🟢 تجميع عند ≤ ${formatSAR(t.target_price)}`);
+    if (t.type === 'reduction' && t.reduction_pct && !t.trim_from && !t.trim_to) extraInfo.push(`📉 نسبة التخفيف: ${t.reduction_pct}%`);
 
     return `<div class="task-item ${cls}">
       <div class="task-type-icon">${meta.icon}</div>
@@ -308,16 +224,17 @@ function openTaskModal(id = null) {
     document.getElementById('task-ticker').value = t.ticker || '';
     document.getElementById('task-name').value   = t.name   || '';
     document.getElementById('task-notes').value  = t.notes  || '';
-    if (t.target_price)  document.getElementById('task-price').value = t.target_price;
-    if (t.reduction_pct) document.getElementById('task-pct').value   = t.reduction_pct;
+    // خطة الأسعار (مع توافق رجعي: target_price القديم = تجميع)
+    document.getElementById('task-accumulate').value = t.accumulate_at ?? t.target_price ?? '';
+    document.getElementById('task-liquidate').value  = t.liquidate_above ?? '';
+    document.getElementById('task-trim-from').value  = t.trim_from ?? '';
+    document.getElementById('task-trim-to').value    = t.trim_to ?? '';
   } else {
     _selectedType = null;
     document.querySelectorAll('.type-option').forEach(o => o.classList.remove('selected'));
-    ['task-ticker','task-name','task-notes','task-price','task-pct'].forEach(id => {
+    ['task-ticker','task-name','task-notes','task-accumulate','task-liquidate','task-trim-from','task-trim-to'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-    document.getElementById('task-price-group').style.display = 'none';
-    document.getElementById('task-pct-group').style.display   = 'none';
   }
 
   document.getElementById('task-modal').style.display = 'flex';
@@ -344,8 +261,6 @@ function selectTaskType(type) {
   document.querySelectorAll('.type-option').forEach(o => {
     o.classList.toggle('selected', o.dataset.type === type);
   });
-  document.getElementById('task-price-group').style.display = type === 'accumulation' ? '' : 'none';
-  document.getElementById('task-pct-group').style.display   = type === 'reduction'    ? '' : 'none';
 }
 
 function onTaskTickerInput() {
@@ -364,12 +279,22 @@ async function saveTask() {
   const ticker = document.getElementById('task-ticker').value.trim().toUpperCase();
   const name   = document.getElementById('task-name').value.trim();
   const notes  = document.getElementById('task-notes').value.trim();
-  const price  = +document.getElementById('task-price').value || null;
-  const pct    = +document.getElementById('task-pct').value   || null;
+  const accumulate = +document.getElementById('task-accumulate').value || null;
+  const liquidate  = +document.getElementById('task-liquidate').value  || null;
+  const trimFrom   = +document.getElementById('task-trim-from').value  || null;
+  const trimTo     = +document.getElementById('task-trim-to').value    || null;
 
   if (!ticker && !notes) { showToast('أدخل رمز السهم أو ملاحظات على الأقل', 'error'); return; }
-  if (price !== null && price <= 0)    { showToast('السعر المستهدف يجب أن يكون أكبر من صفر', 'error'); return; }
-  if (pct   !== null && (pct <= 0 || pct > 100)) { showToast('نسبة التخفيف يجب أن تكون بين 1% و100%', 'error'); return; }
+  const prices = { 'تجميع عند': accumulate, 'تصفية فوق': liquidate, 'تخفيف من': trimFrom, 'تخفيف إلى': trimTo };
+  for (const [lbl, v] of Object.entries(prices)) {
+    if (v !== null && v <= 0) { showToast(`سعر «${lbl}» يجب أن يكون أكبر من صفر`, 'error'); return; }
+  }
+  if (trimFrom !== null && trimTo !== null && trimTo < trimFrom) {
+    showToast('سعر «تخفيف إلى» يجب أن يكون ≥ «تخفيف من»', 'error'); return;
+  }
+  if (liquidate !== null && trimTo !== null && liquidate < trimTo) {
+    showToast('سعر «تصفية فوق» يفترض أن يكون ≥ نهاية نطاق التخفيف', 'error'); return;
+  }
 
   const confirmMsg = _editingTaskId ? 'هل تريد حفظ التعديلات على المهمة؟' : 'هل تريد إضافة هذه المهمة؟';
   if (!await confirmAsync(confirmMsg)) return;
@@ -383,9 +308,11 @@ async function saveTask() {
     ticker:        ticker || null,
     name:          name   || null,
     notes:         notes  || null,
-    // خزّن السعر/النسبة فقط للنوع المناسب — يمنع تسرّب سعر التجميع لمهام أخرى
-    target_price:  _selectedType === 'accumulation' ? price : null,
-    reduction_pct: _selectedType === 'reduction'   ? pct   : null,
+    // خطة الأسعار الثابتة — تُغذّي محرّك القرار (مستقلة عن نوع المهمة)
+    accumulate_at:   accumulate,
+    liquidate_above: liquidate,
+    trim_from:       trimFrom,
+    trim_to:         trimTo,
     status:        _editingTaskId
                   ? (_tasks.find(t => t.id === _editingTaskId)?.status || 'active')
                   : 'active',
@@ -442,7 +369,6 @@ async function reloadTasks() {
   _tasks = data || [];
   buildYearPills();
   renderKPIs();
-  renderAutoAlerts();
   applyFilters();
 }
 

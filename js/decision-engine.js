@@ -10,9 +10,15 @@
 const CAPS = Object.freeze({ single: 7, blueChip: 12, sector: 25 });
 const PORTFOLIO_SIZE = Object.freeze({ min: 18, max: 25 });
 
-// هوامش الفلتر 3 (حسمها المالك): قصّ عند +20% فوق العادلة، شراء عند −10% تحت
-const VALUE_CAP_MARGIN = 0.20; // السعر > العادلة × 1.20 → مُقيّم بأعلى → مرشّح قصّ
-const BUY_ZONE_MARGIN  = 0.10; // السعر < العادلة × 0.90 → منطقة شراء → مرشّح إضافة
+// نص مختصر لخطة الأسعار (للعرض في الجداول)
+function zonesText(z) {
+  if (!z) return null;
+  const p = [];
+  if (z.accumulate) p.push(`تجميع ≤${formatNum(z.accumulate)}`);
+  if (z.trimFrom)   p.push(`تخفيف ${formatNum(z.trimFrom)}${z.trimTo ? '–' + formatNum(z.trimTo) : ''}`);
+  if (z.liquidate)  p.push(`تصفية >${formatNum(z.liquidate)}`);
+  return p.length ? p.join(' · ') : null;
+}
 
 // triggers ثابتة مُعرّفة من المالك (الدستور §1) — أولوية عليا فوق كل حساب
 // ملاحظة الاتجاه: المواساة بيع عند الوصول لـ85 فأعلى. أرامكو تخفيض للوزن 12%
@@ -29,12 +35,11 @@ const FIXED_TRIGGERS = Object.freeze([
 
 // مفتاح حفظ مدخلات المحرّك لكل سهم (يُزامن عبر user_settings)
 const ENGINE_STORE_KEY = 'decision_engine_v1';
-const VALUATION_HISTORY_KEY = 'valuation_history_v1'; // مصدر القيمة العادلة المحفوظة
 
 // ── الحالة ──
 let holdings   = [];   // من جدول holdings
 let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
-let valuationFV  = {}; // ticker → { value, date } (آخر قيمة عادلة محفوظة من الحاسبة)
+let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
 let engineCfg    = {}; // ticker → مدخلات المحرّك اليدوية (استدامة/قيادي/نوع/عادلة يدوية)
 let _results     = []; // مخرجات التقييم لكل سهم (للتصدير)
 
@@ -106,20 +111,16 @@ function failReason(covered, healthy, cut) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
-// القيمة العادلة (الفلتر 2/3): override يدوي > آخر قيمة محفوظة من الحاسبة
+// خطة الأسعار (الفلتر 3) — مصدرها صفحة «مهام المحفظة» لكل سهم:
+//   accumulate = تجميع عند سعر ≤   |   trimFrom..trimTo = نطاق التخفيف
+//   liquidate  = تصفية إذا تجاوز السعر هذا الحدّ (سعر التضخّم)
+// تُرجع null إذا لا توجد أي خانة سعرية → القيمة «غير متوفرة» (تُعلَن صراحةً §8).
 // ══════════════════════════════════════════════════════════════════════
-function fairValueOf(h) {
-  const cfg = engineCfg[h.ticker] || {};
-  if (cfg.fairValueManual != null && cfg.fairValueManual !== '' && +cfg.fairValueManual > 0) {
-    return { value: +cfg.fairValueManual, source: 'يدوي' };
-  }
-  const fv = valuationFV[h.ticker];
-  if (fv && fv.value > 0) {
-    const age = fvAgeDays(fv);
-    return { value: fv.value, min: fv.min, max: fv.max,
-             source: `حاسبة القيمة العادلة (${fv.date})`, ageDays: age };
-  }
-  return null; // غير متوفرة — يُعلَن صراحةً
+function priceZonesOf(h) {
+  const z = taskZones[h.ticker];
+  if (!z) return null;
+  const has = z.accumulate != null || z.trimFrom != null || z.trimTo != null || z.liquidate != null;
+  return has ? z : null;
 }
 
 // ملاحظات الدستور الخاصة (§3) — تُعرَض كلافتة تحذيرية، لا تُغيّر منطق المحرّك آلياً
@@ -151,22 +152,18 @@ function evaluateHolding(h, ctx) {
   const hasExplicitTarget = tgt.target_pct != null && +tgt.target_pct > 0;
   const targetWeight = hasExplicitTarget ? +tgt.target_pct : cap;
 
-  const fv  = fairValueOf(h);
+  const zones = priceZonesOf(h);      // خطة الأسعار من المهام (أو null)
   const sus = sustainabilityOf(h);
   const priceOk = price > 0 && +h.shares > 0; // حارس: بلا سعر/أسهم لا تُبنى إشارة سعرية
-  const fvStale = fv && fv.ageDays != null && fv.ageDays > FV_STALE_DAYS;
   const gaps = [];
   if (!priceOk) gaps.push('السعر الحالي');
-  if (!fv) gaps.push('القيمة العادلة');
+  if (!zones)   gaps.push('خطة الأسعار (المهام)');
   if (sus.status === 'unknown') gaps.push('بوابة الاستدامة');
   const note = specialNoteOf(h);
 
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector,
-    weight, cap, price, value, assetType,
-    fairValue: fv ? fv.value : null, fairSource: fv ? fv.source : null,
-    fairMin: fv ? fv.min : null, fairMax: fv ? fv.max : null,
-    fvAgeDays: fv ? fv.ageDays : null, fvStale,
+    weight, cap, price, value, assetType, zones,
     sustain: sus, targetWeight, gaps, specialNote: note,
     blueChip: isBlueChip(h),
   };
@@ -195,51 +192,51 @@ function evaluateHolding(h, ctx) {
       reason: `فشل بوابة الاستدامة (الفلتر 1): ${sus.reason}` };
   }
 
+  // ── P1: سعر التصفية (تضخّم) من المهام — تجاوز الحدّ يفرض التصفية فوراً ──
+  if (zones && zones.liquidate && priceOk && price > zones.liquidate) {
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1,
+      reason: `سعر التضخّم (المهام): السعر ${formatNum(price)} تجاوز حدّ التصفية ${formatNum(zones.liquidate)} → بيع كامل` };
+  }
+
   // ── P2: تجاوز هدف الوزن الفردي (الفلتر 4) — يفرض التخفيف للهدف ──
   const overWeight = weight > targetWeight + 0.05; // مقارنة بهدف السهم الفردي
-  // ── P2: سقف القيمة (الفلتر 3) — مبالغة في التسعير تفرض التخفيف (يلزم سعر صالح) ──
-  const overValued = fv && priceOk ? price > fv.value * (1 + VALUE_CAP_MARGIN) : false;
+  // ── P2: نطاق التخفيف من المهام (الفلتر 3) — السعر دخل نطاق بيع الزائد ──
+  const inTrimBand = zones && zones.trimFrom && priceOk && price >= zones.trimFrom;
 
-  if (overWeight || overValued) {
+  if (overWeight || inTrimBand) {
     // أي حدّ ينكسر أول يفرض التخفيف (الدستور §5). هدف الوزن يحكم نسبة التخفيف.
     const reasons = [];
     if (overWeight) reasons.push(`تجاوز هدف الوزن (الفلتر 4): الوزن ${formatNum(weight)}% > الهدف ${formatNum(targetWeight)}%`);
-    if (overValued) {
-      let r = `تجاوز القيمة العادلة +${Math.round(VALUE_CAP_MARGIN*100)}% (الفلتر 3): السعر ${formatNum(price)} > العادلة ${formatNum(fv.value)}`;
-      if (fvStale) r += ` ⚠ القيمة العادلة متقادمة (${fv.ageDays} يوم) — راجع الأرقام`;
-      reasons.push(r);
+    if (inTrimBand) {
+      const to = zones.trimTo ? `–${formatNum(zones.trimTo)}` : '';
+      reasons.push(`نطاق التخفيف (المهام): السعر ${formatNum(price)} ≥ ${formatNum(zones.trimFrom)}${to} → بيع الزائد`);
     }
     return { ...base, action: 'trim',
-      label: overWeight ? `تخفيف لإرجاع الوزن إلى ${formatNum(targetWeight)}%` : 'تخفيف (مبالغة في التسعير)',
+      label: overWeight ? `تخفيف لإرجاع الوزن إلى ${formatNum(targetWeight)}%` : 'تخفيف (نطاق السعر)',
       cutToWeight: overWeight ? targetWeight : null, priority: 2,
       reason: reasons.join(' | ') };
   }
 
-  // ── P3: فرصة تجميع (الفلتر 3) — تحت القيمة + استدامة سليمة + وزن تحت الهدف ──
-  const inBuyZone = fv && priceOk && sus.status === 'pass'
-      && price < fv.value * (1 - BUY_ZONE_MARGIN)
+  // ── P3: تجميع من المهام (الفلتر 3) — السعر ≤ حدّ التجميع + استدامة سليمة + وزن تحت الهدف ──
+  const inBuyZone = zones && zones.accumulate && priceOk && sus.status === 'pass'
+      && price <= zones.accumulate
       && weight < targetWeight - 0.05;
   if (inBuyZone) {
-    if (fvStale) {
-      // لا نوصي بالتجميع بناءً على تقييم متقادم — أعلِن الحاجة لتحديثه
-      return { ...base, action: 'hold', label: 'احتفاظ', priority: 9,
-        reason: `في منطقة الشراء لكن القيمة العادلة متقادمة (${fv.ageDays} يوم) — حدّثها قبل أي تجميع (الدستور: الدورة 6 أشهر)` };
-    }
     if (!hasExplicitTarget) {
       // الهدف الفردي للسهم غير محدَّد، والشراء «مشروط مو آلي». بلا نسبة هدف
       // صريحة لا تُطلَق توصية تجميع آلية — يُعرَض كمرشّح مع إرشاد لضبط الهدف.
       return { ...base, action: 'hold', label: 'مرشّح تجميع (يحتاج هدف)', priority: 4,
         buyZone: true,
-        reason: `في منطقة الشراء (السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% = ${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة، لكن لا يوجد هدف فردي مسجَّل. حدّد هدف السهم في صفحة «أهداف الأسهم» لتفعيل توصية التجميع (§4: الشراء مشروط مو آلي)` };
+        reason: `في منطقة التجميع (السعر ${formatNum(price)} ≤ حدّ التجميع ${formatNum(zones.accumulate)}) + استدامة سليمة، لكن لا يوجد هدف فردي مسجَّل. حدّد هدف السهم في صفحة «أهداف الأسهم» لتفعيل توصية التجميع (§4: الشراء مشروط مو آلي)` };
     }
     return { ...base, action: 'add', label: 'تجميع (مشروط)', priority: 3,
-      reason: `منطقة شراء (الفلتر 3): السعر ${formatNum(price)} < العادلة −${Math.round(BUY_ZONE_MARGIN*100)}% (${formatNum(fv.value*(1-BUY_ZONE_MARGIN))}) + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}%` };
+      reason: `منطقة تجميع (المهام): السعر ${formatNum(price)} ≤ حدّ التجميع ${formatNum(zones.accumulate)} + استدامة سليمة + الوزن ${formatNum(weight)}% < الهدف ${formatNum(targetWeight)}%` };
   }
 
   // ── احتفاظ ──
   let holdReason;
   if (gaps.length) holdReason = `احتفاظ — لا قاعدة تخفيف/تصفية انطبقت. بيانات غير متوفرة: ${gaps.join('، ')}`;
-  else             holdReason = 'احتفاظ — ضمن هدف الوزن وسقف القيمة، الاستدامة سليمة';
+  else             holdReason = 'احتفاظ — ضمن هدف الوزن وخطة الأسعار، الاستدامة سليمة';
   return { ...base, action: 'hold', label: 'احتفاظ', priority: 9, reason: holdReason };
 }
 
@@ -255,11 +252,13 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rVal] = await Promise.all([
+  const [rH, rT, rEng, rTasks] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
-    loadUserSetting(VALUATION_HISTORY_KEY),
+    supabaseClient.from('portfolio_tasks')
+      .select('ticker, accumulate_at, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
+      .eq('status', 'active').order('updated_at', { ascending: false }),
   ]);
 
   holdings = rH.data || [];
@@ -267,41 +266,19 @@ async function loadAll() {
   (rT.data || []).forEach(r => { stockTargets[r.ticker] = r; });
   engineCfg = rEng || {};
 
-  // أحدث قيمة عادلة محفوظة لكل رمز من سجل الحاسبة
-  valuationFV = {};
-  (rVal || []).forEach(entry => {
-    const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
-    if (!tk) return;
-    const parsed = parseFairValueRange(entry.results?.fairValueRange);
-    if (parsed == null) return;
-    // السجل مرتّب بالأحدث أولاً (unshift) → أول ظهور هو الأحدث.
-    // entry.id = Date.now() وقت الحفظ → نستخدمه لحساب عمر القيمة العادلة بدقّة
-    // (نص التاريخ بتقويم هجري يصعب تحليله، أما الـid فطابع زمني موثوق).
-    if (!valuationFV[tk]) {
-      const ts = typeof entry.id === 'number' ? entry.id : null;
-      valuationFV[tk] = { value: parsed.avg, min: parsed.min, max: parsed.max,
-                         date: (entry.date || '').split('،')[0] || '', ts };
-    }
+  // خطة الأسعار لكل رمز من المهام النشطة — أحدث مهمة فيها سعر هي المرجع
+  taskZones = {};
+  (rTasks.data || []).forEach(t => {
+    const tk = (t.ticker || '').trim().toUpperCase();
+    if (!tk || taskZones[tk]) return; // مرتّبة بالأحدث → أول ظهور هو الأحدث
+    const num = v => (v != null && +v > 0 ? +v : null);
+    taskZones[tk] = {
+      accumulate: num(t.accumulate_at),
+      trimFrom:   num(t.trim_from),
+      trimTo:     num(t.trim_to),
+      liquidate:  num(t.liquidate_above),
+    };
   });
-}
-
-// عمر القيمة العادلة بالأيام (أو null إن لم يتوفر طابع زمني)
-const FV_STALE_DAYS = 180; // دورة الدستور 6 أشهر — أقدم من ذلك = متقادمة
-function fvAgeDays(fv) {
-  if (!fv || !fv.ts) return null;
-  return Math.floor((Date.now() - fv.ts) / 86400000);
-}
-
-// يحوّل نص نتيجة الحاسبة ("12.50 — 18.30" أو "15.40 ر.س") إلى { avg, min, max }
-// avg = نقطة الوسط (للإشارة بهوامش المالك)، min/max = حدّا النطاق (للشفافية)
-function parseFairValueRange(str) {
-  if (!str) return null;
-  const nums = String(str).replace(/,/g, '').match(/\d+(?:\.\d+)?/g);
-  if (!nums || !nums.length) return null;
-  const vals = nums.map(Number).filter(n => n > 0);
-  if (!vals.length) return null;
-  const min = Math.min(...vals), max = Math.max(...vals);
-  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, min, max };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -326,7 +303,7 @@ function renderSummaryStrip(totalValue) {
   const el = document.getElementById('de-summary');
   if (!el) return;
   const n = (a) => _results.filter(r => r.action === a).length;
-  const gapsFV  = _results.filter(r => r.fairValue == null).length;
+  const gapsFV  = _results.filter(r => r.zones == null).length;
   const gapsSus = _results.filter(r => r.sustain.status === 'unknown').length;
   const count = holdings.length;
   const sizeOk = count >= PORTFOLIO_SIZE.min && count <= PORTFOLIO_SIZE.max;
@@ -337,7 +314,7 @@ function renderSummaryStrip(totalValue) {
     <div class="de-stat de-stat-add"><div class="de-stat-num">${n('add')}</div><div class="de-stat-lbl">تجميع</div></div>
     <div class="de-stat de-stat-hold"><div class="de-stat-num">${n('hold')}</div><div class="de-stat-lbl">احتفاظ</div></div>
     <div class="de-stat"><div class="de-stat-num">${count} <span style="font-size:.6em;color:${sizeOk?'#10b981':'#f59e0b'}">${sizeOk?'✓':'⚠'}</span></div><div class="de-stat-lbl">عدد الأسهم (الهدف ${PORTFOLIO_SIZE.min}–${PORTFOLIO_SIZE.max})</div></div>
-    <div class="de-stat de-stat-gap"><div class="de-stat-num">${gapsFV} / ${gapsSus}</div><div class="de-stat-lbl">ناقص: قيمة عادلة / استدامة</div></div>
+    <div class="de-stat de-stat-gap"><div class="de-stat-num">${gapsFV} / ${gapsSus}</div><div class="de-stat-lbl">ناقص: خطة أسعار / استدامة</div></div>
   `;
 }
 
@@ -359,7 +336,7 @@ function renderActionTable() {
       <td><strong>${r.ticker}</strong><br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
       <td>${formatNum(r.weight)}%<br><span class="small text-muted">الهدف ${formatNum(r.targetWeight)}%</span></td>
       <td>${formatNum(r.price)}</td>
-      <td>${r.fairValue != null ? formatNum(r.fairValue) : '<span class="text-muted">غير متوفرة</span>'}</td>
+      <td class="small">${zonesText(r.zones) ? escapeHtmlSafe(zonesText(r.zones)) : '<span class="text-muted">غير متوفرة</span>'}</td>
       <td class="de-reason">${escapeHtmlSafe(r.reason)}</td>
       <td><button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">بطاقة</button></td>
     </tr>`).join('');
@@ -399,11 +376,9 @@ function renderAllTable() {
   const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   tbody.innerHTML = sorted.map(r => {
     const susBadge = { pass: '🟢 سليمة', fail: '🔴 فاشلة', unknown: '⚪ غير متوفرة' }[r.sustain.status];
-    const staleTag = r.fvStale ? `<br><span class="small" style="color:#f59e0b" title="أقدم من ${FV_STALE_DAYS} يوم">⏳ متقادمة (${r.fvAgeDays} يوم)</span>` : '';
-    const rangeTag = (r.fairMin != null && r.fairMax != null && r.fairMax > r.fairMin)
-      ? `<br><span class="small text-muted" title="نطاق النماذج">النطاق: ${formatNum(r.fairMin)} – ${formatNum(r.fairMax)}</span>` : '';
-    const fvCell = r.fairValue != null
-      ? `${formatNum(r.fairValue)}${rangeTag}<br><span class="small text-muted">${escapeHtmlSafe(r.fairSource||'')}</span>${staleTag}`
+    const zt = zonesText(r.zones);
+    const fvCell = zt
+      ? `<span class="small">${escapeHtmlSafe(zt)}</span>`
       : '<span class="text-muted">غير متوفرة</span>';
     const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
     return `
@@ -441,7 +416,6 @@ function openStockCard(ticker) {
   _cardTicker = ticker;
   const cfg = engineCfg[ticker] || {};
   const autoType = classifyAsset(h.sector);
-  const fv = valuationFV[ticker];
 
   document.getElementById('de-card-title').textContent = `بطاقة السهم — ${ticker} ${h.name}`;
   document.getElementById('de-card-sector').textContent = h.sector || '—';
@@ -453,17 +427,14 @@ function openStockCard(ticker) {
   setSelect('de-card-covered', cfg.divCovered || '');
   setSelect('de-card-healthy', cfg.fundHealthy || '');
   setSelect('de-card-cut', cfg.divCut || '');
-  document.getElementById('de-card-fairmanual').value = cfg.fairValueManual ?? '';
   document.getElementById('de-card-notes').value = cfg.notes || '';
 
+  // خطة الأسعار مصدرها صفحة المهام — تُعرَض للقراءة فقط هنا
+  const zt = zonesText(taskZones[ticker]);
   const fvHint = document.getElementById('de-card-fvhint');
-  if (fv) {
-    const age = fvAgeDays(fv);
-    const staleMsg = age != null && age > FV_STALE_DAYS ? ` ⏳ متقادمة (${age} يوم) — حدّثها بإعادة تشغيل الحاسبة.` : '';
-    fvHint.textContent = `قيمة عادلة محفوظة من الحاسبة: ${formatNum(fv.value)} (${fv.date}). اتركه فارغاً لاستخدامها.${staleMsg}`;
-  } else {
-    fvHint.textContent = 'لا توجد قيمة عادلة محفوظة لهذا السهم — أدخلها يدوياً أو شغّل حاسبة القيمة العادلة.';
-  }
+  fvHint.innerHTML = zt
+    ? `خطة الأسعار (من المهام): <strong>${escapeHtmlSafe(zt)}</strong>`
+    : 'لا توجد خطة أسعار لهذا السهم — أضِفها في صفحة <a href="tasks.html" style="color:var(--accent)">مهام المحفظة</a>.';
 
   // ملاحظة الدستور الخاصة (5110 / سياق الإسمنت الدوري)
   const noteEl = document.getElementById('de-card-note');
@@ -488,8 +459,6 @@ async function saveStockCard(e) {
   cfg.divCovered  = v('de-card-covered') || undefined;
   cfg.fundHealthy = v('de-card-healthy') || undefined;
   cfg.divCut      = v('de-card-cut') || undefined;
-  const fm = v('de-card-fairmanual');
-  cfg.fairValueManual = fm !== '' ? +fm : undefined;
   cfg.notes       = v('de-card-notes').trim() || undefined;
 
   // نظّف المفاتيح الفارغة
@@ -508,13 +477,13 @@ async function saveStockCard(e) {
 // ══════════════════════════════════════════════════════════════════════
 function exportActionsCSV() {
   const rows = _results
-    .filter(r => r.action !== 'hold')
+    .filter(r => r.action !== 'hold' || r.buyZone)
     .sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   if (!rows.length) { showToast('لا توجد إجراءات للتصدير', 'info'); return; }
-  const head = ['الرمز','الاسم','الإجراء','الوزن%','الهدف%','السعر','القيمة العادلة','السبب'];
+  const head = ['الرمز','الاسم','الإجراء','الوزن%','الهدف%','السعر','خطة الأسعار','السبب'];
   const lines = rows.map(r => [
     r.ticker, r.name, r.label, formatNum(r.weight), formatNum(r.targetWeight), formatNum(r.price),
-    r.fairValue != null ? formatNum(r.fairValue) : 'غير متوفرة', r.reason,
+    zonesText(r.zones) || 'غير متوفرة', r.reason,
   ].map(csvCell).join(','));
   const csv = '﻿' + [head.map(csvCell).join(','), ...lines].join('\r\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

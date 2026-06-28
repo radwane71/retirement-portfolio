@@ -237,7 +237,7 @@
         <h1>📋 مهام المحفظة
           <button class="info-btn" type="button" onclick="showCardInfo('tasks')" title="ما هذه الصفحة؟" style="position:static;opacity:.7">ⓘ</button>
         </h1>
-        <p>مهامك اليدوية + تنبيهات تلقائية من الأهداف — كل شيء محفوظ، لا شيء يُحذف</p>
+        <p>خطة أسعار يدوية لكل سهم — تُغذّي محرّك القرار: تجميع / تخفيف / تصفية</p>
       </div>
       <button class="btn btn-primary" onclick="openTaskModal()">+ مهمة جديدة</button>
     </div>
@@ -258,11 +258,6 @@
         <div class="label">ملغاة</div>
         <div class="value num text-muted" id="tk-cancelled">—</div>
         <div class="sub">أُلغيت (محفوظة)</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">تنبيهات تلقائية</div>
-        <div class="value num text-accent" id="tk-alerts">—</div>
-        <div class="sub">من صفحة الأهداف</div>
       </div>
     </div>
 
@@ -324,14 +319,6 @@
       </div>
     </details>
 
-    <!-- Auto-alerts section — تنبيهات النظام في الأسفل -->
-    <div class="alert-section" id="auto-alerts-section">
-      <div class="alert-section-title">👁 تنبيهات تلقائية من أهداف المحفظة</div>
-      <div id="auto-alerts-body">
-        <p class="small text-muted">جارٍ التحميل…</p>
-      </div>
-    </div>
-
     <footer class="site-footer">
       ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
       أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
@@ -386,16 +373,28 @@
           <input type="text" id="task-name" placeholder="اختياري — يُملأ تلقائياً">
         </div>
 
-        <!-- Accumulation: target price -->
-        <div class="form-group" id="task-price-group" style="display:none">
-          <label>تجميع عند سعر أقل من (ر.س)</label>
-          <input type="number" id="task-price" step="0.01" min="0" placeholder="0.00">
-        </div>
+      </div>
 
-        <!-- Reduction: percentage -->
-        <div class="form-group" id="task-pct-group" style="display:none">
-          <label>نسبة التخفيف %</label>
-          <input type="number" id="task-pct" step="1" min="1" max="99" placeholder="مثال: 30">
+      <!-- خطة الأسعار — تُغذّي محرّك القرار -->
+      <div style="margin:14px 0 6px;font-size:0.82rem;color:var(--text-2);font-weight:700">
+        خطة الأسعار (اختيارية — أي خانة تتركها فارغة تُهمَل)
+      </div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>🟢 تجميع عند سعر ≤ (ر.س)</label>
+          <input type="number" id="task-accumulate" step="0.01" min="0" placeholder="شراء إضافي عند هذا السعر أو أقل">
+        </div>
+        <div class="form-group">
+          <label>🔴 تصفية إذا تجاوز (ر.س)</label>
+          <input type="number" id="task-liquidate" step="0.01" min="0" placeholder="بيع كامل — سعر التضخّم">
+        </div>
+        <div class="form-group">
+          <label>⚖️ تخفيف من سعر (ر.س)</label>
+          <input type="number" id="task-trim-from" step="0.01" min="0" placeholder="بداية بيع الزائد">
+        </div>
+        <div class="form-group">
+          <label>⚖️ تخفيف إلى سعر (ر.س)</label>
+          <input type="number" id="task-trim-to" step="0.01" min="0" placeholder="نهاية نطاق التخفيف">
         </div>
       </div>
 
