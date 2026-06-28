@@ -2037,6 +2037,180 @@ async function exportMonthlyReviewMD() {
     }
     hr();
 
+    // ════════════════════════════════════════════════════════
+    // 27. تقييم أمان المحفظة (Portfolio Safety Rating)
+    // ════════════════════════════════════════════════════════
+    h2('27. تقييم أمان المحفظة (Portfolio Safety Rating)');
+    p('لقطة آخر حساب من صفحة «تقييم أمان المحفظة». الدرجة من 10، مبنية على مدخلات يدوية يحفظها المالك. تُحدَّث آلياً عند كل حساب في تلك الصفحة.');
+    {
+      const cell = v => String(v == null ? '—' : v).replace(/\|/g, '\\|').replace(/\n+/g, ' ');
+      const rat  = await syncedGet('portfolio_rating_snapshot_v1', null);
+      if (rat && rat.score != null) {
+        p(`**الدرجة:** ${(+rat.score).toFixed(1)} / 10  `);
+        p(`**التقييم:** ${cell(rat.evaluation)}  `);
+        p(`**تاريخ آخر حساب:** ${rat.generated_at ? new Date(rat.generated_at).toLocaleString('ar-SA') : '—'}`);
+
+        const RAT_LABELS = {
+          individualStocks:'عدد الأسهم المنفردة', reitCount:'عدد صناديق الريت',
+          etfCount:'عدد صناديق المؤشرات ETF', bondCount:'عدد الصكوك/السندات',
+          largestStockPercentage:'% أكبر سهم', largestSectorPercentage:'% أكبر قطاع',
+          geographicDistribution:'التوزيع الجغرافي', goldPercentage:'نسبة الذهب/التحوط',
+          hasCash:'احتياطي كاش', sectorDiversification:'التنوع القطاعي',
+          investmentHorizon:'أفق الاستثمار', usesLeverage:'رافعة مالية', leverageRatio:'نسبة الرافعة %',
+        };
+        const RAT_VALMAP = {
+          geographicDistribution:{ diversified:'متنوع عالمياً', international:'دولي', regional:'إقليمي', 'local-only':'محلي فقط' },
+          goldPercentage:{ high:'مرتفعة', medium:'متوسطة', low:'منخفضة', none:'لا يوجد' },
+          hasCash:{ yes:'نعم', no:'لا' },
+          sectorDiversification:{ 'single-sector':'قطاع واحد', '2-4-sectors':'2–4 قطاعات', '5-7-sectors':'5–7 قطاعات', '8-plus-sectors':'8+ قطاعات' },
+          investmentHorizon:{ long:'طويل', medium:'متوسط', short:'قصير' },
+          usesLeverage:{ yes:'نعم', no:'لا' },
+        };
+        const inp = rat.inputs || {};
+        const inRows = Object.keys(RAT_LABELS)
+          .filter(k => inp[k] != null && inp[k] !== '')
+          .map(k => [RAT_LABELS[k], cell(RAT_VALMAP[k]?.[inp[k]] ?? inp[k])]);
+        if (inRows.length) { h3('المدخلات'); p(mdTable(['المدخل','القيمة'], inRows)); }
+
+        if (Array.isArray(rat.breakdown) && rat.breakdown.length) {
+          h3('تفصيل النقاط');
+          p(mdTable(['البند','الدرجة','الحد الأقصى'],
+            rat.breakdown.map(b => [
+              cell(b.label),
+              (b.value >= 0 ? '+' : '') + (+b.value).toFixed(2),
+              b.max != null ? (+b.max).toFixed(2) : (b.isPenalty ? 'خصم' : '—'),
+            ])));
+        }
+      } else {
+        p('_لا توجد لقطة محفوظة لتقييم الأمان. افتح صفحة «تقييم أمان المحفظة» واحسب مرة واحدة ثم أعد تصدير التقرير._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 28. مواعيد آخر تحديث لأسعار الأسهم
+    // ════════════════════════════════════════════════════════
+    h2('28. مواعيد آخر تحديث لأسعار الأسهم (Price Freshness)');
+    p('تاريخ آخر تحديث يدوي للسعر لكل رمز — يقيس طزاجة بيانات الأسعار. يُعتبر السعر «قديماً» بعد 7 أيام.');
+    {
+      const ts   = lsGet('tharwa-price-timestamps', {});
+      const keys = ts && typeof ts === 'object' ? Object.keys(ts) : [];
+      if (keys.length) {
+        const rows = keys.map(tk => {
+          const t   = new Date(ts[tk]);
+          const age = (Date.now() - t.getTime()) / 86400000;
+          const h   = holdings.find(x => x.ticker === tk);
+          return { tk, name: h?.name || '—', iso: ts[tk], age, stale: age > 7 };
+        }).sort((a, b) => b.age - a.age);
+        p(mdTable(['الرمز','الاسم','آخر تحديث','منذ (يوم)','الحالة'],
+          rows.map(r => [
+            r.tk, r.name, new Date(r.iso).toLocaleString('ar-SA'),
+            r.age.toFixed(1), r.stale ? '🔴 قديم (>7 أيام)' : '🟢 حديث',
+          ])));
+        const staleN = rows.filter(r => r.stale).length;
+        p(`\n**${rows.length}** رمز لها طابع زمني | **${staleN}** قديم (>7 أيام).`);
+      } else {
+        p('_لا توجد طوابع زمنية لأسعار الأسهم بعد._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 29. الأداء التفصيلي — العائد المعدَّل بالزمن (TWR)
+    // ════════════════════════════════════════════════════════
+    h2('29. الأداء التفصيلي — العائد المعدَّل بالزمن (TWR)');
+    p('العائد المعدَّل بالزمن (Time-Weighted Return، معيار GIPS بطريقة Modified Dietz) يعزل أداء قراراتك الاستثمارية بإزالة أثر الإيداعات والسحوبات. الأساس = 100 عند أول لقطة صافي ثروة. (مطابق لمنطق صفحة الأداء.)');
+    {
+      // مطابقة _deduplicateSnapsByDay + _computeTWR في performance.js
+      const _dedupSnaps = (snaps) => {
+        const byDate = {};
+        for (const s of snaps) {
+          const existing = byDate[s.date];
+          if (!existing) { byDate[s.date] = s; continue; }
+          const isManual  = s.notes && !s.notes.startsWith('auto');
+          const wasManual = existing.notes && !existing.notes.startsWith('auto');
+          if (isManual && !wasManual) { byDate[s.date] = s; continue; }
+          if (!wasManual && !isManual) byDate[s.date] = s;
+        }
+        return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+      };
+      const _twr = (snaps, cfsIn) => {
+        const sorted = _dedupSnaps(snaps);
+        if (!sorted.length) return { twrMap: {}, sorted: [] };
+        const cfs = cfsIn.slice().sort((a, b) => a.date.localeCompare(b.date));
+        const twrMap = {}; let factor = 1.0; twrMap[sorted[0].date] = 100;
+        for (let i = 1; i < sorted.length; i++) {
+          const sD = sorted[i - 1].date, eD = sorted[i].date;
+          const sV = +sorted[i - 1].total_value, eV = +sorted[i].total_value;
+          const netCF = cfs.filter(c => c.date > sD && c.date <= eD)
+            .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
+          const denom = sV + netCF / 2;
+          if (denom > 0) { const r = (eV - sV - netCF) / denom; factor *= (1 + r); }
+          twrMap[sorted[i].date] = +(factor * 100).toFixed(3);
+        }
+        return { twrMap, sorted };
+      };
+
+      if (snapshots.length >= 2) {
+        const { twrMap, sorted } = _twr(snapshots, cashflows);
+        const lastIdx  = twrMap[sorted[sorted.length - 1].date];
+        const totalTWR = lastIdx - 100;
+        const days     = (parseDateLocal(sorted[sorted.length - 1].date) - parseDateLocal(sorted[0].date)) / 86400000;
+        const years    = days / 365;
+        const annTWR   = years > 0.08 && lastIdx > 0 ? (Math.pow(lastIdx / 100, 1 / years) - 1) * 100 : null;
+
+        p(`**الفترة:** ${sorted[0].date} ← ${sorted[sorted.length - 1].date} (${years.toFixed(1)} سنة، ${sorted.length} لقطة)  `);
+        p(`**إجمالي عائد TWR:** ${(totalTWR >= 0 ? '+' : '') + PCT(totalTWR)}  `);
+        if (annTWR != null) p(`**عائد TWR السنوي المركّب:** ${(annTWR >= 0 ? '+' : '') + PCT(annTWR)}`);
+
+        // العوائد الشهرية — آخر مؤشر في كل شهر
+        h3('العوائد الشهرية (TWR)');
+        const monthEnd = {};
+        sorted.forEach(s => { monthEnd[s.date.slice(0, 7)] = twrMap[s.date]; });
+        const months = Object.keys(monthEnd).sort();
+        let prevIdx = null;
+        const mRows = months.map(m => {
+          const idx = monthEnd[m];
+          const ret = prevIdx != null && prevIdx > 0 ? (idx - prevIdx) / prevIdx * 100 : null;
+          prevIdx = idx;
+          return [m, N(idx), ret == null ? '—' : ((ret >= 0 ? '+' : '') + PCT(ret))];
+        });
+        p(mdTable(['الشهر','مؤشر TWR (=100 بداية)','عائد الشهر'], mRows));
+
+        // مقارنة بمؤشر تاسي
+        h3('مقارنة بمؤشر تاسي');
+        const bmSorted = [...(Array.isArray(benchmark) ? benchmark : [])]
+          .filter(e => e && e.date).sort((a, b) => a.date.localeCompare(b.date));
+        if (bmSorted.length >= 2) {
+          const tasiAt = (date) => { const pr = bmSorted.filter(e => e.date <= date); return pr.length ? +pr[pr.length - 1].value : null; };
+          const twrAt  = (date) => { const pr = sorted.filter(s => s.date <= date); return pr.length ? twrMap[pr[pr.length - 1].date] : null; };
+          const startDate = sorted[0].date < bmSorted[0].date ? bmSorted[0].date : sorted[0].date;
+          const endDate   = sorted[sorted.length - 1].date;
+          const twrStart  = twrAt(startDate) ?? 100;
+          const tasiStart = tasiAt(startDate), tasiEnd = tasiAt(endDate);
+          const portDelta = twrStart > 0 ? (lastIdx / twrStart * 100 - 100) : null;
+          const tasiDelta = (tasiStart && tasiEnd && tasiStart > 0) ? (tasiEnd - tasiStart) / tasiStart * 100 : null;
+          if (portDelta != null && tasiDelta != null) {
+            const alpha = portDelta - tasiDelta;
+            p(mdTable(['المقياس','القيمة'], [
+              ['الفترة المشتركة', `${startDate} ← ${endDate}`],
+              ['عائد محفظتك (TWR)', (portDelta >= 0 ? '+' : '') + PCT(portDelta)],
+              ['عائد تاسي (سعري)',  (tasiDelta >= 0 ? '+' : '') + PCT(tasiDelta)],
+              ['الفارق (ألفا، سعري)', (alpha >= 0 ? '+' : '') + PCT(alpha)],
+            ]));
+            p('_ملاحظة منهجية: عائد محفظتك TWR يشمل توزيعاتك، بينما تاسي هنا سعري فقط (لا يشمل التوزيعات). للمقارنة العادلة أضف عائد توزيعات تاسي التقديري ~3.5%/سنة._');
+          } else {
+            p('_تعذّرت المقارنة — بيانات تاسي لا تغطي فترة المحفظة._');
+          }
+        } else {
+          p('_لا توجد بيانات كافية لمؤشر تاسي للمقارنة (انظر القسم 19)._');
+        }
+      } else {
+        p('_تحتاج لقطتَي صافي ثروة على الأقل لحساب TWR. أضِف لقطات من صفحة صافي الثروة._');
+      }
+    }
+    hr();
+
     p('---');
     p('_تم توليد هذا التقرير تلقائياً من تطبيق ثروة — مفكرة حسابية شخصية._');
     p('_الأرقام تعكس البيانات المُدخَّلة يدوياً ولا تمثّل توصيات استثمارية._');

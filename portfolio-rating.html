@@ -303,10 +303,60 @@
   <script>
     let breakdownChartInst = null;
 
+    // ── حفظ/استعادة لقطة التقييم في user_settings (تُنسخ احتياطياً تلقائياً) ──
+    const RATING_SNAPSHOT_KEY = 'portfolio_rating_snapshot_v1';
+    const RATING_FIELDS = [
+      'individualStocks','reitCount','etfCount','bondCount',
+      'largestStockPercentage','largestSectorPercentage','geographicDistribution',
+      'goldPercentage','hasCash','sectorDiversification','investmentHorizon',
+      'usesLeverage','leverageRatio'
+    ];
+    let _ratingSaveTimer = null;
+    let _ratingLoaded = false;
+
+    function captureRatingInputs() {
+      const o = {};
+      RATING_FIELDS.forEach(id => { o[id] = document.getElementById(id).value; });
+      return o;
+    }
+
+    function saveRatingSnapshot(score, evaluation, breakdown) {
+      // debounce: نحفظ بعد توقف الإدخال بثانية لتفادي كتابة سحابية على كل ضغطة
+      clearTimeout(_ratingSaveTimer);
+      const snapshot = {
+        generated_at: new Date().toISOString(),
+        score, evaluation,
+        inputs: captureRatingInputs(),
+        breakdown,
+      };
+      _ratingSaveTimer = setTimeout(() => {
+        saveUserSetting(RATING_SNAPSHOT_KEY, snapshot).catch(() => {});
+      }, 1000);
+    }
+
+    async function loadRatingSnapshot() {
+      try {
+        const snap = await loadUserSetting(RATING_SNAPSHOT_KEY);
+        if (snap && snap.inputs) {
+          RATING_FIELDS.forEach(id => {
+            if (snap.inputs[id] != null) document.getElementById(id).value = snap.inputs[id];
+          });
+          // إظهار حقول الرافعة لو كانت مفعّلة في اللقطة
+          if (snap.inputs.usesLeverage === 'yes') {
+            document.getElementById('leverageWarning').style.display    = 'block';
+            document.getElementById('leverageRatioGroup').style.display = 'block';
+          }
+          _ratingLoaded = true;
+          updateResults();
+        }
+      } catch (_) {}
+    }
+
     async function init() {
       const user = await requireAuth();
       if (!user) return;
       setActiveNav('nav-portfolio-rating');
+      await loadRatingSnapshot();
     }
 
     document.getElementById('usesLeverage').addEventListener('change', function () {
@@ -525,6 +575,9 @@
       // شارت الأبعاد الإيجابية
       renderBreakdownChart(positives);
       document.getElementById('scoreBreakdown').style.display = 'block';
+
+      // حفظ لقطة التقييم (تُدرَج في تقرير المراجعة وتُنسخ احتياطياً)
+      saveRatingSnapshot(score, evaluation, breakdown);
     }
 
     function renderBreakdownChart(items) {
@@ -591,6 +644,9 @@
       document.getElementById('percentageDisplay').style.background = 'var(--bg-3)';
       document.getElementById('percentageDisplay').style.color      = 'var(--text-muted)';
       if (breakdownChartInst) { breakdownChartInst.destroy(); breakdownChartInst = null; }
+      // مسح اللقطة المحفوظة أيضاً حتى لا يُدرَج تقييم قديم في التقرير بعد التصفير
+      clearTimeout(_ratingSaveTimer);
+      saveUserSetting(RATING_SNAPSHOT_KEY, null).catch(() => {});
     }
 
     document.querySelectorAll('input[type="number"], select').forEach(el => {
