@@ -1,6 +1,7 @@
 let holdings    = [];
 let stockTargets = {};   // ticker → target_pct  (من stock_targets)
 let stockZones   = {};   // ticker → { entry_price, exit_price }
+let trimZonesMap = {};   // ticker → trim_from (من portfolio_tasks)
 let stockTaskMap = {};   // ticker → نوع المهمة اليدوية الفعّالة (من portfolio_tasks)
 let plannedTickers = {}; // ticker → name  (أسهم user_stocks المخطط لها وغير المملوكة)
 // مهام الأسهم اليدوية — نفس تعريف targets.js
@@ -259,7 +260,7 @@ async function loadAllData() {
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     supabaseClient.from('sector_targets').select('sector, target_pct'),
     supabaseClient.from('portfolio_cash').select('amount, updated_at').limit(1).maybeSingle(),
-    supabaseClient.from('portfolio_tasks').select('type, ticker, status').eq('status', 'active'),
+    supabaseClient.from('portfolio_tasks').select('type, ticker, status, trim_from').eq('status', 'active'),
     supabaseClient.from('user_stocks').select('ticker, name')
   ]);
 
@@ -276,7 +277,12 @@ async function loadAllData() {
 
   // المهام اليدوية الفعّالة لكل سهم (أحدث مهمة لكل رمز)
   stockTaskMap = {};
-  (rTasks?.data || []).forEach(t => { if (t.ticker && !stockTaskMap[t.ticker]) stockTaskMap[t.ticker] = t.type; });
+  trimZonesMap = {};
+  (rTasks?.data || []).forEach(t => {
+    if (!t.ticker) return;
+    if (!stockTaskMap[t.ticker]) stockTaskMap[t.ticker] = t.type;
+    if (!trimZonesMap[t.ticker] && t.trim_from != null) trimZonesMap[t.ticker] = +t.trim_from;
+  });
   // الأسهم المخطط لها = user_stocks غير الموجودة في الحيازات الفعلية
   plannedTickers = {};
   const _heldSet = new Set((rH.data || []).map(h => h.ticker));
@@ -2707,10 +2713,11 @@ function renderPriceZonesCard() {
   const totalValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
   const rows = [];
   holdings.forEach(h => {
-    const zone = stockZones[h.ticker];
-    if (!zone || (zone.entry_price == null && zone.exit_price == null)) return;
+    const zone     = stockZones[h.ticker] || {};
+    const trimFrom = trimZonesMap[h.ticker] ?? null;
+    if (zone.entry_price == null && zone.exit_price == null && trimFrom == null) return;
     const price = +h.current_price;
-    let entryStatus = '', exitStatus = '';
+    let entryStatus = '', trimStatus = '', exitStatus = '';
     if (zone.entry_price != null) {
       if (price <= zone.entry_price) {
         const currentW = totalValue > 0 ? (+h.shares * price) / totalValue * 100 : 0;
@@ -2723,18 +2730,24 @@ function renderPriceZonesCard() {
       } else
         entryStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.entry_price}</span>`;
     }
+    if (trimFrom != null) {
+      if (price >= trimFrom)
+        trimStatus = `<span style="color:#f0b429;font-weight:bold">⚖️ في منطقة تخفيف — السعر ${price} تجاوز الحد ${trimFrom}</span>`;
+      else
+        trimStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${trimFrom}</span>`;
+    }
     if (zone.exit_price != null) {
       if (price >= zone.exit_price)
         exitStatus = `<span style="color:#f85149;font-weight:bold">🔴 في منطقة بيع — السعر ${price} تجاوز الحد ${zone.exit_price}</span>`;
       else
         exitStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.exit_price}</span>`;
     }
-    rows.push({ ticker: h.ticker, name: h.name, entryStatus, exitStatus, zone, price });
+    rows.push({ ticker: h.ticker, name: h.name, entryStatus, trimStatus, exitStatus, zone, trimFrom, price });
   });
 
   if (!rows.length) {
     el.innerHTML = `<div class="text-muted small" style="text-align:center;padding:12px">
-      لا توجد مناطق سعرية مُعرَّفة — أضفها من <a href="targets.html" style="color:var(--accent)">صفحة الأهداف</a>
+      لا توجد مناطق سعرية مُعرَّفة — أضفها من <a href="tasks.html" style="color:var(--accent)">التقييمات العادلة</a>
     </div>`;
     return;
   }
@@ -2743,11 +2756,13 @@ function renderPriceZonesCard() {
     <thead><tr style="color:var(--text-muted);border-bottom:1px solid var(--border)">
       <th style="text-align:right;padding:4px 6px">السهم</th>
       <th style="text-align:right;padding:4px 6px">منطقة الشراء ≤</th>
+      <th style="text-align:right;padding:4px 6px">التخفيف ≥</th>
       <th style="text-align:right;padding:4px 6px">منطقة البيع ≥</th>
     </tr></thead>
     <tbody>${rows.map(r => `<tr style="border-bottom:1px solid var(--border)">
       <td style="padding:4px 6px"><strong class="text-accent">${esc(r.ticker)}</strong>${r.name ? `<br><span class="text-muted" style="font-size:0.75rem">${esc(r.name)}</span>` : ''}</td>
       <td style="padding:4px 6px">${r.zone.entry_price != null ? r.entryStatus || '—' : '<span class="text-muted">—</span>'}</td>
+      <td style="padding:4px 6px">${r.trimFrom != null ? r.trimStatus || '—' : '<span class="text-muted">—</span>'}</td>
       <td style="padding:4px 6px">${r.zone.exit_price  != null ? r.exitStatus  || '—' : '<span class="text-muted">—</span>'}</td>
     </tr>`).join('')}</tbody>
   </table>`;
