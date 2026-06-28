@@ -362,6 +362,7 @@
         <div id="editModeBadge" class="edit-mode-badge">✏️ وضع التعديل — ستُحدَّث العملية المحددة عند الضغط على «احسب»</div>
         <button class="btn btn-secondary btn-sm" id="cancelEditBtn" style="display:none;margin-bottom:8px;width:100%" onclick="cancelEdit()">إلغاء التعديل ✕</button>
         <button class="calc-btn" onclick="calculateFairValue()">احسب القيمة العادلة</button>
+        <button class="btn btn-secondary btn-sm" style="width:100%;margin-top:8px" onclick="resetCalculator()">🔄 إعادة تعيين الحاسبة</button>
       </div>
     </div>
 
@@ -776,16 +777,21 @@
         buildModelsTable(values);
         const chart_values = Object.fromEntries(Object.entries(values).filter(([,v])=>v!==null&&v>0&&isFinite(v)));
         createModelsChart(chart_values);
-        document.getElementById('dashboardDebt').textContent      = `${document.getElementById('debtRatio').value}%`;
-        document.getElementById('dashboardLiquidity').textContent  = parseFloat(document.getElementById('liquidityRatio').value).toFixed(1);
-        document.getElementById('dashboardEarnings').textContent   = `${document.getElementById('earningsQuality').value}%`;
+        // مؤشرات اللوحة العامة — لا تُطبَّق على البنك (له مؤشراته NPL/LDR/ROE المضبوطة أعلاه)
+        if (companyType !== 'bank') {
+          document.getElementById('dashboardDebt').textContent      = `${document.getElementById('debtRatio').value}%`;
+          document.getElementById('dashboardLiquidity').textContent  = parseFloat(document.getElementById('liquidityRatio').value).toFixed(1);
+          document.getElementById('dashboardEarnings').textContent   = `${document.getElementById('earningsQuality').value}%`;
+        }
         document.getElementById('resultsSection').style.display = 'block';
         document.getElementById('loadingOverlay').classList.add('hidden');
         document.getElementById('resultsSection').scrollIntoView({behavior:'smooth'});
+        return true;
       } catch (err) {
         document.getElementById('loadingOverlay').classList.add('hidden');
         console.error(err);
         alert('خطأ أثناء الحساب: ' + err.message);
+        return false;
       }
     }
 
@@ -1278,7 +1284,7 @@
       list.innerHTML = filtered.map(entry => {
         const inp = entry.inputs || {};
         const res = entry.results || {};
-        const typeLabel  = inp.companyType === 'reit' ? '🏢 ريت عقاري' : '📊 شركة عادية';
+        const typeLabel  = inp.companyType === 'reit' ? '🏢 ريت عقاري' : inp.companyType === 'bank' ? '🏦 بنك / مصرف' : '📊 شركة عادية';
         const ticker     = inp.ticker    || '';
         const stockName  = inp.stockName || '';
 
@@ -1344,7 +1350,8 @@
     const _origCalc = calculateFairValue;
     calculateFairValue = async function() {
       const inputs = captureInputs();
-      await _origCalc();
+      const ok = await _origCalc();
+      if (ok !== true) return; // أُلغي التعديل أو فشلت المدخلات → لا تحفظ
       setTimeout(async () => {
         const fairRange  = document.getElementById('fairValueRange').textContent;
         const fairDetail = document.getElementById('fairValueDetails').textContent;
@@ -1365,6 +1372,35 @@
       }, 300);
     };
 
+    // ===== إعادة تعيين الحاسبة =====
+    let _calcDefaults = null;
+    function snapshotDefaults() {
+      _calcDefaults = {};
+      document.querySelectorAll('.calc-grid input, .calc-grid select, .calc-grid textarea').forEach(el => {
+        if (!el.id) return;
+        _calcDefaults[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+      });
+    }
+
+    async function resetCalculator() {
+      if (!await confirmAsync('إعادة تعيين الحاسبة؟ ستُمسح المدخلات الحالية (لن يتأثر السجل المحفوظ).')) return;
+      if (_calcDefaults) {
+        Object.entries(_calcDefaults).forEach(([id, val]) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (el.type === 'checkbox') el.checked = val; else el.value = val;
+        });
+      }
+      document.getElementById('waccInputs').style.display = 'none';
+      document.getElementById('growthPerpWarning').style.display = 'none';
+      toggleCompanyType();
+      setEditMode(false);
+      document.getElementById('resultsSection').style.display = 'none';
+      document.getElementById('outlierWarning').style.display = 'none';
+      showToast('تم إعادة تعيين الحاسبة', 'success');
+      document.querySelector('.calc-grid').scrollIntoView({ behavior: 'smooth' });
+    }
+
     async function init() {
       const user = await requireAuth();
       if (!user) return;
@@ -1373,6 +1409,7 @@
       renderHistory();
     }
 
+    snapshotDefaults();
     init();
   </script>
 </body>
