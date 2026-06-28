@@ -721,9 +721,12 @@ function stockFinancials(ticker) {
   const divs      = divByTicker[ticker] || [];
   const divTotal  = divs.reduce((s, d) => s + (d.amount || 0), 0);
   const yoc       = costBasis > 0 ? divTotal / costBasis * 100 : 0;
+  const cutoff    = Date.now() - 365 * 86400000;
+  const ttmDiv    = divs.reduce((s, d) => s + (d.date.getTime() >= cutoff ? (d.amount || 0) : 0), 0);
+  const fwdYoc    = costBasis > 0 ? ttmDiv / costBasis * 100 : 0;
   const byYear    = {};
   divs.forEach(d => { const y = d.date.getFullYear(); byYear[y] = (byYear[y] || 0) + d.amount; });
-  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, byYear, divCount: divs.length, buyShares, sellShares, grantShares };
+  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, ttmDiv, fwdYoc, byYear, divCount: divs.length, buyShares, sellShares, grantShares };
 }
 
 function sectorPctOf(sector, totalValue) {
@@ -851,6 +854,19 @@ function openDetailCard(ticker) {
     kv('إجمالي الأرباح الموزعة', formatNum(fin.divTotal)),
     kv('العائد على التكلفة YOC', formatNum(fin.yoc) + '%'),
   ].join('') + '</div>');
+
+  // عدسة الدخل (مهمة المحفظة: دخل توزيعات) — مساهمة المركز في دخل المحفظة
+  let portfolioTTM = 0;
+  Object.values(divByTicker).forEach(arr => arr.forEach(d => { if (d.date.getTime() >= Date.now() - 365 * 86400000) portfolioTTM += (d.amount || 0); }));
+  const incomeShare = portfolioTTM > 0 ? fin.ttmDiv / portfolioTTM * 100 : 0;
+  out.push('<h4 class="de-d-h">عدسة الدخل — مساهمة المركز في دخل المحفظة</h4>');
+  out.push('<div class="de-d-kvs">' + [
+    kv('دخل التوزيعات (آخر 12 شهراً)', formatNum(fin.ttmDiv) + ' ر.س'),
+    kv('حصته من دخل المحفظة', formatNum(incomeShare) + '%'),
+    kv('YOC (آخر 12 شهراً)', formatNum(fin.fwdYoc) + '%'),
+    kv('YOC التراكمي', formatNum(fin.yoc) + '%'),
+  ].join('') + '</div>');
+  out.push(`<div class="small text-muted" style="margin-top:4px">دخل المحفظة الكلي (آخر 12 شهراً): ${formatNum(portfolioTTM)} ر.س · المهمة: دخل شهري مستهدف (الدستور).</div>`);
 
   // الأرباح السنوية
   const years = Object.keys(fin.byYear).map(Number).sort((a, b) => b - a);
