@@ -11,141 +11,172 @@
   <meta name="apple-mobile-web-app-title" content="ثروة">
   <meta name="theme-color" content="#6366f1">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>مهام المحفظة - محفظتي</title>
+  <title>التقييمات العادلة - محفظتي</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <style>
-    /* ── Task cards ── */
-    .tasks-board { display:flex; flex-direction:column; gap:12px; }
+    /* ── Valuation Cards Grid ── */
+    .val-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+    }
+    @media (max-width: 680px) { .val-grid { grid-template-columns: 1fr; } }
 
-    .task-item {
+    .val-card {
       background: var(--bg-2);
-      border: 1px solid var(--border);
+      border: 2px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 16px 18px;
+      padding: 18px 16px 14px;
       display: flex;
-      gap: 14px;
-      align-items: flex-start;
+      flex-direction: column;
+      gap: 0;
       transition: border-color .15s;
+      position: relative;
     }
-    .task-item:hover { border-color: var(--accent); }
-    .task-item.done       { opacity: 0.55; border-color:rgba(63,185,80,0.3); }
-    .task-item.cancelled  { opacity: 0.45; }
-    .task-item.auto-alert { border-right: 4px solid var(--accent); }
+    .val-card:hover { border-color: var(--accent); }
 
-    .task-type-icon { font-size:1.5rem; flex-shrink:0; margin-top:2px; }
+    .val-card.dec-accumulation { border-right: 4px solid #3fb950; }
+    .val-card.dec-reduction    { border-right: 4px solid #f0b429; }
+    .val-card.dec-monitoring   { border-right: 4px solid #8b949e; }
+    .val-card.dec-liquidation  { border-right: 4px solid #f85149; }
+    .val-card.dec-hold         { border-right: 4px solid #3b82f6; }
 
-    .task-body { flex:1; min-width:0; }
-    .task-header { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:6px; }
-    .task-ticker { font-size:1rem; font-weight:700; color:var(--accent); }
-    .task-name   { font-size:0.85rem; color:var(--text-2); }
+    .val-card.status-done      { opacity: 0.6; }
+    .val-card.status-cancelled { opacity: 0.45; }
 
-    .task-badge {
-      padding:2px 9px; border-radius:12px; font-size:0.7rem; font-weight:700;
+    .vc-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      padding-left: 60px;
     }
-    .badge-liquidation { background:rgba(248,81,73,0.15); color:#f85149; }
-    .badge-reduction   { background:rgba(240,180,41,0.15); color:#f0b429; }
-    .badge-monitoring  { background:rgba(139,148,158,0.15); color:#8b949e; }
-    .badge-accumulation{ background:rgba(63,185,80,0.15);  color:#3fb950; }
-    .badge-hold        { background:rgba(59,130,246,0.15);  color:#3b82f6; }
-    .badge-auto        { background:rgba(88,166,255,0.12); color:#58a6ff; font-size:0.65rem; }
+    .vc-ticker { font-size: 1.1rem; font-weight: 900; color: var(--accent); }
+    .vc-name   { font-size: 0.82rem; color: var(--text-2); }
 
-    .badge-status-active    { background:rgba(63,185,80,0.12);  color:#3fb950; }
-    .badge-status-done      { background:rgba(139,148,158,0.12);color:#8b949e; }
-    .badge-status-cancelled { background:rgba(248,81,73,0.12);  color:#f85149; }
-
-    .task-notes { font-size:0.82rem; color:var(--text-2); margin-top:4px; line-height:1.6; white-space:pre-wrap; }
-    .task-meta  { font-size:0.72rem; color:var(--text-2); margin-top:6px; opacity:0.8; }
-
-    /* ── نسبة السهم بالمحفظة + هدفه ── */
-    .tk-port-row {
-      display:flex; flex-wrap:wrap; gap:6px; margin-top:7px;
+    .vc-dec-badge {
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.72rem;
+      font-weight: 700;
     }
-    .tk-port-pill {
-      font-size:0.74rem; color:var(--text-2);
-      background:var(--bg-3); border:1px solid var(--border);
-      border-radius:8px; padding:3px 9px; line-height:1.5;
-    }
-    .tk-port-pill strong { color:var(--text); }
-    .tk-port-pill.tk-muted { opacity:0.7; font-style:italic; }
+    .dec-accumulation .vc-dec-badge { background:rgba(63,185,80,.15);  color:#3fb950; }
+    .dec-reduction    .vc-dec-badge { background:rgba(240,180,41,.15); color:#f0b429; }
+    .dec-monitoring   .vc-dec-badge { background:rgba(139,148,158,.15);color:#8b949e; }
+    .dec-liquidation  .vc-dec-badge { background:rgba(248,81,73,.15);  color:#f85149; }
+    .dec-hold         .vc-dec-badge { background:rgba(59,130,246,.15); color:#3b82f6; }
 
-    .task-actions { display:flex; gap:6px; flex-shrink:0; flex-wrap:wrap; align-items:center; }
-
-    /* ── Alert section ── */
-    .alert-section {
-      background: rgba(240,180,41,0.06);
-      border: 1px solid rgba(240,180,41,0.25);
-      border-radius: var(--radius-lg);
-      padding: 18px;
-      margin-bottom: 24px;
+    .vc-weight-row {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
     }
-    .alert-section-title {
-      font-size:0.9rem; font-weight:700; color:var(--accent); margin-bottom:12px;
+    .vc-pill {
+      font-size: 0.73rem;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 3px 9px;
+      color: var(--text-2);
+      line-height: 1.5;
+    }
+    .vc-pill strong { color: var(--text); }
+    .vc-pill.gap-up   { color: #f85149; font-weight:700; }
+    .vc-pill.gap-down { color: #3b82f6; font-weight:700; }
+    .vc-pill.gap-ok   { color: #3fb950; font-weight:700; }
+
+    .vc-notes {
+      font-size: 0.78rem;
+      color: var(--text-2);
+      line-height: 1.55;
+      margin-bottom: 10px;
+      white-space: pre-wrap;
     }
 
-    /* ── Year filter pill ── */
-    .year-pills { display:flex; gap:6px; flex-wrap:wrap; }
-    .year-pill  {
+    .vc-prices {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      margin-bottom: 10px;
+      background: var(--bg-3);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+    }
+    .vc-price-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.79rem;
+    }
+    .vc-price-row .pr-label { color: var(--text-2); }
+    .vc-price-row .pr-val   { font-weight: 700; }
+    .pr-acc  { color: #3fb950; }
+    .pr-trim { color: #f0b429; }
+    .pr-liq  { color: #f85149; }
+
+    .vc-date {
+      font-size: 0.68rem;
+      color: var(--text-2);
+      opacity: .7;
+      margin-top: auto;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+    }
+
+    .vc-actions {
+      position: absolute;
+      top: 10px;
+      left: 12px;
+      display: flex;
+      gap: 4px;
+    }
+
+    /* ── Filter pills ── */
+    .filter-pills { display:flex; gap:6px; flex-wrap:wrap; }
+    .filter-pill  {
       padding:4px 14px; border-radius:20px; font-size:0.8rem; cursor:pointer;
       background:var(--bg-3); border:1px solid var(--border); color:var(--text-2);
       font-family:inherit; transition:all .15s;
     }
-    .year-pill.active { background:var(--accent); color:#000; border-color:var(--accent); font-weight:700; }
+    .filter-pill.active { background:var(--accent); color:#000; border-color:var(--accent); font-weight:700; }
 
-    /* ── Modal form ── */
-    .task-modal-card { max-width:620px; }
-    .task-modal-card textarea {
-      width:100%; min-height:90px; background:var(--bg-2); border:1px solid var(--border);
+    /* ── Modal ── */
+    .val-modal-card { max-width:640px; }
+    .val-modal-card textarea {
+      width:100%; min-height:80px; background:var(--bg-2); border:1px solid var(--border);
       border-radius:var(--radius); color:var(--text); font-family:Tajawal; font-size:0.9rem;
       padding:10px; resize:vertical;
     }
-    .task-modal-card textarea:focus { outline:none; border-color:var(--accent); }
+    .val-modal-card textarea:focus { outline:none; border-color:var(--accent); }
 
-    .type-selector { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:16px; }
-    .type-option {
-      padding:12px; border-radius:var(--radius); border:2px solid var(--border);
-      cursor:pointer; text-align:center; transition:all .15s;
+    .dec-selector {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 7px;
+      margin-bottom: 16px;
     }
-    .type-option.selected  { border-color:var(--accent); background:var(--accent-dim); }
-    .type-option .t-icon   { font-size:1.4rem; margin-bottom:4px; }
-    .type-option .t-name   { font-size:0.82rem; font-weight:700; }
-    .type-option .t-desc   { font-size:0.72rem; color:var(--text-2); margin-top:2px; }
+    @media (max-width: 540px) { .dec-selector { grid-template-columns: repeat(3, 1fr); } }
 
-    /* ── Mobile: declutter task cards ── */
-    @media (max-width: 768px) {
-      .task-item {
-        padding: 13px 14px;
-        gap: 10px;
-        flex-wrap: wrap;
-        align-items: center;
-      }
-      .task-type-icon { font-size:1.25rem; margin-top:0; }
-      /* العنوان + المحتوى يأخذان بقية الصف بجانب الأيقونة */
-      .task-body { flex: 1 1 0; }
-      .task-header { gap:6px; row-gap:4px; margin-bottom:5px; }
-      .task-ticker { font-size:0.95rem; }
-      .task-name   { font-size:0.8rem; width:100%; }
-      .task-badge  { font-size:0.66rem; padding:2px 8px; }
-      .task-notes  { font-size:0.82rem; }
-      /* الأزرار تنزل سطراً كاملاً وتتوزّع بالتساوي */
-      .task-actions {
-        flex-basis: 100%;
-        width: 100%;
-        gap: 8px;
-        margin-top: 2px;
-        padding-top: 10px;
-        border-top: 1px solid var(--border);
-      }
-      .task-actions .btn { flex: 1; justify-content: center; min-height: 38px; }
-      /* الفلاتر: مسمّيات أوضح */
-      .year-pills { gap:6px; }
-      .alert-section { padding: 14px; }
+    .dec-option {
+      padding: 10px 6px;
+      border-radius: var(--radius);
+      border: 2px solid var(--border);
+      cursor: pointer;
+      text-align: center;
+      transition: all .15s;
     }
+    .dec-option.selected { border-color: var(--accent); background: var(--accent-dim); }
+    .dec-option .d-icon  { font-size: 1.3rem; margin-bottom: 3px; }
+    .dec-option .d-name  { font-size: 0.72rem; font-weight: 700; }
+
     @media (max-width: 520px) {
-      .task-item { padding: 12px; }
-      .task-actions .btn { font-size:0.76rem; padding:6px 8px; }
+      .val-card { padding: 14px 12px 12px; }
+      .vc-ticker { font-size: 1rem; }
+      .vc-header { padding-left: 50px; }
     }
   </style>
 </head>
@@ -173,7 +204,7 @@
           <a href="decision-engine.html" class="nav-link nav-sub" id="nav-decision-engine"><span class="icon">🧭</span><span>محرّك القرار</span></a>
           <a href="forecast.html"     class="nav-link nav-sub" id="nav-forecast">    <span class="icon">🔮</span><span>الرؤية المستقبلية</span></a>
           <a href="performance.html"  class="nav-link nav-sub" id="nav-performance"> <span class="icon">📉</span><span>الأداء التاريخي</span></a>
-          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📋</span><span>مهام المحفظة</span></a>
+          <a href="tasks.html"        class="nav-link nav-sub" id="nav-tasks">       <span class="icon">📊</span><span>التقييمات العادلة</span></a>
           <a href="review-log.html"   class="nav-link nav-sub" id="nav-review-log">  <span class="icon">📒</span><span>دفتر المراجعة</span></a>
         </div>
       </div>
@@ -206,10 +237,9 @@
           <a href="life-goals.html"   class="nav-link nav-sub" id="nav-life-goals">  <span class="icon">🎯</span><span>أهداف الحياة</span></a>
           <a href="inventory.html"    class="nav-link nav-sub" id="nav-inventory">   <span class="icon">📦</span><span>مخزون المنزل</span></a>
           <a href="school.html" class="nav-link nav-sub" id="nav-school"><span class="icon">🎓</span><span>المتابعة المدرسية</span></a>
-          
         </div>
       </div>
-            <div class="nav-group">
+      <div class="nav-group">
         <button class="nav-group-btn" onclick="toggleNavGroup('grp-learn')">
           <span class="icon">📚</span><span>تعليم الاستثمار</span>
           <span class="nav-group-chevron">▾</span>
@@ -234,18 +264,18 @@
   <main class="main">
     <div class="page-header">
       <div class="page-header-text">
-        <h1>📋 مهام المحفظة
+        <h1>📊 التقييمات العادلة
           <button class="info-btn" type="button" onclick="showCardInfo('tasks')" title="ما هذه الصفحة؟" style="position:static;opacity:.7">ⓘ</button>
         </h1>
-        <p>خطة أسعار يدوية لكل سهم — تُغذّي محرّك القرار: تجميع / تخفيف / تصفية</p>
+        <p>خطة أسعار لكل سهم — تجميع / تخفيف / مراقبة / تصفية — مرتبطة بمحرّك القرار</p>
       </div>
-      <button class="btn btn-primary" onclick="openTaskModal()">+ مهمة جديدة</button>
+      <button class="btn btn-primary" onclick="openValModal()">+ تقييم جديد</button>
     </div>
 
     <!-- KPIs -->
     <div class="stats-grid" style="margin-bottom:20px">
       <div class="stat-card">
-        <div class="label">مهام نشطة</div>
+        <div class="label">تقييمات نشطة</div>
         <div class="value num text-accent" id="tk-active">—</div>
         <div class="sub">تنتظر التنفيذ</div>
       </div>
@@ -262,26 +292,19 @@
     </div>
 
     <!-- Filters -->
-    <div class="card" style="padding:14px 18px">
+    <div class="card" style="padding:14px 18px; margin-bottom:16px">
       <div style="display:flex;flex-direction:column;gap:10px">
-        <!-- السنة -->
         <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
-          <span class="small text-muted" style="min-width:50px">السنة:</span>
-          <div class="year-pills" id="year-pills"></div>
-        </div>
-        <!-- النوع -->
-        <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
-          <span class="small text-muted" style="min-width:50px">النوع:</span>
-          <div class="year-pills" id="type-pills">
-            <button class="year-pill active" onclick="filterByType('all')">كل الأنواع</button>
-            <button class="year-pill" onclick="filterByType('accumulation')">🟢 تجميع</button>
-            <button class="year-pill" onclick="filterByType('hold')">🔵 احتفاظ</button>
-            <button class="year-pill" onclick="filterByType('reduction')">⚖️ تخفيف</button>
-            <button class="year-pill" onclick="filterByType('monitoring')">👁 مراقبة</button>
-            <button class="year-pill" onclick="filterByType('liquidation')">🔴 تصفية</button>
+          <span class="small text-muted" style="min-width:50px">القرار:</span>
+          <div class="filter-pills" id="type-pills">
+            <button class="filter-pill active" onclick="filterByType('all')">الكل</button>
+            <button class="filter-pill" onclick="filterByType('accumulation')">🟢 تجميع</button>
+            <button class="filter-pill" onclick="filterByType('hold')">🔵 احتفاظ</button>
+            <button class="filter-pill" onclick="filterByType('reduction')">⚖️ تخفيف</button>
+            <button class="filter-pill" onclick="filterByType('monitoring')">👁 مراقبة</button>
+            <button class="filter-pill" onclick="filterByType('liquidation')">🔴 تصفية</button>
           </div>
         </div>
-        <!-- الحالة -->
         <div class="flex gap-3" style="align-items:center;flex-wrap:wrap">
           <span class="small text-muted" style="min-width:50px">الحالة:</span>
           <select id="status-filter" onchange="applyFilters()"
@@ -295,26 +318,26 @@
       </div>
     </div>
 
-    <!-- Manual tasks board — مهامي أولاً -->
+    <!-- Valuation cards board -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">مهامي اليدوية</span>
+        <span class="section-title">تقييماتي</span>
         <span class="small text-muted" id="tasks-count-label">—</span>
       </div>
-      <div class="tasks-board" id="tasks-board">
+      <div class="val-grid" id="val-grid">
         <div class="empty-state" style="padding:30px"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div>
       </div>
     </div>
 
-    <!-- Archive / history -->
-    <details class="card">
+    <!-- Archive -->
+    <details class="card" style="margin-top:16px">
       <summary style="font-weight:700;font-size:0.95rem;list-style:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer">
-        <span>📦 أرشيف المهام المنتهية والملغاة</span>
+        <span>📦 أرشيف التقييمات المنتهية والملغاة</span>
         <span class="small text-muted">▼</span>
       </summary>
       <div style="margin-top:14px">
-        <div class="tasks-board" id="archive-board">
-          <p class="small text-muted" style="padding:10px">لا توجد مهام مؤرشفة</p>
+        <div class="val-grid" id="archive-grid">
+          <p class="small text-muted" style="padding:10px">لا توجد تقييمات مؤرشفة</p>
         </div>
       </div>
     </details>
@@ -325,41 +348,30 @@
     </footer>
   </main>
 
-  <!-- Task Modal -->
-  <div class="modal-overlay" id="task-modal" style="display:none" onclick="closeTaskModalOverlay(event)">
-    <div class="modal-card task-modal-card">
+  <!-- Valuation Modal -->
+  <div class="modal-overlay" id="val-modal" style="display:none" onclick="closeValModalOverlay(event)">
+    <div class="modal-card val-modal-card">
       <div class="modal-header">
-        <h3 style="margin:0;font-size:1rem" id="task-modal-title">مهمة جديدة</h3>
-        <button class="modal-close" onclick="closeTaskModalWithConfirm()">✕</button>
+        <h3 style="margin:0;font-size:1rem" id="val-modal-title">تقييم جديد</h3>
+        <button class="modal-close" onclick="closeValModalWithConfirm()">✕</button>
       </div>
 
-      <!-- Task type selector -->
-      <div style="margin:16px 0 8px;font-size:0.8rem;color:var(--text-2)">نوع المهمة *</div>
-      <div class="type-selector" id="type-selector">
-        <div class="type-option" data-type="liquidation" onclick="selectTaskType('liquidation')">
-          <div class="t-icon">🔴</div>
-          <div class="t-name">تصفية كاملة</div>
-          <div class="t-desc">بيع كامل الموقف</div>
+      <div style="margin:16px 0 8px;font-size:0.8rem;color:var(--text-2)">القرار النهائي *</div>
+      <div class="dec-selector" id="dec-selector">
+        <div class="dec-option" data-type="accumulation" onclick="selectDecision('accumulation')">
+          <div class="d-icon">🟢</div><div class="d-name">تجميع</div>
         </div>
-        <div class="type-option" data-type="reduction" onclick="selectTaskType('reduction')">
-          <div class="t-icon">⚖️</div>
-          <div class="t-name">تخفيف</div>
-          <div class="t-desc">بيع جزء من الموقف</div>
+        <div class="dec-option" data-type="hold" onclick="selectDecision('hold')">
+          <div class="d-icon">🔵</div><div class="d-name">احتفاظ</div>
         </div>
-        <div class="type-option" data-type="monitoring" onclick="selectTaskType('monitoring')">
-          <div class="t-icon">👁</div>
-          <div class="t-name">تحت المراقبة</div>
-          <div class="t-desc">مراقبة بدون إجراء</div>
+        <div class="dec-option" data-type="reduction" onclick="selectDecision('reduction')">
+          <div class="d-icon">⚖️</div><div class="d-name">تخفيف</div>
         </div>
-        <div class="type-option" data-type="accumulation" onclick="selectTaskType('accumulation')">
-          <div class="t-icon">🟢</div>
-          <div class="t-name">تجميع / إضافة</div>
-          <div class="t-desc">زيادة الموقف</div>
+        <div class="dec-option" data-type="monitoring" onclick="selectDecision('monitoring')">
+          <div class="d-icon">👁</div><div class="d-name">مراقبة</div>
         </div>
-        <div class="type-option" data-type="hold" onclick="selectTaskType('hold')">
-          <div class="t-icon">🔵</div>
-          <div class="t-name">احتفاظ</div>
-          <div class="t-desc">إبقاء الموقف كما هو</div>
+        <div class="dec-option" data-type="liquidation" onclick="selectDecision('liquidation')">
+          <div class="d-icon">🔴</div><div class="d-name">تصفية</div>
         </div>
       </div>
 
@@ -372,21 +384,15 @@
           <label>اسم السهم</label>
           <input type="text" id="task-name" placeholder="اختياري — يُملأ تلقائياً">
         </div>
-
       </div>
 
-      <!-- خطة الأسعار — تُغذّي محرّك القرار -->
       <div style="margin:14px 0 6px;font-size:0.82rem;color:var(--text-2);font-weight:700">
-        خطة الأسعار (اختيارية — أي خانة تتركها فارغة تُهمَل)
+        خطة الأسعار (اختيارية — أي خانة فارغة تُهمَل)
       </div>
       <div class="form-grid">
         <div class="form-group">
           <label>🟢 تجميع عند سعر ≤ (ر.س)</label>
           <input type="number" id="task-accumulate" step="0.01" min="0" placeholder="شراء إضافي عند هذا السعر أو أقل">
-        </div>
-        <div class="form-group">
-          <label>🔴 تصفية إذا تجاوز (ر.س)</label>
-          <input type="number" id="task-liquidate" step="0.01" min="0" placeholder="بيع كامل — سعر التضخّم">
         </div>
         <div class="form-group">
           <label>⚖️ تخفيف من سعر (ر.س)</label>
@@ -396,16 +402,20 @@
           <label>⚖️ تخفيف إلى سعر (ر.س)</label>
           <input type="number" id="task-trim-to" step="0.01" min="0" placeholder="نهاية نطاق التخفيف">
         </div>
+        <div class="form-group">
+          <label>🔴 متضخّم مالياً — تصفية فوق (ر.س)</label>
+          <input type="number" id="task-liquidate" step="0.01" min="0" placeholder="سعر التضخّم المالي">
+        </div>
       </div>
 
       <div class="form-group" style="margin-top:8px">
-        <label>ملاحظات / استراتيجية التنفيذ</label>
-        <textarea id="task-notes" placeholder="مثال: 40% عند السعر 18 ريال، 30% عند 22 ريال...&#10;أو أي ملاحظات تريدها"></textarea>
+        <label>ملاحظات التقييم / استراتيجية التنفيذ</label>
+        <textarea id="task-notes" placeholder="مثال: السهم مقيّم عند 22 ريال، هامش أمان 15%، تجميع تدريجي..."></textarea>
       </div>
 
       <div class="flex gap-3 mt-4" style="justify-content:flex-end">
-        <button class="btn btn-secondary" onclick="closeTaskModalWithConfirm()">إلغاء</button>
-        <button class="btn btn-primary"   onclick="saveTask()">حفظ المهمة</button>
+        <button class="btn btn-secondary" onclick="closeValModalWithConfirm()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveTask()">حفظ التقييم</button>
       </div>
     </div>
   </div>
