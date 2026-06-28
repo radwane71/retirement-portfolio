@@ -135,7 +135,10 @@
     .tr-up   { color:#3fb950; }
     .tr-down { color:#f85149; }
     .tr-flat { color:#8b949e; }
-    .trend-comment { font-size:0.8rem; line-height:1.65; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px; margin-top:4px; }
+    .trend-comment { font-size:0.8rem; line-height:1.85; color:var(--text-muted); border-top:1px solid var(--border); padding-top:8px; margin-top:8px; }
+    .trend-cat-title { font-size:0.74rem; font-weight:700; color:var(--text-muted); margin:10px 0 6px; }
+    .tr-tag { font-size:0.6rem; background:rgba(99,102,241,0.15); color:var(--primary); border-radius:8px; padding:1px 6px; font-weight:700; }
+    .tr-streak { font-size:0.68rem; font-weight:700; }
     /* Bank inputs */
     .bank-warn { background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.3); border-radius:7px; padding:10px 13px; color:#f0b429; font-size:0.82rem; margin-bottom:12px; }
     .bank-safety { background:rgba(248,81,73,0.06); border:1px solid rgba(248,81,73,0.25); border-radius:7px; padding:10px 13px; margin-top:4px; }
@@ -460,6 +463,7 @@
     }
 
     let modelsChart = null;
+    let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
     const C = s => getComputedStyle(document.documentElement).getPropertyValue(s).trim();
 
     // ===== Help System =====
@@ -622,6 +626,7 @@
         }
 
         document.getElementById('loadingOverlay').classList.remove('hidden');
+        _lastFairAvg = null;
         const companyType = document.getElementById('companyType').value;
         let growth_perp   = (parseFloat(document.getElementById('growthPerp').value)    || 0) / 100;
         let discount_rate = (parseFloat(document.getElementById('discountRate').value)   || 0) / 100;
@@ -668,6 +673,7 @@
           enterprise_value    = nav_total;
           const valid_reit    = [nav_per_unit, pffo_value].filter(v => v !== null && v > 0);
           const avg_fair      = valid_reit.length > 0 ? valid_reit.reduce((a,b)=>a+b,0) / valid_reit.length : 0;
+          _lastFairAvg        = avg_fair;
           values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'Cap Rate (مرجع)': caprate_check };
           fair_value_range  = formatCurrency(avg_fair);
           fair_value_detail = `متوسط NAV (${formatCurrency(nav_per_unit)}) و P/FFO (${formatCurrency(pffo_value)}) | عائد FFO: ${ffo_yield.toFixed(2)}%`;
@@ -698,6 +704,7 @@
           const valid_values = Object.values(values).filter(v => v !== null && v > 0 && isFinite(v));
           if (valid_values.length === 0) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ لم ينتج أي نموذج قيمة صالحة. تحقق من المدخلات.'); return; }
           const avg  = valid_values.reduce((a,b)=>a+b,0) / valid_values.length;
+          _lastFairAvg = avg;
           const minV = Math.min(...valid_values);
           const maxV = Math.max(...valid_values);
           fair_value_range  = `${formatCurrency(minV)} — ${formatCurrency(maxV)}`;
@@ -740,6 +747,7 @@
           if (!validBank.length) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ تحقق من المدخلات.'); return; }
 
           const avgBank = validBank.reduce((a,b)=>a+b,0) / validBank.length;
+          _lastFairAvg  = avgBank;
           const minBank = Math.min(...validBank);
           const maxBank = Math.max(...validBank);
           fair_value_range  = validBank.length > 1 ? `${formatCurrency(minBank)} — ${formatCurrency(maxBank)}` : formatCurrency(avgBank);
@@ -1150,103 +1158,189 @@
       provCoverage:'تغطية المخصصات %', ldr:'LDR %',
     };
 
-    // ── مقارنة ذكية بين العمليات لنفس الرمز ──
-    function buildTrendAnalysis(current, prevEntries) {
-      if (!prevEntries.length) return '';
+    // ── بيانات وصفية لكل بند: الفئة + اتجاه التحسّن ──
+    // cat: fund=أساسيات الشركة | market=مدفوع بالسوق | assum=افتراض من المستخدم
+    // dir: up=أعلى أفضل | down=أقل أفضل | neutral=حركة بلا حكم | context=يُبلَّغ بحذر
+    const TREND_FIELDS = {
+      eps:            { label:'EPS',              cat:'fund',  dir:'up',      unit:'ر.س' },
+      fcf:            { label:'FCF/سهم',          cat:'fund',  dir:'up',      unit:'ر.س' },
+      dividends:      { label:'التوزيعات',         cat:'fund',  dir:'up',      unit:'ر.س' },
+      bookValue:      { label:'القيمة الدفترية',   cat:'fund',  dir:'up',      unit:'ر.س' },
+      netDebt:        { label:'الدين الصافي/سهم',  cat:'fund',  dir:'down',    unit:'ر.س' },
+      debtRatio:      { label:'نسبة الدين',        cat:'fund',  dir:'down',    unit:'%'   },
+      liquidityRatio: { label:'نسبة السيولة',      cat:'fund',  dir:'up',      unit:'×'   },
+      earningsQuality:{ label:'ROE',              cat:'fund',  dir:'up',      unit:'%'   },
+      debtEquity:     { label:'D/E',              cat:'fund',  dir:'down',    unit:'×'   },
+      nav:            { label:'NAV الإجمالي',      cat:'fund',  dir:'up',      unit:'ر.س' },
+      ffo:            { label:'FFO',              cat:'fund',  dir:'up',      unit:'ر.س' },
+      totalDebt:      { label:'إجمالي الديون',     cat:'fund',  dir:'down',    unit:'ر.س' },
+      totalUnits:     { label:'عدد الوحدات',       cat:'fund',  dir:'neutral', unit:'وحدة' },
+      bvps:           { label:'BVPS',             cat:'fund',  dir:'up',      unit:'ر.س' },
+      bankRoe:        { label:'ROE (بنك)',        cat:'fund',  dir:'up',      unit:'%'   },
+      bankEps:        { label:'EPS (بنك)',        cat:'fund',  dir:'up',      unit:'ر.س' },
+      bankDps:        { label:'DPS',              cat:'fund',  dir:'up',      unit:'ر.س' },
+      bankPayout:     { label:'نسبة التوزيع',      cat:'fund',  dir:'context', unit:'%'  },
+      cet1:           { label:'CET1',             cat:'fund',  dir:'up',      unit:'%'   },
+      npl:            { label:'NPL',              cat:'fund',  dir:'down',    unit:'%'   },
+      provCoverage:   { label:'تغطية المخصصات',    cat:'fund',  dir:'up',      unit:'%'   },
+      ldr:            { label:'LDR',              cat:'fund',  dir:'context', unit:'%'  },
+      betaMain:       { label:'Beta',             cat:'fund',  dir:'down',    unit:''    },
+      currentPrice:   { label:'السعر الحالي',      cat:'market',dir:'neutral', unit:'ر.س' },
+      currentPe:      { label:'P/E الحالي',        cat:'market',dir:'neutral', unit:'×'  },
+      bankCurrentPb:  { label:'P/B الحالي (بنك)',  cat:'market',dir:'neutral', unit:'×'  },
+      bankCurrentPe:  { label:'P/E الحالي (بنك)',  cat:'market',dir:'neutral', unit:'×'  },
+      growth5yr:      { label:'نمو 5 سنوات',       cat:'assum', dir:'neutral', unit:'%'  },
+      growthPerp:     { label:'النمو الدائم',       cat:'assum', dir:'neutral', unit:'%'  },
+      discountRate:   { label:'WACC/الخصم',        cat:'assum', dir:'neutral', unit:'%'  },
+      sectorPe:       { label:'P/E القطاع',        cat:'assum', dir:'neutral', unit:'×'  },
+      fairPb:         { label:'P/B العادل',        cat:'assum', dir:'neutral', unit:'×'  },
+      pffoMultiple:   { label:'مضاعف P/FFO',       cat:'assum', dir:'neutral', unit:'×'  },
+      capRate:        { label:'Cap Rate',         cat:'assum', dir:'neutral', unit:'%'  },
+      bondYield:      { label:'عائد السندات',      cat:'assum', dir:'neutral', unit:'%'  },
+      bankFairPb:     { label:'P/B العادل (بنك)',  cat:'assum', dir:'neutral', unit:'×'  },
+      bankFairPe:     { label:'P/E العادل (بنك)',  cat:'assum', dir:'neutral', unit:'×'  },
+      beta:           { label:'Beta (WACC)',      cat:'assum', dir:'neutral', unit:''   },
+      riskFree:       { label:'معدل خالٍ من المخاطر', cat:'assum', dir:'neutral', unit:'%' },
+      marketReturn:   { label:'عائد السوق',        cat:'assum', dir:'neutral', unit:'%'  },
+      debtCost:       { label:'تكلفة الدين',       cat:'assum', dir:'neutral', unit:'%'  },
+      taxRate:        { label:'معدل الضريبة',      cat:'assum', dir:'neutral', unit:'%'  },
+    };
 
+    const fmtNum = v => (Math.round(v * 100) / 100).toString();
+
+    // ── مقارنة ذكية: كل البنود، عبر كل تاريخ الرمز، مع فصل الأساسيات عن الافتراضات ──
+    function buildTrendAnalysis(current, otherEntries) {
+      // ترتيب زمني عبر id (id = طابع زمني للإنشاء)
+      const series = [...otherEntries, current].sort((a, b) => (a.id || 0) - (b.id || 0));
+      const idx    = series.findIndex(e => e.id === current.id);
+      const prior  = series.slice(0, idx); // كل العمليات قبل الحالية زمنياً
+      if (!prior.length) {
+        return `<div class="trend-panel"><div class="trend-comment">📊 أول عملية تقييم لهذا الرمز — لا توجد بيانات سابقة للمقارنة. ننتظر العملية القادمة لبناء الاتجاه.</div></div>`;
+      }
+      const immediatePrev = prior[prior.length - 1];
       const inp = current.inputs || {};
-      // الحقول المُقارَنة: [مفتاح, تسمية, الاتجاه الإيجابي: 'up'=أعلى أفضل | 'down'=أقل أفضل | null=محايد, وحدة]
-      const FIELDS = [
-        { k:'eps',           label:'EPS',         pos:'up',   unit:'ر.س' },
-        { k:'fcf',           label:'FCF/سهم',     pos:'up',   unit:'ر.س' },
-        { k:'dividends',     label:'التوزيعات',   pos:'up',   unit:'ر.س' },
-        { k:'earningsQuality',label:'ROE',         pos:'up',   unit:'%'   },
-        { k:'debtRatio',     label:'نسبة الدين',  pos:'down', unit:'%'   },
-        { k:'betaMain',      label:'Beta',         pos:'down', unit:''    },
-        { k:'growth5yr',     label:'نمو 5 سنوات', pos:'up',   unit:'%'   },
-        { k:'currentPrice',  label:'السعر الحالي',pos:null,   unit:'ر.س' },
-        { k:'bankRoe',       label:'ROE بنك',     pos:'up',   unit:'%'   },
-        { k:'npl',           label:'NPL',          pos:'down', unit:'%'   },
-        { k:'cet1',          label:'CET1',         pos:'up',   unit:'%'   },
-        { k:'bankEps',       label:'EPS بنك',     pos:'up',   unit:'ر.س' },
-      ];
 
       const rows = [];
-      for (const f of FIELDS) {
-        const cur = parseFloat(inp[f.k]);
-        if (isNaN(cur) || cur === 0) continue;
-        // تاريخ القيم لهذا الحقل عبر كل العمليات السابقة (الأحدث أولاً)
-        const history = prevEntries
-          .map(e => ({ val: parseFloat(e.inputs?.[f.k] || 0), date: e.date || '' }))
-          .filter(x => !isNaN(x.val) && x.val !== 0);
-        if (!history.length) continue;
+      for (const [k, f] of Object.entries(TREND_FIELDS)) {
+        const cur = parseFloat(inp[k]);
+        if (isNaN(cur)) continue;
+        // سلسلة القيم السابقة لهذا الحقل (زمنياً، الأقدم أولاً)
+        const hist = prior.map(e => parseFloat(e.inputs?.[k])).filter(v => !isNaN(v));
+        if (!hist.length) continue;
 
-        const prev = history[0].val;
+        const prev = hist[hist.length - 1];
         const diff = cur - prev;
         const pct  = prev !== 0 ? (diff / Math.abs(prev) * 100) : null;
+        const moved = pct === null ? diff !== 0 : Math.abs(pct) > 3;
 
-        let cls = 'tr-flat', arrow = '→', status = 'مستقر';
-        if (pct !== null && Math.abs(pct) > 3) {
-          const isGood = f.pos === 'up' ? diff > 0 : f.pos === 'down' ? diff < 0 : null;
-          if (isGood === true)       { cls = 'tr-up';   arrow = '▲'; status = 'تحسّن'; }
-          else if (isGood === false) { cls = 'tr-down'; arrow = '▼'; status = 'تراجع'; }
-          else                        { cls = diff > 0 ? 'tr-up' : 'tr-down'; arrow = diff > 0 ? '▲' : '▼'; status = diff > 0 ? 'ارتفع' : 'انخفض'; }
+        let cls = 'tr-flat', arrow = '→', status = 'مستقر', good = null;
+        if (moved) {
+          if (f.cat === 'fund' && (f.dir === 'up' || f.dir === 'down')) {
+            good = f.dir === 'up' ? diff > 0 : diff < 0;
+            cls = good ? 'tr-up' : 'tr-down'; arrow = good ? '▲' : '▼'; status = good ? 'تحسّن' : 'تراجع';
+          } else {
+            cls = diff > 0 ? 'tr-up' : 'tr-down'; arrow = diff > 0 ? '▲' : '▼';
+            status = f.cat === 'assum' ? (diff > 0 ? 'رفعت الافتراض' : 'خفّضت الافتراض')
+                                       : (diff > 0 ? 'ارتفع' : 'انخفض');
+          }
         }
 
-        rows.push({ ...f, cur, prev, diff, pct, cls, arrow, status, histCount: history.length });
+        // اتجاه متواصل عبر ≥3 نقاط
+        let streak = '';
+        const full = [...hist, cur];
+        if (full.length >= 3) {
+          const allUp = full.every((v, i) => i === 0 || v > full[i - 1]);
+          const allDn = full.every((v, i) => i === 0 || v < full[i - 1]);
+          if (allUp) streak = '⏫ صاعد متواصل';
+          else if (allDn) streak = '⏬ هابط متواصل';
+        }
+
+        rows.push({ k, ...f, cur, prev, diff, pct, cls, arrow, status, good, streak, points: full.length });
       }
 
       if (!rows.length) return '';
 
-      // ── التعليق المالي الذكي ──
-      const improving = rows.filter(r => r.status === 'تحسّن');
-      const worsening = rows.filter(r => r.status === 'تراجع');
-      const total     = rows.length;
-      let comment = '';
-      const eps_r   = rows.find(r=>r.k==='eps');
-      const fcf_r   = rows.find(r=>r.k==='fcf');
-      const div_r   = rows.find(r=>r.k==='dividends');
-      const debt_r  = rows.find(r=>r.k==='debtRatio');
-      const roe_r   = rows.find(r=>r.k==='earningsQuality') || rows.find(r=>r.k==='bankRoe');
-      const npl_r   = rows.find(r=>r.k==='npl');
-      const beta_r  = rows.find(r=>r.k==='betaMain');
+      // الحكم النزيه مبني على الأساسيات فقط
+      const fund   = rows.filter(r => r.cat === 'fund' && r.good !== null);
+      const fundUp = fund.filter(r => r.good === true);
+      const fundDn = fund.filter(r => r.good === false);
+      const get    = k => rows.find(r => r.k === k);
 
-      if (total < 2) {
-        comment = '📊 بيانات غير كافية لتحليل الاتجاه — ننتظر المزيد من عمليات التقييم للسهم نفسه.';
-      } else if (improving.length >= total * 0.7) {
-        comment = '📈 الصورة الإجمالية إيجابية — غالبية المؤشرات في مسار تحسّن. استمر في المراقبة الدورية.';
-      } else if (worsening.length >= total * 0.6) {
-        comment = '⚠️ تراجع في أغلب المؤشرات — مراجعة فورية للمركز الاستثماري ضرورية.';
+      const comments = [];
+      if (fund.length === 0) {
+        comments.push('📊 لا توجد حركة جوهرية في الأساسيات بعد — بيانات غير كافية للحكم، ننتظر نتائج الربع القادم.');
+      } else if (fundUp.length >= fund.length * 0.7) {
+        comments.push('📈 الأساسيات في تحسّن عام — غالبية أرقام الشركة الفعلية تتقدّم. استمر بالمراقبة الدورية.');
+      } else if (fundDn.length >= fund.length * 0.6) {
+        comments.push('⚠️ تدهور في أغلب الأساسيات — مراجعة فورية للمركز مطلوبة (الفلتر 1: بوابة الاستدامة).');
       } else {
-        comment = '🔄 إشارات متضاربة — بعض المؤشرات تتحسن وأخرى تتراجع. الصورة تحتاج مراقبة ربعية.';
+        comments.push('🔄 إشارات متضاربة في الأساسيات — بعضها يتحسن وبعضها يتراجع. الصورة تحتاج مراقبة ربعية.');
+      }
+
+      // قاعدة التثبيت: القيمة العادلة لا ترتفع إلا بارتفاع الأرقام الفعلية
+      const fvCur  = parseFloat(current.results?.fairValueAvg);
+      const fvPrev = parseFloat(immediatePrev.results?.fairValueAvg);
+      if (!isNaN(fvCur) && !isNaN(fvPrev) && fvPrev > 0) {
+        const fvPct = (fvCur - fvPrev) / fvPrev * 100;
+        const assumMoved = rows.some(r => r.cat === 'assum' && r.diff !== 0);
+        if (fvPct > 3 && fundUp.length === 0) {
+          comments.push(`🚩 القيمة العادلة ارتفعت ${fvPct.toFixed(1)}% دون أي تحسّن في الأساسيات${assumMoved ? ' — غالباً بسبب تعديل افتراضاتك' : ''}. هذا يخالف «قاعدة التثبيت»: لا تُرفع القيمة العادلة لتبرير سعر أعلى.`);
+        } else if (fvPct > 3 && fundUp.length > 0) {
+          comments.push(`✅ ارتفاع القيمة العادلة (${fvPct.toFixed(1)}%) مدعوم بتحسّن فعلي في الأساسيات — ارتفاع موثوق.`);
+        } else if (fvPct < -3) {
+          comments.push(`📉 انخفضت القيمة العادلة ${Math.abs(fvPct).toFixed(1)}% عن العملية السابقة.`);
+        }
       }
 
       // تعليقات متخصصة
-      const comments = [comment];
-      if (eps_r?.status === 'تراجع' && div_r?.status === 'تحسّن')
-        comments.push('📌 تحسّن التوزيعات مع تراجع الأرباح — راقب نسبة التوزيع لضمان الاستدامة.');
+      const eps_r=get('eps')||get('bankEps'), div_r=get('dividends')||get('bankDps'),
+            debt_r=get('debtRatio')||get('netDebt')||get('totalDebt'),
+            roe_r=get('earningsQuality')||get('bankRoe'), npl_r=get('npl'),
+            beta_r=get('betaMain'), payout_r=get('bankPayout'), cet1_r=get('cet1'),
+            prov_r=get('provCoverage'), price_r=get('currentPrice');
+      if (eps_r?.status === 'تراجع' && div_r && div_r.diff > 0)
+        comments.push('📌 التوزيعات ترتفع بينما الأرباح تتراجع — راقب استدامة نسبة التوزيع (قد تكون غير مغطّاة).');
       if (debt_r?.status === 'تراجع')
-        comments.push('📌 تصاعد الدين — تحقق من تغطية الفائدة وأثره على FCF.');
-      if (npl_r?.pct && npl_r.pct > 20)
-        comments.push('📌 ارتفاع ملحوظ في NPL — مؤشر خطر جودة أصول يستدعي تعمقاً في تقرير البنك.');
+        comments.push('📌 تصاعد المديونية — تحقق من تغطية الفائدة وأثرها على التدفق النقدي الحر.');
+      if (npl_r && npl_r.pct !== null && npl_r.pct > 20)
+        comments.push('📌 قفزة في NPL — مؤشر خطر جودة أصول يستدعي قراءة تقرير البنك بعمق.');
+      if (cet1_r?.status === 'تراجع')
+        comments.push('📌 تراجع CET1 — انتبه لكفاية رأس المال قبل أي إضافة.');
+      if (prov_r?.status === 'تراجع')
+        comments.push('📌 انخفاض تغطية المخصصات — وسادة الخسائر الائتمانية تضعف.');
+      if (payout_r && payout_r.diff > 0 && payout_r.pct !== null && payout_r.pct > 15)
+        comments.push('📌 ارتفاع ملحوظ في نسبة التوزيع — تأكّد أنه نمو أرباح لا توزيع فوق الطاقة.');
+      if (parseFloat(inp.ldr) > 110)
+        comments.push('📌 LDR فوق 110% — ضغط سيولة محتمل.');
       if (beta_r?.status === 'تحسّن')
-        comments.push('📌 تحسّن Beta (أقل تقلباً) — إيجابي من منظور المخاطر.');
-      if (roe_r?.status === 'تراجع' && improving.length < 2)
-        comments.push('📌 تراجع الكفاءة مع ضعف عام — فكّر في مراجعة الوزن في المحفظة.');
+        comments.push('📌 تحسّن Beta (تقلّب أقل) — إيجابي من منظور المخاطر.');
+      if (roe_r?.status === 'تراجع' && fundUp.length < 2)
+        comments.push('📌 تراجع الكفاءة (ROE) مع ضعف عام — أعد تقييم الوزن في المحفظة.');
+      if (price_r && price_r.diff > 0 && fund.length > 0 && fundUp.length === 0)
+        comments.push('📌 السعر يرتفع دون تحسّن في الأساسيات — حذار شراء المطاردة.');
 
-      // بناء HTML للصفوف
-      const rowsHtml = rows.map(r => {
-        const pctStr = r.pct !== null ? ` (${r.pct > 0 ? '+' : ''}${r.pct.toFixed(1)}%)` : '';
-        return `<div class="trend-row">
-          <div class="tr-label">${r.label}</div>
-          <div class="tr-val">${r.cur}${r.unit ? ' '+r.unit : ''}</div>
-          <div class="tr-delta ${r.cls}">${r.arrow} ${r.status}${pctStr} <span style="font-weight:400;opacity:.7">من ${r.prev}${r.unit ? ' '+r.unit : ''}</span></div>
-        </div>`;
-      }).join('');
+      // بناء الصفوف مجمّعة بالفئة
+      const CAT_LABEL = { fund:'🏢 الأساسيات (أرقام الشركة)', market:'💹 السوق', assum:'⚙️ افتراضاتك (مدخلات النموذج)' };
+      let rowsHtml = '';
+      for (const cat of ['fund','market','assum']) {
+        const catRows = rows.filter(r => r.cat === cat);
+        if (!catRows.length) continue;
+        rowsHtml += `<div class="trend-cat-title">${CAT_LABEL[cat]}</div><div class="trend-rows">`;
+        rowsHtml += catRows.map(r => {
+          const pctStr    = r.pct !== null ? ` (${r.pct > 0 ? '+' : ''}${r.pct.toFixed(1)}%)` : '';
+          const streakStr = r.streak ? ` <span class="tr-streak ${r.cls}">${r.streak}</span>` : '';
+          return `<div class="trend-row">
+            <div class="tr-label">${r.label}${r.cat === 'assum' ? ' <span class="tr-tag">افتراض</span>' : ''}</div>
+            <div class="tr-val">${fmtNum(r.cur)}${r.unit ? ' '+r.unit : ''}</div>
+            <div class="tr-delta ${r.cls}">${r.arrow} ${r.status}${pctStr}${streakStr} <span style="font-weight:400;opacity:.7">من ${fmtNum(r.prev)}${r.unit ? ' '+r.unit : ''}</span></div>
+          </div>`;
+        }).join('');
+        rowsHtml += `</div>`;
+      }
 
       return `<div class="trend-panel">
-        <div class="trend-panel-title">📊 مقارنة مع ${prevEntries.length} عملية سابقة لـ ${escHist((current.inputs?.ticker||'').toUpperCase())}</div>
-        <div class="trend-rows">${rowsHtml}</div>
+        <div class="trend-panel-title">📊 مقارنة عبر ${prior.length} عملية سابقة لـ ${escHist((inp.ticker||'').toUpperCase())} — مقابل عملية ${escHist(immediatePrev.date||'')}</div>
+        ${rowsHtml}
         <div class="trend-comment">${comments.join('<br>')}</div>
       </div>`;
     }
@@ -1365,6 +1459,7 @@
           await saveCalcToHistory(inputs, {
             fairValueRange: fairRange,
             fairValueDetail: fairDetail,
+            fairValueAvg: (_lastFairAvg != null && isFinite(_lastFairAvg)) ? _lastFairAvg : null,
             marginText: (marginEl && marginEl !== '—') ? marginEl : '',
             models
           });
