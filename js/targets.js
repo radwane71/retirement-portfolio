@@ -7,6 +7,9 @@ let sectorTargets = {};   // sector → target_pct
 let taskMap       = {};   // ticker → latest active task
 let taskZonesMap  = {};   // ticker → { accumulate_at, trim_from, liquidate_above }
 let totalValue    = 0;
+// آخر تقييم عادل لكل رمز من سجل حاسبة القيمة العادلة (valuation_history_v1)
+// ticker → { fairValueAvg, fairValueRange, marginText, models, date, companyType }
+let valuationLatest = {};
 
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
 window.CARD_INFO = {
@@ -90,6 +93,29 @@ async function loadAll() {
     if (tz.accumulate_at)   stockZones[ticker].entry_price = tz.accumulate_at;
     if (tz.liquidate_above) stockZones[ticker].exit_price  = tz.liquidate_above;
   });
+
+  // ── سجل حاسبة القيمة العادلة: آخر تقييم لكل رمز ──
+  // المصدر نفسه الذي تحفظ فيه صفحة حاسبة القيمة العادلة سجلّها (user_settings).
+  // السجل مرتّب بالأحدث أولاً (unshift)، فأول عملية نصادفها لكل رمز هي الأحدث.
+  valuationLatest = {};
+  try {
+    const hist = await loadUserSetting('valuation_history_v1');
+    if (Array.isArray(hist)) {
+      hist.forEach(e => {
+        const tk = (e?.inputs?.ticker || '').toUpperCase().trim();
+        if (!tk || valuationLatest[tk]) return;          // أبقِ الأحدث فقط
+        const res = e.results || {};
+        valuationLatest[tk] = {
+          fairValueAvg:   (res.fairValueAvg != null && isFinite(+res.fairValueAvg)) ? +res.fairValueAvg : null,
+          fairValueRange: res.fairValueRange || null,
+          marginText:     res.marginText || '',
+          models:         Array.isArray(res.models) ? res.models : [],
+          date:           e.date || '',
+          companyType:    e.inputs?.companyType || 'normal',
+        };
+      });
+    }
+  } catch (_) { /* الشبكة/الصلاحيات — نكمل بلا تقييم */ }
 
   renderStockTargets();
   renderSectorTargets();
@@ -655,10 +681,81 @@ function exportTargetsCSV() {
 // ⚖️ محرك إعادة التوازن — Rebalancing Engine
 // ══════════════════════════════════════════════════════════════
 
+// ── درجة جاذبية السعر للشراء (0..1) لسهم عند سعره الحالي ──────
+// تدمج مصدرين:
+//   1) إشارات المالك الصريحة من صفحة التقييمات (portfolio_tasks):
+//      تجميع accumulate_at · تخفيف trim_from · بيع liquidate_above — لها الأولوية.
+//   2) آخر تقييم عادل من سجل حاسبة القيمة العادلة (valuation_history_v1).
+// الناتج: درجة عالية = السعر في منطقة شراء جيدة · ≈0 = قريب من المتضخم/فوق العادلة.
+// لا تُقدِّر بيانات ناقصة بصمت: لو لا zones ولا تقييم → درجة محايدة 1 وتُعلَّم «بلا تقييم».
+function valuationScore(ticker, price) {
+  const fmt = v => formatSAR(v);
+  price = +price || 0;
+  const tz = taskZonesMap[ticker] || {};
+  const A = +tz.accumulate_at   || 0;   // تجميع
+  const T = +tz.trim_from       || 0;   // تخفيف
+  const L = +tz.liquidate_above || 0;   // بيع كامل
+
+  // ── درجة من إشارات المالك (zones) ──
+  let zoneScore = null, zoneLabel = '', zoneReason = '';
+  if (L > 0 && price >= L) {
+    zoneScore = 0; zoneLabel = '🔴 فوق سعر البيع';
+    zoneReason = `السعر ${fmt(price)} ≥ بيع ${fmt(L)}`;
+  } else if (A > 0 && T > 0 && T > A) {
+    if (price <= A)      { zoneScore = 1; zoneLabel = '🟢 منطقة التجميع'; zoneReason = `السعر ≤ تجميع ${fmt(A)}`; }
+    else if (price >= T) { zoneScore = 0; zoneLabel = '🔴 منطقة التخفيف (متضخم)'; zoneReason = `السعر ≥ تخفيف ${fmt(T)}`; }
+    else                 { zoneScore = (T - price) / (T - A); zoneLabel = '🟡 بين التجميع والتخفيف'; zoneReason = `بين تجميع ${fmt(A)} وتخفيف ${fmt(T)}`; }
+  } else if (A > 0) {                    // سعر تجميع فقط — يتلاشى حتى +15% فوقه
+    const top = A * 1.15;
+    if (price <= A)        { zoneScore = 1; zoneLabel = '🟢 منطقة التجميع'; zoneReason = `السعر ≤ تجميع ${fmt(A)}`; }
+    else if (price >= top) { zoneScore = 0; zoneLabel = '🔴 بعيد فوق التجميع'; zoneReason = `السعر ≥ ${fmt(top)} (+15% فوق التجميع)`; }
+    else                   { zoneScore = (top - price) / (A * 0.15); zoneLabel = '🟡 قرب التجميع'; zoneReason = `أعلى من تجميع ${fmt(A)} بقليل`; }
+  } else if (T > 0) {                    // سعر تخفيف فقط — جذّاب تحته بهامش 15%
+    const bot = T * 0.85;
+    if (price >= T)        { zoneScore = 0; zoneLabel = '🔴 منطقة التخفيف (متضخم)'; zoneReason = `السعر ≥ تخفيف ${fmt(T)}`; }
+    else if (price <= bot) { zoneScore = 1; zoneLabel = '🟢 أقل من التخفيف بهامش'; zoneReason = `السعر ≤ ${fmt(bot)}`; }
+    else                   { zoneScore = (T - price) / (T * 0.15); zoneLabel = '🟡 قرب التخفيف'; zoneReason = `أسفل تخفيف ${fmt(T)} بقليل`; }
+  }
+
+  // ── درجة من سجل حاسبة القيمة العادلة ──
+  const v = valuationLatest[ticker];
+  let fvScore = null, fvReason = '';
+  if (v && v.fairValueAvg > 0 && price > 0) {
+    const disc = (v.fairValueAvg - price) / v.fairValueAvg;     // موجب = تحت العادلة
+    fvScore = Math.max(0, Math.min(1, (disc + 0.10) / 0.40));   // ‑10% → 0 · +30% → 1
+    fvReason = disc >= 0
+      ? `هامش أمان ${(disc * 100).toFixed(0)}% تحت العادلة ${fmt(v.fairValueAvg)}`
+      : `مبالغ ${Math.abs(disc * 100).toFixed(0)}% فوق العادلة ${fmt(v.fairValueAvg)}`;
+  }
+
+  // ── الدمج: إشارات المالك أولاً، والعادلة تعزيز ثانوي ──
+  let score, label, reason, source;
+  if (zoneScore != null && fvScore != null) {
+    score = 0.7 * zoneScore + 0.3 * fvScore;
+    label = zoneLabel; reason = `${zoneReason} · ${fvReason}`; source = 'zones+fv';
+  } else if (zoneScore != null) {
+    score = zoneScore; label = zoneLabel; reason = zoneReason; source = 'zones';
+  } else if (fvScore != null) {
+    score = fvScore;
+    label = fvScore >= 0.66 ? '🟢 تحت العادلة' : fvScore >= 0.33 ? '🟡 قرب العادلة' : '🔴 فوق العادلة';
+    reason = fvReason; source = 'fv';
+  } else {
+    score = 1; label = '⚪ بلا تقييم'; reason = 'لا توجد أسعار تقييم لهذا السهم'; source = 'none';
+  }
+  return {
+    score: Math.max(0, Math.min(1, score)), label, reason, source,
+    fairValueAvg: v?.fairValueAvg ?? null, range: v?.fairValueRange ?? null,
+    marginText: v?.marginText || '', valDate: v?.date || '',
+  };
+}
+
 function runRebalancing() {
   const budget       = +document.getElementById('reb-budget')?.value || 0;
   const method       = document.getElementById('reb-method')?.value || 'gap';
   const entryFilter  = document.getElementById('reb-entry-filter')?.checked || false;
+  // مراعاة موقع السعر من التقييم (افتراضياً مُفعّل) — يجعل المحرك ذكياً لا يعتمد الفجوة وحدها
+  const valAwareEl   = document.getElementById('reb-valuation-aware');
+  const valAware     = valAwareEl ? valAwareEl.checked : true;
   const resultEl     = document.getElementById('reb-result');
   if (!resultEl) return;
 
@@ -683,11 +780,16 @@ function runRebalancing() {
       const gap        = targetPct - currentPct;           // موجب = ناقص الهدف
       const zone       = stockZones[h.ticker] || {};
       const inZone     = !zone.entry_price || +h.current_price <= +zone.entry_price;
-      return { ...h, currentPct, targetPct, gap, inZone };
+      const val        = valuationScore(h.ticker, +h.current_price);
+      // الدرجة الفعّالة: 1 عند إيقاف مراعاة التقييم (سلوك قديم بالضبط)
+      const effScore   = valAware ? val.score : 1;
+      // الأولوية = الفجوة × جاذبية السعر → سهم قريب من المتضخم يهبط للأسفل ولو فجوته كبيرة
+      const priority   = gap * effScore;
+      return { ...h, currentPct, targetPct, gap, inZone, val, effScore, priority };
     })
     .filter(c => c.gap > 0.05)                             // فقط الناقص فعلاً (فوق 0.05%)
     .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
-    .sort((a, b) => b.gap - a.gap);                        // ترتيب تنازلي بالفجوة
+    .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
 
   if (!candidates.length) {
     const msg = entryFilter
@@ -708,22 +810,40 @@ function runRebalancing() {
     return { ...c, maxAlloc };
   });
 
+  // ── إن كانت مراعاة التقييم مُفعّلة وكل الأسهم الناقصة قريبة من سعرها المتضخم ──
+  // لا نشتري سهماً غالياً لمجرد وجود فجوة. هذا هو السلوك الذكي الذي طلبه المالك.
+  if (valAware && candidates_.every(c => c.effScore <= 0.05)) {
+    const list = candidates_
+      .sort((a, b) => b.gap - a.gap)
+      .map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — فجوة ${c.gap.toFixed(1)}% · ${c.val.label} <span class="text-muted small">(${esc(c.val.reason)})</span></li>`)
+      .join('');
+    resultEl.innerHTML = `<div style="padding:18px 20px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-3)">
+      <div style="color:var(--accent);font-weight:600;margin-bottom:8px">⚠️ لا شراء مُوصى به الآن</div>
+      <p class="small text-muted" style="margin-bottom:10px">كل الأسهم الناقصة عن هدفها سعرها الحالي قريب من منطقة التخفيف/المتضخم أو فوق قيمته العادلة. الفجوة وحدها لا تبرّر الشراء عند سعر مرتفع.</p>
+      <ul class="small" style="margin:0;padding-inline-start:18px;line-height:1.9">${list}</ul>
+      <p class="small text-muted" style="margin-top:10px">💡 أوقف «مراعاة موقع السعر من التقييم» لتجاهل التقييم والتوزيع بالفجوة فقط، أو انتظر نزول الأسعار لمناطق التجميع.</p>
+    </div>`;
+    return;
+  }
+
   // ── حساب التوزيع حسب الطريقة — مع تطبيق الحد الأقصى ────────
   let allocations = [];
 
   if (method === 'gap') {
-    // بالتناسب مع حجم الفجوة ثم تقليص لـ maxAlloc
-    const totalGap = candidates_.reduce((s, c) => s + c.gap, 0);
+    // بالتناسب مع الأولوية (الفجوة × جاذبية السعر) ثم تقليص لـ maxAlloc
+    const totalW = candidates_.reduce((s, c) => s + c.priority, 0) || 1;
     allocations = candidates_.map(c => ({
       ...c,
-      allocated: Math.min(budget * (c.gap / totalGap), c.maxAlloc)
+      allocated: Math.min(budget * (c.priority / totalW), c.maxAlloc)
     }));
   } else if (method === 'equal') {
-    // توزيع متساوٍ ثم تقليص لـ maxAlloc
-    const each = budget / candidates_.length;
-    allocations = candidates_.map(c => ({ ...c, allocated: Math.min(each, c.maxAlloc) }));
+    // توزيع متساوٍ بين المؤهّلين — عند مراعاة التقييم نستبعد القريب من المتضخم (درجة ≤ 0.15)
+    const eligible = valAware ? candidates_.filter(c => c.effScore > 0.15) : candidates_;
+    const pool = eligible.length ? eligible : candidates_;
+    const each = budget / pool.length;
+    allocations = pool.map(c => ({ ...c, allocated: Math.min(each, c.maxAlloc) }));
   } else {
-    // أولوية للأكثر انحرافاً فقط — مقيّدة بـ maxAlloc أيضاً
+    // أولوية للأعلى أولوية (فجوة × تقييم) فقط — مقيّدة بـ maxAlloc أيضاً
     const top = candidates_[0];
     allocations = [{ ...top, allocated: Math.min(budget, top.maxAlloc) }];
   }
@@ -796,6 +916,7 @@ function runRebalancing() {
             <th>الوزن قبل</th>
             <th>الوزن بعد</th>
             <th>الفجوة المتبقية</th>
+            ${valAware ? '<th>موقع السعر من التقييم</th>' : ''}
             <th>منطقة الشراء</th>
           </tr>
         </thead>
@@ -818,6 +939,11 @@ function runRebalancing() {
                 <span class="small" style="color:var(--success)">↑${(r.newPct - r.currentPct).toFixed(2)}%</span>
               </td>
               <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>
+              ${valAware ? `<td style="min-width:160px">
+                <div style="font-size:0.82rem">${r.val.label} <span class="text-muted">· ${(r.val.score*100).toFixed(0)}%</span></div>
+                <div class="small text-muted" style="line-height:1.5">${esc(r.val.reason)}</div>
+                ${r.val.range ? `<div class="small text-muted">عادلة: ${esc(r.val.range)}${r.val.valDate ? ` · ${esc(r.val.valDate)}` : ''}</div>` : ''}
+              </td>` : ''}
               <td>${zoneEl}</td>
             </tr>`;
           }).join('')}
@@ -842,7 +968,15 @@ function showRebInfo() {
     'طرق التوزيع:',
     '• بالتناسب مع الفجوة: الأسهم الأبعد عن هدفها تأخذ نصيباً أكبر',
     '• توزيع متساوٍ: كل سهم ناقص يأخذ نفس المبلغ',
-    '• الأولى بالأولوية: كل المبلغ للسهم الأبعد انحرافاً',
+    '• الأولى بالأولوية: كل المبلغ للسهم الأعلى أولوية',
+    '',
+    '⚖️ مراعاة موقع السعر من التقييم (مُفعّلة افتراضياً):',
+    'لا يكتفي المحرك بالفجوة، بل يقرأ لكل سهم أسعار التجميع/التخفيف/البيع',
+    'من صفحة التقييمات، وآخر قيمة عادلة من سجل حاسبة القيمة العادلة.',
+    'الأولوية = الفجوة × جاذبية السعر، فالسهم القريب من سعره المتضخم',
+    'يهبط للأسفل ولو فجوته كبيرة. وإن كانت كل الأسهم الناقصة مرتفعة',
+    'السعر، يخبرك صراحةً «لا شراء مُوصى به الآن» بدل شراء سهم غالٍ.',
+    'أوقف الخيار لتوزيع بالفجوة فقط (السلوك القديم).',
     '',
     'عدد الأسهم يُقرَّب للأسفل دائماً (floor) — لا كسور في السهم.',
     'المتبقي = ما لم يُنفق بعد التقريب.',
