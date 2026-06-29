@@ -749,6 +749,34 @@ function valuationScore(ticker, price) {
   };
 }
 
+// ── مقياس بصري لموقع السعر (على غرار مقياس التنويع في لوحة التحكم) ──
+// شريط من اليمين لليسار: متضخم 🔴 — تخفيف 🟡 — تجميع 🟢، مع علامة موضع السعر.
+// score: 0 = متضخم (يمين) · 1 = تجميع (يسار). تُحسب من valuationScore().
+function valScaleHtml(val) {
+  if (!val || val.source === 'none') {
+    return `<div style="font-size:0.8rem">⚪ بلا تقييم</div>
+            <div class="small text-muted">لا توجد أسعار تقييم لهذا السهم</div>`;
+  }
+  const pos = Math.max(0, Math.min(100, val.score * 100));   // % من اليمين (متضخم)
+  return `
+    <div style="font-size:0.8rem;margin-bottom:5px">${val.label} <span class="text-muted">· ${pos.toFixed(0)}%</span></div>
+    <div style="direction:rtl;position:relative;margin:7px 3px 2px">
+      <div style="display:flex;height:8px;border-radius:5px;overflow:hidden">
+        <div style="flex:1;background:#f85149"></div>
+        <div style="flex:1;background:#f0b429"></div>
+        <div style="flex:1;background:#3fb950"></div>
+      </div>
+      <div style="position:absolute;top:-4px;right:${pos.toFixed(1)}%;transform:translateX(50%)">
+        <div style="width:2px;height:16px;background:var(--text);margin:0 auto"></div>
+      </div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--text-muted);direction:rtl;margin:0 3px 4px">
+      <span>متضخم</span><span>تخفيف</span><span>تجميع</span>
+    </div>
+    <div class="small text-muted" style="line-height:1.5">${esc(val.reason)}</div>
+    ${val.range ? `<div class="small text-muted">عادلة: ${esc(val.range)}${val.valDate ? ` · ${esc(val.valDate)}` : ''}</div>` : ''}`;
+}
+
 function runRebalancing() {
   const budget       = +document.getElementById('reb-budget')?.value || 0;
   const method       = document.getElementById('reb-method')?.value || 'gap';
@@ -939,11 +967,7 @@ function runRebalancing() {
                 <span class="small" style="color:var(--success)">↑${(r.newPct - r.currentPct).toFixed(2)}%</span>
               </td>
               <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>
-              ${valAware ? `<td style="min-width:160px">
-                <div style="font-size:0.82rem">${r.val.label} <span class="text-muted">· ${(r.val.score*100).toFixed(0)}%</span></div>
-                <div class="small text-muted" style="line-height:1.5">${esc(r.val.reason)}</div>
-                ${r.val.range ? `<div class="small text-muted">عادلة: ${esc(r.val.range)}${r.val.valDate ? ` · ${esc(r.val.valDate)}` : ''}</div>` : ''}
-              </td>` : ''}
+              ${valAware ? `<td style="min-width:170px">${valScaleHtml(r.val)}</td>` : ''}
               <td>${zoneEl}</td>
             </tr>`;
           }).join('')}
