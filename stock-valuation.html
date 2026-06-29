@@ -413,7 +413,7 @@
           <span id="hist-saving-badge" class="hist-saving" style="display:none;">💾 جاري الحفظ…</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
-          <button class="btn btn-secondary btn-sm" onclick="exportHistoryCSV()">⬇️ تصدير CSV</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportHistoryMD()">⬇️ تصدير Markdown</button>
           <button class="btn btn-secondary btn-sm" onclick="recomputeAllHistory()" title="يعيد حساب نتائج كل العمليات المحفوظة بالمعادلة المحدّثة من مدخلاتها الأصلية">🔄 إعادة حساب السجل</button>
           <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
         </div>
@@ -1048,27 +1048,100 @@
       showToast(`✅ أُعيد حساب السجل — ${changed} نتيجة تغيّرت${failed ? ` · ${failed} تعذّرت (مدخلات ناقصة)` : ''}`, 'success');
     }
 
-    // ═══ تصدير كل العمليات الحسابية إلى CSV (كل المدخلات + النتائج) ═══
-    function exportHistoryCSV() {
+    // ═══ تصدير كل العمليات الحسابية إلى Markdown (كل صغيرة وكبيرة في السجل) ═══
+    function exportHistoryMD() {
       if (!_history.length) { showToast('لا توجد عمليات للتصدير', 'info'); return; }
-      const inputKeys = new Set();
-      _history.forEach(e => Object.keys(e.inputs || {}).forEach(k => inputKeys.add(k)));
-      const ik = [...inputKeys];
-      const header = ['id', 'التاريخ', ...ik, 'القيمة_العادلة_المدى', 'المتوسط_الرقمي', 'هامش_الأمان', 'النماذج'];
-      const cell = v => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-      const rows = _history.map(e => {
+
+      const typeMap = { reit: '🏢 ريت عقاري', bank: '🏦 بنك / مصرف', normal: '📊 شركة عادية' };
+      const scenMap = { realistic: 'واقعي', optimistic: 'متفائل', conservative: 'محتاط' };
+      // مفاتيح وصفية/منفصلة تُعرض في أقسامها الخاصة، فلا تُكرَّر في جدول المدخلات
+      const metaKeys = ['companyType', 'scenario', 'ticker', 'stockName', 'notes', 'perplexityEval'];
+      // تهريب نص خلية الجدول في Markdown (الشرطة العمودية والأسطر الجديدة)
+      const mdCell = v => String(v == null ? '' : v).replace(/\|/g, '\\|').replace(/\r?\n/g, '<br>');
+
+      const lines = [];
+      lines.push('# سجل العمليات الحسابية — حاسبة القيمة العادلة للأسهم');
+      lines.push('');
+      lines.push(`> تاريخ التصدير: ${new Date().toLocaleString('ar-SA')}`);
+      lines.push(`> إجمالي العمليات: **${_history.length}**`);
+      lines.push('');
+      lines.push('---');
+      lines.push('');
+
+      _history.forEach((e, idx) => {
         const inp = e.inputs || {}, res = e.results || {};
-        const models = (res.models || []).map(m => `${m.name}=${m.value}`).join(' ; ');
-        return [e.id, e.date, ...ik.map(k => inp[k]), res.fairValueRange, res.fairValueAvg, res.marginText, models].map(cell).join(',');
+        const ticker = inp.ticker || '—';
+        const stockName = inp.stockName || '—';
+        const typeLabel = typeMap[inp.companyType] || inp.companyType || '—';
+        const scenLabel = scenMap[inp.scenario] || inp.scenario || '—';
+
+        lines.push(`## ${idx + 1}. ${ticker} — ${stockName}`);
+        lines.push('');
+        lines.push(`- **المعرّف (ID):** ${e.id}`);
+        lines.push(`- **التاريخ:** ${e.date}`);
+        lines.push(`- **نوع الشركة:** ${typeLabel}`);
+        lines.push(`- **السيناريو:** ${scenLabel}`);
+        lines.push(`- **حساب WACC تلقائياً:** ${inp.useWacc ? 'نعم' : 'لا'}`);
+        lines.push('');
+
+        // ── النتيجة ──
+        lines.push('### النتيجة');
+        lines.push('');
+        lines.push(`- **القيمة العادلة (المدى):** ${res.fairValueRange || '—'}`);
+        lines.push(`- **المتوسط الرقمي:** ${res.fairValueAvg != null ? res.fairValueAvg : '—'}`);
+        if (res.fairValueDetail) lines.push(`- **تفصيل القيمة العادلة:** ${res.fairValueDetail}`);
+        if (res.marginText) lines.push(`- **هامش الأمان:** ${res.marginText}`);
+        lines.push('');
+
+        // ── النماذج (كل نموذج وقيمته العادلة) ──
+        if (res.models && res.models.length) {
+          lines.push('### نماذج القيمة العادلة');
+          lines.push('');
+          lines.push('| النموذج | القيمة العادلة |');
+          lines.push('| --- | --- |');
+          res.models.forEach(m => lines.push(`| ${mdCell(m.name)} | ${mdCell(m.value)} |`));
+          lines.push('');
+        }
+
+        // ── كل المدخلات (واحدة واحدة) ──
+        const inputRows = Object.entries(inp).filter(([k]) => !metaKeys.includes(k));
+        if (inputRows.length) {
+          lines.push('### المدخلات');
+          lines.push('');
+          lines.push('| البند | المفتاح | القيمة |');
+          lines.push('| --- | --- | --- |');
+          inputRows.forEach(([k, v]) => {
+            lines.push(`| ${mdCell(INPUT_LABELS[k] || k)} | \`${k}\` | ${mdCell(v)} |`);
+          });
+          lines.push('');
+        }
+
+        // ── الملاحظات وتقييم Perplexity (نص كامل) ──
+        if (inp.notes) {
+          lines.push('### 📝 الملاحظات');
+          lines.push('');
+          lines.push(String(inp.notes));
+          lines.push('');
+        }
+        if (inp.perplexityEval) {
+          lines.push('### 🔍 تقييم Perplexity');
+          lines.push('');
+          lines.push(String(inp.perplexityEval));
+          lines.push('');
+        }
+
+        lines.push('---');
+        lines.push('');
       });
-      const csv = '﻿' + [header.map(cell).join(','), ...rows].join('\r\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+      const md = lines.join('\n');
+      const blob = new Blob([md], { type: 'text/markdown;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
-      a.href = url; a.download = `valuation-history-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.href = url; a.download = `valuation-history-${new Date().toISOString().slice(0, 10)}.md`;
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 100);
-      showToast(`✅ صُدِّرت ${_history.length} عملية إلى CSV`, 'success');
+      showToast(`✅ صُدِّرت ${_history.length} عملية إلى Markdown`, 'success');
     }
 
     // ── البحث التلقائي عن اسم الشركة من قاعدة بيانات الأسهم ──
