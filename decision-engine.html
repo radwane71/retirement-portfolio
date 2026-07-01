@@ -215,12 +215,13 @@
     <!-- ── شريط الملخص ── -->
     <div class="de-summary" id="de-summary"></div>
 
-    <!-- ── جدول الإجراءات (الأولوية) ── -->
+    <!-- ── جدول الإجراءات (الأولوية) — البطل ── -->
     <div class="card">
       <div class="section-header">
         <span class="section-title">📋 ما الذي يحتاج إجراءً الآن؟</span>
-        <span class="small text-muted">الأعلى أهمّية في الأعلى — اضغط «بطاقة» لتفاصيل السهم</span>
+        <span class="small text-muted">الأعلى أهمّية في الأعلى — اضغط «تفاصيل» لكل سهم</span>
       </div>
+      <p id="de-hero-line" style="margin:0 0 12px;font-size:.92rem;line-height:1.6;color:var(--text)">جارٍ الحساب…</p>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -234,6 +235,7 @@
           </tbody>
         </table>
       </div>
+      <p id="de-gaps-note" class="small text-muted" style="margin:10px 2px 0;line-height:1.6"></p>
     </div>
 
     <!-- ── سقف القطاع ── -->
@@ -242,14 +244,17 @@
       <div id="de-sector-check"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
     </div>
 
-    <!-- ── بطاقات كل الأسهم ── -->
+    <!-- ── بطاقات كل الأسهم (تفصيلي — مطوي افتراضياً) ── -->
     <div class="card">
-      <div class="section-header">
-        <span class="section-title">🔬 بطاقة كل شركة</span>
-        <span class="small text-muted">كل بطاقة تعرض الأساسيات — اضغط «تفاصيل كاملة» لكل شيء (الفلاتر المكسورة/السليمة، المالية، الأرباح، التقييم)</span>
+      <div class="section-header" style="cursor:pointer" onclick="toggleAllCards()">
+        <span class="section-title">🔬 بطاقة كل شركة <span class="small text-muted" style="font-weight:400">(كل الأسهم بالتفصيل)</span></span>
+        <button id="de-cards-toggle" class="btn btn-secondary btn-sm" type="button" onclick="event.stopPropagation();toggleAllCards()">▾ عرض كل الأسهم</button>
       </div>
-      <div id="de-cards" class="de-cards-grid">
-        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div>
+      <div id="de-cards-wrap" style="display:none">
+        <p class="small text-muted" style="margin:0 0 12px">تعرض كل الأسهم (لا الإجراءات فقط) — اضغط «تفاصيل كاملة» لأي سهم لرؤية الفلاتر والمالية والأرباح والتقييم.</p>
+        <div id="de-cards" class="de-cards-grid">
+          <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div>
+        </div>
       </div>
     </div>
 

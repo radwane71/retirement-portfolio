@@ -563,7 +563,9 @@ function renderSummaryStrip(totalValue) {
   const gapsSus = _results.filter(r => r.sustain.status === 'unknown').length;
   const count = holdings.length;
   const sizeOk = count >= PORTFOLIO_SIZE.min && count <= PORTFOLIO_SIZE.max;
+  const needAction = n('exit') + n('trim') + n('add') + _results.filter(r => r.action === 'hold' && r.buyZone).length;
 
+  // شريط مبسّط: أرقام الإجراءات فقط + عدد الأسهم. النواقص تُعرض كسطر ملاحظة أسفل الجدول لا كخانة غامضة.
   el.innerHTML = `
     <div class="de-stat de-stat-exit"><div class="de-stat-num">${n('exit')}</div><div class="de-stat-lbl">تصفية</div></div>
     <div class="de-stat de-stat-trim"><div class="de-stat-num">${n('trim')}</div><div class="de-stat-lbl">تخفيف</div></div>
@@ -571,8 +573,22 @@ function renderSummaryStrip(totalValue) {
     <div class="de-stat de-stat-add"><div class="de-stat-num">${n('add')}</div><div class="de-stat-lbl">تجميع</div></div>
     <div class="de-stat de-stat-hold"><div class="de-stat-num">${n('hold')}</div><div class="de-stat-lbl">احتفاظ</div></div>
     <div class="de-stat"><div class="de-stat-num">${count} <span style="font-size:.6em;color:${sizeOk?'#10b981':'#f59e0b'}">${sizeOk?'✓':'⚠'}</span></div><div class="de-stat-lbl">عدد الأسهم (الهدف ${PORTFOLIO_SIZE.min}–${PORTFOLIO_SIZE.max})</div></div>
-    <div class="de-stat de-stat-gap"><div class="de-stat-num">${gapsFV} / ${gapsSus}</div><div class="de-stat-lbl">ناقص: خطة أسعار / استدامة</div></div>
   `;
+
+  // سطر خلاصة بلغة بسيطة فوق الجدول
+  const hero = document.getElementById('de-hero-line');
+  if (hero) {
+    hero.innerHTML = needAction > 0
+      ? `عندك <strong style="color:var(--accent)">${needAction}</strong> ${needAction === 1 ? 'سهم يحتاج' : 'أسهم تحتاج'} قراراً منك الآن. الباقي ضمن القواعد — تابع القائمة أدناه بالترتيب.`
+      : `✅ لا يوجد إجراء مطلوب الآن — كل أسهمك ضمن قواعد محفظتك.`;
+    // نواقص البيانات كملاحظة هادئة لا كخانة رقمية غامضة
+    const noteEl = document.getElementById('de-gaps-note');
+    if (noteEl) {
+      noteEl.innerHTML = (gapsFV || gapsSus)
+        ? `ℹ️ لإكمال الدقّة: ${gapsFV ? `<strong>${gapsFV}</strong> سهم بلا خطة أسعار` : ''}${gapsFV && gapsSus ? ' · ' : ''}${gapsSus ? `<strong>${gapsSus}</strong> سهم بلا بيانات استدامة` : ''} — أدخلها عبر زر ⚙️ في بطاقة السهم.`
+        : '';
+    }
+  }
 }
 
 // سطر الوزن الفرعي: الهدف المسجّل + الانحراف، أو «بلا هدف · السقف» (إصلاح الهدف الملفّق)
@@ -638,6 +654,16 @@ function trendChip(tr) {
   const color = (tr.signal === 'cut' || tr.signal === 'stopped') ? '#ef4444' : tr.signal === 'growing' ? '#10b981' : 'var(--text-muted)';
   const txt = ({ growing:'📈 توزيع ينمو', stable:'➡️ توزيع مستقر', cut:'📉 توزيع منخفض', stopped:'🛑 توزيع متوقّف' })[tr.signal] || '';
   return `<span class="small" title="${escapeHtmlSafe(tr.note)}" style="color:${color}">${txt}</span>`;
+}
+
+// طيّ/فتح قسم بطاقات كل الأسهم (مطوي افتراضياً لتبسيط الصفحة)
+function toggleAllCards() {
+  const wrap = document.getElementById('de-cards-wrap');
+  const btn  = document.getElementById('de-cards-toggle');
+  if (!wrap) return;
+  const open = wrap.style.display === 'none';
+  wrap.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? '▴ إخفاء' : '▾ عرض كل الأسهم';
 }
 
 // ── العرض الرئيسي: بطاقة لكل شركة (تشمل البيانات الأساسية + زر تفاصيل) ──
