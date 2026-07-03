@@ -114,6 +114,46 @@
     .hist-models-tbl tr:last-child td { border-bottom:none; }
     .hist-clear-btn { background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); color:#ef4444; border-radius:7px; padding:8px 16px; font-size:0.85rem; cursor:pointer; font-family:'Tajawal',sans-serif; }
     .hist-clear-btn:hover { background:rgba(239,68,68,0.25); }
+    /* ── سجل العمليات — تصميم بصري منظّم ── */
+    .hist-card { background:var(--bg-2); border:1px solid var(--border); border-radius:14px; margin-bottom:14px;
+                 overflow:hidden; border-right:4px solid var(--border); transition:box-shadow .2s; }
+    .hist-card:hover { box-shadow:0 4px 18px rgba(0,0,0,.18); }
+    .hist-card.v-under { border-right-color:#3fb950; }
+    .hist-card.v-over  { border-right-color:#f85149; }
+    .hist-card.v-fair  { border-right-color:#f0b429; }
+    .hist-top { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; padding:14px 16px 8px; }
+    .hist-idwrap { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+    .hist-badge { background:var(--primary); color:#fff; font-weight:900; font-size:0.95rem; padding:5px 12px;
+                  border-radius:9px; letter-spacing:.5px; }
+    .hist-nm { font-size:1rem; font-weight:700; color:var(--text); }
+    .hist-actions { display:flex; gap:6px; flex-shrink:0; }
+    .hist-ico { width:34px; height:34px; border-radius:9px; border:1px solid var(--border); background:var(--bg-3);
+                cursor:pointer; font-size:15px; display:flex; align-items:center; justify-content:center; transition:all .15s; }
+    .hist-ico:hover { transform:translateY(-1px); }
+    .hist-ico.e:hover { background:rgba(99,102,241,.2); border-color:var(--primary); }
+    .hist-ico.d:hover { background:rgba(239,68,68,.2); border-color:#ef4444; }
+    .hist-chips { display:flex; gap:6px; flex-wrap:wrap; padding:0 16px 12px; }
+    .hist-chip { font-size:0.72rem; padding:3px 10px; border-radius:20px; background:var(--bg-3);
+                 color:var(--text-muted); display:inline-flex; align-items:center; gap:4px; }
+    .hist-hero { margin:0 16px 14px; background:var(--bg-1); border:1px solid var(--border); border-radius:11px;
+                 padding:13px 15px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; }
+    .hist-hero-l { display:flex; flex-direction:column; gap:3px; min-width:0; }
+    .hist-hero-cap { font-size:0.72rem; color:var(--text-muted); }
+    .hist-hero-val { font-size:1.3rem; font-weight:900; color:var(--text); line-height:1.2; }
+    .hist-hero-sub { font-size:0.76rem; color:var(--text-muted); }
+    .hist-pill { font-size:0.85rem; font-weight:800; padding:7px 14px; border-radius:20px; white-space:nowrap; text-align:center; }
+    .pill-under { background:rgba(63,185,80,.15); color:#3fb950; }
+    .pill-over  { background:rgba(248,81,73,.15); color:#f85149; }
+    .pill-fair  { background:rgba(240,180,41,.15); color:#f0b429; }
+    .hist-toggle { display:block; width:calc(100% - 32px); margin:0 16px 14px; padding:9px; text-align:center;
+                   background:var(--bg-3); border:1px solid var(--border); border-radius:9px; color:var(--text-muted);
+                   font-size:0.82rem; font-weight:600; cursor:pointer; font-family:'Tajawal',sans-serif; transition:background .2s; }
+    .hist-toggle:hover { background:var(--bg-1); color:var(--text); }
+    .hist-body { display:none; padding:0 16px 16px; }
+    .hist-body.open { display:block; }
+    .hist-sec-h { font-size:0.78rem; font-weight:700; color:var(--text-muted); margin:14px 0 8px;
+                  padding-bottom:5px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:6px; }
+    .hist-sec-h:first-child { margin-top:4px; }
     /* حقول الرمز والاسم */
     .ticker-row { display:grid; grid-template-columns:1fr 2fr; gap:10px; margin-bottom:4px; }
     .hist-stock-id { font-size:1.05rem; font-weight:900; color:var(--primary); letter-spacing:0.5px; }
@@ -1502,7 +1542,7 @@
       const btn = document.getElementById('hist-btn-'    + id);
       if (el.classList.contains('open')) {
         el.classList.remove('open');
-        btn.textContent = '👁️ عرض التفاصيل';
+        btn.textContent = '👁️ عرض التفاصيل الكاملة';
       } else {
         el.classList.add('open');
         btn.textContent = '🙈 إخفاء التفاصيل';
@@ -1758,13 +1798,13 @@
           .join('');
 
         const notesHtml = inp.notes
-          ? `<div style="margin-top:10px;"><div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:4px;">📝 الملاحظات:</div>
-               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;padding:10px;">${escHist(inp.notes)}</div></div>`
+          ? `<div class="hist-sec-h">📝 الملاحظات</div>
+               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;">${escHist(inp.notes)}</div>`
           : '';
 
         const perplexityHtml = inp.perplexityEval
-          ? `<div style="margin-top:12px;"><div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:4px;">🔍 تقييم Perplexity:</div>
-               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;padding:10px;">${escHist(inp.perplexityEval)}</div></div>`
+          ? `<div class="hist-sec-h">🔍 تقييم Perplexity</div>
+               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;">${escHist(inp.perplexityEval)}</div>`
           : '';
 
         // مقارنة ذكية مع عمليات سابقة لنفس الرمز
@@ -1777,8 +1817,9 @@
         // موثوقية كل نموذج تُحسب من مدخلات هذه العملية نفسها (لا سياق عملية أخرى)
         const relCtx = relCtxFromInputs(inp);
         const modelsHtml = res.models?.length
-          ? `<div style="overflow-x:auto;"><table class="hist-models-tbl">
-               <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>موثوقية النموذج لهذا السهم</th></tr></thead>
+          ? `<div class="hist-sec-h">📋 النماذج وموثوقيتها لهذا السهم</div>
+             <div style="overflow-x:auto;"><table class="hist-models-tbl">
+               <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>الموثوقية</th></tr></thead>
                <tbody>${res.models.map(m=>{
                  const rel = modelReliability(m.name, relCtx);
                  return `<tr><td>${m.name}</td><td>${m.value}</td>`
@@ -1788,31 +1829,49 @@
              </table></div>`
           : '';
 
-        return `<div class="hist-item">
-          <div class="hist-header">
-            <div>
-              ${ticker ? `<div class="hist-stock-id">${ticker}</div>` : ''}
-              ${stockName ? `<div class="hist-stock-name">${stockName}</div>` : ''}
-              <div class="hist-title" style="margin-top:${ticker?'4px':'0'}">${typeLabel} — ${scenarioMap[inp.scenario]||inp.scenario||'—'}</div>
-              <div class="hist-date">🕐 ${entry.date}</div>
+        // الحكم اللوني من نص الهامش: هامش أمان=مقيّم بأقل / مبالغ فيه=مقيّم بأعلى
+        const mt = res.marginText || '';
+        const verdict = mt.includes('هامش أمان') ? 'under' : mt.includes('مبالغ فيه') ? 'over' : (mt ? 'fair' : '');
+        const cardCls = verdict ? ` v-${verdict}` : '';
+        const pillHtml = mt
+          ? `<div class="hist-pill pill-${verdict}">${mt}</div>`
+          : '';
+        const scen = scenarioMap[inp.scenario] || inp.scenario || '—';
+
+        return `<div class="hist-card${cardCls}">
+          <div class="hist-top">
+            <div class="hist-idwrap">
+              ${ticker ? `<span class="hist-badge">${ticker}</span>` : ''}
+              ${stockName ? `<span class="hist-nm">${stockName}</span>` : ''}
             </div>
-            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-              <button id="hist-btn-${entry.id}" class="hist-toggle-btn" onclick="toggleHistDetail(${entry.id})">👁️ عرض التفاصيل</button>
-              <button class="hist-edit-btn" onclick="editHistoryItem(${entry.id})">✏️ تعديل</button>
-              <button class="hist-del-btn" onclick="deleteHistoryItem(${entry.id})">🗑️ حذف</button>
+            <div class="hist-actions">
+              <button class="hist-ico e" title="تعديل" onclick="editHistoryItem(${entry.id})">✏️</button>
+              <button class="hist-ico d" title="حذف" onclick="deleteHistoryItem(${entry.id})">🗑️</button>
             </div>
           </div>
-          <div class="hist-result">${res.fairValueRange||'—'}</div>
-          <div style="font-size:0.82rem;color:var(--text-muted);margin-bottom:4px;">${res.fairValueDetail||''}</div>
-          ${res.marginText ? `<div style="font-size:0.82rem;margin-bottom:4px;">${res.marginText}</div>` : ''}
-          <div id="hist-detail-${entry.id}" class="hist-details">
-            <div style="font-size:0.8rem;font-weight:600;color:var(--text-muted);margin-bottom:6px;margin-top:10px;">📥 المدخلات:</div>
+          <div class="hist-chips">
+            <span class="hist-chip">${typeLabel}</span>
+            <span class="hist-chip">🎚️ ${scen}</span>
+            <span class="hist-chip">🕐 ${entry.date}</span>
+          </div>
+          <div class="hist-hero">
+            <div class="hist-hero-l">
+              <span class="hist-hero-cap">القيمة العادلة للسهم</span>
+              <span class="hist-hero-val">${res.fairValueRange||'—'}</span>
+              ${res.fairValueDetail ? `<span class="hist-hero-sub">${res.fairValueDetail}</span>` : ''}
+            </div>
+            ${pillHtml}
+          </div>
+          <button id="hist-btn-${entry.id}" class="hist-toggle" onclick="toggleHistDetail(${entry.id})">👁️ عرض التفاصيل الكاملة</button>
+          <div id="hist-detail-${entry.id}" class="hist-body">
+            <div class="hist-sec-h">📥 المدخلات</div>
             <div class="hist-inputs-grid">${inputsHtml}</div>
             ${modelsHtml}
             ${notesHtml}
             ${perplexityHtml}
+            <div class="hist-sec-h">📈 مقارنة الاتجاه عبر الزمن</div>
+            ${trendHtml}
           </div>
-          ${trendHtml}
         </div>`;
       }).join('');
     }
