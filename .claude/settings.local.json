@@ -24,7 +24,27 @@
       "Bash(grep -E \"\\\\.sql$\")",
       "Bash(git checkout *)",
       "Bash(git -C \"C:\\\\Users\\\\User\\\\retirement-portfolio\" status)",
-      "Bash(node --check \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\dashboard.js\")"
+      "Bash(node --check \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\dashboard.js\")",
+      "Bash(node --check C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\dashboard.js)",
+      "Bash(node --check \"C:/Users/User/retirement-portfolio/js/dashboard.js\")",
+      "Bash(cat .github/workflows/deploy.yml)",
+      "Bash(ls .github/)",
+      "Bash(git fetch *)",
+      "Bash(git ls-tree *)",
+      "PowerShell($gh = \"$env:LOCALAPPDATA\\\\Microsoft\\\\WinGet\\\\Links\\\\gh.exe\"; if \\(-not \\(Test-Path $gh\\)\\) { $gh = \\(Get-Command gh -ErrorAction SilentlyContinue\\).Source }; if \\(-not $gh\\) { $gh = \"C:\\\\Program Files\\\\GitHub CLI\\\\gh.exe\" }; \"Path: $gh\"; if \\(Test-Path $gh\\) { & $gh --version | Select-Object -First 1; \"---AUTH---\"; & $gh auth status 2>&1 | Select-Object -First 5 })",
+      "Bash(git credential *)",
+      "Bash(git merge *)",
+      "Bash(powershell -Command \"\\(Get-Content js/utils.js | Measure-Object -Line\\).Lines\")",
+      "Bash(powershell -Command \"Get-Content js/utils.js -Tail 15\")",
+      "Bash(node --check js/utils.js)",
+      "Bash(node --check js/watchlist.js)",
+      "Bash(node --check \"C:\\\\Users\\\\User\\\\retirement-portfolio\\\\js\\\\forecast.js\")",
+      "Bash(node --check js/targets.js)",
+      "Bash(node --check js/transactions.js)",
+      "Bash(git reset *)",
+      "Bash(echo \"=== commit done, rc=$? ===\")",
+      "Bash(echo \"=== rc=$? ===\")",
+      "Bash(node --check js/decision-engine.js)"
     ]
   }
 }
