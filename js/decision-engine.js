@@ -310,6 +310,7 @@ function evaluateHolding(h, ctx) {
     fairValue: val && val.fair ? val.fair.avg : null, valDate: val ? val.date : null,
     valFair: val && val.fair ? val.fair : null, valInputs: val ? val.inputs : null,
     valAgeDays: valAge, valStale, stabilizationFlag: val ? val.stabilizationFlag : null,
+    xirr: stockFinancials(h.ticker).xirr,
     blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
   };
 
@@ -716,7 +717,7 @@ function cardHtml(r) {
         <div class="de-kv"><span>السعر</span><b>${formatNum(r.price)}</b></div>
         <div class="de-kv"><span>القيمة العادلة</span>${fvLine}</div>
         <div class="de-kv"><span>الاستدامة</span><b>${SUS_BADGE[r.sustain.status]}</b></div>
-        <div class="de-kv"><span>نوع الأصل</span><b class="small">${escapeHtmlSafe(ASSET_LABEL[r.assetType])}</b></div>
+        <div class="de-kv"><span>عائدك الفعلي XIRR</span><b>${r.xirr != null ? `<span style="color:${r.xirr >= 0 ? '#10b981' : '#ef4444'}">${r.xirr >= 0 ? '+' : '−'}${formatNum(Math.abs(r.xirr))}%</span>` : '<span class="text-muted">—</span>'}</b></div>
       </div>
       ${trendChip(r.sustain.trend) ? `<div class="de-card-trend">${trendChip(r.sustain.trend)}</div>` : ''}
       ${zt ? `<div class="de-card-zones small">🎯 خطة الأسعار: ${escapeHtmlSafe(zt)}</div>` : '<div class="de-card-zones small text-muted">🎯 لا خطة أسعار</div>'}
@@ -780,7 +781,23 @@ function stockFinancials(ticker) {
   const fwdYoc    = costBasis > 0 ? ttmDiv / costBasis * 100 : 0;
   const byYear    = {};
   divs.forEach(d => { const y = d.date.getFullYear(); byYear[y] = (byYear[y] || 0) + d.amount; });
-  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, ttmDiv, fwdYoc, byYear, divCount: divs.length, buyShares, sellShares, grantShares };
+  const xirr = positionXIRR(tx, divs, mktVal);
+  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, ttmDiv, fwdYoc, byYear, divCount: divs.length, buyShares, sellShares, grantShares, xirr };
+}
+
+// العائد الفعلي السنوي المعدَّل بالزمن (XIRR) — نفس منطق صفحة «الأداء التاريخي» (js/performance.js)
+// يقارن التدفقات الفعلية (شراء/بيع/توزيعات) بالقيمة السوقية الحالية — أداء حقيقي، لا افتراضي
+function positionXIRR(tx, divs, mktVal) {
+  const flows = [];
+  tx.forEach(t => {
+    if (t.type === 'buy')       flows.push({ date: t.date, amount: -t.total });
+    else if (t.type === 'sell') flows.push({ date: t.date, amount:  t.total });
+  });
+  divs.forEach(d => flows.push({ date: d.date, amount: d.amount }));
+  if (mktVal > 0) flows.push({ date: new Date(), amount: mktVal });
+  const hasNeg = flows.some(f => f.amount < 0), hasPos = flows.some(f => f.amount > 0);
+  if (!hasNeg || !hasPos || flows.length < 2) return null;
+  try { return computeXIRR(flows); } catch (_) { return null; }
 }
 
 function sectorPctOf(sector, totalValue) {
@@ -847,6 +864,16 @@ function openDetailCard(ticker) {
   out.push(_dRow(susStatus, `الفلتر 1 — بوابة الاستدامة (${SUS_BADGE[sus.status]})`, susBody));
   out.push(_dRow('neutral', `مقياس الاستدامة لنوع الأصل (${E(ASSET_LABEL[r.assetType])})`, E(SUSTAIN_METRIC[r.assetType])));
 
+  // مقارنة الأداء التاريخي الفعلي (XIRR) بالتوقّع المستقبلي (هامش القيمة العادلة)
+  if (fin.xirr != null && r.fairValue != null) {
+    const margin = (r.fairValue - r.price) / r.fairValue * 100;
+    let note;
+    if (fin.xirr < 0 && margin > 10) note = `⚠️ أداؤك الفعلي فيه سلبي (${sign(fin.xirr)}%) رغم إن الحاسبة تقول فيه هامش أمان (${formatNum(margin)}%) — راجع سعر دخولك ومدة احتفاظك قبل ما تجمّع أكثر.`;
+    else if (fin.xirr >= 0 && margin < -10) note = `ℹ️ أداؤك التاريخي إيجابي (${sign(fin.xirr)}%) لكن السعر الحالي أعلى من القيمة العادلة بهامش معتبر — الأداء الماضي لا يبرر الشراء عند هذا السعر.`;
+    else note = `أداؤك الفعلي (${sign(fin.xirr)}% سنوياً) والتوقّع المستقبلي (هامش ${formatNum(margin)}%) متوافقان تقريباً.`;
+    out.push(_dRow('neutral', '📊 التاريخي مقابل المستقبلي', E(note)));
+  }
+
   // الفلتر 2 — القيمة العادلة
   if (r.fairValue != null) {
     const margin = (r.fairValue - r.price) / r.fairValue * 100;
@@ -909,6 +936,9 @@ function openDetailCard(ticker) {
     kv('ر/خ محقق (مبيعات)', sign(fin.realized)),
     kv('إجمالي الأرباح الموزعة', formatNum(fin.divTotal)),
     kv('العائد على التكلفة YOC', formatNum(fin.yoc) + '%'),
+    kv('العائد الفعلي السنوي XIRR', fin.xirr != null
+      ? `<span style="color:${fin.xirr >= 0 ? '#10b981' : '#ef4444'}">${sign(fin.xirr)}%</span>`
+      : '<span class="text-muted">غير كافٍ للحساب</span>'),
   ].join('') + '</div>');
 
   // عدسة الدخل (مهمة المحفظة: دخل توزيعات) — مساهمة المركز في دخل المحفظة
