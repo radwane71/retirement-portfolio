@@ -742,7 +742,6 @@
           const caprate_check = (ffo > 0 && capRate > 0) ? ffo / capRate : null;
           const ffo_yield     = currentPrice > 0 ? (ffo / currentPrice * 100) : 0;
           enterprise_value    = nav_total;
-          _lastCtx = { companyType: 'reit', ffo, pffoMultiple: pffo, capRate: capRate * 100, nav_total, totalUnits };
           const valid_reit    = [nav_per_unit, pffo_value].filter(v => v !== null && v > 0);
           const avg_fair      = valid_reit.length > 0 ? valid_reit.reduce((a,b)=>a+b,0) / valid_reit.length : 0;
           _lastFairAvg        = avg_fair;
@@ -769,7 +768,6 @@
           const bond_yield   =  parseFloat(document.getElementById('bondYield').value)   || 6.5;
           const fair_pb      =  parseFloat(document.getElementById('fairPb').value)      || 1.5;
           const currentPrice =  parseFloat(document.getElementById('currentPrice').value)|| 0;
-          const currentPeVal =  parseFloat(document.getElementById('currentPe').value)   || 0;
           if (eps <= 0 && fcf <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ يجب إدخال EPS أو FCF موجب للشركة العادية.'); return; }
           if (bond_yield <= 0)      { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ عائد السندات يجب أن يكون موجباً.'); return; }
           const growth_5yr_adj = growth_5yr + growth_adj;
@@ -781,8 +779,6 @@
           const gordon_value = calculate_gordon(dividends, growth_perp_final, discount_rate);
           const bv_value     = calculate_book_value(book_value, fair_pb);
           values = { 'DCF': dcf_value, 'جراهام': graham_value, 'مكرر الربحية P/E': pe_value, 'جوردون': gordon_value, 'القيمة الدفترية': bv_value };
-          _lastCtx = { companyType: 'normal', fcf, eps, dividends, book_value, sector_pe, currentPe: currentPeVal,
-            growth_5yr_adj, growth_perp_final, discount_rate, bond_yield };
           const valid_values = Object.values(values).filter(v => v !== null && v > 0 && isFinite(v));
           if (valid_values.length === 0) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ لم ينتج أي نموذج قيمة صالحة. تحقق من المدخلات.'); return; }
           const avg  = valid_values.reduce((a,b)=>a+b,0) / valid_values.length;
@@ -824,7 +820,6 @@
           values = {};
           if (pbVal) values['P/B Fair Value'] = pbVal;
           if (peVal) values['P/E Fair Value'] = peVal;
-          _lastCtx = { companyType: 'bank', bvps, bankEps, bankFairPb, bankFairPe };
 
           const validBank = Object.values(values).filter(v => v > 0);
           if (!validBank.length) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ تحقق من المدخلات.'); return; }
@@ -865,6 +860,8 @@
         document.getElementById('enterpriseValueDetails').textContent = enterprise_value > 0 ? 'قيمة الشركة الإجمالية قبل خصم الدين الصافي' : '—';
         document.getElementById('fairValueRange').textContent   = fair_value_range;
         document.getElementById('fairValueDetails').textContent = fair_value_detail;
+        // سياق الموثوقية للحساب الحيّ — نفس دالة السجل، مصدر واحد بلا تكرار
+        _lastCtx = relCtxFromInputs(captureInputs());
         buildModelsTable(values);
         const chart_values = Object.fromEntries(Object.entries(values).filter(([,v])=>v!==null&&v>0&&isFinite(v)));
         createModelsChart(chart_values);
@@ -887,8 +884,39 @@
     }
 
     // ===== موثوقية كل نموذج لهذا السهم بالذات (وليست دقّة عامة ثابتة) =====
-    // Contextا يُملأ داخل calculateFairValue() بمدخلات آخر عملية حساب — يُستخدم هنا فقط للتفسير، لا يغيّر الأرقام.
+    // المصدر الوحيد للسياق: relCtxFromInputs(inp) — يشتق نفس القيم التي يشتقها recomputeResults
+    // (السيناريو + WACC + سقف النمو الدائم 3%) من أي كائن مدخلات، سواء عملية حيّة أو عملية محفوظة
+    // في السجل. هكذا تعمل الموثوقية على السجل بنفس دقّة الحساب الحيّ، بلا تكرار منطق ولا سياق عالق.
     let _lastCtx = {};
+    function relCtxFromInputs(inp) {
+      inp = inp || {};
+      const num = v => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+      const companyType = inp.companyType || 'normal';
+      const scenario    = inp.scenario || 'realistic';
+      const growth_adj  = scenario === 'optimistic' ? 0.02 : scenario === 'conservative' ? -0.02 : 0;
+
+      let discount_rate = (num(inp.discountRate) || 0) / 100;
+      if (inp.useWacc) {
+        const rf = (num(inp.riskFree)||0)/100, b = num(inp.beta)||1, rm = (num(inp.marketReturn)||0)/100,
+              rd = (num(inp.debtCost)||0)/100, tx = (num(inp.taxRate)||0)/100, de = num(inp.debtEquity)||0;
+        discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
+      }
+      let growth_perp_final = (num(inp.growthPerp) || 0) / 100 + growth_adj;
+      if (growth_perp_final > 0.03) growth_perp_final = 0.03;
+
+      if (companyType === 'reit') {
+        return { companyType, ffo: num(inp.ffo), pffoMultiple: num(inp.pffoMultiple),
+                 capRate: num(inp.capRate), nav_total: num(inp.nav), totalUnits: num(inp.totalUnits) };
+      }
+      if (companyType === 'bank') {
+        return { companyType, bvps: num(inp.bvps), bankEps: num(inp.bankEps),
+                 bankFairPb: num(inp.bankFairPb), bankFairPe: num(inp.bankFairPe) };
+      }
+      return { companyType: 'normal', fcf: num(inp.fcf), eps: num(inp.eps), dividends: num(inp.dividends),
+               book_value: num(inp.bookValue), sector_pe: num(inp.sectorPe), currentPe: num(inp.currentPe),
+               growth_5yr_adj: (num(inp.growth5yr) || 0) / 100 + growth_adj, growth_perp_final,
+               discount_rate, bond_yield: num(inp.bondYield) };
+    }
     function modelReliability(name, c) {
       c = c || {};
       switch (name) {
@@ -1746,10 +1774,17 @@
           : [];
         const trendHtml = buildTrendAnalysis(entry, sameTickerPrev);
 
+        // موثوقية كل نموذج تُحسب من مدخلات هذه العملية نفسها (لا سياق عملية أخرى)
+        const relCtx = relCtxFromInputs(inp);
         const modelsHtml = res.models?.length
           ? `<div style="overflow-x:auto;"><table class="hist-models-tbl">
-               <thead><tr><th>النموذج</th><th>القيمة العادلة</th></tr></thead>
-               <tbody>${res.models.map(m=>`<tr><td>${m.name}</td><td>${m.value}</td></tr>`).join('')}</tbody>
+               <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>موثوقية النموذج لهذا السهم</th></tr></thead>
+               <tbody>${res.models.map(m=>{
+                 const rel = modelReliability(m.name, relCtx);
+                 return `<tr><td>${m.name}</td><td>${m.value}</td>`
+                   + `<td class="${rel.cls}" title="${(rel.reason||'').replace(/"/g,'&quot;')}"><strong>${rel.label}</strong>`
+                   + `${rel.reason?`<div style="font-weight:400;opacity:.8;margin-top:2px;font-size:0.72rem;line-height:1.45">${rel.reason}</div>`:''}</td></tr>`;
+               }).join('')}</tbody>
              </table></div>`
           : '';
 
