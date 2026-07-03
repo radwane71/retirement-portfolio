@@ -546,7 +546,7 @@ function runEngine() {
   _results = holdings.map(h => evaluateHolding(h, ctx));
 
   renderSummaryStrip(totalValue);
-  renderActionTable();
+  renderActionGroups();
   renderSectorCheck(totalValue);
   renderCards();
 
@@ -601,11 +601,11 @@ function renderSummaryStrip(totalValue) {
     <div class="de-stat"><div class="de-stat-num">${count} <span style="font-size:.6em;color:${sizeOk?'#10b981':'#f59e0b'}">${sizeOk?'✓':'⚠'}</span></div><div class="de-stat-lbl">عدد الأسهم (الهدف ${PORTFOLIO_SIZE.min}–${PORTFOLIO_SIZE.max})</div></div>
   `;
 
-  // سطر خلاصة بلغة بسيطة فوق الجدول
+  // سطر خلاصة بلغة بسيطة فوق الصفحة — أول شيء يشوفه المستخدم
   const hero = document.getElementById('de-hero-line');
   if (hero) {
     hero.innerHTML = needAction > 0
-      ? `عندك <strong style="color:var(--accent)">${needAction}</strong> ${needAction === 1 ? 'سهم يحتاج' : 'أسهم تحتاج'} قراراً منك الآن. الباقي ضمن القواعد — تابع القائمة أدناه بالترتيب.`
+      ? `عندك <strong style="color:var(--accent)">${needAction}</strong> ${needAction === 1 ? 'سهم يحتاج' : 'أسهم تحتاج'} قراراً منك الآن. الباقي ضمن القواعد — شوف المجموعات بالأسفل.`
       : `✅ لا يوجد إجراء مطلوب الآن — كل أسهمك ضمن قواعد محفظتك.`;
     // نواقص البيانات كملاحظة هادئة لا كخانة رقمية غامضة
     const noteEl = document.getElementById('de-gaps-note');
@@ -615,39 +615,38 @@ function renderSummaryStrip(totalValue) {
         : '';
     }
   }
+
+  // سطر دخل بسيط: أين أنت من هدف 5000 ر.س شهرياً بحلول 2045 (الدستور §1)
+  const incomeEl = document.getElementById('de-income-line');
+  if (incomeEl) {
+    const cutoff = Date.now() - 365 * 86400000;
+    let ttm = 0;
+    Object.values(divByTicker).forEach(arr => arr.forEach(d => { if (d.date.getTime() >= cutoff) ttm += (d.amount || 0); }));
+    const monthly = ttm / 12;
+    const goal = 5000;
+    const pct = goal > 0 ? Math.min(100, monthly / goal * 100) : 0;
+    incomeEl.innerHTML = `💵 دخل توزيعاتك الشهري الحالي (آخر 12 شهراً): <strong>${formatNum(monthly)} ر.س</strong> من هدف <strong>${formatNum(goal)} ر.س</strong> بحلول 2045 (<strong>${formatNum(pct)}%</strong>)`;
+  }
 }
 
-// سطر الوزن الفرعي: الهدف المسجّل + الانحراف، أو «بلا هدف · السقف» (إصلاح الهدف الملفّق)
-function weightSubLine(r) {
-  if (r.hasTarget) {
-    return `الهدف ${formatNum(r.targetWeight)}% (${r.dev >= 0 ? '+' : '−'}${formatNum(Math.abs(r.dev))})`;
-  }
-  const capHit = r.overCap ? ' ⚠️ كُسر' : '';
-  return `بلا هدف مسجّل · السقف ${formatNum(r.cap)}%${capHit}`;
-}
-
-// ── جدول الإجراءات مرتّب بالأولوية (الدستور §7) ──
-function renderActionTable() {
-  const tbody = document.getElementById('de-action-tbody');
-  if (!tbody) return;
-  const actionable = _results
-    .filter(r => r.action !== 'hold' || r.buyZone)
-    .sort((a, b) => a.priority - b.priority || b.weight - a.weight);
-
-  if (!actionable.length) {
-    tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="icon">✅</div><p>لا يوجد سهم يحتاج إجراء الآن — كل المكوّنات ضمن القواعد.</p></div></td></tr>`;
-    return;
-  }
-  tbody.innerHTML = actionable.map(r => `
-    <tr class="de-row-${r.severity || 'green'}">
-      <td><span class="de-badge ${badgeFor(r)}">${r.label}</span></td>
-      <td><strong>${r.ticker}</strong><br><span class="small text-muted">${escapeHtmlSafe(r.name)}</span></td>
-      <td>${formatNum(r.weight)}%<br><span class="small text-muted">${escapeHtmlSafe(weightSubLine(r))}</span></td>
-      <td>${formatNum(r.price)}</td>
-      <td class="small">${zonesText(r.zones) ? escapeHtmlSafe(zonesText(r.zones)) : '<span class="text-muted">غير متوفرة</span>'}</td>
-      <td class="de-reason">${escapeHtmlSafe(r.reason)}</td>
-      <td><button class="btn btn-secondary btn-sm" onclick="openDetailCard('${r.ticker}')">تفاصيل</button></td>
-    </tr>`).join('');
+// ── مجموعات بلغة بسيطة بدل الجدول: 🔴 يحتاج تصرّف · 🟡 راقبه · 🟢 فرص تجميع (الدستور §7) ──
+function renderActionGroups() {
+  const groups = {
+    urgent: { severities: ['red'],              el: 'de-group-urgent', wrap: 'de-group-urgent-wrap' },
+    watch:  { severities: ['yellow', 'monitor'], el: 'de-group-watch',  wrap: 'de-group-watch-wrap'  },
+    add:    { severities: ['add'],               el: 'de-group-add',   wrap: 'de-group-add-wrap'    },
+  };
+  const actionable = _results.filter(r => r.action !== 'hold' || r.buyZone);
+  Object.values(groups).forEach(g => {
+    const rows = actionable.filter(r => g.severities.includes(r.severity))
+      .sort((a, b) => a.priority - b.priority || b.weight - a.weight);
+    const wrapEl = document.getElementById(g.wrap);
+    const listEl = document.getElementById(g.el);
+    if (!wrapEl || !listEl) return;
+    if (!rows.length) { wrapEl.style.display = 'none'; return; }
+    wrapEl.style.display = '';
+    listEl.innerHTML = rows.map(cardHtml).join('');
+  });
 }
 
 // ── فحص سقف القطاع 25% (الفلتر 4) ──
@@ -692,23 +691,15 @@ function toggleAllCards() {
   if (btn) btn.textContent = open ? '▴ إخفاء' : '▾ عرض كل الأسهم';
 }
 
-// ── العرض الرئيسي: بطاقة لكل شركة (تشمل البيانات الأساسية + زر تفاصيل) ──
-function renderCards() {
-  const wrap = document.getElementById('de-cards');
-  if (!wrap) return;
-  if (!holdings.length) {
-    wrap.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>لا توجد أسهم في المحفظة بعد.</p></div>`;
-    return;
-  }
-  const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
-  wrap.innerHTML = sorted.map(r => {
-    const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
-    const star    = r.blueChip ? ' <span title="سهم قيادي — سقف 12%">⭐</span>' : '';
-    const fvLine  = r.fairValue != null
-      ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}${r.stabilizationFlag ? ` <span style="color:#ef4444;cursor:help" title="${escapeHtmlSafe(r.stabilizationFlag)}">🚩</span>` : ''}</b>`
-      : '<b class="text-muted">—</b>';
-    const zt = zonesText(r.zones);
-    return `
+// ── بطاقة سهم واحدة (مشتركة بين المجموعات الرئيسية وقائمة «كل الأسهم») ──
+function cardHtml(r) {
+  const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
+  const star    = r.blueChip ? ' <span title="سهم قيادي — سقف 12%">⭐</span>' : '';
+  const fvLine  = r.fairValue != null
+    ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}${r.stabilizationFlag ? ` <span style="color:#ef4444;cursor:help" title="${escapeHtmlSafe(r.stabilizationFlag)}">🚩</span>` : ''}</b>`
+    : '<b class="text-muted">—</b>';
+  const zt = zonesText(r.zones);
+  return `
     <div class="de-card de-card-${r.severity || 'green'}">
       <div class="de-card-top">
         <div class="de-card-id">
@@ -735,7 +726,18 @@ function renderCards() {
         <button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">⚙️ إدخال يدوي</button>
       </div>
     </div>`;
-  }).join('');
+}
+
+// ── قائمة كل الأسهم (تفصيلي — مطوي افتراضياً) ──
+function renderCards() {
+  const wrap = document.getElementById('de-cards');
+  if (!wrap) return;
+  if (!holdings.length) {
+    wrap.innerHTML = `<div class="empty-state"><div class="icon">📭</div><p>لا توجد أسهم في المحفظة بعد.</p></div>`;
+    return;
+  }
+  const sorted = _results.slice().sort((a, b) => a.priority - b.priority || b.weight - a.weight);
+  wrap.innerHTML = sorted.map(cardHtml).join('');
 }
 
 function badgeClass(action) {

@@ -52,6 +52,9 @@
     .de-const b { display:block; font-size:1.05rem; color:var(--accent); }
     .de-const small { color:var(--text-muted); }
 
+    .de-hero-card { background:var(--bg-2); }
+    .de-hero-text { margin:0; font-size:1.15rem; font-weight:700; line-height:1.7; color:var(--text); }
+    .de-legend-compact { margin-top:14px; padding-top:12px; border-top:1px solid var(--border); align-items:center; }
     .de-legend-row { display:flex; flex-wrap:wrap; gap:16px; }
     .de-leg { font-size:.84rem; color:var(--text); display:flex; align-items:center; gap:7px; }
     .de-dot { display:inline-block; width:11px; height:11px; border-radius:50%; flex-shrink:0; }
@@ -190,24 +193,22 @@
   <main class="main">
     <div class="page-header">
       <div class="page-header-text">
-        <h1>🧭 محرّك القرار</h1>
-        <p>تنبيهات آلية لكل سهم حسب وزنه وخطة أسعاره وعتباتك اللونية — تصفية · تخفيف · تجميع · احتفاظ، مع سبب كل قرار</p>
+        <h1>🧭 وش وضع محفظتي اليوم؟</h1>
+        <p>نظرة واحدة بسيطة: أي سهم يحتاج قراراً منك الآن، وليش — بلغة عادية، بدون جداول معقّدة</p>
       </div>
-      <button class="btn btn-secondary btn-sm" onclick="exportActionsCSV()">⬇ تصدير الإجراءات CSV</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportActionsCSV()">⬇ تصدير CSV</button>
     </div>
 
-    <!-- ── دليل القراءة: الألوان + العتبات ── -->
-    <div class="card">
-      <div class="section-header">
-        <span class="section-title">كيف تُقرأ هذه الصفحة؟
-          <button class="info-btn" type="button" onclick="showCardInfo('decisionEngine')" title="كيف يعمل المحرّك؟" style="position:static;opacity:.7">ⓘ</button>
-        </span>
-      </div>
-      <div class="de-legend-row">
-        <span class="de-leg"><span class="de-dot" style="background:#ef4444"></span> أحمر: إجراء — تصفية أو تخفيف حادّ</span>
-        <span class="de-leg"><span class="de-dot" style="background:#f59e0b"></span> أصفر: تنبيه — اقترب من تجاوز الهدف</span>
-        <span class="de-leg"><span class="de-dot" style="background:#3b82f6"></span> أزرق: مراقبة — قلق مؤقت أو بقرارك</span>
-        <span class="de-leg"><span class="de-dot" style="background:#10b981"></span> أخضر: تجميع أو ضمن الهدف</span>
+    <!-- ── البطاقة الرئيسية: خلاصة تنفيذية ── -->
+    <div class="card de-hero-card">
+      <p id="de-hero-line" class="de-hero-text">جارٍ الحساب…</p>
+      <div id="de-income-line" class="small text-muted" style="margin-top:6px"></div>
+      <div class="de-legend-row de-legend-compact">
+        <span class="de-leg"><span class="de-dot" style="background:#ef4444"></span> يحتاج تصرّف</span>
+        <span class="de-leg"><span class="de-dot" style="background:#f59e0b"></span> راقبه</span>
+        <span class="de-leg"><span class="de-dot" style="background:#3b82f6"></span> تحت المراقبة</span>
+        <span class="de-leg"><span class="de-dot" style="background:#10b981"></span> فرصة تجميع</span>
+        <button class="info-btn" type="button" onclick="showCardInfo('decisionEngine')" title="كيف يشتغل المحرّك بالتفصيل؟" style="position:static;opacity:.75;margin-inline-start:auto">ⓘ كيف يفكّر المحرّك؟</button>
       </div>
       <div id="de-thresholds" class="de-thresholds"></div>
     </div>
@@ -215,32 +216,29 @@
     <!-- ── شريط الملخص ── -->
     <div class="de-summary" id="de-summary"></div>
 
-    <!-- ── جدول الإجراءات (الأولوية) — البطل ── -->
-    <div class="card">
-      <div class="section-header">
-        <span class="section-title">📋 ما الذي يحتاج إجراءً الآن؟</span>
-        <span class="small text-muted">الأعلى أهمّية في الأعلى — اضغط «تفاصيل» لكل سهم</span>
-      </div>
-      <p id="de-hero-line" style="margin:0 0 12px;font-size:.92rem;line-height:1.6;color:var(--text)">جارٍ الحساب…</p>
-      <div class="table-wrapper">
-        <table>
-          <thead>
-            <tr>
-              <th>الإجراء</th><th>السهم</th><th>الوزن</th><th>السعر</th>
-              <th>خطة الأسعار</th><th>السبب (القاعدة)</th><th></th>
-            </tr>
-          </thead>
-          <tbody id="de-action-tbody">
-            <tr><td colspan="7"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ تشغيل الفلاتر…</p></div></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p id="de-gaps-note" class="small text-muted" style="margin:10px 2px 0;line-height:1.6"></p>
+    <!-- ── 🔴 يحتاج تصرّف الآن ── -->
+    <div class="card" id="de-group-urgent-wrap" style="display:none">
+      <div class="section-header"><span class="section-title">🔴 يحتاج تصرّف منك الآن</span></div>
+      <div id="de-group-urgent" class="de-cards-grid"></div>
     </div>
+
+    <!-- ── 🟡🔵 راقبه ── -->
+    <div class="card" id="de-group-watch-wrap" style="display:none">
+      <div class="section-header"><span class="section-title">🟡 راقبه عن قرب</span></div>
+      <div id="de-group-watch" class="de-cards-grid"></div>
+    </div>
+
+    <!-- ── 🟢 فرص تجميع ── -->
+    <div class="card" id="de-group-add-wrap" style="display:none">
+      <div class="section-header"><span class="section-title">🟢 فرص تجميع الآن</span></div>
+      <div id="de-group-add" class="de-cards-grid"></div>
+    </div>
+
+    <p id="de-gaps-note" class="small text-muted" style="margin:2px 2px 18px;line-height:1.6"></p>
 
     <!-- ── سقف القطاع ── -->
     <div class="card">
-      <div class="section-header"><span class="section-title">🏭 فحص سقف القطاع (25%)</span></div>
+      <div class="section-header"><span class="section-title">🏭 تركّز أي قطاع فوق حدّه؟</span></div>
       <div id="de-sector-check"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
     </div>
 
