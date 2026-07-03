@@ -194,6 +194,10 @@
     .rel-mid  { color:#f0b429; }
     .rel-low  { color:var(--danger); }
     .rel-na   { color:var(--text-muted); }
+    .rel-bar { height:5px; border-radius:4px; background:var(--bg-3); overflow:hidden; margin:5px 0 2px; max-width:170px; }
+    .rel-bar span { display:block; height:100%; border-radius:4px; }
+    .rel-top { font-size:0.64rem; font-weight:800; color:#3fb950; background:rgba(63,185,80,.14); padding:1px 8px; border-radius:20px; white-space:nowrap; }
+    .rel-reason { font-weight:400; opacity:.82; margin-top:2px; font-size:0.72rem; line-height:1.45; }
   </style>
 </head>
 <body>
@@ -1009,12 +1013,74 @@
       }
     }
 
+    // ===== درجة موثوقية رقمية 0–100 لكل نموذج + ترتيب + وسم «الأصدق» =====
+    // تدمج قاعدة النموذج الاستثمارية (مرتفعة/متوسطة/منخفضة) مع مدى توافقه مع
+    // بقية النماذج: النموذج البعيد عن وسيط النماذج تنخفض ثقته حتى لو قاعدته مرتفعة.
+    // هكذا يتمايز 4 نماذج «مرتفعة» بأرقام مختلفة، ويظهر أيّها الأصدق لهذا السهم تحديداً.
+    let _lastModelRows = [];
+    const _REL_BASE = { 'rel-high': 86, 'rel-mid': 66, 'rel-low': 44 };
+    function scoreModels(items, ctx) {
+      items.forEach(it => { it.rel = modelReliability(it.name, ctx); it.isTop = false; it.consensusNote = ''; });
+      // النماذج المُطبَّقة فقط (تستبعد «لا ينطبق» والمرجعية) تدخل في التوافق
+      const applic = items.filter(it => it.rel.cls !== 'rel-na' && it.valueNum != null && it.valueNum > 0);
+      const nums = applic.map(it => it.valueNum).slice().sort((a, b) => a - b);
+      let median = null;
+      if (nums.length) median = nums.length % 2 ? nums[(nums.length - 1) / 2] : (nums[nums.length / 2 - 1] + nums[nums.length / 2]) / 2;
+      items.forEach(it => {
+        if (it.rel.cls === 'rel-na' || it.valueNum == null || it.valueNum <= 0) { it.score = null; return; }
+        let s = _REL_BASE[it.rel.cls] != null ? _REL_BASE[it.rel.cls] : 50;
+        if (median && median > 0 && applic.length >= 2) {
+          const dev = Math.abs(it.valueNum - median) / median;      // انحراف عن وسيط النماذج
+          // خصم متدرّج من أول انحراف (تمييز دقيق بين المتقاربة) ثم أشدّ بعد 10%
+          const pen = dev <= 0.10 ? dev * 40 : 4 + (dev - 0.10) * 70;
+          s -= Math.min(34, pen);
+          it.consensusNote = dev <= 0.10
+            ? ` · قريب من توافق النماذج (انحراف ${(dev * 100).toFixed(0)}%) ✓`
+            : ` · يبتعد ${(dev * 100).toFixed(0)}% عن وسيط النماذج (يخفض الثقة)`;
+        }
+        it.score = Math.max(5, Math.min(99, Math.round(s)));
+      });
+      const ranked = applic.filter(it => it.score != null).sort((a, b) => b.score - a.score);
+      if (ranked.length) ranked[0].isTop = true;
+      return items;
+    }
+
+    // خلية الموثوقية: التصنيف + الدرجة الرقمية + شريط + وسم «الأصدق» + السبب
+    function relCellHtml(it) {
+      const rel = it.rel || { label: '—', cls: '', reason: '' };
+      if (it.score == null) {
+        return `<strong class="${rel.cls}">${rel.label}</strong>` + (rel.reason ? `<div class="rel-reason">${rel.reason}</div>` : '');
+      }
+      const pct = it.score;
+      const col = pct >= 75 ? '#3fb950' : pct >= 55 ? '#f0b429' : '#f85149';
+      return `<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">`
+        + `<strong class="${rel.cls}">${rel.label}</strong>`
+        + `<span style="font-weight:800;color:${col}">${pct}<span style="font-size:.68em;opacity:.55">/100</span></span>`
+        + (it.isTop ? `<span class="rel-top">⭐ الأصدق لهذا السهم</span>` : '')
+        + `</div>`
+        + `<div class="rel-bar"><span style="width:${pct}%;background:${col}"></span></div>`
+        + (rel.reason ? `<div class="rel-reason">${rel.reason}${it.consensusNote || ''}</div>` : '');
+    }
+
+    // تحويل قيمة معروضة (أرقام عربية + رمز عملة) إلى رقم — لتقييم عمليات السجل القديمة
+    function parseArabicNum(s) {
+      if (s == null) return null;
+      let t = String(s).replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)));
+      t = t.replace(/٫/g, '.').replace(/[^0-9.\-]/g, '');
+      const n = parseFloat(t);
+      return isFinite(n) ? n : null;
+    }
+
     function buildModelsTable(values) {
       const currentPrice = parseFloat(document.getElementById('currentPrice').value) || 0;
       const tbody = document.getElementById('modelsTable');
       tbody.innerHTML = '';
-      Object.entries(values).forEach(([name, val]) => {
-        const tr = document.createElement('tr');
+      const items = Object.entries(values).map(([name, val]) => ({ name, valueNum: (val != null && val > 0 && isFinite(val)) ? val : null }));
+      scoreModels(items, _lastCtx);
+      // نخزّن الصفوف بالقيمة الخام لحفظها في السجل (تمييز موثوقية دقيق لاحقاً بلا إعادة تحليل نص)
+      _lastModelRows = items.map(it => ({ name: it.name, value: it.valueNum != null ? formatCurrency(it.valueNum) : 'لا ينطبق', raw: it.valueNum }));
+      items.forEach(it => {
+        const val = it.valueNum;
         let status = '—';
         if (val !== null && val > 0 && currentPrice > 0) {
           const diff = ((val - currentPrice) / val * 100);
@@ -1024,9 +1090,9 @@
               ? `<span style="color:var(--danger);font-weight:700">🔴 مبالغ في تقييمها (${Math.abs(diff).toFixed(1)}%)</span>`
               : `<span style="color:#f59e0b;font-weight:700">🟡 قرب القيمة العادلة</span>`;
         }
-        const rel = modelReliability(name, _lastCtx);
-        tr.innerHTML = `<td><strong>${name}</strong></td><td>${val!==null&&val>0?formatCurrency(val):'<span style="color:var(--text-muted)">لا ينطبق</span>'}</td><td>${status}</td>` +
-          `<td class="${rel.cls}" title="${(rel.reason||'').replace(/"/g,'&quot;')}"><strong>${rel.label}</strong>${rel.reason ? `<div class="small" style="font-weight:400;margin-top:2px;opacity:.85">${rel.reason}</div>` : ''}</td>`;
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td><strong>${it.name}</strong></td><td>${val!==null&&val>0?formatCurrency(val):'<span style="color:var(--text-muted)">لا ينطبق</span>'}</td><td>${status}</td>` +
+          `<td>${relCellHtml(it)}</td>`;
         tbody.appendChild(tr);
       });
     }
@@ -1159,7 +1225,7 @@
 
       const currentPrice = num(inp.currentPrice);
       const mk = (values, avg) => {
-        const models = Object.entries(values).map(([name, v]) => ({ name, value: (v != null && v > 0) ? formatCurrency(v) : 'لا ينطبق' }));
+        const models = Object.entries(values).map(([name, v]) => ({ name, value: (v != null && v > 0) ? formatCurrency(v) : 'لا ينطبق', raw: (v != null && v > 0) ? v : null }));
         let marginText = '';
         if (currentPrice > 0 && avg > 0) {
           const m = (avg - currentPrice) / avg * 100;
@@ -1814,20 +1880,18 @@
           : [];
         const trendHtml = buildTrendAnalysis(entry, sameTickerPrev);
 
-        // موثوقية كل نموذج تُحسب من مدخلات هذه العملية نفسها (لا سياق عملية أخرى)
+        // موثوقية كل نموذج تُحسب من مدخلات هذه العملية نفسها + توافقها مع بقية نماذجها
         const relCtx = relCtxFromInputs(inp);
-        const modelsHtml = res.models?.length
-          ? `<div class="hist-sec-h">📋 النماذج وموثوقيتها لهذا السهم</div>
+        let modelsHtml = '';
+        if (res.models?.length) {
+          const relItems = res.models.map(m => ({ name: m.name, value: m.value, valueNum: (m.raw != null ? m.raw : parseArabicNum(m.value)) }));
+          scoreModels(relItems, relCtx);
+          modelsHtml = `<div class="hist-sec-h">📋 النماذج وموثوقيتها لهذا السهم</div>
              <div style="overflow-x:auto;"><table class="hist-models-tbl">
-               <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>الموثوقية</th></tr></thead>
-               <tbody>${res.models.map(m=>{
-                 const rel = modelReliability(m.name, relCtx);
-                 return `<tr><td>${m.name}</td><td>${m.value}</td>`
-                   + `<td class="${rel.cls}" title="${(rel.reason||'').replace(/"/g,'&quot;')}"><strong>${rel.label}</strong>`
-                   + `${rel.reason?`<div style="font-weight:400;opacity:.8;margin-top:2px;font-size:0.72rem;line-height:1.45">${rel.reason}</div>`:''}</td></tr>`;
-               }).join('')}</tbody>
-             </table></div>`
-          : '';
+               <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>الموثوقية والأصدق</th></tr></thead>
+               <tbody>${relItems.map(it => `<tr><td>${it.name}</td><td>${it.value}</td><td>${relCellHtml(it)}</td></tr>`).join('')}</tbody>
+             </table></div>`;
+        }
 
         // الحكم اللوني من نص الهامش: هامش أمان=مقيّم بأقل / مبالغ فيه=مقيّم بأعلى
         const mt = res.marginText || '';
@@ -1886,11 +1950,16 @@
         const fairRange  = document.getElementById('fairValueRange').textContent;
         const fairDetail = document.getElementById('fairValueDetails').textContent;
         const marginEl   = document.getElementById('dashboardMargin').textContent;
-        const models = [];
-        document.querySelectorAll('#modelsTable tr').forEach(tr => {
-          const tds = tr.querySelectorAll('td');
-          if (tds.length >= 2) models.push({ name: tds[0].innerText, value: tds[1].innerText });
-        });
+        // نحفظ الصفوف بقيمها الخام (raw) من آخر حساب — لتمييز موثوقية دقيق لاحقاً بلا إعادة تحليل نص
+        let models = (_lastModelRows && _lastModelRows.length)
+          ? _lastModelRows.map(r => ({ ...r }))
+          : [];
+        if (!models.length) {
+          document.querySelectorAll('#modelsTable tr').forEach(tr => {
+            const tds = tr.querySelectorAll('td');
+            if (tds.length >= 2) models.push({ name: tds[0].innerText, value: tds[1].innerText });
+          });
+        }
         if (fairRange && fairRange !== '-' && fairRange !== '—') {
           await saveCalcToHistory(inputs, {
             fairValueRange: fairRange,
