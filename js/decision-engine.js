@@ -8,6 +8,9 @@
 
 // ── 1. الثوابت اللي ما تتغير (الدستور §1) — ممنوع تعديلها من الواجهة ──
 const CAPS = Object.freeze({ single: 7, blueChip: 12, sector: 25 });
+// منطقة سماح (الدستور §1): زيادة مسموحة فوق السقف بدون تنبيه — سهم/قيادي 0.75، قطاع 1.25
+const CAP_BUFFER = 0.75;
+const SECTOR_BUFFER = 1.25;
 const PORTFOLIO_SIZE = Object.freeze({ min: 18, max: 25 });
 
 // نص مختصر لخطة الأسعار (للعرض في الجداول)
@@ -287,7 +290,7 @@ function evaluateHolding(h, ctx) {
   const devBand = dev == null ? 'none'
     : absDev <= thr.green ? 'green' : absDev <= thr.yellow ? 'yellow' : 'red';
   const devTxt = dev != null ? `${dev >= 0 ? '+' : '−'}${formatNum(absDev)} نقطة` : 'بلا هدف مسجّل';
-  const overCap = weight > cap;   // كسر السقف الدستوري (§1/§4) — حدّ صلب دائماً
+  const overCap = weight > cap + CAP_BUFFER;   // كسر السقف الدستوري بعد منطقة السماح (§1/§4) — حدّ صلب دائماً
 
   const taskType = taskTypes[h.ticker] || null; // قرار المالك من صفحة المهام
   const userWatching = taskType === 'monitoring';
@@ -306,7 +309,7 @@ function evaluateHolding(h, ctx) {
     gaps, specialNote: note,
     fairValue: val && val.fair ? val.fair.avg : null, valDate: val ? val.date : null,
     valFair: val && val.fair ? val.fair : null, valInputs: val ? val.inputs : null,
-    valAgeDays: valAge, valStale,
+    valAgeDays: valAge, valStale, stabilizationFlag: val ? val.stabilizationFlag : null,
     blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
   };
 
@@ -468,17 +471,40 @@ async function loadAll() {
   });
   Object.values(txByTicker).forEach(rows => rows.sort((a, b) => a.date - b.date));
 
-  // آخر تقييم لكل رمز من حاسبة القيمة العادلة (السجل مرتّب بالأحدث أولاً)
+  // آخر تقييم لكل رمز من حاسبة القيمة العادلة (السجل مرتّب بالأحدث أولاً) + التقييم السابق مباشرة
+  // لتطبيق «قاعدة التثبيت» (الدستور §4 الفلتر 2): القيمة العادلة ترتفع فقط لو الأرباح/FCF/التوزيع ارتفعوا فعلاً.
   valByTicker = {};
+  const prevValByTicker = {};
   (Array.isArray(rVal) ? rVal : []).forEach(entry => {
     const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
-    if (!tk || valByTicker[tk]) return; // أول ظهور = الأحدث
-    valByTicker[tk] = {
+    if (!tk) return;
+    const rec = {
       ts: typeof entry.id === 'number' ? entry.id : null,
       date: (entry.date || '').split('،')[0] || '',
       fair: parseFairValueRange(entry.results?.fairValueRange),
       inputs: entry.inputs || {},
     };
+    if (!valByTicker[tk]) valByTicker[tk] = rec;          // أول ظهور = الأحدث
+    else if (!prevValByTicker[tk]) prevValByTicker[tk] = rec; // ثاني ظهور = التقييم السابق مباشرة
+  });
+  // فحص قاعدة التثبيت: القيمة العادلة ارتفعت، هل ارتفعت الأرباح/FCF/التوزيع فعلاً معها؟
+  Object.keys(valByTicker).forEach(tk => {
+    const cur = valByTicker[tk], prev = prevValByTicker[tk];
+    if (!cur.fair || !prev || !prev.fair) return;
+    const fairRose = cur.fair.avg > prev.fair.avg * 1.01; // هامش ضجيج 1%
+    if (!fairRose) return;
+    const isReit = cur.inputs.companyType === 'reit';
+    const earnKey = isReit ? 'ffo' : 'eps';
+    const curEarn = numOf(cur.inputs[earnKey]), prevEarn = numOf(prev.inputs[earnKey]);
+    const curDiv  = numOf(cur.inputs.dividends || cur.inputs.bankDps);
+    const prevDiv = numOf(prev.inputs.dividends || prev.inputs.bankDps);
+    const curFcf  = numOf(cur.inputs.fcf), prevFcf = numOf(prev.inputs.fcf);
+    const earnUp = curEarn != null && prevEarn != null && curEarn > prevEarn;
+    const divUp  = curDiv  != null && prevDiv  != null && curDiv  > prevDiv;
+    const fcfUp  = curFcf  != null && prevFcf  != null && curFcf  > prevFcf;
+    if (!earnUp && !divUp && !fcfUp) {
+      cur.stabilizationFlag = `⚠️ القيمة العادلة ارتفعت من ${formatNum(prev.fair.avg)} إلى ${formatNum(cur.fair.avg)} (${prev.date || '—'} → ${cur.date || '—'}) بدون دليل ارتفاع فعلي في ${isReit ? 'FFO' : 'EPS'}/FCF/التوزيع بالأرقام المُدخلة — راجع قاعدة التثبيت (الدستور §4 الفلتر 2)`;
+    }
   });
 
   // خطة الأسعار + نوع المهمة لكل رمز من المهام النشطة — أحدث مهمة هي المرجع
@@ -636,14 +662,14 @@ function renderSectorCheck(totalValue) {
   const rows = Object.entries(bySector)
     .map(([sec, val]) => ({ sec, pct: totalValue > 0 ? val / totalValue * 100 : 0 }))
     .sort((a, b) => b.pct - a.pct);
-  const breaches = rows.filter(r => r.pct > CAPS.sector);
+  const breaches = rows.filter(r => r.pct > CAPS.sector + SECTOR_BUFFER);
 
   if (!breaches.length) {
-    el.innerHTML = `<p class="text-muted" style="margin:0">✅ كل القطاعات تحت سقف ${CAPS.sector}%. أعلى قطاع: <strong>${escapeHtmlSafe(rows[0]?.sec || '—')}</strong> (${formatNum(rows[0]?.pct || 0)}%).</p>`;
+    el.innerHTML = `<p class="text-muted" style="margin:0">✅ كل القطاعات تحت سقف ${CAPS.sector}% (+منطقة سماح ${SECTOR_BUFFER}%). أعلى قطاع: <strong>${escapeHtmlSafe(rows[0]?.sec || '—')}</strong> (${formatNum(rows[0]?.pct || 0)}%).</p>`;
     return;
   }
   el.innerHTML = breaches.map(b =>
-    `<div class="de-alert-line">⚠️ تركيز قطاعي: <strong>${escapeHtmlSafe(b.sec)}</strong> = ${formatNum(b.pct)}% &gt; السقف ${CAPS.sector}% (الفلتر 4)</div>`
+    `<div class="de-alert-line">⚠️ تركيز قطاعي: <strong>${escapeHtmlSafe(b.sec)}</strong> = ${formatNum(b.pct)}% &gt; السقف ${CAPS.sector}% + منطقة السماح ${SECTOR_BUFFER}% (الفلتر 4)</div>`
   ).join('');
 }
 
@@ -679,7 +705,7 @@ function renderCards() {
     const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
     const star    = r.blueChip ? ' <span title="سهم قيادي — سقف 12%">⭐</span>' : '';
     const fvLine  = r.fairValue != null
-      ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}</b>`
+      ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}${r.stabilizationFlag ? ` <span style="color:#ef4444;cursor:help" title="${escapeHtmlSafe(r.stabilizationFlag)}">🚩</span>` : ''}</b>`
       : '<b class="text-muted">—</b>';
     const zt = zonesText(r.zones);
     return `
@@ -825,10 +851,11 @@ function openDetailCard(ticker) {
     const mStatus = margin >= 10 ? 'ok' : margin <= -10 ? 'bad' : 'warn';
     const rangeTxt = r.valFair && r.valFair.max > r.valFair.min
       ? ` (نطاق ${formatNum(r.valFair.min)}–${formatNum(r.valFair.max)})` : '';
-    out.push(_dRow(mStatus, 'الفلتر 2 — القيمة العادلة مقابل السعر',
+    out.push(_dRow(r.stabilizationFlag ? 'warn' : mStatus, 'الفلتر 2 — القيمة العادلة مقابل السعر',
       `العادلة ${formatNum(r.fairValue)}${rangeTxt} · السعر ${formatNum(r.price)} → ` +
       `${margin >= 0 ? `هامش أمان ${formatNum(margin)}%` : `مبالغ فيه ${formatNum(Math.abs(margin))}%`}` +
-      (r.valDate ? `<br><span class="text-muted">آخر تقييم: ${E(r.valDate)}${r.valStale ? ` · 📅 قديم (${r.valAgeDays} يوم)` : ''}</span>` : '')));
+      (r.valDate ? `<br><span class="text-muted">آخر تقييم: ${E(r.valDate)}${r.valStale ? ` · 📅 قديم (${r.valAgeDays} يوم)` : ''}</span>` : '') +
+      (r.stabilizationFlag ? `<br>${E(r.stabilizationFlag)}` : '')));
   } else {
     out.push(_dRow('neutral', 'الفلتر 2 — القيمة العادلة', 'لا يوجد تقييم محفوظ — احسبه في صفحة القيمة العادلة ليُقارن بالسعر.'));
   }
@@ -857,12 +884,13 @@ function openDetailCard(ticker) {
       `لا هدف وزن مسجّل لهذا السهم. سجّله في صفحة «أهداف الأسهم». نُراقب السقف فقط.`));
   }
   out.push(_dRow(r.overCap ? 'bad' : 'ok', 'السقف الدستوري للوزن (§1)',
-    `الوزن ${formatNum(r.weight)}% مقابل السقف ${formatNum(r.cap)}%${r.blueChip ? ' (قيادي)' : ''} → ${r.overCap ? 'كُسر — يفرض التخفيف (الفلتر 4)' : 'ضمن السقف'}`));
+    `الوزن ${formatNum(r.weight)}% مقابل السقف ${formatNum(r.cap)}%${r.blueChip ? ' (قيادي)' : ''} + منطقة سماح ${CAP_BUFFER}% (حتى ${formatNum(r.cap + CAP_BUFFER)}%) → ${r.overCap ? 'كُسر — يفرض التخفيف (الفلتر 4)' : 'ضمن السقف'}`));
 
   // سقف القطاع (§4 على مستوى المحفظة)
   const secPct = sectorPctOf(h.sector, totalValue);
-  out.push(_dRow(secPct > CAPS.sector ? 'bad' : 'ok', `سقف القطاع (${CAPS.sector}%)`,
-    `قطاع «${E((h.sector || '').trim() || 'غير مصنّف')}» = ${formatNum(secPct)}% من المحفظة → ${secPct > CAPS.sector ? 'تجاوز السقف' : 'ضمن السقف'}`));
+  const secOver = secPct > CAPS.sector + SECTOR_BUFFER;
+  out.push(_dRow(secOver ? 'bad' : 'ok', `سقف القطاع (${CAPS.sector}% + سماح ${SECTOR_BUFFER}%)`,
+    `قطاع «${E((h.sector || '').trim() || 'غير مصنّف')}» = ${formatNum(secPct)}% من المحفظة → ${secOver ? 'تجاوز السقف' : 'ضمن السقف'}`));
 
   // ملاحظة دستورية خاصة
   if (r.specialNote) out.push(_dRow('warn', 'ملاحظة دستورية (§3)', E(r.specialNote)));
