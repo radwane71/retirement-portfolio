@@ -2463,6 +2463,31 @@ window.showCardInfo(key)
 // مستخدَم بكثافة في dashboard.js (بطاقات التنويع/الصحة/التعادل/FIRE...) وصفحات أخرى
 ```
 
+### نمط شارة نضج البيانات (Maturity Badge) — جديد
+
+```javascript
+maturityBadge(level, reason)
+// شارة صغيرة بجانب المؤشر تنبّه أن الرقم صحيح لكنه غير كافٍ للحكم بعد.
+// المستويات: 'reliable' (لا شارة) | 'early' 🌱 | 'sparse' ⏳ | 'na' ⚪
+// قابلة للنقر → showMaturityInfo() يفتح نافذة شرح (مفيد على الجوال بلا hover)
+
+assessMetricMaturity(kind, ctx)
+// يقرّر مستوى النضج حسب نوع المؤشر وسياق المحفظة. يُرجع {level, reason}.
+// kind: 'return' (XIRR/TWR) | 'risk' (Sharpe/Sortino/تذبذب/تراجع) | 'divYield'
+//       | 'divGrowth' | 'breakeven' | 'diversification' | 'income'
+// ctx : { ageMonths, snapshots, divYears, divCount, stockCount }
+// العتبات المُشفّرة (أمثلة):
+//   return:  <6ش=early · <12ش=early · <24ش=sparse · ≥24ش=reliable
+//   risk:    <4 لقطات=na · <8=early · <12=sparse
+//   divYield: 0 توزيعات=na · <سنة كاملة=early
+//   divGrowth: <سنتين=early · <3=sparse
+//   breakeven/income: <12ش=early
+
+portfolioAgeMonths(firstDate)   // عمر المحفظة بالأشهر من أقدم تاريخ
+```
+
+**التطبيق:** الداشبورد (XIRR، العوائد التوزيعية، استرداد رأس المال، التنويع)، الأداء (أقصى تراجع، Sharpe/Sortino/التذبذب)، التوزيعات (Forward/YOC)، الرؤية (XIRR التاريخي). المؤشرات الظرفية (أرقام حالية كالقيمة السوقية) لا تحمل شارة لأنها ليست حساسة لعمر المحفظة.
+
 ### Inline Editing
 
 ```javascript

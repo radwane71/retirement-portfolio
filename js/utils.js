@@ -435,6 +435,107 @@ window.showCardInfo = function(key) {
   openInfoModal(c.title, body);
 };
 
+// ══════════════════════════════════════════════════════════════
+// شارة نضج البيانات — هل المؤشر كافٍ للحكم على المحفظة أم مبكّر؟
+// ──────────────────────────────────────────────────────────────
+// الهدف: تنبيه لطيف بأن الرقم *صحيح* لكن المحفظة حديثة أو البيانات
+// قليلة، فالمؤشر لا يكفي للحكم بعد. لا نزعج عند الكفاية (لا شارة).
+//
+//   'reliable' → لا شارة (كافٍ للحكم)
+//   'early'    → 🌱 مبكّر (البيانات صحيحة لكن المحفظة حديثة)
+//   'sparse'   → ⏳ تقريبي (نقاط بيانات قليلة)
+//   'na'       → ⚪ غير متوفر (لا بيانات للحساب أصلاً)
+//
+// الاستخدام: ضع الناتج بجانب عنوان الكرت أو الرقم:
+//   el.innerHTML = 'XIRR ' + maturityBadge('early', 'المحفظة أقل من سنة…');
+// ──────────────────────────────────────────────────────────────
+window.MATURITY_META = {
+  early:  { icon: '🌱', label: 'مبكّر',      color: '#f0b429' },
+  sparse: { icon: '⏳', label: 'تقريبي',     color: '#3b82f6' },
+  na:     { icon: '⚪', label: 'غير متوفر',  color: '#8b949e' },
+};
+
+function maturityBadge(level, reason) {
+  if (!level || level === 'reliable') return '';
+  const m = window.MATURITY_META[level] || window.MATURITY_META.na;
+  const safe = String(reason || '').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  // نضيف زر تلميح قابل للنقر (للموبايل) عبر showMaturityInfo، ونص title (للماوس).
+  return `<span class="maturity-badge" role="button" tabindex="0"
+    title="ℹ️ ${safe}"
+    onclick="showMaturityInfo('${level}', this)"
+    data-reason="${safe}"
+    style="cursor:help">${m.icon}</span>`;
+}
+
+// نافذة تشرح معنى الشارة عند نقرها (مفيدة على الجوال حيث لا يوجد hover)
+window.showMaturityInfo = function(level, el) {
+  const m = window.MATURITY_META[level] || window.MATURITY_META.na;
+  const reason = el?.getAttribute('data-reason') || '';
+  if (typeof openInfoModal === 'function') {
+    openInfoModal(`${m.icon} مؤشر ${m.label}`,
+      `<p style="line-height:1.9">${reason}</p>` +
+      `<p class="info-note" style="margin-top:8px;font-size:.85rem;color:var(--text-muted)">` +
+      `الرقم المعروض <b>صحيح</b> ومبني على بياناتك الفعلية — الشارة تعني فقط أنه ` +
+      `<b>غير كافٍ للحكم النهائي على المحفظة بعد</b>. كلما طال عمر المحفظة وزادت البيانات، ` +
+      `تختفي الشارة ويصبح المؤشر موثوقاً.</p>`);
+  }
+};
+
+// عمر المحفظة بالأشهر من أقدم تاريخ (معاملة/تدفق). يقبل نصوص YYYY-MM-DD أو Date.
+function portfolioAgeMonths(firstDate) {
+  if (!firstDate) return 0;
+  const d = (firstDate instanceof Date) ? firstDate
+    : (typeof parseDateLocal === 'function' ? parseDateLocal(firstDate) : new Date(firstDate));
+  if (!d || isNaN(d)) return 0;
+  return Math.max(0, (Date.now() - d.getTime()) / (30.44 * 86400000));
+}
+
+// تقييم نضج مؤشر حسب نوعه وسياق المحفظة.
+// kind: 'return' | 'risk' | 'divYield' | 'divGrowth' | 'breakeven' | 'diversification' | 'income'
+// ctx : { ageMonths, snapshots, divYears, divCount, stockCount }
+// يُرجع { level, reason }.
+function assessMetricMaturity(kind, ctx) {
+  const c = ctx || {};
+  const age = +c.ageMonths || 0;
+  const snaps = +c.snapshots || 0;
+  const divYears = +c.divYears || 0;
+  const divCount = +c.divCount || 0;
+  const stocks = +c.stockCount || 0;
+  const R = (level, reason) => ({ level, reason });
+
+  switch (kind) {
+    case 'return': // XIRR / TWR / عائد سنوي
+      if (age < 6)  return R('early',  'محفظتك أقل من 6 أشهر. العائد السنوي هنا مُستنتَج من فترة قصيرة جداً، فيتضخّم أو ينهار مع أي حركة سعر. يحتاج ≥ 12 شهراً ليصبح ذا معنى.');
+      if (age < 12) return R('early',  'محفظتك أقل من سنة. العائد السنوي مؤشر أوّلي فقط — يستقر عادةً بعد 12–24 شهراً من التداول.');
+      if (age < 24) return R('sparse', 'محفظتك أقل من سنتين. العائد أفضل الآن لكنه ما زال متأثراً بأداء السنة الأولى بشكل كبير.');
+      return R('reliable');
+    case 'risk': // Sharpe / Sortino / تذبذب / أقصى تراجع
+      if (snaps < 4)  return R('na',     `تحتاج ≥ 4 لقطات صافي ثروة (لديك ${snaps}). أضِف لقطات شهرية من صفحة صافي الثروة.`);
+      if (snaps < 8)  return R('early',  `لديك ${snaps} لقطات فقط. مقاييس المخاطر (التذبذب/شارب/سورتينو) تحتاج ≥ 12 لقطة شهرية لتعكس تقلّب المحفظة بصدق.`);
+      if (snaps < 12) return R('sparse', `لديك ${snaps} لقطة. المقاييس تقديرية وتتحسّن كلما تراكمت لقطات شهرية أكثر.`);
+      return R('reliable');
+    case 'divYield': // Forward / YOC / العائد التوزيعي
+      if (divCount < 1) return R('na',    'لا توجد توزيعات مسجّلة بعد — العائد التوزيعي غير قابل للحساب حتى تستلم أول توزيعة وتسجّلها.');
+      if (divYears < 1) return R('early', 'لم تكتمل دورة توزيع سنوية كاملة بعد. العائد المتوقّع مبني على توزيعات جزئية، فقد يكون أعلى أو أقل من الواقع السنوي.');
+      return R('reliable');
+    case 'divGrowth': // نمو التوزيعات CAGR
+      if (divYears < 2) return R('early',  'قياس نمو التوزيعات يحتاج سنتين تقويميتين مكتملتين على الأقل. لديك أقل من ذلك، فالنمو غير قابل للقياس بعد.');
+      if (divYears < 3) return R('sparse', 'سنتان فقط من التوزيعات — معدّل النمو مؤشر أوّلي، سنة واحدة استثنائية قد تضخّمه.');
+      return R('reliable');
+    case 'breakeven': // استرداد رأس المال / نقطة التعادل
+      if (age < 12) return R('early', 'محفظتك أقل من سنة. من الطبيعي أن تكون نسبة الاسترداد منخفضة في مرحلة البناء — هذا لا يدل على ضعف، بل على أن الوقت لم يكفِ للنمو والتوزيعات بعد.');
+      return R('reliable');
+    case 'diversification': // HHI / العدد الفعّال
+      if (stocks < 3) return R('early', `لديك ${stocks} سهم فقط. مقياس التنويع يصف وضعك الحالي بدقة، لكن المحفظة ما زالت في طور التكوين — الحكم على جودة التنويع يحتاج بناءً أوسع.`);
+      return R('reliable');
+    case 'income': // تغطية الدخل الشهري / FIRE
+      if (age < 12) return R('early', 'في مرحلة بناء المحفظة، تغطية الدخل تكون منخفضة بطبيعتها. الحكم على مسارك نحو الدخل المستهدف يحتاج سنة على الأقل من التداول والتوزيعات.');
+      return R('reliable');
+    default:
+      return R('reliable');
+  }
+}
+
 // ── Chart defaults ────────────────────────────────────────────
 function chartDefaults() {
   const light = document.body.classList.contains('light-mode');

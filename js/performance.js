@@ -38,6 +38,45 @@ window.CARD_INFO = {
       <p>مرآة صادقة تكشف أنماطك الفعلية: هل تطارد الأسعار المرتفعة؟ تبيع بسرعة عند الربح؟ تركّز في قلة من الأسهم؟</p>
       <p class="info-note">💡 أكبر عدوّ للمستثمر هو سلوكه لا السوق. رؤية أنماطك بالأرقام أول خطوة لتصحيحها — البيانات لا تجامل.</p>`
   },
+  'kpi-realized': {
+    title: '💵 الربح/الخسارة المحقق',
+    body: `
+      <p>تخيّل أنك اشتريت لعبة بـ10 ريال وبعتها بـ15. الـ5 ريال هي «ربح محقق» — صار في جيبك فعلاً لأنك بعت.</p>
+      <div class="info-formula">المحقق = ما قبضته من البيع − ما دفعته لشراء ما بعته</div>
+      <p class="info-note">💡 «محقق» = حقيقي وثابت، لأنك بعت وانتهى. عكسه «غير محقق» الذي ما زال مجرد رقم على الشاشة يتغيّر كل يوم.</p>`
+  },
+  'kpi-unrealized': {
+    title: '📄 الربح/الخسارة غير المحقق',
+    body: `
+      <p>لو عندك لعبة اشتريتها بـ10 ريال وصار سعرها اليوم 13، عندك «ربح على الورق» بـ3 ريال — لكنه ليس في جيبك لأنك ما بعت. لو نزل السعر بكرة، يختفي.</p>
+      <div class="info-formula">غير المحقق = قيمة أسهمك اليوم − ما دفعته فيها</div>
+      <p class="info-note">💡 يتحرّك مع السعر لحظياً. لا يصير حقيقياً إلا يوم تبيع.</p>`
+  },
+  'kpi-drawdown': {
+    title: '📉 أقصى تراجع (Max Drawdown)',
+    body: `
+      <p>أكبر «هبوطة» مرّت على محفظتك من أعلى قمة وصلت لها إلى أدنى قاع بعدها. مثل أعلى نقطة في الأفعوانية ثم أوطى نقطة — كم كان طول السقوط.</p>
+      <div class="info-formula">التراجع = (القاع − القمة) ÷ القمة × 100 — محسوب على الأداء المعزول عن إيداعاتك وسحوباتك</div>
+      <p class="info-note">💡 يقيس أسوأ ألم مررت به. رقم صغير (قريب من الصفر) = مسار هادئ. رقم كبير سالب = تقلّبات حادة تحتاج أعصاباً قوية.</p>`
+  },
+  'kpi-hhi': {
+    title: '🧩 تركّز المحفظة (HHI)',
+    body: `
+      <p>يقيس هل بيضك كله في سلة واحدة. لو معظم فلوسك في سهم أو سهمين، الرقم يرتفع (خطر). لو موزّعة على أسهم كثيرة بأوزان متقاربة، ينخفض (أأمن).</p>
+      <div class="info-formula">HHI = مجموع مربّعات أوزان الأسهم · العدد الفعّال = 1 ÷ HHI</div>
+      <p class="info-note">💡 «العدد الفعّال» يقول: تنوّعك الحقيقي يعادل كم سهماً متساوياً. تملك 20 سهماً لكن العدد الفعّال 4؟ إذن أنت فعلياً مركّز في 4.</p>`
+  },
+  'kpi-risk': {
+    title: '⚖️ العائد مقابل المخاطرة (شارب/سورتينو/التذبذب)',
+    body: `
+      <p>مو المهم كم ربحت، المهم كم «رعب» تحمّلت عشان تربح. طفلان جابا نفس الدرجة، بس واحد ذاكر بهدوء والثاني سهر ليلة الامتحان بتوتر — أيّهما أفضل؟</p>
+      <div class="info-math">
+        • <strong>التذبذب:</strong> كم يتأرجح عائدك صعوداً وهبوطاً (أقل = أهدأ).<br>
+        • <strong>Sharpe:</strong> كم ربح مقابل كل وحدة تأرجح (أعلى = أفضل).<br>
+        • <strong>Sortino:</strong> مثل شارب لكن يعاقب فقط على التأرجح <em>الهابط</em> (المؤلم) — أنسب لمن يهمّه حماية رأس ماله.
+      </div>
+      <p class="info-note">🟡 هذه المقاييس تحتاج لقطات صافي ثروة شهرية كافية لتصبح موثوقة — لذلك تظهر شارة «مبكّر/تقريبي» حتى تتراكم بياناتك.</p>`
+  },
 };
 
 let _tx       = [];
@@ -293,7 +332,8 @@ function renderKPIs() {
       const dd = peak > 0 ? (v - peak) / peak * 100 : 0;
       if (dd < maxDD) { maxDD = dd; ddPeakDate = peakDate; ddTroughDate = s.date; }
     }
-    ddEl.textContent  = maxDD.toFixed(2) + '%';
+    const _mDD = assessMetricMaturity('risk', { snapshots: _snapshots.length });
+    ddEl.innerHTML    = maxDD.toFixed(2) + '%' + maturityBadge(_mDD.level, _mDD.reason);
     ddEl.className    = 'value num ' + (maxDD < -15 ? 'text-danger' : maxDD < -8 ? 'text-warning' : 'text-success');
     ddEl.title        = ddPeakDate ? `من ${formatDate(ddPeakDate)} إلى ${formatDate(ddTroughDate)}` : '';
   } else if (ddEl) {
@@ -374,17 +414,21 @@ function renderRiskMetrics() {
   };
   if (!m) { setInsufficient(volEl, 'pk-volatility-sub'); setInsufficient(shEl, 'pk-sharpe-sub'); setInsufficient(soEl, 'pk-sortino-sub'); return; }
 
+  // شارة نضج موحّدة: مقاييس المخاطر تحتاج لقطات شهرية كافية
+  const _mRisk = assessMetricMaturity('risk', { snapshots: _snapshots.length });
+  const _rb = maturityBadge(_mRisk.level, _mRisk.reason);
+
   if (volEl) {
-    volEl.textContent = (m.annVol * 100).toFixed(1) + '%';
+    volEl.innerHTML  = (m.annVol * 100).toFixed(1) + '%' + _rb;
     volEl.className   = 'value num ' + (m.annVol < 0.15 ? 'text-success' : m.annVol < 0.30 ? 'text-warning' : 'text-danger');
   }
   const ratioClass = v => v == null ? 'text-muted' : v >= 1 ? 'text-success' : v >= 0 ? 'text-warning' : 'text-danger';
   if (shEl) {
-    shEl.textContent = m.sharpe == null ? '—' : m.sharpe.toFixed(2);
+    shEl.innerHTML   = (m.sharpe == null ? '—' : m.sharpe.toFixed(2)) + _rb;
     shEl.className   = 'value num ' + ratioClass(m.sharpe);
   }
   if (soEl) {
-    soEl.textContent = m.sortino == null ? '—' : m.sortino.toFixed(2);
+    soEl.innerHTML   = (m.sortino == null ? '—' : m.sortino.toFixed(2)) + _rb;
     soEl.className   = 'value num ' + ratioClass(m.sortino);
     const sub = document.getElementById('pk-sortino-sub');
     if (sub) sub.textContent = `🟡 تقريبي · ${m.nReturns} فترة`;

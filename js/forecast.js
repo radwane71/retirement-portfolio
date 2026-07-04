@@ -1080,8 +1080,9 @@ function renderHistSummary() {
   }
 
   // XIRR: المصدر الأصدق للعائد التاريخي الحقيقي
+  const _mRet = assessMetricMaturity('return', { ageMonths: (h.yearsActive || 0) * 12 });
   const xirrLabel = h.xirr != null
-    ? `${h.xirr >= 0 ? '+' : ''}${h.xirr.toFixed(2)}%`
+    ? `${h.xirr >= 0 ? '+' : ''}${h.xirr.toFixed(2)}%${maturityBadge(_mRet.level, _mRet.reason)}`
     : '—';
 
   // نمو رأس المال: عرض الخام vs المُعدَّل للواقعية

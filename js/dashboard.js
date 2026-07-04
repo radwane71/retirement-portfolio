@@ -612,8 +612,22 @@ async function loadAllData() {
     }
   }
 
+  // ── سياق نضج البيانات — لتحديد المؤشرات المبكّرة على عمر المحفظة ──
+  const _firstBuyDate = txRows.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0] || null;
+  const _mAgeMonths   = (typeof portfolioAgeMonths === 'function') ? portfolioAgeMonths(_firstBuyDate) : 0;
+  const _divCalYears  = Object.keys(divByYear).filter(y => +divByYear[y] > 0).length;
+  const _mDivYears    = Math.min(_divCalYears, Math.max(1, Math.ceil(_mAgeMonths / 12))); // مقيّد بعمر المحفظة
+  const _maturityCtx  = {
+    ageMonths:  _mAgeMonths,
+    snapshots:  nwRows.length,
+    divYears:   divRows.length ? _mDivYears : 0,
+    divCount:   divRows.length,
+    stockCount: holdings.length,
+  };
+
   window._ds = {
     yr,
+    mCtx: _maturityCtx,
     totalInvested:   totalBuys - totalSells,
     totalBuys,
     totalSells,
@@ -724,7 +738,12 @@ function switchYieldTab(tab) {
             : tab === 'fwd'    ? (s.divYieldFwd||0)
             : (s.divYieldMarket||0);
   const el = document.getElementById('stat-div-yield');
-  if (el) el.className = 'value num ' + (val >= 5 ? 'text-success' : val >= 3 ? 'text-accent' : 'text-muted');
+  if (el) {
+    el.className = 'value num ' + (val >= 5 ? 'text-success' : val >= 3 ? 'text-accent' : 'text-muted');
+    // شارة نضج: العائد التوزيعي مبكّر قبل اكتمال دورة سنة أو بلا توزيعات
+    const _mY = assessMetricMaturity('divYield', s.mCtx);
+    if (_mY.level && _mY.level !== 'reliable') el.innerHTML = el.textContent + maturityBadge(_mY.level, _mY.reason);
+  }
 }
 
 // ── شارات موثوقية الكروت ──────────────────────────────────────
@@ -842,7 +861,8 @@ function renderStats() {
       xirrEl.className = 'value num text-muted';
       setText('stat-xirr-sub', 'يحتاج معاملات شراء وبيع/توزيعات');
     } else {
-      xirrEl.textContent = (s.xirr >= 0 ? '+' : '') + s.xirr.toFixed(2) + '%';
+      const _m = assessMetricMaturity('return', s.mCtx);
+      xirrEl.innerHTML = (s.xirr >= 0 ? '+' : '') + s.xirr.toFixed(2) + '%' + maturityBadge(_m.level, _m.reason);
       xirrEl.className = 'value num ' + (s.xirr >= 0 ? 'text-success' : 'text-danger');
       // ── تحذير جودة البيانات: أسعار قديمة تُضعف دقة XIRR ───
       if (hasStalePrice()) {
@@ -1530,7 +1550,7 @@ function renderDiversificationCard() {
         </div>
       </div>
       <div style="flex:1;min-width:180px">
-        <div style="font-size:0.98rem;font-weight:700;color:${zoneColor};margin-bottom:3px">${zoneLabel}</div>
+        <div style="font-size:0.98rem;font-weight:700;color:${zoneColor};margin-bottom:3px">${zoneLabel}${(() => { const _m = assessMetricMaturity('diversification', { stockCount: n }); return maturityBadge(_m.level, _m.reason); })()}</div>
         <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:6px">${progressTxt}</div>
         <div style="font-size:0.74rem;color:var(--text-2);line-height:1.55;margin-bottom:9px">
           تملك ${n} سهماً، لكن بسبب تفاوت أوزانها فإن تنوّعها يعادل
@@ -2883,9 +2903,11 @@ function renderBreakEvenCard() {
   // ما زاد عن 100% هو ربحك الصافي على رأس المال (profit% = breProgress − 100).
   const recoveredPct = breProgress;                        // كم استرجعت من رأس مالك
   const aboveBE      = recoveredPct - 100;                 // + فوق التعادل / − تحته
-  const recoveredCaption = isBreakEven
+  const _mBE = assessMetricMaturity('breakeven', (window._ds || {}).mCtx);
+  const _beBadge = maturityBadge(_mBE.level, _mBE.reason);
+  const recoveredCaption = (isBreakEven
     ? `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>+${aboveBE.toFixed(1)}% ربح</b> فوق نقطة التعادل`
-    : `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>${aboveBE.toFixed(1)}% تحت نقطة التعادل</b>`;
+    : `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>${aboveBE.toFixed(1)}% تحت نقطة التعادل</b>`) + _beBadge;
   const progressBar = `
     <div style="margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">

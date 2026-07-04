@@ -309,6 +309,20 @@ html, body {
 .card:hover .info-btn { opacity: 1; }
 .info-btn:hover { color: var(--accent); }
 
+/* ── شارة نضج البيانات (maturity badge) ── */
+.maturity-badge {
+  display: inline-block;
+  font-size: 0.78em;
+  margin: 0 3px;
+  vertical-align: middle;
+  line-height: 1;
+  user-select: none;
+  filter: saturate(1.1);
+  transition: transform 0.15s;
+}
+.maturity-badge:hover,
+.maturity-badge:focus { transform: scale(1.25); outline: none; }
+
 /* ── Info Modal body styles ── */
 .info-formula {
   background: var(--bg-2);

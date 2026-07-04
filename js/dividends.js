@@ -334,6 +334,18 @@ function renderDivStats() {
   const fwdYoc     = netCapital > 0 ? fwd.total / netCapital * 100 : 0;
   const fwdYocCls  = fwdYoc >= 5 ? 'text-success' : fwdYoc >= 3 ? 'text-accent' : 'text-muted';
 
+  // ── شارة نضج: العائد التوزيعي مبكّر قبل اكتمال دورة سنة كاملة ──
+  const _txArr    = (typeof transactions !== 'undefined') ? transactions : [];
+  const _firstBuy = _txArr.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0];
+  const _ageM     = (typeof portfolioAgeMonths === 'function') ? portfolioAgeMonths(_firstBuy) : 0;
+  const _divCalYr = new Set(dividends.map(d => +d.year || new Date(d.date).getFullYear())).size;
+  const _mDiv     = assessMetricMaturity('divYield', {
+    ageMonths: _ageM,
+    divYears:  Math.min(_divCalYr, Math.max(1, Math.ceil(_ageM / 12))),
+    divCount:  dividends.length,
+  });
+  const _dvBadge  = maturityBadge(_mDiv.level, _mDiv.reason);
+
   // عدد الأسهم الموزِّعة
   const uniqueTickers = new Set(dividends.map(d => d.ticker)).size;
   const coveredByFwd  = fwd.breakdown.length;
@@ -363,14 +375,14 @@ function renderDivStats() {
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item"
       title="TTM YOC = أرباح آخر 12 شهر ÷ تكلفة الحيازات الحالية&#10;قد يبدو منخفضاً إذا نمت المحفظة مؤخراً (المقام أكبر من متوسط الفترة)">
-      <div class="tx-stat-val ${ttmYocCls}">${ttmYoc.toFixed(2)}%</div>
+      <div class="tx-stat-val ${ttmYocCls}">${ttmYoc.toFixed(2)}%${_dvBadge}</div>
       <div class="tx-stat-lbl">YOC الفعلي (TTM)</div>
       ${ttmNote}
     </div>
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item"
       title="Forward Projected = لكل سهم: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية&#10;هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم&#10;يعكس ما تتوقع استلامه سنوياً من محفظتك الحالية&#10;مغطى: ${coveredByFwd} رمز من أصل ${uniqueTickers}">
-      <div class="tx-stat-val ${fwdYocCls}">${fwdYoc.toFixed(2)}%</div>
+      <div class="tx-stat-val ${fwdYocCls}">${fwdYoc.toFixed(2)}%${_dvBadge}</div>
       <div class="tx-stat-lbl">العائد المتوقع (Forward)</div>
       <div class="tx-stat-sub" style="color:var(--success,#3fb950)">≈ ${formatSAR(fwd.total)} سنوياً</div>
     </div>

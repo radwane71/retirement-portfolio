@@ -137,25 +137,29 @@
     <div class="stats-grid" id="perf-kpis">
       <div class="stat-card"><div class="label">مراكز مفتوحة <span class="eng-label">Open</span></div><div class="value num text-success" id="pk-open">—</div><div class="sub">سهم نشط</div></div>
       <div class="stat-card"><div class="label">مراكز مغلقة <span class="eng-label">Closed</span></div><div class="value num text-muted" id="pk-closed">—</div><div class="sub">صفقات منتهية</div></div>
-      <div class="stat-card"><div class="label">إجمالي ر/خ محقق <span class="eng-label">Realized P&amp;L</span></div><div class="value num" id="pk-realized">—</div><div class="sub">من صفقات البيع</div></div>
-      <div class="stat-card"><div class="label">ر/خ غير محقق <span class="eng-label">Unrealized P&amp;L</span></div><div class="value num" id="pk-unrealized">—</div><div class="sub">على المراكز الحالية</div></div>
-      <div class="stat-card"><div class="label">أقصى تراجع <span class="eng-label">Max Drawdown</span></div><div class="value num text-muted" id="pk-max-drawdown">—</div><div class="sub">من قمة إلى قاع</div></div>
-      <div class="stat-card" title="Herfindahl-Hirschman Index — يقيس تركز المحفظة&#10;قريب من 0 = تنويع جيد | فوق 0.25 = تركز عالٍ">
+      <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-realized')">ⓘ</button><div class="label">إجمالي ر/خ محقق <span class="eng-label">Realized P&amp;L</span></div><div class="value num" id="pk-realized">—</div><div class="sub">من صفقات البيع</div></div>
+      <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-unrealized')">ⓘ</button><div class="label">ر/خ غير محقق <span class="eng-label">Unrealized P&amp;L</span></div><div class="value num" id="pk-unrealized">—</div><div class="sub">على المراكز الحالية</div></div>
+      <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-drawdown')">ⓘ</button><div class="label">أقصى تراجع <span class="eng-label">Max Drawdown</span></div><div class="value num text-muted" id="pk-max-drawdown">—</div><div class="sub">من قمة إلى قاع</div></div>
+      <div class="stat-card">
+        <button class="info-btn" type="button" onclick="showCardInfo('kpi-hhi')">ⓘ</button>
         <div class="label">تركز المحفظة <span class="eng-label">HHI</span></div>
         <div class="value num" id="pk-hhi">—</div>
         <div class="sub" id="pk-hhi-sub">مقياس التنويع</div>
       </div>
-      <div class="stat-card" title="التذبذب السنوي — الانحراف المعياري لعوائد المحفظة (TWR)&#10;كلما قلّ كان مسار العائد أكثر استقراراً">
+      <div class="stat-card">
+        <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
         <div class="label">التذبذب السنوي <span class="eng-label">Volatility</span></div>
         <div class="value num" id="pk-volatility">—</div>
         <div class="sub" id="pk-volatility-sub">🟡 تقريبي (لقطات شهرية)</div>
       </div>
-      <div class="stat-card" title="Sharpe = (العائد السنوي − العائد الخالي من المخاطر) ÷ التذبذب الكلي&#10;يقيس العائد مقابل كل وحدة مخاطرة. أعلى = أفضل">
+      <div class="stat-card">
+        <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
         <div class="label">شارب <span class="eng-label">Sharpe</span></div>
         <div class="value num" id="pk-sharpe">—</div>
         <div class="sub" id="pk-sharpe-sub">🟡 تقريبي</div>
       </div>
-      <div class="stat-card" title="Sortino = (العائد السنوي − الخالي من المخاطر) ÷ تذبذب الهبوط فقط&#10;يعاقب على التقلب السلبي وحده — أنسب لمن يهمّه حماية رأس المال">
+      <div class="stat-card">
+        <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
         <div class="label">سورتينو <span class="eng-label">Sortino</span></div>
         <div class="value num" id="pk-sortino">—</div>
         <div class="sub" id="pk-sortino-sub">🟡 تقريبي</div>
