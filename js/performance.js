@@ -183,12 +183,31 @@ function buildPositionData() {
     // المقابل في holdings للسعر الحالي
     const h       = _holdings.find(x => x.ticker === p.ticker);
     p.currentPrice = h ? +h.current_price : null;
-    // دائماً احسب من المعاملات (buyCost يشمل العمولة) لضمان الاتساق
-    p.avgCost      = p.buyShares > 0 ? p.buyCost / p.buyShares : 0;
+
+    // AUDIT-FIX (2026-07): الربح المحقق بالمنهج الزمني — متوسط التكلفة وقت كل
+    // بيع، لا متوسطاً نهائياً يشمل مشتريات لاحقة للبيع. مطابق تماماً لمنهج
+    // لوحة التحكم وسجل المعاملات (إصلاح F-6) — يوحّد الرقم عبر الصفحات الثلاث.
+    const events = [...p.allBuys, ...p.allSells]
+      .slice().sort((a, b) => ((a.date || '') < (b.date || '') ? -1 : (a.date || '') > (b.date || '') ? 1 : 0));
+    let _sh = 0, _cost = 0, _realized = 0;
+    events.forEach(t => {
+      if (t.type === 'sell') {
+        const avg  = _sh > 0 ? _cost / _sh : 0;
+        const sold = Math.min(+t.shares, _sh);
+        _realized += +t.total - avg * sold;
+        _cost = Math.max(0, _cost - avg * sold);
+        _sh   = Math.max(0, _sh - +t.shares);
+      } else { // buy أو grant (المنحة total = 0 فتخفض المتوسط)
+        _cost += +t.total;
+        _sh   += +t.shares;
+      }
+    });
+    // متوسط التكلفة الزمني للحيازة المتبقية — يطابق holdings.avg_price
+    p.avgCost = _sh > 0.001 ? _cost / _sh : (p.buyShares > 0 ? p.buyCost / p.buyShares : 0);
 
     if (remaining <= 0.001) {
-      // مغلق بالكامل
-      const realizedPnL = p.sellRevenue - p.buyCost;
+      // مغلق بالكامل — المنهج الزمني يكافئ (حصيلة البيع − كامل تكلفة الشراء)
+      const realizedPnL = _realized;
       p.realizedPnL  = realizedPnL;
       p.realizedPct  = p.buyCost > 0 ? realizedPnL / p.buyCost * 100 : 0;
       p.totalReturn  = realizedPnL + p.divReceived;
@@ -204,13 +223,13 @@ function buildPositionData() {
     } else {
       // مفتوح (كلياً أو جزئياً)
       p.remainingShares   = remaining;
-      const costOfRemaining = p.avgCost * remaining;
+      const costOfRemaining = _cost;            // تكلفة الحيازة المتبقية (زمنية)
       p.marketValue       = p.currentPrice != null ? p.currentPrice * remaining : null;
       p.unrealizedPnL     = p.marketValue != null ? p.marketValue - costOfRemaining : null;
       p.unrealizedPct     = costOfRemaining > 0 && p.unrealizedPnL != null ? p.unrealizedPnL / costOfRemaining * 100 : null;
-      // الربح المحقق من البيع الجزئي
-      const costOfSold    = p.buyShares > 0 ? (p.buyCost / p.buyShares) * p.sellShares : 0;
-      p.partialRealizedPnL = p.sellRevenue - costOfSold;
+      // الربح المحقق من البيع الجزئي — زمني (WAC وقت كل بيع)
+      const costOfSold    = Math.max(0, p.buyCost - _cost);
+      p.partialRealizedPnL = _realized;
       p.totalReturn        = (p.unrealizedPnL || 0) + p.partialRealizedPnL + p.divReceived;
       p.totalReturnPct     = costOfRemaining > 0 ? p.totalReturn / (costOfRemaining + costOfSold) * 100 : 0;
       // XIRR للمراكز المفتوحة (القيمة الحالية كتدفق نهائي)

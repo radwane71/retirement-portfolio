@@ -37,13 +37,17 @@ Deno.serve(async (req) => {
 
   // ── جلب أسهم المستخدم ────────────────────────────────────────
   const hRes    = await fetch(
-    `${SUPABASE_URL}/rest/v1/holdings?select=ticker&user_id=eq.${userId}`,
+    `${SUPABASE_URL}/rest/v1/holdings?select=ticker,price_manual&user_id=eq.${userId}`,
     { headers: { Authorization: `Bearer ${SERVICE_KEY}`, apikey: SERVICE_KEY } }
   )
   const holdings = await hRes.json()
 
   // مجموعة الرموز المملوكة (تُحدَّث في DB) ومجموعة الكل (تُجلب أسعارها)
   const heldTickers: string[] = (holdings || []).map((h: any) => h.ticker)
+  // AUDIT-FIX (2026-07): الأسعار المعدَّلة يدوياً (price_manual) لا تُداس بالتحديث التلقائي
+  const manualTickers = new Set<string>(
+    (holdings || []).filter((h: any) => h.price_manual === true).map((h: any) => h.ticker)
+  )
   const allTickerSet = new Set<string>([...heldTickers, ...extraTickers])
   if (!allTickerSet.size) {
     return new Response(JSON.stringify({ updated: 0, prices: {}, failed: [], message: 'لا توجد أسهم' }), {
@@ -109,7 +113,9 @@ Deno.serve(async (req) => {
   // نحدّث فقط الأسهم المملوكة في holdings — الرموز الإضافية (المراقبة) تُعاد أسعارها دون حفظ
   const heldSet = new Set(heldTickers)
   const patchResults = await Promise.all(
-    Object.entries(prices).filter(([ticker]) => heldSet.has(ticker)).map(([ticker, price]) =>
+    Object.entries(prices)
+      .filter(([ticker]) => heldSet.has(ticker) && !manualTickers.has(ticker))
+      .map(([ticker, price]) =>
       fetch(
         `${SUPABASE_URL}/rest/v1/holdings?user_id=eq.${userId}&ticker=eq.${ticker}`,
         {

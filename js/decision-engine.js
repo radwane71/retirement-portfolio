@@ -94,9 +94,14 @@ function capOf(h) { return isBlueChip(h) ? CAPS.blueChip : CAPS.single; }
 function numOf(v) { if (v == null || v === '') return null; const n = +v; return isFinite(n) ? n : null; }
 
 // يحوّل نص نتيجة الحاسبة ("12.50 — 18.30" أو "15.40 ر.س") إلى { avg, min, max }
+// AUDIT-FIX (2026-07): formatCurrency('ar-SA') قد يُخرج أرقاماً عربية-هندية (٠-٩)
+// لا يلتقطها \d اللاتيني — نحوّلها أولاً حتى لا يفشل التحليل ويضيع التقييم.
 function parseFairValueRange(str) {
   if (!str) return null;
-  const nums = String(str).replace(/,/g, '').match(/\d+(?:\.\d+)?/g);
+  const normalized = String(str)
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/٫/g, '.').replace(/[,،]/g, '');
+  const nums = normalized.match(/\d+(?:\.\d+)?/g);
   if (!nums || !nums.length) return null;
   const vals = nums.map(Number).filter(n => n > 0);
   if (!vals.length) return null;
@@ -479,10 +484,17 @@ async function loadAll() {
   (Array.isArray(rVal) ? rVal : []).forEach(entry => {
     const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
     if (!tk) return;
+    // AUDIT-FIX (2026-07): المصدر الأول هو fairValueAvg الرقمي المخزَّن في السجل
+    // (نفس ما تقرأه صفحة الأهداف) — تحليل النص المعروض احتياطي فقط للسجل القديم.
+    const parsedRange = parseFairValueRange(entry.results?.fairValueRange);
+    const avgNum = (entry.results?.fairValueAvg != null && isFinite(+entry.results.fairValueAvg) && +entry.results.fairValueAvg > 0)
+      ? +entry.results.fairValueAvg : null;
     const rec = {
       ts: typeof entry.id === 'number' ? entry.id : null,
       date: (entry.date || '').split('،')[0] || '',
-      fair: parseFairValueRange(entry.results?.fairValueRange),
+      fair: avgNum != null
+        ? { avg: avgNum, min: parsedRange?.min ?? avgNum, max: parsedRange?.max ?? avgNum }
+        : parsedRange,
       inputs: entry.inputs || {},
     };
     if (!valByTicker[tk]) valByTicker[tk] = rec;          // أول ظهور = الأحدث

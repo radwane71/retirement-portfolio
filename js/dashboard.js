@@ -115,7 +115,8 @@ async function refreshPrices(silent = false) {
       const nowISO = new Date().toISOString();
       if (json.prices) {
         holdings.forEach(h => {
-          if (json.prices[h.ticker] != null) {
+          // AUDIT-FIX (2026-07): لا تدُس السعر اليدوي (price_manual) بالتحديث التلقائي
+          if (json.prices[h.ticker] != null && !h.price_manual) {
             h.current_price = json.prices[h.ticker];
             _priceTimestamps[h.ticker] = nowISO;   // ← سجّل وقت التحديث
           }
@@ -443,6 +444,9 @@ async function loadAllData() {
 
   // ── Forward Projected Income — الأدق للمحافظ النامية ─────────
   // لكل سهم في الحيازات: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية
+  // AUDIT-FIX (2026-07): نبني أيضاً fwdByTicker (دخل متوقع لكل رمز) ليستخدمه
+  // كرت «الدخل حسب القطاع» بتوزيعات فعلية بدل التوزيع بنسبة القيمة السوقية.
+  const fwdByTicker = {};
   const fwdProjected = (() => {
     const divDate = d => {
       if (d.date) return d.date;
@@ -524,7 +528,9 @@ async function loadAllData() {
       const dps = recent[Math.floor(recent.length / 2)];
       if (dps < 0.0001) return;
 
-      total += dps * freq * +h.shares;
+      const projected = dps * freq * +h.shares;
+      fwdByTicker[h.ticker] = projected;
+      total += projected;
     });
     return total;
   })();
@@ -597,7 +603,7 @@ async function loadAllData() {
     totalDivAll,     yearDiv,
     divYieldYear,    divYieldAll,
     divYieldAnn, divYieldYOC, divYieldMarket, divYieldFwd,
-    fwdProjected, ttmDiv, xirr,
+    fwdProjected, fwdByTicker, ttmDiv, xirr,
     annualizedYearDiv, daysElapsed, daysInYear, denomAnn,
     grantMap, totalGrantShares, totalGrantTickers,
     latestNW:        nwRows[0] ? +nwRows[0].total_value : null,
@@ -1996,27 +2002,14 @@ function renderIncomeBySector() {
     tickerSector[h.ticker] = (h.sector || '').trim() || 'غير مصنف';
   });
 
-  // نجمع TTM dividends (آخر 12 شهراً) لكل قطاع
-  // _ttmDivByTicker: نحسبها هنا
-  const now     = new Date();
-  const yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-
-  // نحتاج divRows — موجودة في window._divRows لو أضفنا، لكن
-  // الأبسط هو استخدام fwdProjected breakdown إن توفّر، وإلا نستخدم القطاع من holdings
-  // نبني توزيع بناءً على نسبة الدخل المتوقع (Forward Income) لكل سهم
-  const { breakdown } = (() => {
-    // نعيد حساب Forward Income per ticker من _ds المحلي
-    // لكن _ds لا يحتوي breakdown — نبني من holdings وبيانات dividends
-    // نستخدم: dخل كل سهم = (القيمة السوقية / إجمالي القيمة) × fwdProjected
-    // هذا تقدير مقبول إذا لم يكن breakdown متاحاً
-    const totalVal = holdings.reduce((sum, h) => sum + +h.shares * +h.current_price, 0);
-    const fwd = s.fwdProjected || s.ttmDiv || 0;
-    const bd  = holdings.map(h => ({
-      ticker:    h.ticker,
-      projected: totalVal > 0 ? (+h.shares * +h.current_price / totalVal) * fwd : 0,
-    }));
-    return { breakdown: bd };
-  })();
+  // AUDIT-FIX (2026-07): نستخدم الدخل المتوقع الفعلي لكل رمز (fwdByTicker من
+  // loadAllData — وسيط DPS × الدورية × الأسهم الحالية). التوزيع السابق بنسبة
+  // القيمة السوقية كان يجعل «نسبة الدخل» = «نسبة الوزن» بالبناء، فيفقد الكرت معناه.
+  const fwdMap = s.fwdByTicker || {};
+  const breakdown = holdings.map(h => ({
+    ticker:    h.ticker,
+    projected: fwdMap[h.ticker] || 0,
+  }));
 
   // اجمع الدخل بالقطاع
   const sectorIncome = {};
@@ -2050,7 +2043,9 @@ function renderIncomeBySector() {
         ${entries.map(([sec, inc]) => {
           const incomePct = totalIncome > 0 ? inc / totalIncome * 100 : 0;
           const totalVal  = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
-          const secVal    = holdings.filter(h => (h.sector||'').trim()||'غير مصنف' === sec)
+          // AUDIT-FIX (2026-07): أقواس حول التعبير — الأسبقية السابقة كانت تجعل
+          // الفلتر يقبل كل سهم مصنَّف في كل قطاع (=== يسبق ||)
+          const secVal    = holdings.filter(h => (((h.sector||'').trim()) || 'غير مصنف') === sec)
                               .reduce((s, h) => s + +h.shares * +h.current_price, 0);
           const weightPct = totalVal > 0 ? secVal / totalVal * 100 : 0;
           const diff      = incomePct - weightPct;
@@ -2824,11 +2819,11 @@ function renderBreakEvenCard() {
 
   // ── المعادلة الكاملة ──────────────────────────────────────
   // currentValue يشمل أسهم المنح (موجودة في holdings) — لا نضيف grantValueNow مرة ثانية
-  // نقد المحفظة يُحسب كـ«عائد» فقط بقدر ما يمكن أن يكون حصيلة بيع (totalSells)؛
-  // أي نقد مودَع زيادة عن ذلك (إيداع جديد لم يُستثمر) ليس عائداً ولا يُحتسب
-  const totalSells   = s.totalSells || 0;
-  const cashReturned = Math.min(portfolioCash, totalSells);
-  const totalReturns = currentValue + cashReturned + totalDivAll;
+  // AUDIT-FIX (2026-07): حصيلة البيع مخصومة أصلاً من رأس المال المنشغل (مشتريات − مبيعات)،
+  // فإضافتها مرة أخرى كـ«نقد عائد» كانت تحتسبها مرتين وتضخّم الربح الحقيقي بمقدار
+  // min(النقد، المبيعات). المعادلة الصحيحة — مطابقة لكرت «إجمالي العائد منذ البداية»:
+  //   إجمالي العوائد = قيمة المحفظة + التوزيعات   مقابل   رأس المال = مشتريات − مبيعات
+  const totalReturns = currentValue + totalDivAll;
 
   // صافي الربح/الخسارة الحقيقي = إجمالي العوائد − ما أنفق
   const trueNetPnL   = totalReturns - netCapital;
@@ -2903,12 +2898,9 @@ function renderBreakEvenCard() {
         <div class="num bold ${cls}" style="font-size:1rem">${val}</div>
         <div class="small text-muted" style="margin-top:2px;font-size:0.72rem">${label}</div>
       </div>`;
-    // نُظهر «النقد من حصيلة البيع» كمكوّن مستقل حين يكون > 0، وإلا لا تتطابق
-    // الصناديق مع صافي الربح (الصافي يشمله لكنه كان مخفياً عن الملخّص).
     const summaryStats = [
       statItem('القيمة السوقية', formatSAR(currentValue), 'text-accent'),
       statItem('الأرباح الموزعة', formatSAR(totalDivAll), 'text-success'),
-      cashReturned > 0 ? statItem('نقد من حصيلة البيع', formatSAR(cashReturned), 'text-success') : '',
       statItem('رأس المال المنشغل', formatSAR(netCapital)),
     ].filter(Boolean);
     const cols = summaryStats.length === 4 ? 2 : 3;
@@ -2931,7 +2923,6 @@ function renderBreakEvenCard() {
       <div style="margin-bottom:8px;margin-top:12px">
         <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">العوائد</div>
         ${row('قيمة المحفظة الحالية', formatSAR(currentValue), '', grantValueNow > 0 ? `(يشمل منحة ${s.totalGrantShares || 0} سهم)` : '')}
-        ${cashReturned > 0 ? row('نقد من حصيلة البيع عند الوسيط', formatSAR(cashReturned)) : ''}
         ${row('إجمالي الأرباح الموزعة (كل الأوقات)', formatSAR(totalDivAll), 'text-success')}
         ${row('إجمالي العوائد', formatSAR(totalReturns), trueNetPnL >= 0 ? 'text-success' : '')}
       </div>
@@ -2954,9 +2945,6 @@ function renderBreakEvenCard() {
       { label: 'ر/خ ورقي (القيمة السوقية)', value: unrealizedPnL, color: unrealizedPnL >= 0 ? '#3b82f6' : '#f85149', base: pct(currentValue) },
       { label: 'ر/خ محقق من المبيعات',      value: realizedPnL,  color: realizedPnL  >= 0 ? '#22c55e' : '#f85149', base: pct(realizedPnL) },
       { label: 'أرباح موزعة مستلمة',        value: totalDivAll,  color: '#3fb950',                                   base: pct(totalDivAll) },
-      cashReturned > 0
-        ? { label: 'نقد من حصيلة البيع',    value: cashReturned, color: '#f0b429',                                  base: pct(cashReturned) }
-        : null,
     ].filter(Boolean);
 
     const totalComponents = components.reduce((s, c) => s + Math.max(0, c.value), 0);
@@ -3034,7 +3022,6 @@ function renderBreakEvenCard() {
         <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(248,81,73,.7);display:inline-block"></span>رأس المال</span>
         <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(59,130,246,.7);display:inline-block"></span>قيمة المحفظة</span>
         <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(63,185,80,.7);display:inline-block"></span>أرباح موزعة</span>
-        ${cashReturned > 0 ? `<span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(240,180,41,.7);display:inline-block"></span>نقد من البيع</span>` : ''}
       </div>`;
 
     // نبني المخطط بعد أن يُدرَج الـ canvas في DOM
@@ -3074,14 +3061,6 @@ function renderBreakEvenCard() {
               borderWidth: 1,
               borderRadius: 0,
             },
-            ...(cashReturned > 0 ? [{
-              label: 'نقد من البيع',
-              data: [0, cashReturned],
-              backgroundColor: 'rgba(240,180,41,.7)',
-              borderColor: '#f0b429',
-              borderWidth: 1,
-              borderRadius: 4,
-            }] : []),
           ],
         },
         options: {
@@ -3762,8 +3741,8 @@ function showCardInfo(key) {
           <em>(ما خرج من جيبك صافياً)</em>
         </div>
         <div class="info-formula">
-          <strong>إجمالي العوائد = قيمة المحفظة الحالية + نقد من حصيلة البيع + كل الأرباح الموزعة</strong><br>
-          <em>(كل ما يقابلك الآن مقابل ما دفعته — قيمة المنح مشمولة ضمن قيمة المحفظة. النقد يُحتسب فقط بقدر حصيلة البيع، أما الإيداع الجديد غير المستثمر فلا يُعدّ عائداً)</em>
+          <strong>إجمالي العوائد = قيمة المحفظة الحالية + كل الأرباح الموزعة</strong><br>
+          <em>(قيمة المنح مشمولة ضمن قيمة المحفظة. حصيلة البيع لا تُضاف هنا لأنها مخصومة أصلاً من رأس المال المنشغل — إضافتها كانت ستحتسبها مرتين)</em>
         </div>
         <div class="info-formula">
           <strong>صافي الربح/الخسارة الحقيقي = إجمالي العوائد − رأس المال المنشغل</strong>
