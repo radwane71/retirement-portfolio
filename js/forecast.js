@@ -31,6 +31,18 @@ window.CARD_INFO = {
       <div class="info-formula">رقم التقاعد (FIRE) = الإنفاق الشهري × 12 ÷ نسبة السحب الآمن (عادة 4%)</div>
       <p class="info-note">💡 قاعدة الـ4%: محفظة تكفي لسحب 4% سنوياً قد تدوم مدى الحياة. هدف دخل 10,000 ر.س/شهر ⇒ تحتاج محفظة ≈ 3 مليون ر.س.</p>`
   },
+  'plan': {
+    title: '🎯 خطة الضخ للوصول للهدف',
+    body: `
+      <p>وضع عكسي للإسقاط: تُثبّت الهدف والأفق والقيمة الحالية، فنحلّ رياضياً <strong>قيمة الضخ الشهري الثابت</strong> التي توصلك للهدف تماماً في نهاية الأفق.</p>
+      <div class="info-math">
+        القيمة النهائية دالة خطية في الضخ الشهري: <code>النهائية = أ + الضخ × ب</code><br>
+        • <strong>أ</strong> = القيمة النهائية بضخ صفر (نمو أصولك الحالية وحدها).<br>
+        • <strong>ب</strong> = القيمة النهائية لضخ ريال واحد شهرياً (عامل القيمة المستقبلية للدفعات).<br>
+        ⇒ <strong>الضخ المطلوب = (الهدف − أ) ÷ ب</strong>
+      </div>
+      <p class="info-note">💡 عند تفعيل التضخم يُرفع الهدف لقوّته الاسمية المستقبلية حتى تبقى قوّته الشرائية = رقم اليوم. لو أصولك الحالية تكفي وحدها، يظهر «لا حاجة لضخ». الخطة تبقى محفوظة كسجل دائم حتى تحذفها بنفسك (بتأكيد).</p>`
+  },
   'montecarlo': {
     title: '🎲 محاكاة مونتي كارلو ومخاطر التسلسل',
     body: `
@@ -219,6 +231,8 @@ async function init() {
     buildScenarios();
     renderScenarioCards();
     runForecast();
+    await loadForecastPlans();
+    renderForecastPlans();
   } catch (e) {
     console.error('forecast init error:', e);
     showToast('خطأ في تحميل بيانات المحفظة', 'error');
@@ -794,6 +808,262 @@ function _renderMonteCarlo(r) {
       فالمتوسطات تُخفي أسوأ التتابعات.
       <br>الدخل الشهري المتوقّع عند التقاعد (من التوزيعات): p10 ≈ ${fmt(r.inc10)} · الوسيط ≈ ${fmt(r.inc50)} · p90 ≈ ${fmt(r.inc90)}.
     </div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// خطة الضخ للوصول للهدف (وضع عكسي) + سجل الخطط المحفوظة
+// ──────────────────────────────────────────────────────────────────────
+const FORECAST_PLANS_KEY = 'forecast_plans_v1';
+let _forecastPlans = [];
+let _lastComputedPlan = null;
+
+const _scenLabel = k => k === 'conservative' ? '🛡️ متحفّظ' : k === 'optimistic' ? '🚀 متفائل' : '📊 معتدل';
+
+// قراءة مدخلات الصفحة الحالية للخطة
+function _readPlanInputs() {
+  return {
+    startValue:     parseFloat(document.getElementById('inp-current-value').value) || (_hist?.currentValue) || 0,
+    lumpSum:        parseFloat(document.getElementById('inp-lump-sum').value) || 0,
+    horizonYears:   parseInt(document.getElementById('inp-horizon').value) || 35,
+    reinvest:       document.getElementById('inp-reinvest').checked,
+    adjustInflation:document.getElementById('inp-inflation').checked,
+    inflationRate:  parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025,
+    goalAmount:     parseFloat(document.getElementById('inp-goal-amount').value) || 0,
+    scenarioKey:    document.getElementById('plan-scenario').value || 'base',
+    goalType:       _goalType,
+  };
+}
+
+// تشغيل الإسقاط بضخ شهري ثابت — يعيد مصفوفة اللقطات (value اسمي)
+function _projectConstant(pmt, inp, scenario, withInflation) {
+  return projectScenario(scenario, {
+    startValue: inp.startValue,
+    dcaSchedule: new Array(inp.horizonYears * 12).fill(pmt),
+    lumpSum: inp.lumpSum,
+    horizonYears: inp.horizonYears,
+    reinvestDividends: inp.reinvest,
+    adjustInflation: !!withInflation,
+    inflationRate: inp.inflationRate,
+  });
+}
+
+function computeContributionPlan() {
+  if (!_hist || !_scenarios.length) { showToast('لا توجد بيانات كافية بعد', 'warning'); return; }
+  const inp = _readPlanInputs();
+  if (inp.goalAmount <= 0) { showToast('حدّد الهدف أولاً من بطاقة «تحديد الهدف» أعلاه', 'warning'); return; }
+
+  // ابنِ السيناريوهات بعائد الأرباح الصحيح (يدوي أو من البيانات)
+  const divOverride = parseFloat(document.getElementById('inp-div-yield').value);
+  buildScenarios((!isNaN(divOverride) && divOverride > 0) ? divOverride / 100 : _hist.safeDivYield);
+  const scenario = _scenarios.find(s => s.key === inp.scenarioKey) || _scenarios[1];
+
+  const years = inp.horizonYears;
+  const monthlyDivRate = Math.pow(1 + scenario.divRate, 1 / 12) - 1;
+
+  // الهدف الاسمي المستقبلي (نرفع هدف اليوم لقوّته الاسمية عند تفعيل التضخم)
+  const inflMul = inp.adjustInflation ? Math.pow(1 + inp.inflationRate, years) : 1;
+  let targetFinalValue;
+  if (inp.goalType === 'monthly_income') {
+    targetFinalValue = monthlyDivRate > 0 ? (inp.goalAmount * inflMul) / monthlyDivRate : Infinity;
+  } else {
+    targetFinalValue = inp.goalAmount * inflMul;
+  }
+
+  // حل خطي: القيمة النهائية = A + الضخ × B  (اسمياً)
+  const A = _projectConstant(0, inp, scenario, false).slice(-1)[0].value;
+  const B = _projectConstant(1, inp, scenario, false).slice(-1)[0].value - A;
+  let requiredPMT = 0, alreadyReached = false, impossible = false;
+  if (targetFinalValue <= A + 1e-6) { alreadyReached = true; }
+  else if (B > 1e-9) { requiredPMT = (targetFinalValue - A) / B; }
+  else { impossible = true; }
+
+  const snaps = _projectConstant(alreadyReached ? 0 : requiredPMT, inp, scenario, inp.adjustInflation);
+  const finalSnap = snaps[snaps.length - 1];
+
+  _lastComputedPlan = {
+    inp,
+    scenario: { key: scenario.key, capRate: scenario.capRate, divRate: scenario.divRate },
+    requiredPMT: impossible ? null : Math.max(0, requiredPMT),
+    alreadyReached, impossible, targetFinalValue,
+    finalValue: finalSnap.value,
+    finalIncome: finalSnap.monthlyIncome,
+    totalContributed: (alreadyReached ? 0 : Math.max(0, requiredPMT)) * years * 12 + inp.lumpSum,
+  };
+  _renderPlanResults(snaps, targetFinalValue);
+}
+
+function _renderPlanResults(snaps, targetFinalValue) {
+  const box = document.getElementById('plan-results');
+  if (!box) return;
+  box.style.display = 'block';
+  const pl = _lastComputedPlan, inp = pl.inp;
+  const goalTxt = inp.goalType === 'monthly_income'
+    ? `دخل شهري ${fmt(inp.goalAmount)} ر.س` : `قيمة محفظة ${fmt(inp.goalAmount)} ر.س`;
+
+  let headline;
+  if (pl.impossible) {
+    headline = `<div style="font-size:1.05rem;font-weight:800;color:#ef4444">تعذّر الحساب — راجع الأفق الزمني</div>`;
+  } else if (pl.alreadyReached) {
+    headline = `<div style="font-size:1.4rem;font-weight:800;color:#10b981;line-height:1.2">لا حاجة لضخ إضافي ✅</div>
+      <div class="small text-muted">أصولك الحالية (${fmt(inp.startValue + inp.lumpSum)} ر.س) تبلغ الهدف وحدها في ${inp.horizonYears} سنة بسيناريو ${_scenLabel(inp.scenarioKey)}.</div>`;
+  } else {
+    headline = `<div class="small text-muted">الضخ الشهري المطلوب للوصول لـ${goalTxt}:</div>
+      <div style="font-size:2.1rem;font-weight:800;color:var(--accent);line-height:1.1">${fmt(pl.requiredPMT)} <span style="font-size:1rem;color:var(--text-2)">ر.س / شهر</span></div>`;
+  }
+
+  // جدول التقدّم السنوي
+  const step = inp.horizonYears <= 20 ? 1 : 5;
+  const rows = [];
+  snaps.forEach(s => {
+    if (s.year === 0) return;
+    if (s.year % step === 0 || s.year === inp.horizonYears) {
+      const prog = targetFinalValue > 0 ? Math.min(999, s.value / targetFinalValue * 100) : 0;
+      rows.push(`<tr>
+        <td>${s.year}</td>
+        <td class="num">${fmtShort(s.yourCapital)}</td>
+        <td class="num">${fmtShort(s.value)}</td>
+        <td class="num">${fmtShort(s.monthlyIncome)}</td>
+        <td class="num" style="color:${prog>=100?'#10b981':prog>=60?'#f0b429':'var(--text-2)'}">${prog.toFixed(0)}%</td>
+      </tr>`);
+    }
+  });
+
+  const inflNote = inp.adjustInflation
+    ? `<div class="small text-muted" style="margin-top:6px">↳ الهدف مرفوع لقوّته الاسمية المستقبلية (${fmt(targetFinalValue)} ر.س) ليعادل ${fmt(inp.goalAmount)} ر.س بقوّة شراء اليوم بعد ${inp.horizonYears} سنة.</div>` : '';
+
+  box.innerHTML = `
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px">
+      ${headline}
+      ${inflNote}
+    </div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px" class="small">
+      <span>الأفق: <b>${inp.horizonYears} سنة</b></span>
+      <span>السيناريو: <b>${_scenLabel(inp.scenarioKey)}</b> (نمو ${(pl.scenario.capRate*100).toFixed(1)}% + توزيع ${(pl.scenario.divRate*100).toFixed(1)}%)</span>
+      <span>البداية: <b>${fmt(inp.startValue + inp.lumpSum)} ر.س</b></span>
+      ${!pl.alreadyReached && !pl.impossible ? `<span>إجمالي ما ستضخّه: <b>${fmt(pl.totalContributed)} ر.س</b></span>` : ''}
+      <span>القيمة المتوقّعة عند الهدف: <b>${fmt(pl.finalValue)} ر.س</b></span>
+    </div>
+    <div class="table-wrap" style="overflow-x:auto">
+      <table style="width:100%;font-size:.82rem"><thead><tr>
+        <th>السنة</th><th>رأس مالك المضاف</th><th>قيمة المحفظة</th><th>الدخل الشهري</th><th>نحو الهدف</th>
+      </tr></thead><tbody>${rows.join('')}</tbody></table>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px">
+      <input type="text" id="plan-notes" placeholder="ملاحظة اختيارية (مثال: خطة تقاعد 2045)" maxlength="120"
+             style="flex:1;min-width:200px;padding:7px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-2);color:var(--text);font-size:.85rem">
+      <button class="btn btn-success btn-sm" onclick="saveForecastPlan()">💾 احفظ هذه الخطة</button>
+    </div>`;
+}
+
+// ── التخزين: user_settings (مصدر الحقيقة) + localStorage cache ──
+async function loadForecastPlans() {
+  try {
+    const remote = (typeof loadUserSetting === 'function') ? await loadUserSetting(FORECAST_PLANS_KEY) : null;
+    if (Array.isArray(remote)) { _forecastPlans = remote; return; }
+  } catch (_) { /* نرجع للكاش */ }
+  try {
+    const raw = localStorage.getItem(userLsKey(FORECAST_PLANS_KEY)) || localStorage.getItem(FORECAST_PLANS_KEY);
+    _forecastPlans = raw ? JSON.parse(raw) : [];
+  } catch (_) { _forecastPlans = []; }
+}
+
+async function _persistForecastPlans() {
+  try { if (typeof saveUserSetting === 'function') await saveUserSetting(FORECAST_PLANS_KEY, _forecastPlans); } catch (_) {}
+  try { localStorage.setItem(userLsKey(FORECAST_PLANS_KEY), JSON.stringify(_forecastPlans)); } catch (_) {}
+}
+
+async function saveForecastPlan() {
+  if (!_lastComputedPlan) { showToast('احسب الخطة أولاً', 'warning'); return; }
+  const notes = (document.getElementById('plan-notes')?.value || '').trim();
+  const pl = _lastComputedPlan;
+  _forecastPlans.unshift({
+    id: Date.now(),
+    date: new Date().toLocaleDateString('en-GB'),
+    createdISO: new Date().toISOString(),
+    notes,
+    inp: pl.inp,
+    scenario: pl.scenario,
+    requiredPMT: pl.requiredPMT,
+    alreadyReached: pl.alreadyReached,
+    finalValue: pl.finalValue,
+    totalContributed: pl.totalContributed,
+  });
+  await _persistForecastPlans();
+  renderForecastPlans();
+  showToast('تم حفظ الخطة ✓', 'success');
+}
+
+async function deleteForecastPlan(id) {
+  const p = _forecastPlans.find(x => x.id === id);
+  const label = p ? (p.notes || (p.inp.goalType === 'monthly_income' ? `دخل ${fmt(p.inp.goalAmount)}` : `محفظة ${fmt(p.inp.goalAmount)}`)) : '';
+  const ok = await confirmAsync(`حذف الخطة «${label}» نهائياً؟\nلا يمكن التراجع.`);
+  if (!ok) return;
+  _forecastPlans = _forecastPlans.filter(x => x.id !== id);
+  await _persistForecastPlans();
+  renderForecastPlans();
+  showToast('حُذفت الخطة', 'info');
+}
+
+function loadForecastPlanIntoInputs(id) {
+  const p = _forecastPlans.find(x => x.id === id);
+  if (!p) return;
+  const i = p.inp;
+  document.getElementById('inp-current-value').value = i.startValue || '';
+  document.getElementById('inp-lump-sum').value = i.lumpSum || 0;
+  document.getElementById('inp-goal-amount').value = i.goalAmount || '';
+  document.getElementById('inp-reinvest').checked = !!i.reinvest;
+  document.getElementById('inp-inflation').checked = !!i.adjustInflation;
+  if (i.inflationRate) document.getElementById('inp-inflation-rate').value = (i.inflationRate * 100).toFixed(1);
+  document.getElementById('plan-scenario').value = i.scenarioKey || 'base';
+  setGoalType(i.goalType || 'portfolio_value');
+  // أقرب أفق متاح
+  const hSel = document.getElementById('inp-horizon');
+  if (hSel) {
+    const opts = [...hSel.options].map(o => +o.value);
+    hSel.value = opts.reduce((pp, c) => Math.abs(c - i.horizonYears) < Math.abs(pp - i.horizonYears) ? c : pp);
+  }
+  runForecast();
+  computeContributionPlan();
+  document.getElementById('plan-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  showToast('تم تحميل الخطة', 'success');
+}
+
+function renderForecastPlans() {
+  const el = document.getElementById('saved-plans-list');
+  if (!el) return;
+  const q = (document.getElementById('plan-search')?.value || '').trim().toLowerCase();
+  let plans = _forecastPlans;
+  if (q) {
+    plans = plans.filter(p =>
+      (p.notes || '').toLowerCase().includes(q) ||
+      String(p.inp.goalAmount).includes(q) ||
+      (p.inp.goalType === 'monthly_income' ? 'دخل' : 'محفظة').includes(q));
+  }
+  if (!plans.length) {
+    el.innerHTML = `<p class="small text-muted" style="margin:8px 0">${_forecastPlans.length ? 'لا نتائج مطابقة للبحث.' : 'لا خطط محفوظة بعد — احسب خطة أعلاه ثم احفظها.'}</p>`;
+    return;
+  }
+  el.innerHTML = plans.map(p => {
+    const goalTxt = p.inp.goalType === 'monthly_income' ? `دخل ${fmt(p.inp.goalAmount)} ر.س/شهر` : `محفظة ${fmt(p.inp.goalAmount)} ر.س`;
+    const pmtTxt = p.alreadyReached ? 'لا حاجة لضخ' : (p.requiredPMT == null ? '—' : `${fmt(p.requiredPMT)} ر.س/شهر`);
+    return `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--bg-2)">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
+        <div style="flex:1;min-width:200px">
+          <div style="font-weight:700">${p.notes ? esc(p.notes) : goalTxt}</div>
+          ${p.notes ? `<div class="small text-muted">${goalTxt}</div>` : ''}
+          <div class="small text-muted" style="margin-top:4px">
+            الضخ المطلوب: <b style="color:var(--accent)">${pmtTxt}</b> ·
+            ${p.inp.horizonYears} سنة · ${_scenLabel(p.inp.scenarioKey)} · حُفظت ${p.date}
+          </div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-secondary btn-sm" onclick="loadForecastPlanIntoInputs(${p.id})">تحميل</button>
+          <button class="btn btn-danger btn-sm" onclick="deleteForecastPlan(${p.id})">حذف</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ── Render historical summary ──────────────────────────────────────────

@@ -531,6 +531,41 @@
       <div id="goal-result-body"></div>
     </div>
 
+    <!-- ── خطة الضخ للوصول للهدف (وضع عكسي) ── -->
+    <div class="card" id="plan-card">
+      <div class="section-header">
+        <span class="section-title">🎯 خطة الضخ للوصول للهدف <span class="eng-label">Contribution Plan</span></span>
+        <button class="info-btn" type="button" onclick="showCardInfo('plan')" style="position:static;opacity:.7">ⓘ</button>
+      </div>
+      <p class="small text-muted" style="margin:6px 0 12px;line-height:1.75">
+        الوضع العكسي: بدل أن تُدخل الضخ الشهري وترى إن كنت ستصل، حدّد <b>الهدف</b> (من بطاقة الهدف أعلاه)
+        و<b>الأفق الزمني</b> و<b>القيمة الحالية</b>، فيحسب لك <b>كم يلزمك ضخّه شهرياً</b> للوصول — مع جدول
+        تقدّم سنوي. احفظ الخطة كسجل دائم يبقى حتى تحذفه بنفسك.
+      </p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
+        <div class="inp-group" style="max-width:220px;margin:0">
+          <label>سيناريو العائد المفترض للخطة</label>
+          <select id="plan-scenario">
+            <option value="conservative">🛡️ متحفّظ (أضمن)</option>
+            <option value="base" selected>📊 معتدل (موصى به)</option>
+            <option value="optimistic">🚀 متفائل</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="computeContributionPlan()">احسب الضخ المطلوب ↻</button>
+      </div>
+      <div id="plan-results" style="display:none"></div>
+    </div>
+
+    <!-- ── الخطط المحفوظة ── -->
+    <div class="card" id="saved-plans-card">
+      <div class="section-header">
+        <span class="section-title">📁 الخطط المحفوظة <span class="eng-label">Saved Plans</span></span>
+        <input type="text" id="plan-search" placeholder="بحث بالهدف أو الملاحظة…" oninput="renderForecastPlans()"
+               style="max-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-2);color:var(--text);font-size:.85rem">
+      </div>
+      <div id="saved-plans-list"></div>
+    </div>
+
     <!-- ── Monte Carlo — مخاطر تسلسل العوائد ── -->
     <div class="card" id="montecarlo-card">
       <div class="section-header">

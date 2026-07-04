@@ -346,7 +346,7 @@ WITH CHECK (auth.uid() = user_id)
 | `updated_at` | TIMESTAMPTZ | — |
 
 > PK مركّب على `(user_id, key)` — upsert تلقائي. **مفاتيح `key` المعروفة حالياً:**
-> `salary_planner_v1` · `sukuk_planner_v1` · `retirement_goal_v1` · `school_tracker_v2` · `school_kanda_v1` · `tharwa-benchmark_v1` · `valuation_history_v1` · `decision_engine_v1` · `decision_engine_snapshot_v1` · `portfolio_rating_snapshot_v1`
+> `salary_planner_v1` · `sukuk_planner_v1` · `retirement_goal_v1` · `school_tracker_v2` · `school_kanda_v1` · `tharwa-benchmark_v1` · `valuation_history_v1` · `decision_engine_v1` · `decision_engine_snapshot_v1` · `portfolio_rating_snapshot_v1` · `forecast_plans_v1`
 > localStorage صار **cache قراءة أولى** فقط لهذه المفاتيح؛ `user_settings` هو مصدر الحقيقة الفعلي.
 
 ---
@@ -442,7 +442,7 @@ WITH CHECK (auth.uid() = user_id)
 
 ## 4. localStorage
 
-جميع المفاتيح مُقيَّدة بـ `userLsKey(k)` = `u:{userId}:{key}` لعزل بيانات كل مستخدم على نفس الجهاز. المفاتيح مشمولة في النسخة الاحتياطية **100%** (18 مفتاحاً في `LS_KEYS`):
+جميع المفاتيح مُقيَّدة بـ `userLsKey(k)` = `u:{userId}:{key}` لعزل بيانات كل مستخدم على نفس الجهاز. المفاتيح مشمولة في النسخة الاحتياطية **100%** (19 مفتاحاً في `LS_KEYS`):
 
 | المفتاح | النوع | الوصف |
 |---|---|---|
@@ -463,6 +463,7 @@ WITH CHECK (auth.uid() = user_id)
 | `tharwa-benchmark_v1` | JSON | `[{date, value}]` — قيم مؤشر تاسي اليدوية (cache) |
 | `tharwa-benchmark-seeded-v1` | string | `true` = تمت بذرة بيانات تاسي التاريخية (2004–2024) الأولى |
 | `valuation_history_v1` | JSON | سجل عمليات حاسبة القيمة العادلة (cache؛ الحقيقة في `user_settings`) |
+| `forecast_plans_v1` | JSON | سجل خطط الضخ المحفوظة في الرؤية المستقبلية (cache؛ الحقيقة في `user_settings`) |
 | `hide-salary-convention` | string | إخفاء لافتة "اتفاقية الفئات" في salary.html |
 | `tharwa_emergency_backup` | JSON | نسخة طارئة تُحفظ تلقائياً قبل أي restore (محلي فقط، غير مُزامَن) |
 
@@ -1131,6 +1132,27 @@ blendedCapGrowth = (أداؤك الشخصي × درجة_الثقة) + (معيا�
   يُعيّن نوع الهدف = قيمة المحفظة، ويُقرِّب الأفق الزمني لأقرب خيار متاح
 ```
 
+### خطة الضخ للوصول للهدف (وضع عكسي + سجل محفوظ)
+
+بطاقة تحلّ رياضياً **الضخ الشهري الثابت المطلوب** للوصول للهدف بدل إدخاله يدوياً. تُحفظ كل خطة كسجل دائم (مثل حاسبة القيمة العادلة) في `user_settings` (مفتاح `forecast_plans_v1`) + cache محلي، وتبقى حتى يحذفها المستخدم بتأكيد.
+
+```
+المدخلات: القيمة الحالية + الأفق + الهدف (قيمة محفظة/دخل شهري) + سيناريو العائد (متحفّظ/معتدل/متفائل)
+
+الحل الخطي (القيمة النهائية دالة خطية في الضخ):
+  القيمة_النهائية(pmt) = A + pmt × B
+  A = القيمة النهائية بضخ صفر (نمو الأصول الحالية وحدها)
+  B = القيمة النهائية لضخ ريال واحد شهرياً (عامل القيمة المستقبلية للدفعة) = final(1) − A
+  الضخ_المطلوب = (الهدف_النهائي − A) ÷ B     [محدود ≥ 0؛ إن ≤ A ⇒ "لا حاجة لضخ"]
+
+الهدف النهائي (اسمي):
+  قيمة محفظة  → targetFinal = goal × (1+معدل_التضخم)^سنوات   [عند تفعيل التضخم]
+  دخل شهري    → targetFinal = (goal × inflMul) ÷ monthlyDivRate
+
+المخرجات: الضخ الشهري المطلوب + جدول تقدّم سنوي (رأس المال المضاف/القيمة/الدخل/نحو الهدف%)
+          + إجمالي ما سيُضخّ. زر حفظ (بملاحظة اختيارية)، وقائمة بحث/تحميل/حذف بتأكيد.
+```
+
 ### محرك الإسقاط الشهري
 
 ```
@@ -1777,7 +1799,7 @@ Re = Rf + β × (Rm − Rf)
 
 ### ب) تصدير النسخة الاحتياطية
 
-**المخرج:** ملف JSON يشمل **17 جدولاً** في Supabase + **18 مفتاحاً** في localStorage
+**المخرج:** ملف JSON يشمل **17 جدولاً** في Supabase + **19 مفتاحاً** في localStorage
 
 **جداول Supabase الكاملة (TABLES):**
 ```
@@ -2355,7 +2377,7 @@ buildCumulativeCapitalMap():
 | المصدر | الجداول / المفاتيح | مشمول؟ |
 |---|---|---|
 | Supabase | **17 جدولاً** (شامل `user_settings`) | ✅ |
-| localStorage | **18 مفتاحاً** (userLsKey) | ✅ |
+| localStorage | **19 مفتاحاً** (userLsKey) | ✅ |
 
 ### سلامة FK عند الاستعادة
 

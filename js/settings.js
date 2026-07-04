@@ -52,6 +52,7 @@ const LS_KEYS = [
   'tharwa-benchmark-seeded-v1',  // flag: هل تمت البذرة الأولى لبيانات تاسي؟
   'valuation_history_v1',        // سجل عمليات حاسبة القيمة العادلة (stock-valuation.html)
   'hide-salary-convention',      // حالة إخفاء لافتة اتفاقية الراتب (salary.html)
+  'forecast_plans_v1',           // سجل خطط الضخ المحفوظة (forecast.html) — cache؛ الحقيقة في user_settings
 ];
 
 async function init() {
