@@ -156,6 +156,14 @@ async function addSingleTransaction(e) {
   if (shares <= 0)                      { showToast('عدد الأسهم يجب أن يكون أكبر من صفر', 'error'); return; }
   if (type !== 'grant' && price <= 0)   { showToast('سعر السهم يجب أن يكون أكبر من صفر', 'error'); return; }
 
+  // AUDIT-FIX (2026-07): تحذير الرمز غير المعروف كان كوداً ميتاً في النموذج الفردي
+  // (النموذج الجماعي فقط يتحقق) — نفس فحص M-18 هنا عبر confirmAsync.
+  const knownTicker = TICKER_DB[ticker] || (typeof lookupTicker === 'function' && lookupTicker(ticker));
+  if (!knownTicker) {
+    const ok = await confirmAsync(`الرمز «${ticker}» غير موجود في قاموس الأسهم السعودية.\nهل تريد المتابعة؟`);
+    if (!ok) { document.getElementById('t-ticker')?.focus(); return; }
+  }
+
   const { data: { user } } = await supabaseClient.auth.getUser();
 
   // warn if selling more shares than currently held (system will cap; user may have made a typo)
@@ -637,6 +645,12 @@ async function onTxSaved(id, field, newVal) {
     const tickers = new Set([row.ticker]);
     if (field === 'ticker' && oldTicker && oldTicker !== row.ticker) tickers.add(oldTicker);
     for (const t of tickers) await recomputeHoldingFromTx(user.id, t);
+    showToast('تم التحديث وإعادة حساب المحفظة ✓', 'success');
+  } else if (field === 'date') {
+    // AUDIT-FIX (2026-07): تغيير التاريخ يغيّر الترتيب الزمني — وWAC يعتمد على
+    // ترتيب البيع بين الشراءات، فلا بد من إعادة حساب الحيازة (كان يُهمَل سابقاً).
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    await recomputeHoldingFromTx(user.id, row.ticker);
     showToast('تم التحديث وإعادة حساب المحفظة ✓', 'success');
   }
   renderTable();

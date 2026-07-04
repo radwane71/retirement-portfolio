@@ -681,9 +681,11 @@ function switchYieldTab(tab) {
   if (tab === 'ann') {
     setText('yield-tab-label', 'العائد المُسنوى — السنة الجارية');
     setText('stat-div-yield',  (s.divYieldAnn || 0).toFixed(2) + '%');
-    const note = s.daysElapsed
+    // AUDIT-FIX (2026-07): قبل يوم 180 الحساب فعلياً TTM (لا استقراء خطي) —
+    // السطر التوضيحي يطابق المعادلة المستخدمة في الحالتين.
+    const note = (s.daysElapsed || 0) >= 180
       ? `أرباح ${formatSAR(s.yearDiv||0)} × (${s.daysInYear}÷${s.daysElapsed}) ÷ تكلفة المحفظة (WAC)`
-      : 'أرباح السنة الجارية مُسنواة';
+      : `مبكراً في السنة (يوم ${s.daysElapsed||0}) — TTM ${formatSAR(s.ttmDiv||0)} ÷ التكلفة (بلا استقراء)`;
     setText('stat-div-yield-sub', note);
   } else if (tab === 'yoc') {
     setText('yield-tab-label', 'العائد على التكلفة (YOC)');
@@ -1592,25 +1594,19 @@ function showDiversificationAnalysis() {
   const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
   if (!holdings.length || !totalVal) return;
 
-  const n = holdings.length;
-  const weights = holdings.map(h => +h.shares * +h.current_price / totalVal);
-  const hhi     = weights.reduce((s, w) => s + w * w, 0);
-  const effN    = Math.max(1, Math.round(1 / hhi));
+  // AUDIT-FIX (2026-07): الحساب كله عبر computeDiversification في utils.js —
+  // المصدر الوحيد للحقيقة. كانت هنا صيغة معامل قطاعات مختلفة (0.60+0.40×(1−NHHI))
+  // تخالف صيغة الكرت (0.70+0.30×effSectors/6) فيتناقض البوب-أب مع حكم الكرت.
+  const div = computeDiversification(holdings.map(h => ({
+    value:  +h.shares * +h.current_price,
+    sector: h.sector,
+    label:  h.ticker,
+  })));
+  if (!div) return;
+  const { n, hhi, effectiveN: effN, secMap, sectorCount, sectorFactor, top1Pct, top1Name } = div;
 
-  const secMap = {};
-  holdings.forEach(h => {
-    const k = (h.sector || '').trim() || 'غير مصنف';
-    secMap[k] = (secMap[k] || 0) + +h.shares * +h.current_price / totalVal;
-  });
-  const sectorCount = Object.keys(secMap).length;
-  const secHHI  = Object.values(secMap).reduce((s, w) => s + w * w, 0);
-  const secNHHI = sectorCount > 1 ? (secHHI - 1/sectorCount)/(1 - 1/sectorCount) : 1.0;
-  const sectorFactor = 0.60 + 0.40*(1 - secNHHI);
-
-  const sorted    = [...holdings].sort((a,b) => +b.shares*+b.current_price - +a.shares*+a.current_price);
-  const top1Pct   = sorted[0] ? +sorted[0].shares*+sorted[0].current_price/totalVal*100 : 0;
-  const top1Name  = sorted[0]?.ticker || '';
-  const top3Pct   = sorted.slice(0,3).reduce((s,h) => s + +h.shares*+h.current_price/totalVal*100, 0);
+  const sorted  = [...holdings].sort((a,b) => +b.shares*+b.current_price - +a.shares*+a.current_price);
+  const top3Pct = sorted.slice(0,3).reduce((s,h) => s + +h.shares*+h.current_price/totalVal*100, 0);
 
   // أكبر قطاع
   const topSector = Object.entries(secMap).sort((a,b)=>b[1]-a[1])[0];
@@ -3843,23 +3839,33 @@ function showCardInfo(key) {
     },
     'fwd-income': {
       title: '💵 الدخل التوزيعي المتوقع',
-      body: `
-        <p>تقدير لدخلك السنوي من التوزيعات بناءً على ما استلمته فعلاً في آخر 12 شهراً (TTM).</p>
-        <div class="info-formula"><strong>مجموع التوزيعات خلال آخر 365 يوماً</strong></div>
+      body: (() => {
+        // AUDIT-FIX (2026-07): الشرح يطابق الحساب الفعلي — الكرت يعرض Forward
+        // (وسيط DPS × الدورية × أسهمك الحالية) ويرجع لـ TTM فقط عند تعذّره.
+        const usingFwd = (s.fwdProjected || 0) > 0;
+        const val = usingFwd ? s.fwdProjected : (s.ttmDiv || 0);
+        return `
+        <p>${usingFwd
+          ? 'تقدير دخلك السنوي القادم بطريقة <strong>Forward</strong>: لكل سهم تملكه، وسيط آخر دفعات (لكل سهم واحد) × عدد مرات التوزيع سنوياً × أسهمك الحالية — نفس منهج ياهو فاينانس، والأدق للمحافظ النامية.'
+          : 'لا تتوفر بيانات كافية لطريقة Forward — نعرض ما استلمته فعلاً في آخر 12 شهراً (TTM).'}</p>
+        <div class="info-formula"><strong>${usingFwd ? 'Σ (وسيط DPS × الدورية × الأسهم الحالية) لكل رمز' : 'مجموع التوزيعات خلال آخر 365 يوماً'}</strong></div>
         <div class="info-math">
-          الدخل السنوي المتوقع = <strong class="text-success">${formatSAR(s.ttmDiv||0)}</strong><br>
-          ≈ ${formatSAR((s.ttmDiv||0)/12)} شهرياً
+          الدخل السنوي المتوقع = <strong class="text-success">${formatSAR(val)}</strong><br>
+          ≈ ${formatSAR(val/12)} شهرياً<br>
+          <span class="text-muted small">للمقارنة: TTM المستلم فعلاً = ${formatSAR(s.ttmDiv||0)}</span>
         </div>
-        <p class="info-note">💡 مؤشر تقديري — يفترض استمرار التوزيعات بنفس الوتيرة.</p>`
+        <p class="info-note">💡 مؤشر تقديري — يفترض استمرار الشركات على آخر سياسة توزيع معروفة.</p>`;
+      })()
     },
     'passive-cover': {
       title: '🛡️ تغطية الدخل السلبي للمصاريف',
       body: (() => {
         const goal = getRetirementGoal();
-        const mInc = (s.ttmDiv||0)/12;
+        // AUDIT-FIX (2026-07): الكرت يحسب بالدخل المتوقع Forward — الشرح يطابقه الآن
+        const mInc = ((s.fwdProjected || s.ttmDiv || 0))/12;
         return `
-        <p>كم نسبة مصاريفك الشهرية التي يغطيها دخل التوزيعات وحده — مؤشر اقترابك من الاستقلال المالي.</p>
-        <div class="info-formula"><strong>(دخل التوزيعات الشهري ÷ المصاريف الشهرية) × 100</strong></div>
+        <p>كم نسبة مصاريفك الشهرية التي يغطيها دخل التوزيعات وحده — مؤشر اقترابك من الاستقلال المالي. الدخل المستخدم هو <strong>المتوقع (Forward)</strong> من كرت الدخل التوزيعي.</p>
+        <div class="info-formula"><strong>(الدخل التوزيعي المتوقع الشهري ÷ المصاريف الشهرية) × 100</strong></div>
         <div class="info-math">
           ${goal.monthly > 0
             ? `${formatSAR(mInc)} ÷ ${formatSAR(goal.monthly)} = <strong class="text-accent">${(mInc/goal.monthly*100).toFixed(1)}%</strong>`
