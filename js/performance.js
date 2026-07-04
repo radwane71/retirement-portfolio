@@ -779,20 +779,60 @@ function renderDividendMetrics() {
     divMap[d.ticker].push({ date: d.date, amount: +d.amount });
   });
 
-  // حساب التوزيع السنوي المتوقع لكل رمز (آخر 12 شهر)
+  // AUDIT-FIX (2026-07): Forward بمنهج صفحة الأرباح واللوحة الموحَّد —
+  // وسيط DPS لآخر «دورية» دفعات × الدورية × الأسهم الحالية. الطريقة السابقة
+  // (مجموع المستلم في آخر 12 شهراً) كانت تبخس المراكز المُضاف إليها حديثاً.
   const now = new Date();
-  const yr12Ago = new Date(now); yr12Ago.setFullYear(yr12Ago.getFullYear() - 1);
+  const _ftx = {};
+  _tx.forEach(t => {
+    if (!t.date) return;
+    (_ftx[t.ticker] = _ftx[t.ticker] || []).push({ date: t.date, type: t.type, shares: +t.shares });
+  });
+  Object.values(_ftx).forEach(a => a.sort((x, y) => (x.date < y.date ? -1 : x.date > y.date ? 1 : 0)));
+  const _sharesAt = (tk, dateStr) => {
+    let s = 0;
+    for (const r of (_ftx[tk] || [])) {
+      if (r.date > dateStr) break;
+      if (r.type === 'sell') s -= r.shares; else s += r.shares;
+    }
+    return Math.max(0, s);
+  };
   function forwardAnnualDiv(ticker, remainingShares) {
-    const entries = divMap[ticker] || [];
-    const recent  = entries.filter(e => e.date && parseDateLocal(e.date) >= yr12Ago);
-    const total12 = recent.reduce((s, e) => s + e.amount, 0);
-    // إذا لا يوجد توزيعات في آخر 12 شهر، استخدم المعدل التاريخي
-    if (total12 > 0) return total12;
-    const allTotal = entries.reduce((s, e) => s + e.amount, 0);
-    const oldest   = entries.reduce((mn, e) => e.date < mn ? e.date : mn, entries[0]?.date || '');
-    if (!oldest) return 0;
-    const yrs = Math.max(0.5, (now - parseDateLocal(oldest)) / (365.25 * 86400000));
-    return allTotal / yrs;
+    const entries = (divMap[ticker] || []).filter(e => e.date && e.amount > 0)
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (!entries.length) return 0;
+    // الدورية من وسيط الفجوات الزمنية بين الدفعات
+    let freq = 1;
+    if (entries.length >= 2) {
+      const gaps = [];
+      for (let i = 1; i < entries.length; i++) {
+        gaps.push(Math.floor((parseDateLocal(entries[i].date) - parseDateLocal(entries[i - 1].date)) / 86400000));
+      }
+      gaps.sort((a, b) => a - b);
+      const med = gaps[Math.floor(gaps.length / 2)];
+      if (med <= 105) freq = 4; else if (med <= 210) freq = 2;
+    }
+    // سلسلة DPS = المبلغ ÷ الأسهم وقت كل دفعة
+    const dpsSeries = [];
+    entries.forEach(e => {
+      const sh = _sharesAt(ticker, e.date);
+      if (sh >= 0.001) dpsSeries.push(e.amount / sh);
+    });
+    let dps;
+    if (dpsSeries.length) {
+      const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
+      dps = recent[Math.floor(recent.length / 2)];
+    } else if (remainingShares > 0) {
+      // اشترى بعد كل التوزيعات المسجّلة — تقدير من آخر سنة مسجّلة
+      const lastYear = Math.max(...entries.map(e => parseDateLocal(e.date).getFullYear()));
+      const lastYearTotal = entries
+        .filter(e => parseDateLocal(e.date).getFullYear() === lastYear)
+        .reduce((s, e) => s + e.amount, 0);
+      dps = lastYearTotal > 0
+        ? lastYearTotal / remainingShares / freq
+        : entries[entries.length - 1].amount / remainingShares;
+    } else return 0;
+    return dps > 0.0001 ? dps * freq * remainingShares : 0;
   }
 
   // ── Portfolio Efficiency Ratio (عمولات vs أرباح) ──

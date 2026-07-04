@@ -113,15 +113,16 @@ function renderAll() {
 }
 
 // مجموع التوزيعات الفعلية خلال آخر 12 شهراً (TTM) — العُرف المالي المعتمد
-// لا توسيع خطّي: نجمع ما استُلم فعلاً في آخر 12 فترة شهرية (متطابق مع منطق رسم آخر 12 شهراً)
+// AUDIT-FIX (2026-07): موحَّد مع لوحة التحكم — بحقل التاريخ (آخر 365 يوماً)
+// مع احتياطي مبني من شهر/سنة للسجلات بلا تاريخ. كان يُحسب هنا بحقلي شهر/سنة
+// وفي اللوحة بالتاريخ، فيختلف الرقمان إذا تعارض الحقلان في سجل مُدخل يدوياً.
 function _ttmDividends() {
-  const now  = new Date();
-  const keys = new Set();
-  for (let i = 0; i < 12; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-    keys.add(d.getFullYear() + '-' + (d.getMonth() + 1));
-  }
-  return dividends.reduce((s, d) => keys.has(+d.year + '-' + +d.month) ? s + +d.amount : s, 0);
+  const now     = new Date();
+  const yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+  return dividends.reduce((s, d) => {
+    const dt = d.date ? parseDateLocal(d.date) : parseDateLocal(_divSortDate(d));
+    return (dt && dt >= yearAgo && dt <= now) ? s + +d.amount : s;
+  }, 0);
 }
 
 // تكلفة الحيازات الحالية = مجموع (متوسط التكلفة × الأسهم المتبقية) لكل سهم
@@ -1331,12 +1332,16 @@ function renderDividendQuality() {
       growthScore = Math.round(Math.min(35, Math.max(0, (cagr + 10) / 18 * 35)));
     }
 
-    // ── 3. انخفاض التذبذب (0–30 نقطة) — يحتاج 3 سنوات على الأقل ──
+    // ── 3. انخفاض التذبذب (0–30 نقطة) — يحتاج 3 سنوات مكتملة على الأقل ──
     // null = غير مقيس بعد (لا قيمة افتراضية مموَّهة)
+    // AUDIT-FIX (2026-07): على السنوات التقويمية المكتملة فقط — السنة الجارية
+    // الجزئية كانت تدخل الحساب فتظهر كتذبذب وهمي يخفض الدرجة (النمو والاتجاه
+    // كانا يستثنيانها أصلاً؛ الآن الثبات متسق معهما).
     let volatilityScore = null;
-    if (n >= 3) {
-      const mean     = amounts.reduce((s, v) => s + v, 0) / n;
-      const variance = amounts.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / n;
+    if (nComplete >= 3) {
+      const cAmounts = completeYears.map(y => yearMap[y]);
+      const mean     = cAmounts.reduce((s, v) => s + v, 0) / nComplete;
+      const variance = cAmounts.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / nComplete;
       const cv       = mean > 0 ? Math.sqrt(variance) / mean : 1;
       volatilityScore = Math.round(Math.max(0, (1 - cv) * 30));
     }
@@ -1456,7 +1461,7 @@ function renderDividendQuality() {
               </td>
               <td style="text-align:center">${scoreBadge(s.continuityScore, 'انتظام ونضج سجل التوزيع')}</td>
               <td style="text-align:center">${scoreBadge(s.growthScore, 'نمو التوزيعات سنة على سنة', 'يحتاج سنتين تقويميتين مكتملتين لقياس النمو')}</td>
-              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض التذبذب بين السنوات', 'يحتاج 3 سنوات على الأقل لقياس الثبات')}</td>
+              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض التذبذب بين السنوات', 'يحتاج 3 سنوات تقويمية مكتملة لقياس الثبات')}</td>
               <td class="num">${s.years} <span class="small text-muted">(${s.firstYear}–${s.lastYear})</span></td>
               <td>${cagrFmt(s.cagr3)}</td>
               <td class="num">${formatSAR(s.lastAmount)}</td>

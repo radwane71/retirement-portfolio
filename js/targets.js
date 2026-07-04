@@ -590,12 +590,15 @@ async function saveAllTargets() {
 
   const rows = allTickers.map(ticker => {
     const tz = taskZonesMap[ticker] || {};
+    // AUDIT-FIX (2026-07): إن لم توجد مهمة نشطة للرمز نحافظ على المناطق السعرية
+    // المخزنة أصلاً في stock_targets بدل الكتابة فوقها بـ null (كانت تُمسح عند كل حفظ)
+    const existing = stockZones[ticker] || {};
     return {
       user_id:     user.id,
       ticker,
       target_pct:  +(document.getElementById('st-' + ticker)?.value || 0),
-      entry_price: tz.accumulate_at   ?? null,
-      exit_price:  tz.liquidate_above ?? null,
+      entry_price: tz.accumulate_at   ?? existing.entry_price ?? null,
+      exit_price:  tz.liquidate_above ?? existing.exit_price  ?? null,
     };
   });
 
@@ -740,7 +743,9 @@ function valuationScore(ticker, price) {
     label = fvScore >= 0.66 ? '🟢 تحت العادلة' : fvScore >= 0.33 ? '🟡 قرب العادلة' : '🔴 فوق العادلة';
     reason = fvReason; source = 'fv';
   } else {
-    score = 1; label = '⚪ بلا تقييم'; reason = 'لا توجد أسعار تقييم لهذا السهم'; source = 'none';
+    // AUDIT-FIX (2026-07): درجة محايدة 0.5 (لا القصوى 1.0) — غياب التقييم لا يجوز
+    // أن يكون ميزة تُقدّم السهم على أسهم مُقيَّمة فعلاً في أولوية الشراء.
+    score = 0.5; label = '⚪ بلا تقييم'; reason = 'لا توجد أسعار تقييم لهذا السهم — درجة محايدة'; source = 'none';
   }
   return {
     score: Math.max(0, Math.min(1, score)), label, reason, source,

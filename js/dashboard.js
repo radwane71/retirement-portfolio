@@ -254,7 +254,7 @@ async function loadAllData() {
   const results = await Promise.allSettled([
     supabaseClient.from('holdings').select('*').order('ticker'),
     supabaseClient.from('transactions').select('type, total, shares, price, commission, vat, ticker, date').eq('is_archived', false),
-    supabaseClient.from('dividends').select('amount, year, date, ticker').eq('is_archived', false),
+    supabaseClient.from('dividends').select('amount, year, month, date, ticker').eq('is_archived', false),
     supabaseClient.from('cashflow_entries').select('type, amount, date').eq('is_archived', false),
     supabaseClient.from('net_worth_snapshots').select('total_value, date').order('date', { ascending: false }).limit(1),
     supabaseClient.from('real_estate').select('current_value, status').eq('is_active', true),
@@ -409,10 +409,13 @@ async function loadAllData() {
   // أرباح آخر 12 شهراً (TTM) — للعائد الحقيقي على التكلفة والدخل المتوقع
   const _today = new Date();
   const _yearAgo = new Date(_today.getFullYear() - 1, _today.getMonth(), _today.getDate());
+  // AUDIT-FIX (2026-07): سجل بلا تاريخ يُحتسب بتاريخ مُركَّب من شهر/سنة (أول الشهر)
+  // بدل إسقاطه — موحَّد مع _ttmDividends في صفحة الأرباح.
   const ttmDiv = divRows.reduce((s, d) => {
-    if (!d.date) return s;
-    const dt = new Date(d.date);
-    return dt >= _yearAgo && dt <= _today ? s + +d.amount : s;
+    const dt = d.date
+      ? new Date(d.date)
+      : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null);
+    return (dt && !isNaN(dt) && dt >= _yearAgo && dt <= _today) ? s + +d.amount : s;
   }, 0);
 
   // ── حساب رأس المال أول السنة الحالية (للعائد المُسنوى) ───
