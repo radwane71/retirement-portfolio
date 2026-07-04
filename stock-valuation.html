@@ -727,7 +727,7 @@
         // ── منع الحساب بدون رمز السهم ──
         const tickerVal = (document.getElementById('stockTicker').value || '').trim();
         if (!tickerVal) {
-          alert('⚠️ أدخل رمز السهم أولاً قبل الحساب.');
+          showToast('⚠️ أدخل رمز السهم أولاً قبل الحساب.', 'error');
           document.getElementById('stockTicker').focus();
           return;
         }
@@ -763,7 +763,7 @@
 
         if (growth_perp_final >= discount_rate) {
           document.getElementById('loadingOverlay').classList.add('hidden');
-          alert(`❌ خطأ: النمو الدائم (${(growth_perp_final*100).toFixed(1)}%) يجب أن يكون أقل من معدل الخصم (${(discount_rate*100).toFixed(1)}%).`);
+          showToast(`❌ خطأ: النمو الدائم (${(growth_perp_final*100).toFixed(1)}%) يجب أن يكون أقل من معدل الخصم (${(discount_rate*100).toFixed(1)}%).`, 'error');
           return;
         }
 
@@ -780,7 +780,7 @@
           const capRate    = (parseFloat(document.getElementById('capRate').value)       || 8) / 100;
           const pffo       =  parseFloat(document.getElementById('pffoMultiple').value) || 12;
           const currentPrice=  parseFloat(document.getElementById('currentPrice').value)|| 0;
-          if (nav_total <= 0 && ffo <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ يجب إدخال NAV أو FFO موجب للريت.'); return; }
+          if (nav_total <= 0 && ffo <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ يجب إدخال NAV أو FFO موجب للريت.', 'error'); return; }
           const nav_per_unit  = (nav_total - totalDebtR) / totalUnits;
           const pffo_value    = ffo > 0 ? ffo * pffo : null;
           const caprate_check = (ffo > 0 && capRate > 0) ? ffo / capRate : null;
@@ -812,8 +812,8 @@
           const bond_yield   =  parseFloat(document.getElementById('bondYield').value)   || 6.5;
           const fair_pb      =  parseFloat(document.getElementById('fairPb').value)      || 1.5;
           const currentPrice =  parseFloat(document.getElementById('currentPrice').value)|| 0;
-          if (eps <= 0 && fcf <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ يجب إدخال EPS أو FCF موجب للشركة العادية.'); return; }
-          if (bond_yield <= 0)      { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ عائد السندات يجب أن يكون موجباً.'); return; }
+          if (eps <= 0 && fcf <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ يجب إدخال EPS أو FCF موجب للشركة العادية.', 'error'); return; }
+          if (bond_yield <= 0)      { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ عائد السندات يجب أن يكون موجباً.', 'error'); return; }
           const growth_5yr_adj = growth_5yr + growth_adj;
           const dcf_result  = calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, discount_rate, net_debt);
           const dcf_value   = dcf_result ? dcf_result.equityValue : null;
@@ -824,7 +824,7 @@
           const bv_value     = calculate_book_value(book_value, fair_pb);
           values = { 'DCF': dcf_value, 'جراهام': graham_value, 'مكرر الربحية P/E': pe_value, 'جوردون': gordon_value, 'القيمة الدفترية': bv_value };
           const valid_values = Object.values(values).filter(v => v !== null && v > 0 && isFinite(v));
-          if (valid_values.length === 0) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ لم ينتج أي نموذج قيمة صالحة. تحقق من المدخلات.'); return; }
+          if (valid_values.length === 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ لم ينتج أي نموذج قيمة صالحة. تحقق من المدخلات.', 'error'); return; }
           const avg  = valid_values.reduce((a,b)=>a+b,0) / valid_values.length;
           _lastFairAvg = avg;
           const minV = Math.min(...valid_values);
@@ -855,7 +855,7 @@
 
           if (bvps <= 0 && bankEps <= 0) {
             document.getElementById('loadingOverlay').classList.add('hidden');
-            alert('❌ أدخل BVPS أو EPS للبنك.');
+            showToast('❌ أدخل BVPS أو EPS للبنك.', 'error');
             return;
           }
 
@@ -866,7 +866,7 @@
           if (peVal) values['P/E Fair Value'] = peVal;
 
           const validBank = Object.values(values).filter(v => v > 0);
-          if (!validBank.length) { document.getElementById('loadingOverlay').classList.add('hidden'); alert('❌ تحقق من المدخلات.'); return; }
+          if (!validBank.length) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ تحقق من المدخلات.', 'error'); return; }
 
           const avgBank = validBank.reduce((a,b)=>a+b,0) / validBank.length;
           _lastFairAvg  = avgBank;
@@ -922,7 +922,7 @@
       } catch (err) {
         document.getElementById('loadingOverlay').classList.add('hidden');
         console.error(err);
-        alert('خطأ أثناء الحساب: ' + err.message);
+        showToast('خطأ أثناء الحساب: ' + err.message, 'error');
         return false;
       }
     }

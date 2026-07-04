@@ -183,7 +183,7 @@ function sustainabilityOf(h) {
   let sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
   const autoSrc = {}; // محور → مصدر الاشتقاق الآلي (للوسم)
 
-  // ① من آخر تقييم: الأساسيات (EPS/FFO) والتغطية (التوزيع÷الأرباح) — أقصاه أصفر
+  // ① من آخر تقييم: الأساسيات (EPS/FFO) والتغطية حسب نوع الأصل — أقصاه أصفر
   const val = valByTicker[h.ticker];
   if (val) {
     const inp = val.inputs || {};
@@ -194,10 +194,19 @@ function sustainabilityOf(h) {
       fun = earn > 0 ? 'healthy' : 'soft';        // سالب → مراقبة لا تصفية
       autoSrc.fun = `تقييم: ${isReit ? 'FFO' : 'EPS'} ${formatNum(earn)}`;
     }
-    if (!cov && div != null && div > 0 && earn != null && earn > 0) {
-      const payout = div / earn;
-      cov = payout <= 1.0 ? 'covered' : 'weak';    // توزيع فوق الأرباح → مراقبة
-      autoSrc.cov = `تقييم: توزيع/${isReit ? 'FFO' : 'EPS'} = ${(payout * 100).toFixed(0)}%`;
+    if (!cov && div != null && div > 0) {
+      // AUDIT-FIX (2026-07): المقياس الصحيح حسب نوع الأصل (الدستور §3):
+      // إسمنت/بتروكيماويات ← تغطية FCF (لا EPS) إن توفّر FCF في التقييم؛
+      // REIT ← FFO؛ البقية ← EPS. كان الكل يُقاس بـ EPS عدا الريت.
+      const isCement = assetTypeOf(h) === 'cement_petro';
+      const fcf = numOf(inp.fcf);
+      const useFcf = isCement && fcf != null && fcf > 0;
+      const coverBase = useFcf ? fcf : (earn != null && earn > 0 ? earn : null);
+      if (coverBase != null) {
+        const payout = div / coverBase;
+        cov = payout <= 1.0 ? 'covered' : 'weak';  // توزيع فوق مصدر التغطية → مراقبة
+        autoSrc.cov = `تقييم: توزيع/${useFcf ? 'FCF' : (isReit ? 'FFO' : 'EPS')} = ${(payout * 100).toFixed(0)}%`;
+      }
     }
   }
 
@@ -391,6 +400,18 @@ function evaluateHolding(h, ctx) {
       label, cutToWeight: cutTo,
       priority: severity === 'red' ? 2 : 2.5,
       reason: reasons.join(' | ') };
+  }
+
+  // ── P2.5: سقف القيمة (الفلتر 3) — السعر فوق العادلة بهامش معتبر ──
+  // AUDIT-FIX (2026-07): كان الفلتر 3 يُعرض في البطاقة التفصيلية فقط دون أن
+  // يرشّح أي إجراء. الآن: تجاوز ≥15% فوق آخر قيمة عادلة (غير قديمة) يرفع
+  // «مرشّح تخفيف (فوق العادلة)» — ترشيح للمراجعة لا بيع آلي، احتراماً لقاعدة
+  // §8 «ممنوع بيع رابح قوي توزيعه ينمو لمجرد ارتفاع السعر».
+  const fvMargin = (base.fairValue != null && base.fairValue > 0 && priceOk)
+    ? (base.fairValue - price) / base.fairValue * 100 : null;
+  if (fvMargin != null && fvMargin <= -15 && !valStale) {
+    return { ...base, action: 'monitor', label: 'مرشّح تخفيف (فوق العادلة)', priority: 2.7, severity: 'yellow',
+      reason: `سقف القيمة (الفلتر 3): السعر ${formatNum(price)} أعلى من القيمة العادلة ${formatNum(base.fairValue)} بهامش ${formatNum(Math.abs(fvMargin))}% (> 15%) — مرشّح للتخفيف بعد مراجعتك. لا بيع آلي: تحقق أولاً أن التقييم محدَّث وأن الأرقام لم ترتفع فعلاً (قاعدة التثبيت §4)` };
   }
 
   // ── P3: تجميع من المهام (الفلتر 3) — السعر ≤ حدّ التجميع + استدامة سليمة + وزن تحت الهدف بعتبة ──
