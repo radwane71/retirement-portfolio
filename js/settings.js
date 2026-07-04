@@ -2218,6 +2218,466 @@ async function exportMonthlyReviewMD() {
     }
     hr();
 
+    // ════════════════════════════════════════════════════════
+    // مساعدات مشتركة للأقسام التحليلية 30–33
+    // ════════════════════════════════════════════════════════
+    // عدد الأسهم المملوكة لرمز عند تاريخ معيّن (لاشتقاق DPS التاريخي)
+    const _sharesAtDate = (ticker, dateStr) => {
+      let sh = 0;
+      transactions
+        .filter(t => t.ticker === ticker && t.date && t.date <= dateStr)
+        .forEach(t => {
+          if (t.type === 'buy' || t.type === 'grant') sh += +t.shares;
+          else if (t.type === 'sell') sh -= +t.shares;
+        });
+      return sh;
+    };
+    // الدخل التوزيعي المتوقّع (Forward) — نفس منطق dividends.js/_dpsTrendAware:
+    // وسيط آخر (freq) دفعات، مع استثناء الأسهم النامية التصاعدية (آخر دفعة معلنة).
+    const _computeForwardIncome = () => {
+      const rows = []; let total = 0;
+      new Set(holdings.map(h => h.ticker)).forEach(ticker => {
+        const h = holdings.find(x => x.ticker === ticker);
+        if (!h || +h.shares <= 0) return;
+        const divs = dividends.filter(d => d.ticker === ticker)
+          .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+        if (!divs.length) return;
+        let freq = 1;
+        if (divs.length >= 2) {
+          const gaps = [];
+          for (let i = 1; i < divs.length; i++) {
+            const d0 = divs[i - 1].date, d1 = divs[i].date;
+            if (d0 && d1) gaps.push((new Date(d1) - new Date(d0)) / 86400000);
+          }
+          gaps.sort((a, b) => a - b);
+          const med = gaps[Math.floor(gaps.length / 2)] || 999;
+          if (med <= 105) freq = 4; else if (med <= 210) freq = 2;
+        }
+        const series = [];
+        divs.forEach(d => {
+          const sh = _sharesAtDate(ticker, d.date || '9999-12-31');
+          if (sh >= 0.001) series.push(+d.amount / sh);
+        });
+        let dps = 0;
+        if (series.length) {
+          const win = series.slice(-freq);
+          let rising = freq >= 2 && win.length >= freq;
+          if (rising) {
+            for (let i = 1; i < win.length; i++) if (win[i] < win[i - 1] * 0.99) { rising = false; break; }
+            rising = rising && win[win.length - 1] > win[0] * 1.03;
+          }
+          dps = rising ? win[win.length - 1] : win.slice().sort((a, b) => a - b)[Math.floor(win.length / 2)];
+        } else {
+          // احتياطي: آخر سنة مسجّلة ÷ الدورية ÷ الأسهم الحالية
+          const lastYr = Math.max(...divs.map(d => +d.year || new Date(d.date).getFullYear()));
+          const yrTotal = divs.filter(d => (+d.year || new Date(d.date).getFullYear()) === lastYr)
+            .reduce((s, d) => s + +d.amount, 0);
+          dps = yrTotal > 0 ? yrTotal / +h.shares / freq : 0;
+        }
+        const projected = dps * freq * +h.shares;
+        total += projected;
+        rows.push({ ticker, name: h.name || ticker, dps, freq, shares: +h.shares, projected });
+      });
+      return { total, rows };
+    };
+    // TWR (Modified Dietz) — نفس منطق performance.js
+    const _dedupSnaps30 = (snaps) => {
+      const byDate = {};
+      for (const s of snaps) {
+        const ex = byDate[s.date];
+        if (!ex) { byDate[s.date] = s; continue; }
+        const isM = s.notes && !s.notes.startsWith('auto');
+        const wasM = ex.notes && !ex.notes.startsWith('auto');
+        if (isM && !wasM) { byDate[s.date] = s; continue; }
+        if (!wasM && !isM) byDate[s.date] = s;
+      }
+      return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+    };
+    const _twr30 = (snaps, cfsIn) => {
+      const sorted = _dedupSnaps30(snaps);
+      if (!sorted.length) return { twrMap: {}, sorted: [] };
+      const cfs = cfsIn.slice().sort((a, b) => a.date.localeCompare(b.date));
+      const twrMap = {}; let factor = 1.0; twrMap[sorted[0].date] = 100;
+      for (let i = 1; i < sorted.length; i++) {
+        const sD = sorted[i - 1].date, eD = sorted[i].date;
+        const sV = +sorted[i - 1].total_value, eV = +sorted[i].total_value;
+        const netCF = cfs.filter(c => c.date > sD && c.date <= eD)
+          .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
+        const denom = sV + netCF / 2;
+        if (denom > 0) { const r = (eV - sV - netCF) / denom; factor *= (1 + r); }
+        twrMap[sorted[i].date] = factor * 100;
+      }
+      return { twrMap, sorted };
+    };
+
+    // أرقام أساسية مشتركة
+    const _totalMkt   = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+    const _totalCost  = holdings.reduce((s, h) => s + +h.shares * +h.avg_price, 0);
+    const _totalBuys  = transactions.filter(t => t.type === 'buy').reduce((s, t) => s + +t.total, 0);
+    const _totalSells = transactions.filter(t => t.type === 'sell').reduce((s, t) => s + +t.total, 0);
+    const _totalDiv   = dividends.reduce((s, d) => s + +d.amount, 0);
+    const _totalComm  = transactions.reduce((s, t) => s + (+t.commission || 0) + (+t.vat || 0), 0);
+    const _sukukActive = (sukukData.opportunities || [])
+      .filter(o => o.status === 'مشترك').reduce((s, o) => s + (+o.amount || 0), 0);
+    const _reVal      = activeRE.reduce((s, r) => s + +r.current_value, 0);
+    const _assetVal   = activeAssets.reduce((s, a) => s + +a.value, 0);
+    const _fwd        = _computeForwardIncome();
+
+    // ════════════════════════════════════════════════════════
+    // 30. مقاييس المخاطر (Risk Metrics)
+    // ════════════════════════════════════════════════════════
+    h2('30. مقاييس المخاطر — التنويع والتركيز والتذبذب');
+    p('طبقة المخاطر التي تكمّل أرقام العائد: تقيس *ثمن* العائد لا حجمه فقط. (مطابقة للوحة التحكم وصفحة الأداء.)');
+
+    // ── التنويع (HHI + العدد الفعّال) ──
+    if (holdings.length && _totalMkt > 0 && typeof computeDiversification === 'function') {
+      const dv = computeDiversification(holdings.map(h => ({
+        value: +h.shares * +h.current_price, sector: h.sector, label: h.ticker,
+      })));
+      if (dv) {
+        h3('التنويع (Diversification)');
+        p('```');
+        p(`عدد الأسهم                 : ${holdings.length}`);
+        p(`العدد الفعّال (1÷HHI)       : ${dv.effectiveN}  ← تنوّع أوزانك يعادل هذا العدد من أسهم متساوية`);
+        p(`HHI (تركّز الأوزان)         : ${dv.hhi.toFixed(4)}`);
+        p(`مؤشر التنويع (0–100)       : ${dv.gaugePos} — ${dv.zoneLabel}`);
+        p(`عدد القطاعات               : ${dv.sectorCount}`);
+        p(`أكبر مركز                  : ${dv.top1Pct.toFixed(1)}% (${dv.top1Name})`);
+        p(`أكبر قطاع                  : ${dv.topSectorPct.toFixed(1)}% (${dv.topSectorName}) عبر ${dv.topSectorCount} سهم`);
+        p('```');
+        p('- **المرجع (Evans & Archer 1968):** ~90% من المخاطر القابلة للتنويع تُزال عند 15 سهماً فعّالاً.');
+        if (dv.corrWarn) {
+          p(`\n> ⚠️ **تنويع اسمي لا فعلي:** ${dv.corrMsg} المؤشر يقيس تركيز الأوزان لا ترابط الأسهم — القطاع الواحد يتحرك ككتلة عند الصدمات.`);
+        }
+      }
+    } else {
+      p('_لا توجد حيازات كافية لحساب التنويع._');
+    }
+
+    // ── التذبذب + Sharpe + Sortino + Max Drawdown (من TWR) ──
+    h3('العائد المعدَّل بالمخاطر (من سلسلة TWR)');
+    if (snapshots.length >= 4) {
+      const { twrMap, sorted } = _twr30(snapshots, cashflows);
+      const pts = sorted.map(s => ({ date: s.date, idx: twrMap[s.date] })).filter(x => x.idx > 0);
+      if (pts.length >= 4) {
+        // Max Drawdown
+        let peak = pts[0].idx, maxDD = 0;
+        pts.forEach(pt => { if (pt.idx > peak) peak = pt.idx; const dd = (pt.idx - peak) / peak * 100; if (dd < maxDD) maxDD = dd; });
+        // عوائد الفترات
+        const rets = [];
+        for (let i = 1; i < pts.length; i++) rets.push(pts[i].idx / pts[i - 1].idx - 1);
+        const spanDays = (new Date(pts[pts.length - 1].date) - new Date(pts[0].date)) / 86400000;
+        const years = spanDays / 365.25;
+        const ppy = rets.length / years;
+        const annRet = Math.pow(pts[pts.length - 1].idx / pts[0].idx, 1 / years) - 1;
+        const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
+        const varSmp = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
+        const volP = Math.sqrt(Math.max(0, varSmp));
+        const downSq = rets.reduce((s, r) => s + (r < 0 ? r * r : 0), 0) / rets.length;
+        const ddP = Math.sqrt(Math.max(0, downSq));
+        const annVol = volP * Math.sqrt(ppy);
+        const annDown = ddP * Math.sqrt(ppy);
+        const RF = 0.03;
+        const sharpe = annVol > 1e-9 ? (annRet - RF) / annVol : null;
+        const sortino = annDown > 1e-9 ? (annRet - RF) / annDown : null;
+        p('```');
+        p(`أقصى تراجع (Max Drawdown)  : ${maxDD.toFixed(2)}%  ← أعمق هبوط من قمة إلى قاع (معزول عن الإيداعات)`);
+        p(`التذبذب السنوي (Volatility) : ${(annVol * 100).toFixed(1)}%`);
+        p(`تذبذب الهبوط (Downside Dev) : ${(annDown * 100).toFixed(1)}%`);
+        p(`العائد السنوي (TWR هندسي)   : ${(annRet >= 0 ? '+' : '') + (annRet * 100).toFixed(2)}%`);
+        p(`Sharpe  = (العائد−RF)÷التذبذب: ${sharpe == null ? '—' : sharpe.toFixed(2)}`);
+        p(`Sortino = (العائد−RF)÷الهبوط : ${sortino == null ? '—' : sortino.toFixed(2)}`);
+        p(`العائد الخالي من المخاطر RF : ${(RF * 100).toFixed(0)}% (افتراض)`);
+        p(`عدد الفترات المحسوبة        : ${rets.length}`);
+        p('```');
+        p('🟡 _تقريبي: مبني على لقطات صافي الثروة الشهرية غير المنتظمة، لا أسعار يومية. Sortino أنسب لأنه يعاقب على الهبوط فقط._');
+      } else {
+        p('_تحتاج ≥4 لقطات صافي ثروة صالحة لحساب مقاييس المخاطر._');
+      }
+    } else {
+      p('_تحتاج ≥4 لقطات صافي ثروة (أضِفها من صفحة صافي الثروة) لحساب Sharpe/Sortino/التذبذب/التراجع._');
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 31. التدقيق السلوكي (Behavioral Audit)
+    // ════════════════════════════════════════════════════════
+    h2('31. التدقيق السلوكي — انضباط قراراتك');
+    p('يحلّل صفقاتك المُغلقة (المُصفّاة بالكامل) لكشف الأنماط النفسية: هل تُمسك بخاسريك؟ هل تُتاجر بإفراط؟ (مطابق لصفحة الأداء.)');
+    {
+      // بناء الصفقات المغلقة: رمز بِيع بالكامل (الأسهم المتبقية ≈ 0)
+      const byTk = {};
+      transactions.forEach(t => {
+        const e = byTk[t.ticker] || (byTk[t.ticker] = { buyShares: 0, buyCost: 0, sellShares: 0, sellRev: 0, grantShares: 0, name: '', firstBuy: null, lastSell: null });
+        e.name = e.name || t.name || '';
+        if (t.type === 'buy')   { e.buyShares += +t.shares; e.buyCost += +t.total; if (t.date && (!e.firstBuy || t.date < e.firstBuy)) e.firstBuy = t.date; }
+        if (t.type === 'grant') { e.grantShares += +t.shares; }
+        if (t.type === 'sell')  { e.sellShares += +t.shares; e.sellRev += +t.total; if (t.date && (!e.lastSell || t.date > e.lastSell)) e.lastSell = t.date; }
+      });
+      const divByTk = {};
+      dividends.forEach(d => { divByTk[d.ticker] = (divByTk[d.ticker] || 0) + +d.amount; });
+
+      const closed = [];
+      Object.entries(byTk).forEach(([tk, e]) => {
+        const remain = e.buyShares + e.grantShares - e.sellShares;
+        if (e.sellShares > 0 && Math.abs(remain) < 0.001 && e.buyShares > 0) {
+          const avgCost = e.buyCost / e.buyShares;
+          const realizedPnL = e.sellRev - avgCost * e.sellShares;
+          const divTotal = divByTk[tk] || 0;
+          const totalReturn = realizedPnL + divTotal;
+          const holdDays = (e.firstBuy && e.lastSell) ? (parseDateLocal(e.lastSell) - parseDateLocal(e.firstBuy)) / 86400000 : 0;
+          closed.push({ tk, name: e.name, realizedPnL, divTotal, totalReturn, holdDays });
+        }
+      });
+
+      if (!closed.length) {
+        p('_لا توجد صفقات مُغلقة بالكامل بعد — التدقيق السلوكي يحتاج مراكز بِيعت كلياً._');
+      } else {
+        const winners = closed.filter(p => p.totalReturn > 0);
+        const losers  = closed.filter(p => p.totalReturn <= 0);
+        const winRate = closed.length ? winners.length / closed.length * 100 : 0;
+        const totalGains = winners.reduce((s, p) => s + p.totalReturn, 0);
+        const totalLosses = Math.abs(losers.reduce((s, p) => s + p.totalReturn, 0));
+        const profitFactor = totalLosses > 0 ? totalGains / totalLosses : (totalGains > 0 ? Infinity : 0);
+        const avgHoldW = winners.length ? winners.reduce((s, p) => s + p.holdDays, 0) / winners.length : 0;
+        const avgHoldL = losers.length ? losers.reduce((s, p) => s + p.holdDays, 0) / losers.length : 0;
+        const avgWin = winners.length ? totalGains / winners.length : 0;
+        const avgLoss = losers.length ? totalLosses / losers.length : 0;
+        const riskReward = avgLoss > 0 ? avgWin / avgLoss : null;
+        const firstBuy = transactions.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0];
+        const monthsActive = firstBuy ? Math.max(1, (new Date() - parseDateLocal(firstBuy)) / (30.44 * 86400000)) : 1;
+        const tradesPerMonth = (transactions.filter(t => t.type === 'buy').length + transactions.filter(t => t.type === 'sell').length) / monthsActive;
+        const fmtDays = d => d >= 365 ? `${(d / 365).toFixed(1)} سنة` : d >= 30 ? `${Math.round(d / 30)} شهر` : `${Math.round(d)} يوم`;
+
+        p('```');
+        p(`عدد الصفقات المغلقة        : ${closed.length}  (${winners.length} رابحة · ${losers.length} خاسرة)`);
+        p(`معدل الربح (Win Rate)      : ${winRate.toFixed(1)}%  ${winRate >= 60 ? '✅ ممتاز' : winRate >= 40 ? '🟡 معقول' : '⚠️ منخفض'}`);
+        p(`Profit Factor             : ${profitFactor === Infinity ? '∞ (لا خسائر)' : profitFactor.toFixed(2)}  ${profitFactor >= 2 ? '✅' : profitFactor >= 1 ? '🟡' : '⚠️'}  ← ربح كل ريال خسارة`);
+        p(`متوسط احتفاظ الرابحة       : ${fmtDays(avgHoldW)}`);
+        p(`متوسط احتفاظ الخاسرة       : ${fmtDays(avgHoldL)}`);
+        p(`Risk/Reward (ربح÷خسارة)    : ${riskReward == null ? '—' : riskReward.toFixed(2) + '×'}  ${riskReward >= 1.5 ? '✅' : riskReward >= 1 ? '🟡' : '⚠️'}`);
+        p(`وتيرة التداول             : ${tradesPerMonth.toFixed(1)} صفقة/شهر  ${tradesPerMonth > 8 ? '⚠️ مرتفع' : tradesPerMonth > 4 ? '🟡 متوسط' : '✅ منضبط'}`);
+        p('```');
+        // تشخيص النفور من الخسارة
+        if (avgHoldW > 0 && avgHoldL > avgHoldW * 1.3) {
+          p(`> ⚠️ **نفور من الخسارة (Loss Aversion):** تُمسك بخاسريك ${(avgHoldL / avgHoldW).toFixed(1)}× أطول من رابحيك — نمط سلوكي شائع ومكلف.`);
+        } else if (avgHoldL > 0 && avgHoldW > avgHoldL * 1.3) {
+          p(`> ✅ **نمط صحي:** تُمسك برابحيك أطول من خاسريك — "دع أرباحك تجري واقطع خسائرك".`);
+        }
+
+        // أفضل / أسوأ 3
+        const byRet = [...closed].sort((a, b) => b.totalReturn - a.totalReturn);
+        h3('أفضل 3 صفقات مغلقة');
+        p(mdTable(['الرمز', 'الاسم', 'إجمالي العائد', 'مدة الاحتفاظ'],
+          byRet.slice(0, 3).map(r => [r.tk, r.name || '—', (r.totalReturn >= 0 ? '+' : '') + SAR(r.totalReturn), fmtDays(r.holdDays)])));
+        if (byRet.length > 3) {
+          h3('أسوأ 3 صفقات مغلقة');
+          p(mdTable(['الرمز', 'الاسم', 'إجمالي العائد', 'مدة الاحتفاظ'],
+            byRet.slice(-3).reverse().map(r => [r.tk, r.name || '—', (r.totalReturn >= 0 ? '+' : '') + SAR(r.totalReturn), fmtDays(r.holdDays)])));
+        }
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 32. مؤشرات لوحة التحكم الإضافية
+    // ════════════════════════════════════════════════════════
+    h2('32. مؤشرات لوحة التحكم الإضافية');
+    {
+      const netCapital = _totalBuys - _totalSells;
+      const totalReturns = _totalMkt + _totalDiv;
+      const recovery = netCapital > 0 ? totalReturns / netCapital * 100 : 0;
+
+      h3('استرداد رأس المال (نقطة التعادل)');
+      p('```');
+      p(`رأس المال المنشغل (شراء−بيع) : ${SAR(netCapital)} ر.س`);
+      p(`إجمالي العوائد (قيمة+توزيعات): ${SAR(totalReturns)} ر.س`);
+      p(`نسبة الاسترداد              : ${recovery.toFixed(1)}%  ${recovery >= 100 ? '✅ تجاوزت التعادل' : recovery >= 75 ? '🟡 قريب' : '🔴 دون التعادل'}`);
+      p(`صافي الربح/الخسارة الحقيقي   : ${(totalReturns - netCapital >= 0 ? '+' : '') + SAR(totalReturns - netCapital)} ر.س`);
+      p('```');
+
+      // تخصيص الأصول %
+      h3('تخصيص الأصول (Asset Allocation)');
+      const allocTotal = _totalMkt + _reVal + portfolioCash + _sukukActive + _assetVal;
+      if (allocTotal > 0) {
+        const arow = (lbl, v) => [lbl, SAR(v), PCT(v / allocTotal * 100)];
+        p(mdTable(['الفئة', 'القيمة (ر.س)', 'النسبة'], [
+          arow('أسهم', _totalMkt),
+          arow('عقارات', _reVal),
+          arow('نقد غير مستثمر', portfolioCash),
+          arow('صكوك نشطة', _sukukActive),
+          arow('أصول أخرى', _assetVal),
+          ['الإجمالي', SAR(allocTotal), '100.00%'],
+        ]));
+      } else { p('_لا توجد أصول لحساب التخصيص._'); }
+
+      // نمو التوزيعات السنوي (Dividend CAGR)
+      h3('نمو التوزيعات السنوي (Dividend CAGR)');
+      const divByYear = {};
+      dividends.forEach(d => { const y = +d.year || new Date(d.date).getFullYear(); divByYear[y] = (divByYear[y] || 0) + +d.amount; });
+      const fullYears = Object.keys(divByYear).map(Number).filter(y => y < today.getFullYear() && divByYear[y] > 0).sort((a, b) => a - b);
+      if (fullYears.length >= 2) {
+        const span = fullYears[fullYears.length - 1] - fullYears[0];
+        const cagr = (Math.pow(divByYear[fullYears[fullYears.length - 1]] / divByYear[fullYears[0]], 1 / span) - 1) * 100;
+        p(`نمو التوزيعات المركّب من ${fullYears[0]} إلى ${fullYears[fullYears.length - 1]}: **${(cagr >= 0 ? '+' : '') + cagr.toFixed(1)}%/سنة** (سنوات كاملة فقط، تستبعد السنة الجارية).`);
+      } else {
+        p('_يحتاج سنتين تقويميتين مكتملتين على الأقل من التوزيعات._');
+      }
+
+      // معدّل المساهمة الشهري (آخر 12 شهراً)
+      h3('معدّل المساهمة الشهري');
+      const cutoff = new Date(today.getFullYear(), today.getMonth() - 12, today.getDate()).toISOString().slice(0, 10);
+      const cf12 = cashflows.filter(c => c.date && c.date >= cutoff);
+      const dep12 = cf12.filter(c => c.type === 'deposit').reduce((s, c) => s + +c.amount, 0);
+      const wd12 = cf12.filter(c => c.type === 'withdrawal').reduce((s, c) => s + +c.amount, 0);
+      const hasCf12 = cf12.length > 0;
+      const monthlyContrib = hasCf12 ? (dep12 - wd12) / 12 : 0;
+      if (hasCf12) {
+        p(`صافي المساهمة آخر 12 شهراً: ${SAR(dep12 - wd12)} ر.س → **${SAR(monthlyContrib)} ر.س/شهر** (إيداعات ${SAR(dep12)} − سحوبات ${SAR(wd12)}).`);
+      } else {
+        p('_لا توجد تدفقات نقدية مسجّلة في آخر 12 شهراً._');
+      }
+
+      // محلل صحة المحفظة (4 محاور) — نفس عتبات لوحة التحكم
+      h3('محلل صحة المحفظة (4 محاور)');
+      if (holdings.length && _totalMkt > 0) {
+        const secMap = {};
+        holdings.forEach(h => { const sec = (h.sector || '').trim() || 'غير مصنف'; secMap[sec] = (secMap[sec] || 0) + +h.shares * +h.current_price; });
+        const secEntries = Object.entries(secMap).sort((a, b) => b[1] - a[1]);
+        const largestSecPct = secEntries[0] ? secEntries[0][1] / _totalMkt * 100 : 0;
+        const largestSecName = secEntries[0]?.[0] || '';
+        const sectorCount = secEntries.length;
+        const sortedH = holdings.map(h => ({ tk: h.ticker, w: +h.shares * +h.current_price / _totalMkt * 100 })).sort((a, b) => b.w - a.w);
+        const top1 = sortedH[0]?.w || 0, top1n = sortedH[0]?.tk || '';
+        const top3 = sortedH.slice(0, 3).reduce((s, h) => s + h.w, 0);
+        const stockCount = holdings.length;
+        const fwdMonthly = _fwd.total / 12;
+        const monthlyTarget = retGoal.monthly || 0;
+        const swr = retGoal.swr || 4;
+        const fireNumber = monthlyTarget > 0 ? (monthlyTarget * 12) / (swr / 100) : 0;
+        const fireBase = _totalMkt + portfolioCash + _sukukActive;
+        const fireProgress = fireNumber > 0 ? Math.min(fireBase / fireNumber * 100, 100) : null;
+        const targetYear = retGoal.target_year || 0;
+        const yearsLeft = targetYear > 0 ? targetYear - today.getFullYear() : null;
+        // إسقاط المسار
+        let projFireRatio = null, projCoverRatio = null;
+        const annualContrib = monthlyContrib * 12;
+        if (targetYear > 0 && yearsLeft > 0 && hasCf12 && annualContrib > 0) {
+          const g = Math.pow(1.05, yearsLeft);
+          const projAssets = Math.max(0, fireBase * g + annualContrib * ((g - 1) / 0.05));
+          if (fireNumber > 0) projFireRatio = projAssets / fireNumber * 100;
+          const divYield = _totalMkt > 0 ? _fwd.total / _totalMkt : 0;
+          if (monthlyTarget > 0) projCoverRatio = (projAssets * divYield / 12) / monthlyTarget * 100;
+        }
+        // محور A: التنوع
+        let aL;
+        if (stockCount < 5) aL = '🔴 تركيز عالٍ';
+        else if (stockCount <= 9 || sectorCount <= 2) aL = '🟡 تنوع محدود';
+        else if (stockCount <= 20 && sectorCount >= 4) aL = '🟢 تنوع جيد';
+        else if (stockCount > 25) aL = '🟡 مراقبة التشتت';
+        else aL = '🟢 تنوع جيد';
+        // محور B: التركيز
+        let bL;
+        if (top1 > 30 || top3 > 65 || largestSecPct > 50) bL = '🔴 تركيز مرتفع جداً';
+        else if (top1 > 20 || top3 > 50 || largestSecPct > 38) bL = '🟡 تركيز مرتفع';
+        else bL = '🟢 توزيع متوازن';
+        // محور C: تغطية الدخل
+        let cL, cD;
+        if (!monthlyTarget) { cL = '⚪ هدف غير محدد'; cD = `دخل متوقع ${SAR(fwdMonthly)}/شهر`; }
+        else {
+          const curCover = fwdMonthly / monthlyTarget * 100;
+          if (curCover >= 100) { cL = '🟢 يغطي مصاريفك الآن'; cD = `${SAR(fwdMonthly)}/شهر ≥ الهدف ${SAR(monthlyTarget)}`; }
+          else if (projCoverRatio != null) {
+            cD = `الآن ${curCover.toFixed(0)}% ← متوقع ${Math.min(projCoverRatio, 999).toFixed(0)}% بحلول ${targetYear}`;
+            cL = projCoverRatio >= 100 ? '🟢 على المسار' : projCoverRatio >= 75 ? '🟡 قريب من المسار' : '🔴 متأخر عن المسار';
+          } else { cL = '🟡 مرحلة بناء'; cD = `${SAR(fwdMonthly)}/شهر من ${SAR(monthlyTarget)} (${curCover.toFixed(0)}%)`; }
+        }
+        // محور D: FIRE
+        let dL, dD;
+        if (fireProgress === null) { dL = '⚪ هدف غير محدد'; dD = yearsLeft != null ? `${yearsLeft} سنة حتى ${targetYear}` : 'حدد هدف FIRE'; }
+        else if (fireProgress >= 100) { dL = '🟢 الهدف محقق'; dD = '100% — أصولك السائلة تكفي'; }
+        else if (projFireRatio != null) {
+          dD = `الآن ${fireProgress.toFixed(0)}% ← متوقع ${Math.min(projFireRatio, 999).toFixed(0)}% بحلول ${targetYear}`;
+          dL = projFireRatio >= 100 ? '🟢 على المسار' : projFireRatio >= 75 ? '🟡 قريب من المسار' : '🔴 متأخر عن المسار';
+        } else { dL = '🟡 مرحلة بناء'; dD = `${fireProgress.toFixed(0)}% من الهدف`; }
+
+        p(mdTable(['المحور', 'التقييم', 'التفاصيل'], [
+          ['التنوع', aL, `${stockCount} سهم · ${sectorCount} قطاع`],
+          ['التركيز', bL, `أكبر سهم ${top1.toFixed(1)}% (${top1n}) · أكبر 3 ${top3.toFixed(1)}% · أكبر قطاع ${largestSecPct.toFixed(1)}% (${largestSecName})`],
+          ['تغطية الدخل', cL, cD],
+          ['التقدم نحو FIRE', dL, dD],
+        ]));
+      } else { p('_لا توجد حيازات لتقييم الصحة._'); }
+
+      // إسقاط FIRE على المسار
+      h3('إسقاط FIRE على المسار');
+      if (retGoal.monthly > 0 && retGoal.target_year > 0 && hasCf12 && monthlyContrib > 0) {
+        const yearsLeft = retGoal.target_year - today.getFullYear();
+        const fireNumber = (retGoal.monthly * 12) / ((retGoal.swr || 4) / 100);
+        const fireBase = _totalMkt + portfolioCash + _sukukActive;
+        if (yearsLeft > 0) {
+          const g = Math.pow(1.05, yearsLeft);
+          const projAssets = fireBase * g + (monthlyContrib * 12) * ((g - 1) / 0.05);
+          const ratio = fireNumber > 0 ? projAssets / fireNumber * 100 : 0;
+          p('```');
+          p(`الأصول الحالية المؤهلة (أسهم+نقد+صكوك): ${SAR(fireBase)} ر.س`);
+          p(`المساهمة السنوية المفترضة           : ${SAR(monthlyContrib * 12)} ر.س`);
+          p(`نمو تخطيطي متحفّظ                   : 5% سنوياً`);
+          p(`السنوات المتبقية حتى ${retGoal.target_year}          : ${yearsLeft}`);
+          p(`الأصول المتوقعة عند التقاعد          : ${SAR(projAssets)} ر.س`);
+          p(`رقم FIRE المطلوب                    : ${SAR(fireNumber)} ر.س`);
+          p(`نسبة الوصول المتوقعة                : ${ratio.toFixed(0)}%  ${ratio >= 100 ? '✅ على المسار' : ratio >= 80 ? '🟡 قريب' : '🔴 متأخر'}`);
+          p('```');
+        } else { p('_سنة التقاعد المستهدفة في الماضي أو الحاضر._'); }
+      } else {
+        p('_يحتاج: هدف FIRE + سنة تقاعد + تدفقات نقدية مسجّلة في آخر 12 شهراً._');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 33. أداء التوزيعات المتقدم
+    // ════════════════════════════════════════════════════════
+    h2('33. أداء التوزيعات المتقدم');
+    {
+      const divROI = _totalBuys > 0 ? _totalDiv / _totalBuys * 100 : 0;
+      const breakEvenYrs = _fwd.total > 0 ? _totalCost / _fwd.total : null;
+      const totalPnL = (_totalMkt - _totalCost) + (() => {
+        // ر/خ محقق (نفس منطق القسم 10)
+        const m = {};
+        transactions.forEach(t => {
+          const e = m[t.ticker] || (m[t.ticker] = { bs: 0, bc: 0, sr: 0, ss: 0 });
+          if (t.type === 'buy' || t.type === 'grant') { e.bc += +t.total; e.bs += +t.shares; }
+          if (t.type === 'sell') { e.sr += +t.total; e.ss += +t.shares; }
+        });
+        return Object.values(m).reduce((s, v) => v.bs < 0.001 ? s : s + v.sr - (v.bc / v.bs) * v.ss, 0);
+      })();
+      const efficiency = _totalComm > 0 ? totalPnL / _totalComm : null;
+
+      p('```');
+      p(`Div ROI (توزيعات ÷ تكلفة الشراء) : ${divROI.toFixed(1)}%  ← نسبة استرداد رأس المال عبر التوزيعات وحدها`);
+      p(`سنوات التعادل بالتوزيعات          : ${breakEvenYrs == null ? '—' : breakEvenYrs.toFixed(1) + ' سنة'}  (تكلفة الحيازة ÷ الدخل المتوقع سنوياً)`);
+      p(`الدخل التوزيعي المتوقع (Forward)  : ${SAR(_fwd.total)} ر.س/سنة`);
+      p(`نسبة كفاءة المحفظة               : ${efficiency == null ? '—' : efficiency.toFixed(1) + '×'}  (إجمالي الأرباح ÷ العمولات والضرائب)`);
+      p(`إجمالي العمولات والضرائب المدفوعة : ${SAR(_totalComm)} ر.س`);
+      p('```');
+      if (efficiency != null) {
+        p(`- ${efficiency >= 20 ? '✅ ممتاز' : efficiency >= 10 ? '🟡 جيد' : '⚠️ منخفض'}: كل ريال عمولة قابله ${efficiency.toFixed(1)} ريال ربح إجمالي.`);
+      }
+
+      if (_fwd.rows.length) {
+        h3('الدخل التوزيعي المتوقع لكل سهم');
+        const frows = _fwd.rows.sort((a, b) => b.projected - a.projected).map(r => [
+          r.ticker, r.name, N(r.shares), SAR(r.dps),
+          r.freq === 4 ? 'ربع سنوي' : r.freq === 2 ? 'نصف سنوي' : 'سنوي',
+          SAR(r.projected),
+          _totalMkt > 0 ? PCT(r.projected / (+holdings.find(h => h.ticker === r.ticker).shares * +holdings.find(h => h.ticker === r.ticker).current_price) * 100) : '—',
+        ]);
+        p(mdTable(['الرمز', 'الاسم', 'الأسهم', 'DPS متوقع', 'الدورية', 'الدخل السنوي', 'العائد الحالي'], frows));
+      }
+    }
+    hr();
+
     p('---');
     p('_تم توليد هذا التقرير تلقائياً من تطبيق ثروة — مفكرة حسابية شخصية._');
     p('_الأرقام تعكس البيانات المُدخَّلة يدوياً ولا تمثّل توصيات استثمارية._');
