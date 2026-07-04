@@ -184,6 +184,35 @@ function _divSortDate(d) {
 //   ②. حدّد الدورية من الفجوة الزمنية بين آخر دفعتين
 //   ③. DPS × الدورية × الأسهم الحالية = الدخل المتوقع من هذا السهم سنوياً
 // هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم
+// ── اختيار DPS المتوقّع: وسيط محصّن، مع استثناء الأسهم النامية ──────
+// dpsSeries: سلسلة DPS بالترتيب الزمني (الأقدم أولاً). freq: الدورية (1/2/4).
+// المنطق:
+//   نفحص آخر دورة سنوية كاملة (آخر freq دفعات). لو كانت تصاعدية بانتظام
+//   (كل دفعة ≥ سابقتها ضمن تسامح 1%، وآخرها أعلى من أولها بأكثر من 3%) →
+//   السهم يرفع توزيعه بثبات، فآخر دفعة معلنة أصدق من الوسيط الذي يتخلّف.
+//   غير ذلك → الوسيط (الافتراضي الآمن ضد التوزيعات الاستثنائية).
+function _dpsTrendAware(dpsSeries, freq) {
+  const n = dpsSeries.length;
+  const window = dpsSeries.slice(-freq);          // آخر دورة سنوية (بالترتيب الزمني)
+  const medianOf = arr => {
+    const s = arr.slice().sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
+  };
+  // نحتاج دورة كاملة على الأقل (freq دفعات) لتأكيد الاتجاه، وإلا نرجع للوسيط
+  if (freq >= 2 && window.length >= freq && n >= freq) {
+    const TOL = 0.99;                             // تسامح 1% للتذبذب الطفيف بين دفعات السنة
+    let rising = true;
+    for (let i = 1; i < window.length; i++) {
+      if (window[i] < window[i - 1] * TOL) { rising = false; break; }
+    }
+    const meaningfulGrowth = window[window.length - 1] > window[0] * 1.03;
+    if (rising && meaningfulGrowth) {
+      return { dps: window[window.length - 1], mode: 'rising' };
+    }
+  }
+  return { dps: medianOf(window), mode: 'median' };
+}
+
 function _projectedAnnualIncome() {
   const breakdown = [];
   let total = 0;
@@ -230,12 +259,16 @@ function _projectedAnnualIncome() {
       }
     }
 
-    // DPS المتوقع = وسيط آخر freq دفعات (يطابق dashboard.js تماماً —
-    // محصّن ضد توزيع خاص/شاذ يضخّم معدّل التشغيل المستقبلي)
-    let dps, lastDivDate, sharesAtRefDiv, usedFallback = false;
+    // DPS المتوقع:
+    //  • الافتراضي = وسيط آخر freq دفعات (محصّن ضد توزيع خاص/شاذ يضخّم التشغيل المستقبلي)
+    //  • استثناء الأسهم النامية: لو آخر دورة سنوية كاملة تصاعدية بانتظام (راجحي/STC مثلاً)
+    //    فالوسيط يتخلّف عن الواقع ويعطي Forward Yield أقل من الحقيقي → نستخدم آخر دفعة معلنة.
+    //    (يطابق dashboard.js — نفس منطق _dpsTrendAware)
+    let dps, lastDivDate, sharesAtRefDiv, usedFallback = false, dpsTrend = 'median';
     if (dpsSeries.length) {
-      const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
-      dps            = recent[Math.floor(recent.length / 2)];
+      const t = _dpsTrendAware(dpsSeries, freq);
+      dps            = t.dps;
+      dpsTrend       = t.mode;
       lastDivDate    = lastValidDate;
       sharesAtRefDiv = lastValidShares;
     } else {
@@ -266,7 +299,7 @@ function _projectedAnnualIncome() {
       ticker, name: holding.name || ticker,
       dps, freq, freqLabel, currentShares,
       lastDivDate, lastDivAmt: lastValidAmt,
-      sharesAtLastDiv: sharesAtRefDiv, projected, usedFallback,
+      sharesAtLastDiv: sharesAtRefDiv, projected, usedFallback, dpsTrend,
     });
   });
 

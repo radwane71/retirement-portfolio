@@ -846,10 +846,33 @@ function computeDiversification(positions) {
   else if (gaugePos < 80) { zoneLabel = 'تنوع جيد';    zoneColor = '#22c55e'; }
   else                    { zoneLabel = 'تنوع ممتاز';  zoneColor = '#10b981'; }
 
+  // ── تنبيه الارتباط بالوكالة (Correlation Proxy) ─────────────────
+  // HHI يقيس تركيز الأوزان لا الترابط الفعلي. محفظة من 10 بنوك سعودية تبدو
+  // "متنوعة" بـHHI منخفض، لكن ارتباط البنوك فيما بينها ~0.9 → تنويع اسمي لا فعلي.
+  // نكشف الحالة عبر الوكيل المتاح بلا سلاسل أسعار: عدد أسهم يوحي بالتنويع (n≥6)
+  // لكن قطاعاً واحداً يهيمن. topSector = أكبر وزن قطاع.
+  let topSectorName = '', topSectorPct = 0;
+  Object.keys(secMap).forEach(k => {
+    if (secMap[k] > topSectorPct) { topSectorPct = secMap[k]; topSectorName = k; }
+  });
+  topSectorPct *= 100;
+  // عدد الأسهم داخل القطاع المهيمن
+  const topSectorCount = items.filter(p =>
+    ((p.sector || '').trim() || 'غير مصنف') === topSectorName).length;
+  // تنبيه: المحفظة تبدو متنوعة عددياً (≥6 أسهم، gaugePos≥40) لكن قطاع واحد
+  // يمثّل ≥40% ويضم ≥3 أسهم مترابطة → التنويع الحقيقي أقل مما يظهره HHI.
+  const corrWarn = (n >= 6 && gaugePos >= 40 && topSectorPct >= 40 && topSectorCount >= 3);
+  const corrMsg = corrWarn
+    ? `${topSectorName} يمثّل ${Math.round(topSectorPct)}% عبر ${topSectorCount} أسهم — `
+      + `الأسهم داخل القطاع الواحد مترابطة الحركة، فالتنويع الفعلي أقل مما يوحي به المؤشر.`
+    : '';
+
   return {
     totalVal, n, hhi, effectiveN,
     secMap, sectorCount, secHHI, effSectors,
     top1Pct, top1Name,
+    topSectorName, topSectorPct, topSectorCount,
+    corrWarn, corrMsg,
     stockGauge, sectorFactor, gaugePos, zoneLabel, zoneColor,
   };
 }

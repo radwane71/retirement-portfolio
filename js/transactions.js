@@ -446,6 +446,147 @@ async function recomputeHoldingFromTx(userId, ticker) {
 }
 
 // ── Filter by type ────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// إجراءات الشركات — تجزئة الأسهم (Stock Split) والتجزئة العكسية
+// ──────────────────────────────────────────────────────────────────────
+// المبدأ: التجزئة تُغيّر عدد الأسهم والسعر عكسياً مع بقاء القيمة (shares×price) ثابتة.
+// نضرب shares لكل معاملة بالمعامل (factor) ونقسم price عليه، فيبقى total كما هو
+// (total = shares×price + عمولة + ضريبة) → WAC (=totalCost/totalShares) يتحوّل
+// إلى avg÷factor، وXIRR (المبني على totals والتواريخ) لا يتأثر إطلاقاً.
+// forward split 10:1 → factor = 10 | reverse split 1:10 → factor = 0.1
+// نعدّل أيضاً current_price في holdings (السوق يعدّل السعر المعلن) قبل إعادة الحساب.
+// التوزيعات لا تُعدَّل: مبالغها إجمالية (لا للسهم)، وحساب الأسهم-وقت-التوزيع يشتقّ
+// من المعاملات المعدَّلة تلقائياً.
+function _corpFactor() {
+  const raw = +document.getElementById('corp-ratio').value;
+  const type = document.getElementById('corp-type').value;
+  if (!raw || raw <= 0) return null;
+  // forward: كل سهم قديم يصبح raw سهماً → factor = raw
+  // reverse: كل raw سهم قديم يصبح سهماً واحداً → factor = 1/raw
+  return type === 'reverse' ? 1 / raw : raw;
+}
+
+function openCorpActionModal() {
+  document.getElementById('corp-ticker').value = '';
+  document.getElementById('corp-ratio').value = '';
+  document.getElementById('corp-ticker-name').textContent = '';
+  document.getElementById('corp-preview').innerHTML = '';
+  document.getElementById('corp-type').value = 'forward';
+  onCorpTypeChange();
+  document.getElementById('corp-modal').style.display = 'flex';
+}
+
+function closeCorpActionModal(e) {
+  if (e && e.target !== document.getElementById('corp-modal')) return;
+  document.getElementById('corp-modal').style.display = 'none';
+}
+
+function onCorpTypeChange() {
+  const type = document.getElementById('corp-type').value;
+  document.getElementById('corp-ratio-lbl').textContent = type === 'reverse'
+    ? 'عدد الأسهم القديمة التي تُدمج في سهم واحد'
+    : 'عدد الأسهم الناتجة عن كل سهم قديم';
+  document.getElementById('corp-ratio').placeholder = type === 'reverse'
+    ? 'مثال: 10  (لتجزئة عكسية 1:10)'
+    : 'مثال: 10  (لتجزئة 10:1)';
+  updateCorpPreview();
+}
+
+function onCorpTickerInput() {
+  const ticker = document.getElementById('corp-ticker').value.trim().toUpperCase();
+  document.getElementById('corp-ticker').value = ticker;
+  const official = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
+  const name = official?.name || TICKER_DB[ticker];
+  document.getElementById('corp-ticker-name').textContent = name || '';
+  updateCorpPreview();
+}
+
+function updateCorpPreview() {
+  const box = document.getElementById('corp-preview');
+  if (!box) return;
+  const ticker = document.getElementById('corp-ticker').value.trim().toUpperCase();
+  const factor = _corpFactor();
+  if (!ticker || !factor) { box.innerHTML = ''; return; }
+
+  const affected = transactions.filter(t => t.ticker === ticker && !t.is_archived);
+  if (!affected.length) {
+    box.innerHTML = `<span style="color:var(--danger)">لا توجد معاملات مسجّلة للرمز «${esc(ticker)}».</span>`;
+    return;
+  }
+  // عيّنة: أول معاملة قبل/بعد
+  const t0 = affected[0];
+  const sh0 = +t0.shares, pr0 = +t0.price;
+  box.innerHTML = `
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+      <div><b>${affected.length}</b> معاملة للرمز «${esc(ticker)}» ستُعدَّل بالمعامل ×${(+factor.toFixed(6))}.</div>
+      <div style="margin-top:6px;color:var(--text-muted)">مثال (أول معاملة):
+        ${formatShares(sh0)} سهم @ ${formatNum(pr0)} ر.س →
+        <b style="color:var(--text)">${formatShares(sh0 * factor)} سهم @ ${formatNum(pr0 / factor)} ر.س</b>
+        <span style="color:var(--text-muted)"> (القيمة الإجمالية ثابتة)</span>
+      </div>
+    </div>`;
+}
+
+async function applyCorpAction() {
+  const ticker = document.getElementById('corp-ticker').value.trim().toUpperCase();
+  const factor = _corpFactor();
+  if (!ticker) { showToast('أدخل رمز السهم', 'error'); return; }
+  if (!factor) { showToast('أدخل معامل تجزئة صحيح (> 0)', 'error'); return; }
+
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) { showToast('انتهت الجلسة', 'error'); return; }
+
+  // اقرأ كل معاملات السهم من قاعدة البيانات مباشرة (لا نعتمد على الصفحة المُحمَّلة
+  // المحدودة بـ TX_PAGE_LIMIT — قد تكون بعض معاملات السهم خارج الصفحة الحالية)
+  const { data: affected, error: loadErr } = await supabaseClient
+    .from('transactions').select('id, type, shares, price')
+    .eq('user_id', user.id).eq('ticker', ticker).eq('is_archived', false);
+  if (loadErr) { showToast('خطأ في قراءة المعاملات', 'error'); return; }
+  if (!affected || !affected.length) { showToast(`لا توجد معاملات للرمز «${ticker}»`, 'error'); return; }
+
+  const ok = await confirmAsync(
+    `سيتم تعديل ${affected.length} معاملة للرمز «${ticker}» بمعامل ×${(+factor.toFixed(6))}.\n` +
+    `عدد الأسهم والسعر سيتغيّران، والقيمة الإجمالية ومتوسط التكلفة وXIRR تبقى سليمة.\n\nمتابعة؟`
+  );
+  if (!ok) return;
+
+  const btn = document.getElementById('corp-apply-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التطبيق…'; }
+
+  // تعديل كل معاملة: shares×factor و price÷factor (total ثابت — لا يُعاد حسابه)
+  let failed = 0;
+  for (const t of affected) {
+    const newShares = +(+t.shares * factor).toFixed(6);
+    const newPrice  = t.type === 'grant' ? 0 : +(+t.price / factor).toFixed(4);
+    const { error } = await supabaseClient.from('transactions')
+      .update({ shares: newShares, price: newPrice })
+      .eq('id', t.id).eq('user_id', user.id);
+    if (error) failed++;
+  }
+
+  // عدّل السعر الحالي في المحفظة (السوق يعدّل السعر المعلن بنفس المعامل)
+  const { data: hold } = await supabaseClient.from('holdings')
+    .select('id, current_price').eq('user_id', user.id).eq('ticker', ticker).maybeSingle();
+  if (hold && +hold.current_price > 0) {
+    await supabaseClient.from('holdings')
+      .update({ current_price: +(+hold.current_price / factor).toFixed(4) })
+      .eq('id', hold.id);
+  }
+
+  // أعِد حساب الحيازة من المعاملات المعدَّلة (يضبط shares وWAC)
+  await recomputeHoldingFromTx(user.id, ticker);
+
+  if (btn) { btn.disabled = false; btn.textContent = 'تطبيق على كل المعاملات'; }
+  document.getElementById('corp-modal').style.display = 'none';
+  showToast(
+    failed ? `اكتمل مع ${failed} خطأ — راجع السجل` : `تمت التجزئة على ${affected.length} معاملة ✓`,
+    failed ? 'warning' : 'success'
+  );
+  await loadTransactions();
+  renderTable();
+  renderTxStats();
+}
+
 function setTxFilter(type) {
   _filterType = type;
   // تحديث حالة الأزرار

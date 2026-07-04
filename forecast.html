@@ -531,6 +531,25 @@
       <div id="goal-result-body"></div>
     </div>
 
+    <!-- ── Monte Carlo — مخاطر تسلسل العوائد ── -->
+    <div class="card" id="montecarlo-card">
+      <div class="section-header">
+        <span class="section-title">🎲 محاكاة مونتي كارلو <span class="eng-label">Sequence-of-Returns Risk</span></span>
+        <button class="info-btn" type="button" onclick="showCardInfo('montecarlo')" style="position:static;opacity:.7">ⓘ</button>
+      </div>
+      <p class="small text-muted" style="margin:6px 0 12px;line-height:1.75">
+        السيناريوهات الثلاثة تفترض عائداً <b>ثابتاً</b> كل سنة — والواقع لا يسير بمتوسطات.
+        هذه المحاكاة تسحب عوائد سنوية عشوائية من تاريخ تاسي الفعلي (2004–2024، بما فيه الانهيارات)
+        وتُعيد التجربة آلاف المرات، لتكشف خطر <b>تسلسل العوائد</b>: انهيار قرب التقاعد أخطر بكثير من
+        انهيار مبكر رغم تساوي المتوسط. النتيجة نطاق احتمالي، لا رقم واحد.
+      </p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+        <button class="btn btn-primary btn-sm" onclick="runMonteCarlo()">▶ تشغيل المحاكاة (2000 مسار)</button>
+        <span class="small text-muted" id="mc-status"></span>
+      </div>
+      <div id="mc-results" style="display:none"></div>
+    </div>
+
     <!-- ── Chart ── -->
     <div class="card">
       <div class="section-header">

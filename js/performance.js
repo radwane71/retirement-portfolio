@@ -300,6 +300,95 @@ function renderKPIs() {
     ddEl.textContent = '— (بيانات غير كافية)';
     ddEl.className   = 'value num text-muted';
   }
+
+  // ── مقاييس مُعدَّلة بالمخاطر: التذبذب / شارب / سورتينو ──────────────
+  renderRiskMetrics();
+}
+
+// ثابت العائد الخالي من المخاطر (افتراض): ~ عائد أدوات قصيرة سعودية.
+// افتراض تخطيطي — لذلك المقاييس تُعلَّم بشارة 🟡 تقريبية.
+const RISK_FREE_RATE = 0.03;
+
+// ══════════════════════════════════════════════════════════════════════
+// Sharpe / Sortino / التذبذب — من سلسلة عوائد TWR (Modified Dietz)
+// ──────────────────────────────────────────────────────────────────────
+// نشتقّ عوائد الفترات من مؤشر TWR المعزول عن التدفقات: r_i = idx_i/idx_{i-1} − 1.
+// هذه العوائد مُصفّاة من أثر الإيداع/السحب أصلاً (بخلاف XIRR)، فتصلح لقياس المخاطرة.
+// القيد الصادق: لقطاتنا شهرية تقريباً وغير منتظمة → المقاييس تقديرية (شارة 🟡).
+//   التذبذب السنوي  = الانحراف المعياري للعوائد × √(فترات/سنة)
+//   تذبذب الهبوط    = √(متوسط مربّع العوائد السالبة مقابل MAR=0) × √(فترات/سنة)
+//   شارب            = (العائد السنوي − RF) ÷ التذبذب السنوي
+//   سورتينو         = (العائد السنوي − RF) ÷ تذبذب الهبوط
+function _computeRiskMetrics() {
+  if (!_snapshots || _snapshots.length < 4) return null;
+  const { twrMap, sortedSnaps } = _computeTWR(_snapshots, _cf || []);
+  const pts = sortedSnaps
+    .map(s => ({ date: s.date, idx: twrMap[s.date] }))
+    .filter(p => p.idx != null && p.idx > 0);
+  if (pts.length < 4) return null;                  // نحتاج ≥3 عوائد لتقدير معقول
+
+  const rets = [];
+  for (let i = 1; i < pts.length; i++) rets.push(pts[i].idx / pts[i - 1].idx - 1);
+  if (rets.length < 3) return null;
+
+  const spanDays = (new Date(pts[pts.length - 1].date) - new Date(pts[0].date)) / 86400000;
+  const years    = spanDays / 365.25;
+  if (years <= 0) return null;
+  const periodsPerYear = rets.length / years;       // متوسط عدد الفترات في السنة
+
+  // العائد السنوي المركّب من مؤشر TWR (هندسي — لا يتأثر بالتدفقات)
+  const totalGrowth = pts[pts.length - 1].idx / pts[0].idx;
+  const annReturn   = Math.pow(totalGrowth, 1 / years) - 1;
+
+  // تذبذب الفترة (عيّنة) وتذبذب الهبوط (مقابل MAR=0)
+  const mean   = rets.reduce((s, r) => s + r, 0) / rets.length;
+  const varSmp = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
+  const volP   = Math.sqrt(Math.max(0, varSmp));
+  const downSq = rets.reduce((s, r) => s + (r < 0 ? r * r : 0), 0) / rets.length;
+  const ddP    = Math.sqrt(Math.max(0, downSq));
+
+  const annVol      = volP * Math.sqrt(periodsPerYear);
+  const annDownside = ddP  * Math.sqrt(periodsPerYear);
+  const excess      = annReturn - RISK_FREE_RATE;
+
+  return {
+    nReturns: rets.length,
+    annReturn, annVol, annDownside,
+    sharpe:  annVol      > 1e-9 ? excess / annVol      : null,
+    sortino: annDownside > 1e-9 ? excess / annDownside : null,
+  };
+}
+
+function renderRiskMetrics() {
+  const volEl = document.getElementById('pk-volatility');
+  const shEl  = document.getElementById('pk-sharpe');
+  const soEl  = document.getElementById('pk-sortino');
+  const m = _computeRiskMetrics();
+
+  const setInsufficient = (el, subId) => {
+    if (!el) return;
+    el.textContent = '— (بيانات غير كافية)';
+    el.className   = 'value num text-muted';
+    const sub = document.getElementById(subId);
+    if (sub) sub.textContent = '🟡 يحتاج لقطات شهرية أكثر';
+  };
+  if (!m) { setInsufficient(volEl, 'pk-volatility-sub'); setInsufficient(shEl, 'pk-sharpe-sub'); setInsufficient(soEl, 'pk-sortino-sub'); return; }
+
+  if (volEl) {
+    volEl.textContent = (m.annVol * 100).toFixed(1) + '%';
+    volEl.className   = 'value num ' + (m.annVol < 0.15 ? 'text-success' : m.annVol < 0.30 ? 'text-warning' : 'text-danger');
+  }
+  const ratioClass = v => v == null ? 'text-muted' : v >= 1 ? 'text-success' : v >= 0 ? 'text-warning' : 'text-danger';
+  if (shEl) {
+    shEl.textContent = m.sharpe == null ? '—' : m.sharpe.toFixed(2);
+    shEl.className   = 'value num ' + ratioClass(m.sharpe);
+  }
+  if (soEl) {
+    soEl.textContent = m.sortino == null ? '—' : m.sortino.toFixed(2);
+    soEl.className   = 'value num ' + ratioClass(m.sortino);
+    const sub = document.getElementById('pk-sortino-sub');
+    if (sub) sub.textContent = `🟡 تقريبي · ${m.nReturns} فترة`;
+  }
 }
 
 // ── Open positions table ──────────────────────────────────────────────

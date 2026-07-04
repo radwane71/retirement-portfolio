@@ -31,6 +31,17 @@ window.CARD_INFO = {
       <div class="info-formula">رقم التقاعد (FIRE) = الإنفاق الشهري × 12 ÷ نسبة السحب الآمن (عادة 4%)</div>
       <p class="info-note">💡 قاعدة الـ4%: محفظة تكفي لسحب 4% سنوياً قد تدوم مدى الحياة. هدف دخل 10,000 ر.س/شهر ⇒ تحتاج محفظة ≈ 3 مليون ر.س.</p>`
   },
+  'montecarlo': {
+    title: '🎲 محاكاة مونتي كارلو ومخاطر التسلسل',
+    body: `
+      <p>السيناريوهات الثابتة تفترض أن السوق يعطي نفس العائد كل سنة — وهذا لا يحدث أبداً. المحاكاة تسحب عائداً سنوياً عشوائياً من <strong>عوائد تاسي الفعلية 2004–2024</strong> (بما فيها انهيارا 2006 و2008)، وتُعيد بناء المسار 2000 مرة.</p>
+      <div class="info-math">
+        • <strong>تجميع العوائد:</strong> Bootstrap — سحب بإحلال من العوائد التاريخية، مع إعادة مركزة المتوسط الهندسي إلى نمو سيناريوك المعتدل (نُبقي التقلّب، نضبط المتوسط).<br>
+        • <strong>نسبة النجاح:</strong> حصّة المسارات التي بلغت هدفك بقوة شراء اليوم عند سنة التقاعد.<br>
+        • <strong>المئينات:</strong> p10 = مسار سيّئ (أسوأ 10%) · p50 = الوسيط · p90 = مسار مواتٍ.
+      </div>
+      <p class="info-note">⚠️ <strong>خطر تسلسل العوائد:</strong> انهيار في السنوات الأخيرة قبل التقاعد أخطر بكثير من انهيار مبكر رغم تساوي المتوسط — لأن المحفظة تكون في أكبر حجم لها. الفجوة بين p10 والوسيط هي ثمن هذا الخطر. اعتمد على p10 لا الوسيط عند التخطيط المحافظ.</p>`
+  },
 };
 
 // ── State ─────────────────────────────────────────────────────────────
@@ -619,6 +630,170 @@ function runForecast() {
   renderGoalPanel(horizonYears, goalAmount);
   renderScenarioDetail(horizonYears);
   updateChartSubtitle(params);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// محاكاة مونتي كارلو — Bootstrap من عوائد تاسي السنوية الفعلية
+// ──────────────────────────────────────────────────────────────────────
+// نبني توزيع العوائد السنوية للمؤشر (تغيّر إغلاقات نهاية السنة)، ثم نسحب منه
+// عشوائياً بإحلال سنةً بعد سنة. هذا يُبقي التقلّب الحقيقي وذيوله السمينة وتتابعه
+// العشوائي (بخلاف متوسط ثابت). نُعيد مركزة المتوسط الهندسي للتوزيع إلى نمو
+// السيناريو المعتدل (blendedCapGrowth) حتى يبقى وسيط المحاكاة متسقاً مع الإسقاط
+// الأساسي، بينما تكشف الأطراف (p10) خطر تسلسل العوائد.
+function _tasiAnnualReturns() {
+  const out = [];
+  for (let i = 1; i < TASI_PRICE_YE.length; i++) {
+    out.push(TASI_PRICE_YE[i] / TASI_PRICE_YE[i - 1] - 1);
+  }
+  return out;   // ~20 عائداً سنوياً 2004→2005 … 2023→2024
+}
+
+// إعادة مركزة التوزيع بحيث يساوي متوسطه الهندسي targetGeo (ضرب تناسبي يحفظ التقلّب)
+function _recenterReturns(returns, targetGeo) {
+  const geo = Math.pow(
+    returns.reduce((p, r) => p * (1 + r), 1),
+    1 / returns.length
+  ) - 1;                                        // المتوسط الهندسي التاريخي
+  const k = (1 + targetGeo) / (1 + geo);        // معامل الإزاحة الضربي
+  return returns.map(r => (1 + r) * k - 1);
+}
+
+function _percentile(sortedArr, p) {
+  if (!sortedArr.length) return 0;
+  const idx = Math.min(sortedArr.length - 1, Math.max(0, Math.round((p / 100) * (sortedArr.length - 1))));
+  return sortedArr[idx];
+}
+
+function runMonteCarlo() {
+  if (!_hist) { showToast('لا توجد بيانات كافية', 'warning'); return; }
+  const N = 2000;
+  const statusEl = document.getElementById('mc-status');
+  if (statusEl) statusEl.textContent = 'جارٍ الحساب…';
+
+  // مدخلات متطابقة مع الإسقاط الأساسي
+  const startValue   = parseFloat(document.getElementById('inp-current-value').value) || _hist.currentValue || 0;
+  const lumpSum      = parseFloat(document.getElementById('inp-lump-sum').value) || 0;
+  const horizonYears = parseInt(document.getElementById('inp-horizon').value) || 35;
+  const reinvest     = document.getElementById('inp-reinvest').checked;
+  const adjustInfl   = document.getElementById('inp-inflation').checked;
+  const inflationRate = parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025;
+  const goalAmount   = parseFloat(document.getElementById('inp-goal-amount').value) || 0;
+
+  const divYieldOverride = parseFloat(document.getElementById('inp-div-yield').value);
+  const divYield = (!isNaN(divYieldOverride) && divYieldOverride > 0)
+    ? divYieldOverride / 100 : _hist.safeDivYield;
+
+  // إضافة سنوية من جدول DCA الشهري
+  const monthly = buildDcaSchedule(getDcaPeriods(), horizonYears * 12);
+  const yearlyAdd = [];
+  for (let y = 0; y < horizonYears; y++) {
+    let sum = 0;
+    for (let m = 0; m < 12; m++) sum += monthly[y * 12 + m] || 0;
+    yearlyAdd.push(sum);
+  }
+
+  // توزيع العوائد المُعاد مركزته إلى نمو السيناريو المعتدل
+  const pool = _recenterReturns(_tasiAnnualReturns(), _hist.blendedCapGrowth);
+
+  const finals = [];        // القيمة النهائية (بقوة شراء اليوم إن فُعِّل التضخم)
+  const incomes = [];       // الدخل الشهري النهائي (حقيقي)
+  let reached = 0;
+  const inflFactorEnd = adjustInfl ? Math.pow(1 + inflationRate, horizonYears) : 1;
+
+  for (let s = 0; s < N; s++) {
+    let value = startValue + lumpSum;
+    for (let y = 0; y < horizonYears; y++) {
+      const r = pool[(Math.random() * pool.length) | 0];   // سحب عشوائي بإحلال
+      value *= (1 + r);                                     // نمو سعري (قد يكون سالباً)
+      const div = value * divYield;
+      if (reinvest) value += div;
+      value += yearlyAdd[y];
+      if (value < 0) value = 0;
+    }
+    const realValue = value / inflFactorEnd;                // بقوة شراء اليوم
+    const realIncome = (realValue * divYield) / 12;
+    finals.push(realValue);
+    incomes.push(realIncome);
+    if (goalAmount > 0) {
+      const metric = _goalType === 'monthly_income' ? realIncome : realValue;
+      if (metric >= goalAmount) reached++;
+    }
+  }
+
+  finals.sort((a, b) => a - b);
+  incomes.sort((a, b) => a - b);
+  const successPct = goalAmount > 0 ? (reached / N * 100) : null;
+
+  _renderMonteCarlo({
+    N, horizonYears, goalAmount, adjustInfl, successPct,
+    p5:  _percentile(finals, 5),  p10: _percentile(finals, 10),
+    p25: _percentile(finals, 25), p50: _percentile(finals, 50),
+    p75: _percentile(finals, 75), p90: _percentile(finals, 90),
+    inc10: _percentile(incomes, 10), inc50: _percentile(incomes, 50), inc90: _percentile(incomes, 90),
+  });
+  if (statusEl) statusEl.textContent = `${N} مسار · عوائد تاسي 2004–2024`;
+}
+
+function _renderMonteCarlo(r) {
+  const box = document.getElementById('mc-results');
+  if (!box) return;
+  box.style.display = 'block';
+  const realTag = r.adjustInfl ? ' <span class="small text-muted">(بقوة شراء اليوم)</span>' : '';
+
+  // شريط المئينات: p10 → p90 مع علامة الوسيط والهدف
+  const lo = r.p5, hi = r.p90, span = Math.max(1, hi - lo);
+  const posOf = v => Math.min(100, Math.max(0, (v - lo) / span * 100));
+  const goalMarker = (r.goalAmount > 0 && _goalType === 'portfolio_value')
+    ? `<div style="position:absolute;top:-4px;bottom:-4px;left:${posOf(r.goalAmount).toFixed(1)}%;width:2px;background:#ef4444" title="الهدف"></div>` : '';
+
+  let successBlock = '';
+  if (r.successPct != null) {
+    const col = r.successPct >= 80 ? '#10b981' : r.successPct >= 50 ? '#f0b429' : '#ef4444';
+    const verdict = r.successPct >= 80 ? 'احتمال مرتفع للوصول'
+                  : r.successPct >= 50 ? 'وصول غير مضمون — راقب المسار'
+                  : 'احتمال منخفض — الخطة تحتاج تعزيزاً';
+    successBlock = `
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px">
+        <div style="text-align:center;min-width:110px">
+          <div style="font-size:2rem;font-weight:800;color:${col};line-height:1">${r.successPct.toFixed(0)}%</div>
+          <div class="small text-muted">نسبة النجاح</div>
+        </div>
+        <div style="flex:1;min-width:200px">
+          <div style="font-weight:700;color:${col};margin-bottom:3px">${verdict}</div>
+          <div class="small text-muted">من أصل ${r.N} مسار محتمل، بلغت هذه النسبة هدفك عند سنة التقاعد بقوة شراء اليوم. الباقي تعثّر بسبب تتابع عوائد سيّئ.</div>
+        </div>
+      </div>`;
+  }
+
+  const row = (label, val, sub, strong) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border)">
+      <span class="small" style="color:var(--text-2)">${label} ${sub ? `<span class="text-muted">${sub}</span>` : ''}</span>
+      <span class="num" style="font-weight:${strong ? 800 : 600};color:${strong ? 'var(--text)' : 'var(--text-2)'}">${fmt(val)}</span>
+    </div>`;
+
+  box.innerHTML = `
+    ${successBlock}
+    <div style="margin-bottom:6px" class="small text-muted">نطاق قيمة المحفظة عند نهاية الأفق (${r.horizonYears} سنة)${realTag}:</div>
+    <div style="position:relative;height:26px;border-radius:13px;background:linear-gradient(90deg,#ef4444 0%,#f0b429 45%,#10b981 100%);margin:8px 0 4px;opacity:.85">
+      <div style="position:absolute;top:-4px;bottom:-4px;left:${posOf(r.p50).toFixed(1)}%;width:3px;background:var(--text)" title="الوسيط"></div>
+      ${goalMarker}
+    </div>
+    <div style="display:flex;justify-content:space-between" class="small text-muted">
+      <span>أسوأ (p5): ${fmtShort(r.p5)}</span><span>الوسيط: ${fmtShort(r.p50)}</span><span>أفضل (p90): ${fmtShort(r.p90)}</span>
+    </div>
+    <div style="margin-top:14px">
+      ${row('مسار سيّئ (p10 — أسوأ 10%)', r.p10, '', false)}
+      ${row('الربع الأدنى (p25)', r.p25, '', false)}
+      ${row('الوسيط المتوقّع (p50)', r.p50, '', true)}
+      ${row('الربع الأعلى (p75)', r.p75, '', false)}
+      ${row('مسار مواتٍ (p90)', r.p90, '', false)}
+    </div>
+    <div style="background:rgba(239,68,68,0.07);border-right:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;margin-top:14px;line-height:1.7" class="small">
+      ⚠️ <strong>خطر تسلسل العوائد:</strong> الفجوة بين المسار السيّئ (p10 = ${fmtShort(r.p10)}) والوسيط (${fmtShort(r.p50)})
+      تقيس هشاشة خطتك أمام انهيار قرب التقاعد. عند التخطيط المحافظ اعتمد <b>p10</b> لا الوسيط —
+      فالمتوسطات تُخفي أسوأ التتابعات.
+      <br>الدخل الشهري المتوقّع عند التقاعد (من التوزيعات): p10 ≈ ${fmt(r.inc10)} · الوسيط ≈ ${fmt(r.inc50)} · p90 ≈ ${fmt(r.inc90)}.
+    </div>`;
 }
 
 // ── Render historical summary ──────────────────────────────────────────

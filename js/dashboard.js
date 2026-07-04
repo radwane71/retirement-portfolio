@@ -527,8 +527,24 @@ async function loadAllData() {
       // AUDIT-FIX (M1): forward DPS = MEDIAN of the last `freq` per-share payments, not the single
       // latest one. A special / irregular final dividend (e.g. quarterly 1,1,1,5) would otherwise
       // inflate the forward run-rate to 5×4=20 vs the true ~4. The median ignores such outliers.
-      const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
-      const dps = recent[Math.floor(recent.length / 2)];
+      // 2026-07: استثناء الأسهم النامية — لو آخر دورة سنوية تصاعدية بانتظام (كل دفعة ≥ سابقتها
+      // ضمن تسامح 1%، وآخرها أعلى من أولها بـ3%+) فالوسيط يتخلّف عن واقع سهم يرفع توزيعه بثبات
+      // (راجحي/STC) → نستخدم آخر دفعة معلنة. غير ذلك يبقى الوسيط. (يطابق dividends.js _dpsTrendAware)
+      const _window = dpsSeries.slice(-freq);
+      let dps;
+      let _rising = freq >= 2 && _window.length >= freq;
+      if (_rising) {
+        for (let i = 1; i < _window.length; i++) {
+          if (_window[i] < _window[i - 1] * 0.99) { _rising = false; break; }
+        }
+        _rising = _rising && _window[_window.length - 1] > _window[0] * 1.03;
+      }
+      if (_rising) {
+        dps = _window[_window.length - 1];
+      } else {
+        const recent = _window.slice().sort((a, b) => a - b);
+        dps = recent[Math.floor(recent.length / 2)];
+      }
       if (dps < 0.0001) return;
 
       const projected = dps * freq * +h.shares;
@@ -1442,6 +1458,7 @@ function renderDiversificationCard() {
   const {
     n, hhi, effectiveN, sectorCount, secHHI,
     top1Pct, top1Name, gaugePos, zoneLabel, zoneColor,
+    corrWarn, corrMsg,
   } = div;
 
   // تحديد نص النصيحة حسب المنطقة
@@ -1463,6 +1480,13 @@ function renderDiversificationCard() {
   const diworseNote = n > 30 ? `
     <div style="background:rgba(245,158,11,0.08);border-right:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.80rem;color:var(--text);line-height:1.65;margin-top:10px;direction:rtl">
       💡 <strong>ملاحظة الإدارة:</strong> ${n} سهماً — عدد كبير يرفع تعقيد المتابعة (Lynch: diworsification). تأكد أن كل مركز مدروس وتعرفه جيداً.
+    </div>` : '';
+
+  // تنبيه الارتباط بالوكالة — تنويع اسمي لا فعلي (قطاع مهيمن بأسهم مترابطة)
+  const corrNote = corrWarn ? `
+    <div style="background:rgba(239,68,68,0.08);border-right:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.80rem;color:var(--text);line-height:1.65;margin-top:10px;direction:rtl">
+      ⚠️ <strong>تنويع اسمي لا فعلي:</strong> ${esc(corrMsg)}
+      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:5px">المؤشر يقيس تركيز الأوزان لا ترابط الأسهم — القطاع الواحد يتحرك ككتلة واحدة عند الصدمات.</div>
     </div>` : '';
 
   // ── حلقة التقدّم نحو نطاق Evans & Archer (15 سهماً متوازناً) ──
@@ -1586,6 +1610,7 @@ function renderDiversificationCard() {
     <!-- النصيحة -->
     <div style="background:${zoneColor}18;border-right:3px solid ${zoneColor};border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.82rem;color:var(--text);line-height:1.65;direction:rtl">${advice}</div>
 
+    ${corrNote}
     ${diworseNote}`;
 }
 
