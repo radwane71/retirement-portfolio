@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260706">
+  <link rel="stylesheet" href="css/style.css?v=20260707">
   <style>
     /* ── Scenario Cards ── */
     .scenario-grid {
@@ -569,14 +569,14 @@
     <!-- ── Monte Carlo — مخاطر تسلسل العوائد ── -->
     <div class="card" id="montecarlo-card">
       <div class="section-header">
-        <span class="section-title">🎲 محاكاة مونتي كارلو <span class="eng-label">Sequence-of-Returns Risk</span></span>
+        <span class="section-title">🎲 اختبار الحظّ — محاكاة مونتي كارلو <span class="eng-label">Monte Carlo</span></span>
         <button class="info-btn" type="button" onclick="showCardInfo('montecarlo')" style="position:static;opacity:.7">ⓘ</button>
       </div>
       <p class="small text-muted" style="margin:6px 0 12px;line-height:1.75">
-        السيناريوهات الثلاثة تفترض عائداً <b>ثابتاً</b> كل سنة — والواقع لا يسير بمتوسطات.
-        هذه المحاكاة تسحب عوائد سنوية عشوائية من تاريخ تاسي الفعلي (2004–2024، بما فيه الانهيارات)
-        وتُعيد التجربة آلاف المرات، لتكشف خطر <b>تسلسل العوائد</b>: انهيار قرب التقاعد أخطر بكثير من
-        انهيار مبكر رغم تساوي المتوسط. النتيجة نطاق احتمالي، لا رقم واحد.
+        السيناريوهات فوق تفترض إن السوق يعطيك <b>نفس العائد كل سنة</b> — وهذا ما يصير أبداً.
+        هنا نجرّب مستقبلك <b>2000 مرة</b>، كل مرة بعوائد سوق مختلفة من تاريخ تاسي الحقيقي (فيه سنوات ممتازة
+        وسنوات انهيار)، ونطلّع لك <b>نطاق كل الاحتمالات</b> — من أسوأ حظ إلى أحسنه — بدل رقم واحد وهمي.
+        اضغط الزر وبيظهر شرح كامل مبسّط للأرقام.
       </p>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
         <button class="btn btn-primary btn-sm" onclick="runMonteCarlo()">▶ تشغيل المحاكاة (2000 مسار)</button>
@@ -675,9 +675,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260706"></script>
-  <script src="js/auth.js?v=20260706"></script>
-  <script src="js/utils.js?v=20260706"></script>
-  <script src="js/forecast.js?v=20260706"></script>
+  <script src="js/supabase.js?v=20260707"></script>
+  <script src="js/auth.js?v=20260707"></script>
+  <script src="js/utils.js?v=20260707"></script>
+  <script src="js/forecast.js?v=20260707"></script>
 </body>
 </html>

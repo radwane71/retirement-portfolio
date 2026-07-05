@@ -44,15 +44,16 @@ window.CARD_INFO = {
       <p class="info-note">💡 عند تفعيل التضخم يُرفع الهدف لقوّته الاسمية المستقبلية حتى تبقى قوّته الشرائية = رقم اليوم. لو أصولك الحالية تكفي وحدها، يظهر «لا حاجة لضخ». الخطة تبقى محفوظة كسجل دائم حتى تحذفها بنفسك (بتأكيد).</p>`
   },
   'montecarlo': {
-    title: '🎲 محاكاة مونتي كارلو ومخاطر التسلسل',
+    title: '🎲 محاكاة مونتي كارلو — بالبساطة',
     body: `
-      <p>السيناريوهات الثابتة تفترض أن السوق يعطي نفس العائد كل سنة — وهذا لا يحدث أبداً. المحاكاة تسحب عائداً سنوياً عشوائياً من <strong>عوائد تاسي الفعلية 2004–2024</strong> (بما فيها انهيارا 2006 و2008)، وتُعيد بناء المسار 2000 مرة.</p>
+      <p>تخيّل إنك تقدر تعيش مستقبلك المالي <strong>2000 مرة</strong>، كل مرة السوق يتصرّف بشكل مختلف — سنة يطلع وسنة ينزل. هذي الأداة تسوّي بالضبط كذا: تجرّب خطّتك 2000 مرة، كل مرة بعوائد سنوية حقيقية سحبناها عشوائياً من تاريخ سوق تاسي (2004–2024، فيه سنوات ذهبية وسنوات انهيار).</p>
       <div class="info-math">
-        • <strong>تجميع العوائد:</strong> Bootstrap — سحب بإحلال من العوائد التاريخية، مع إعادة مركزة المتوسط الهندسي إلى نمو سيناريوك المعتدل (نُبقي التقلّب، نضبط المتوسط).<br>
-        • <strong>نسبة النجاح:</strong> حصّة المسارات التي بلغت هدفك بقوة شراء اليوم عند سنة التقاعد.<br>
-        • <strong>المئينات:</strong> p10 = مسار سيّئ (أسوأ 10%) · p50 = الوسيط · p90 = مسار مواتٍ.
+        • <strong>نسبة النجاح:</strong> من كل 100 مستقبل جرّبناه، كم واحد وصل لهدفك؟<br>
+        • <strong>«لو حظّك سيّئ»:</strong> نتيجة تقع في أسوأ 10 من كل 100 محاولة.<br>
+        • <strong>«الأكثر توقّعاً»:</strong> النتيجة اللي في المنتصف تماماً.<br>
+        • <strong>«لو حظّك ممتاز»:</strong> نتيجة تقع في أفضل 10 من كل 100.
       </div>
-      <p class="info-note">⚠️ <strong>خطر تسلسل العوائد:</strong> انهيار في السنوات الأخيرة قبل التقاعد أخطر بكثير من انهيار مبكر رغم تساوي المتوسط — لأن المحفظة تكون في أكبر حجم لها. الفجوة بين p10 والوسيط هي ثمن هذا الخطر. اعتمد على p10 لا الوسيط عند التخطيط المحافظ.</p>`
+      <p class="info-note">💡 <strong>ليش الأداة مهمة؟</strong> السيناريوهات العادية تفترض أن السوق يعطيك نفس العائد كل سنة — وهذا وهم. الواقع متقلّب، وانهيار السوق <strong>قرب تقاعدك</strong> أخطر من انهيار وأنت شاب. عشان كذا خطّط على «لو حظّك سيّئ» لتكون آمن، لا على المنتصف.</p>`
   },
 };
 
@@ -760,53 +761,75 @@ function _renderMonteCarlo(r) {
   const goalMarker = (r.goalAmount > 0 && _goalType === 'portfolio_value')
     ? `<div style="position:absolute;top:-4px;bottom:-4px;left:${posOf(r.goalAmount).toFixed(1)}%;width:2px;background:#ef4444" title="الهدف"></div>` : '';
 
+  // ── مقدمة تشرح الفكرة ببساطة ──
+  const intro = `
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;line-height:1.85" class="small">
+      🎲 <strong>وش سوّينا هنا؟</strong> شغّلنا "مستقبل محفظتك" <b>${r.N} مرة</b>، كل مرة بعوائد سوق مختلفة
+      سحبناها من تاريخ تاسي الحقيقي (2004–2024) — فيه سنوات ممتازة وسنوات انهيار. ليش؟ لأن السوق
+      <b>ما يعطي نفس العائد كل سنة</b>؛ أحياناً يطلع وأحياناً ينزل، والترتيب نفسه يفرق. فالنتيجة مو رقم
+      واحد مضمون، بل <b>نطاق احتمالات</b>: من أسوأ حظ إلى أحسن حظ.
+    </div>`;
+
   let successBlock = '';
   if (r.successPct != null) {
     const col = r.successPct >= 80 ? '#10b981' : r.successPct >= 50 ? '#f0b429' : '#ef4444';
-    const verdict = r.successPct >= 80 ? 'احتمال مرتفع للوصول'
-                  : r.successPct >= 50 ? 'وصول غير مضمون — راقب المسار'
-                  : 'احتمال منخفض — الخطة تحتاج تعزيزاً';
+    const verdict = r.successPct >= 80 ? 'فرصة ممتازة للوصول لهدفك 👍'
+                  : r.successPct >= 50 ? 'الوصول ممكن لكنه غير مضمون — راقب وزِد ضخّك إن قدرت'
+                  : 'الفرصة ضعيفة — خطّتك تحتاج تعزيز (ضخ أشهر أو أفق أطول)';
     successBlock = `
       <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px">
-        <div style="text-align:center;min-width:110px">
-          <div style="font-size:2rem;font-weight:800;color:${col};line-height:1">${r.successPct.toFixed(0)}%</div>
-          <div class="small text-muted">نسبة النجاح</div>
+        <div style="text-align:center;min-width:120px">
+          <div style="font-size:2rem;font-weight:800;color:${col};line-height:1">${r.successPct.toFixed(0)}<span style="font-size:1rem">من 100</span></div>
+          <div class="small text-muted">محاولة نجحت</div>
         </div>
         <div style="flex:1;min-width:200px">
           <div style="font-weight:700;color:${col};margin-bottom:3px">${verdict}</div>
-          <div class="small text-muted">من أصل ${r.N} مسار محتمل، بلغت هذه النسبة هدفك عند سنة التقاعد بقوة شراء اليوم. الباقي تعثّر بسبب تتابع عوائد سيّئ.</div>
+          <div class="small text-muted">يعني: من كل 100 مستقبل محتمل جرّبناه، بلغت <b>${r.successPct.toFixed(0)}</b> منها هدفك (بقوة شراء اليوم)، والباقي ما وصل لأن السوق تعثّر في توقيت سيّئ.</div>
         </div>
       </div>`;
   }
 
-  const row = (label, val, sub, strong) => `
-    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border)">
-      <span class="small" style="color:var(--text-2)">${label} ${sub ? `<span class="text-muted">${sub}</span>` : ''}</span>
-      <span class="num" style="font-weight:${strong ? 800 : 600};color:${strong ? 'var(--text)' : 'var(--text-2)'}">${fmt(val)}</span>
+  const row = (emoji, label, hint, val, strong) => `
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <span class="small" style="color:${strong ? 'var(--text)' : 'var(--text-2)'};font-weight:${strong ? 700 : 400}">
+        ${emoji} ${label}${hint ? ` <span class="text-muted" style="font-weight:400">— ${hint}</span>` : ''}
+      </span>
+      <span class="num" style="font-weight:${strong ? 800 : 600};color:${strong ? 'var(--text)' : 'var(--text-2)'};white-space:nowrap">${fmt(val)}</span>
     </div>`;
 
   box.innerHTML = `
+    ${intro}
     ${successBlock}
-    <div style="margin-bottom:6px" class="small text-muted">نطاق قيمة المحفظة عند نهاية الأفق (${r.horizonYears} سنة)${realTag}:</div>
+    <div style="margin-bottom:6px" class="small" style="color:var(--text-2)"><b>حجم محفظتك المتوقّع</b> بعد ${r.horizonYears} سنة${realTag} — حسب حظّك في السوق:</div>
     <div style="position:relative;height:26px;border-radius:13px;background:linear-gradient(90deg,#ef4444 0%,#f0b429 45%,#10b981 100%);margin:8px 0 4px;opacity:.85">
-      <div style="position:absolute;top:-4px;bottom:-4px;left:${posOf(r.p50).toFixed(1)}%;width:3px;background:var(--text)" title="الوسيط"></div>
+      <div style="position:absolute;top:-4px;bottom:-4px;left:${posOf(r.p50).toFixed(1)}%;width:3px;background:var(--text)" title="الأكثر توقّعاً"></div>
       ${goalMarker}
     </div>
     <div style="display:flex;justify-content:space-between" class="small text-muted">
-      <span>أسوأ (p5): ${fmtShort(r.p5)}</span><span>الوسيط: ${fmtShort(r.p50)}</span><span>أفضل (p90): ${fmtShort(r.p90)}</span>
+      <span>👈 أسوأ حظ</span><span>المنتصف</span><span>أحسن حظ 👉</span>
     </div>
-    <div style="margin-top:14px">
-      ${row('مسار سيّئ (p10 — أسوأ 10%)', r.p10, '', false)}
-      ${row('الربع الأدنى (p25)', r.p25, '', false)}
-      ${row('الوسيط المتوقّع (p50)', r.p50, '', true)}
-      ${row('الربع الأعلى (p75)', r.p75, '', false)}
-      ${row('مسار مواتٍ (p90)', r.p90, '', false)}
+
+    <div style="margin-top:8px;margin-bottom:2px" class="small text-muted">
+      رتّبنا كل النتائج من الأسوأ للأفضل. اقرأ كل سطر هكذا: «<b>لو</b> صار لك هذا الحظ، بتكون محفظتك بهذا الحجم»:
     </div>
-    <div style="background:rgba(239,68,68,0.07);border-right:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;margin-top:14px;line-height:1.7" class="small">
-      ⚠️ <strong>خطر تسلسل العوائد:</strong> الفجوة بين المسار السيّئ (p10 = ${fmtShort(r.p10)}) والوسيط (${fmtShort(r.p50)})
-      تقيس هشاشة خطتك أمام انهيار قرب التقاعد. عند التخطيط المحافظ اعتمد <b>p10</b> لا الوسيط —
-      فالمتوسطات تُخفي أسوأ التتابعات.
-      <br>الدخل الشهري المتوقّع عند التقاعد (من التوزيعات): p10 ≈ ${fmt(r.inc10)} · الوسيط ≈ ${fmt(r.inc50)} · p90 ≈ ${fmt(r.inc90)}.
+    <div style="margin-top:6px">
+      ${row('😟', 'لو حظّك سيّئ', 'أسوأ 10 نتائج من كل 100', r.p10, false)}
+      ${row('🙁', 'لو حظّك أقل من المتوسط', 'أسوأ الربع', r.p25, false)}
+      ${row('😐', 'الأكثر توقّعاً', 'المنتصف تماماً', r.p50, true)}
+      ${row('🙂', 'لو حظّك أحسن من المتوسط', 'أفضل الربع', r.p75, false)}
+      ${row('😄', 'لو حظّك ممتاز', 'أفضل 10 نتائج من كل 100', r.p90, false)}
+    </div>
+
+    <div style="background:rgba(240,180,41,0.08);border-right:3px solid #f0b429;border-radius:0 8px 8px 0;padding:11px 13px;margin-top:14px;line-height:1.8" class="small">
+      💡 <strong>ليش نركّز على "لو حظّك سيّئ" بدل المنتصف؟</strong><br>
+      لأن انهيار السوق <b>قرب تقاعدك</b> أخطر بكثير من انهيار وأنت في البداية — وقتها محفظتك تكون في أكبر
+      حجم لها، وما يبقى وقت كافٍ تعوّض الخسارة. عشان تكون آمن، خطّط على أساس السطر «😟 لو حظّك سيّئ»
+      (${fmtShort(r.p10)})، لا على «المنتصف» (${fmtShort(r.p50)}) — المتوسطات تخدعك وتخفي أسوأ الاحتمالات.
+    </div>
+
+    <div style="margin-top:12px;padding:10px 13px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;line-height:1.8" class="small">
+      💵 <strong>دخلك الشهري المتوقّع من التوزيعات عند التقاعد:</strong><br>
+      😟 لو حظّك سيّئ ≈ <b>${fmt(r.inc10)}</b> · 😐 الأكثر توقّعاً ≈ <b>${fmt(r.inc50)}</b> · 😄 لو حظّك ممتاز ≈ <b>${fmt(r.inc90)}</b> <span class="text-muted">(ريال/شهر)</span>
     </div>`;
 }
 
