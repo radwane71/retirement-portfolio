@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260705">
+  <link rel="stylesheet" href="css/style.css?v=20260706">
   <style>
     .gl-dash { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:24px; }
     .gl-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px 18px; }
@@ -67,16 +67,43 @@
     .empty-state { text-align:center; padding:50px 20px; color:var(--text-2); }
     .empty-state .big { font-size:2.5rem; margin-bottom:10px; }
 
-    /* goal cards (modern layout) */
-    .goals-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(290px,1fr)); gap:14px; }
-    .goal-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:15px 16px 12px; display:flex; flex-direction:column; gap:11px; transition:border-color .15s, transform .1s; }
-    .goal-card:hover { border-color:var(--accent); transform:translateY(-2px); }
-    .goal-card .gc-head { display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
-    .goal-card .gc-title { font-weight:700; font-size:0.98rem; line-height:1.45; }
-    .goal-card .gc-meta { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
-    .goal-card .gc-amount { display:flex; justify-content:space-between; font-size:0.82rem; padding-top:2px; }
-    .goal-card .gc-notes { font-size:0.78rem; color:var(--text-2); line-height:1.55; background:var(--bg-3); border-radius:8px; padding:7px 10px; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; }
-    .goal-card .gc-foot { display:flex; justify-content:flex-end; align-items:center; margin-top:auto; padding-top:9px; border-top:1px solid var(--border); }
+    /* ── قائمة الأهداف (To-Do List — صفوف تحت بعض) ── */
+    .goals-list { display:flex; flex-direction:column; gap:8px; }
+    .todo-row {
+      display:flex; align-items:center; gap:12px;
+      background:var(--bg-2); border:1px solid var(--border);
+      border-right:4px solid var(--pri, #9ca3af);
+      border-radius:12px; padding:11px 14px;
+      transition:border-color .15s, background .15s;
+    }
+    .todo-row:hover { border-color:var(--accent); }
+    .todo-row.is-done, .todo-row.is-cancel { opacity:.62; }
+
+    /* مربع الإتمام (checkbox دائري) */
+    .todo-check {
+      width:24px; height:24px; flex-shrink:0; border-radius:50%;
+      border:2px solid var(--border); background:transparent; cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      font-size:.8rem; color:#fff; transition:all .15s; padding:0;
+    }
+    .todo-check:hover { border-color:var(--success); }
+    .todo-check.done { background:var(--success); border-color:var(--success); }
+
+    /* المحتوى الأساسي (العنوان + البادجات) */
+    .todo-main { flex:1; min-width:0; }
+    .todo-title { font-weight:700; font-size:0.95rem; line-height:1.4; }
+    .todo-title.done { text-decoration:line-through; }
+    .todo-meta { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:5px; }
+    .todo-notes { font-size:0.76rem; color:var(--text-2); margin-top:5px; line-height:1.5;
+      display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+
+    /* الجانب (تقدّم + موعد + أزرار) */
+    .todo-side { display:flex; align-items:center; gap:14px; flex-shrink:0; }
+    .todo-prog { width:130px; }
+    .todo-prog-top { display:flex; justify-content:space-between; font-size:.7rem; margin-bottom:3px; }
+    .todo-amount { font-size:.74rem; color:var(--text-2); white-space:nowrap; text-align:left; }
+    .todo-actions { display:flex; gap:6px; }
+
     .deadline { font-size:0.73rem; font-weight:600; display:inline-flex; align-items:center; gap:3px; white-space:nowrap; }
     .deadline.overdue { color:#f87171; }
     .deadline.soon    { color:#fb923c; }
@@ -84,6 +111,13 @@
     .btn-icon { background:var(--bg-3); border:1px solid var(--border); border-radius:8px; padding:5px 9px; cursor:pointer; font-size:0.9rem; line-height:1; transition:background .15s, border-color .15s; }
     .btn-icon:hover { border-color:var(--accent); }
     .btn-icon.danger:hover { border-color:var(--danger); }
+
+    /* على الجوال: يلتفّ الجانب تحت العنوان */
+    @media (max-width:720px) {
+      .todo-row { flex-wrap:wrap; }
+      .todo-side { width:100%; justify-content:space-between; padding-top:9px; margin-top:2px; border-top:1px solid var(--border); }
+      .todo-prog { width:auto; flex:1; }
+    }
   </style>
 </head>
 <body>
@@ -208,8 +242,8 @@
       <input type="text" id="flt-search" placeholder="بحث في الهدف…" oninput="renderGoals()" style="min-width:180px">
     </div>
 
-    <!-- Goal cards -->
-    <div class="goals-grid" id="goals-grid"></div>
+    <!-- Goal list (To-Do style) -->
+    <div class="goals-list" id="goals-grid"></div>
   </main>
 
   <!-- Add/Edit Modal -->
@@ -294,9 +328,9 @@
 
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260705"></script>
-  <script src="js/utils.js?v=20260705"></script>
-  <script src="js/auth.js?v=20260705"></script>  <script src="js/life-goals.js?v=20260705"></script>
+  <script src="js/supabase.js?v=20260706"></script>
+  <script src="js/utils.js?v=20260706"></script>
+  <script src="js/auth.js?v=20260706"></script>  <script src="js/life-goals.js?v=20260706"></script>
   <script>setActiveNav('nav-life-goals');</script>
 </body>
 </html>

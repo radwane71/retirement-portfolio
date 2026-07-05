@@ -174,54 +174,67 @@ function sortGoals(list, mode) {
   return arr;
 }
 
-function goalCardHtml(g) {
-  const prog  = Math.max(0, Math.min(100, +g.progress || 0));
-  const priC  = PRI_CLASS[g.priority] || 'pri-4';
-  const stC   = ST_CLASS[g.status]   || 'st-active';
+function goalRowHtml(g) {
+  const prog   = Math.max(0, Math.min(100, +g.progress || 0));
+  const priC   = PRI_CLASS[g.priority] || 'pri-4';
+  const stC    = ST_CLASS[g.status]    || 'st-active';
   const priClr = PRI_COLOR[g.priority] || '#9ca3af';
-  const dl    = deadlineInfo(g);
+  const dl     = deadlineInfo(g);
   const target = +g.amount || 0;
   const saved  = Math.round(target * prog / 100);
   const progClr = prog >= 100 ? '#4ade80' : prog >= 50 ? 'var(--accent)' : '#fb923c';
-  const dimmed  = (g.status === 'مكتمل' || g.status === 'ملغي') ? 'opacity:.72;' : '';
+  const isDone   = g.status === 'مكتمل';
+  const isCancel = g.status === 'ملغي';
+  const rowCls   = isDone ? 'is-done' : isCancel ? 'is-cancel' : '';
 
   const dlHtml = dl
     ? `<span class="deadline ${dl.cls}">${dl.icon} ${dl.txt}</span>`
     : (g.date ? `<span class="deadline ok">📅 ${formatDate(g.date)}</span>` : '');
 
   const amountHtml = target
-    ? `<div class="gc-amount">
-         <span style="color:var(--text-2)">أُنجز ≈ ${formatSAR(saved)}</span>
-         <span style="font-weight:700">${formatSAR(target)}</span>
-       </div>`
+    ? `<div class="todo-amount">أُنجز ≈ ${formatSAR(saved)}<br><span style="font-weight:700;color:var(--text)">${formatSAR(target)}</span></div>`
     : '';
 
-  return `<div class="goal-card" style="border-top:3px solid ${priClr};${dimmed}">
-    <div class="gc-head">
-      <div class="gc-title">${esc(g.desc)}</div>
-      <span class="st-badge ${stC}">${esc(g.status)}</span>
-    </div>
-    <div class="gc-meta">
-      <span class="area-badge">${esc(g.area||'—')}</span>
-      <span class="pri-badge ${priC}">${esc(g.priority||'—')}</span>
-      ${dlHtml}
-    </div>
-    <div>
-      <div class="progress-wrap" style="height:8px"><div class="progress-bar" style="width:${prog}%;background:${progClr}"></div></div>
-      <div style="display:flex;justify-content:space-between;margin-top:5px">
-        <span style="font-size:.74rem;color:var(--text-2)">نسبة الإنجاز</span>
-        <span style="font-size:.8rem;font-weight:700;color:${progClr}">${prog}%</span>
+  return `<div class="todo-row ${rowCls}" style="--pri:${priClr}">
+    <button class="todo-check ${isDone ? 'done' : ''}" onclick="toggleDone('${g.id}')"
+      title="${isDone ? 'إلغاء الإتمام' : 'وضع علامة مكتمل'}">${isDone ? '✓' : ''}</button>
+    <div class="todo-main">
+      <div class="todo-title ${isDone || isCancel ? 'done' : ''}">${esc(g.desc)}</div>
+      <div class="todo-meta">
+        <span class="st-badge ${stC}">${esc(g.status)}</span>
+        <span class="area-badge">${esc(g.area||'—')}</span>
+        <span class="pri-badge ${priC}">${esc(g.priority||'—')}</span>
+        ${dlHtml}
       </div>
+      ${g.notes && g.notes.trim() ? `<div class="todo-notes">💬 ${esc(g.notes)}</div>` : ''}
     </div>
-    ${amountHtml}
-    ${g.notes && g.notes.trim() ? `<div class="gc-notes">💬 ${esc(g.notes)}</div>` : ''}
-    <div class="gc-foot">
-      <div style="display:flex;gap:6px">
+    <div class="todo-side">
+      <div class="todo-prog">
+        <div class="todo-prog-top"><span style="color:var(--text-2)">الإنجاز</span><span style="font-weight:700;color:${progClr}">${prog}%</span></div>
+        <div class="progress-wrap" style="height:7px;margin:0"><div class="progress-bar" style="width:${prog}%;background:${progClr}"></div></div>
+      </div>
+      ${amountHtml}
+      <div class="todo-actions">
         <button class="btn-icon" onclick="openEditModal('${g.id}')" title="تعديل">✏️</button>
         <button class="btn-icon danger" onclick="openDelModal('${g.id}')" title="حذف">🗑️</button>
       </div>
     </div>
   </div>`;
+}
+
+// وضع/إلغاء علامة "مكتمل" مباشرة من مربع الإتمام (سلوك To-Do List)
+function toggleDone(id) {
+  const g = goals.find(x => x.id === id);
+  if (!g) return;
+  if (g.status === 'مكتمل') {
+    g.status = 'قيد التنفيذ';
+  } else {
+    g.status = 'مكتمل';
+    g.progress = 100;
+  }
+  saveGoals(goals);
+  renderDash();
+  renderGoals();
 }
 
 function renderGoals() {
@@ -238,7 +251,7 @@ function renderGoals() {
     </div>`;
     return;
   }
-  grid.innerHTML = list.map(goalCardHtml).join('');
+  grid.innerHTML = list.map(goalRowHtml).join('');
 }
 
 // ─── Modal ────────────────────────────────────────────────────────────────────
