@@ -1100,7 +1100,7 @@ function renderHistSummary() {
   const items = [
     { val: fmt(h.currentValue),           lbl: 'القيمة السوقية الحالية' },
     { val: fmt(h.costBasis),              lbl: 'التكلفة الأساسية' },
-    { val: xirrLabel,                     lbl: 'XIRR — العائد الداخلي الحقيقي' },
+    { val: xirrLabel,                     lbl: 'XIRR — العائد الداخلي الحقيقي', raw: true },
     { val: growthLabel,                   lbl: 'نمو رأس المال (مُستخدَم في السيناريوهات)', raw: true },
     { val: pct(h.safeDivYield),           lbl: 'عائد الأرباح السنوي' },
     { val: fmt(h.avgAnnualDiv),           lbl: 'متوسط الأرباح السنوية' },
