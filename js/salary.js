@@ -189,6 +189,46 @@ function renderDashboard() {
   document.getElementById('dash-label').textContent     = label;
   document.getElementById('dash-months').textContent    = entries.length + ' شهر';
 
+  // ── معدّل الادخار والاستثمار — أهم مؤشر لبناء الثروة (ادخار + أصول ÷ الراتب) ──
+  const typeAmt = tId => store.categories
+    .filter(c => (c.type || 'expense') === tId)
+    .reduce((s, c) => s + (catTotals[c.id] || 0), 0);
+  const investAmt  = typeAmt('savings') + typeAmt('asset');
+  const investRate = totalSalary > 0 ? investAmt / totalSalary * 100 : 0;
+  const expenseRate = totalSalary > 0 ? typeAmt('expense') / totalSalary * 100 : 0;
+
+  const savRateEl = document.getElementById('dash-savings-rate');
+  const savSubEl  = document.getElementById('dash-savings-sub');
+  const savCardEl = document.getElementById('dash-savings-card');
+  if (savRateEl) {
+    savRateEl.textContent = totalSalary > 0 ? investRate.toFixed(1) + '%' : '—';
+    savSubEl.textContent  = totalSalary > 0
+      ? `مصاريف ${expenseRate.toFixed(0)}% · ادخار+أصول ${investRate.toFixed(0)}%`
+      : 'ادخار + أصول ÷ الراتب';
+    // معيار 50/30/20: ≥20% صحّي، 10-20% مقبول، <10% ضعيف
+    savCardEl.className = 'salary-card' +
+      (totalSalary <= 0 ? '' : investRate >= 20 ? ' success' : investRate >= 10 ? '' : ' danger');
+  }
+
+  // ── بطاقة المتبقي — تأطير محاسبة صفرية: الهدف صفر، لا «فائض أخضر» دائم ──
+  const remCardEl = document.getElementById('dash-remaining-card');
+  const remSubEl  = document.getElementById('dash-remaining-sub');
+  if (remCardEl) {
+    if (totalSalary <= 0) {
+      remCardEl.className = 'salary-card';
+      remSubEl.textContent = 'الأفضل أن يقترب من الصفر';
+    } else if (totalRemaining < 0) {
+      remCardEl.className = 'salary-card danger';
+      remSubEl.textContent = 'التوزيعات تتجاوز الدخل';
+    } else if (totalRemaining <= totalSalary * 0.02) {
+      remCardEl.className = 'salary-card success';
+      remSubEl.textContent = 'ممتاز — كل ريال موجّه';
+    } else {
+      remCardEl.className = 'salary-card accent';
+      remSubEl.textContent = 'مبلغ غير موجّه — خصّصه';
+    }
+  }
+
   // ── ملخص النوع: مصاريف / ادخار / أصول ─────────────────────────────────────
   const typeSumEl = document.getElementById('type-summary');
   if (typeSumEl) {

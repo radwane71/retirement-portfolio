@@ -400,30 +400,7 @@
       }
     </script>
 
-    <!-- Summary Cards -->
-    <div class="section-header" style="margin:0 0 8px">
-      <span class="section-title">💵 ملخص توزيع الراتب</span>
-      <button class="info-btn" type="button" onclick="showCardInfo('salary-summary')" title="كيف أوزّع راتبي؟" style="position:static;opacity:.7">ⓘ</button>
-    </div>
-    <div class="salary-dash">
-      <div class="salary-card accent">
-        <div class="card-label">إجمالي الرواتب</div>
-        <div class="card-value" id="dash-salary">—</div>
-        <div class="card-sub" id="dash-label">الإجمالي الكلي</div>
-      </div>
-      <div class="salary-card">
-        <div class="card-label">إجمالي المُوزَّع</div>
-        <div class="card-value" id="dash-allocated">—</div>
-        <div class="card-sub" id="dash-months">0 شهر</div>
-      </div>
-      <div class="salary-card success">
-        <div class="card-label">المتبقي غير الموزع</div>
-        <div class="card-value" id="dash-remaining">—</div>
-        <div class="card-sub">الفرق بين الراتب والتوزيعات</div>
-      </div>
-    </div>
-
-    <!-- Date Range Filter -->
+    <!-- Date Range Filter (global control — يتحكم بكل الأرقام تحته) -->
     <div class="date-range-bar">
       <label>من:</label>
       <select id="from-month" onchange="applyDateRange()">
@@ -449,6 +426,34 @@
       </select>
       <select id="to-year" onchange="applyDateRange()"><option value="">— سنة</option></select>
       <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.82rem" onclick="clearDateRange()">مسح الفلتر</button>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="section-header" style="margin:0 0 8px">
+      <span class="section-title">💵 ملخص توزيع الراتب</span>
+      <button class="info-btn" type="button" onclick="showCardInfo('salary-summary')" title="كيف أوزّع راتبي؟" style="position:static;opacity:.7">ⓘ</button>
+    </div>
+    <div class="salary-dash">
+      <div class="salary-card accent">
+        <div class="card-label">إجمالي الرواتب</div>
+        <div class="card-value" id="dash-salary">—</div>
+        <div class="card-sub" id="dash-label">الإجمالي الكلي</div>
+      </div>
+      <div class="salary-card">
+        <div class="card-label">إجمالي المُوزَّع</div>
+        <div class="card-value" id="dash-allocated">—</div>
+        <div class="card-sub" id="dash-months">0 شهر</div>
+      </div>
+      <div class="salary-card" id="dash-savings-card">
+        <div class="card-label">معدّل الادخار والاستثمار</div>
+        <div class="card-value" id="dash-savings-rate">—</div>
+        <div class="card-sub" id="dash-savings-sub">ادخار + أصول ÷ الراتب</div>
+      </div>
+      <div class="salary-card" id="dash-remaining-card">
+        <div class="card-label">المتبقي غير الموزع</div>
+        <div class="card-value" id="dash-remaining">—</div>
+        <div class="card-sub" id="dash-remaining-sub">الأفضل أن يقترب من الصفر</div>
+      </div>
     </div>
 
     <!-- Type Summary + Category Breakdown -->
@@ -522,7 +527,21 @@
 
     </div>
 
-    <!-- Category Management -->
+    <!-- Table -->
+    <div class="section-box">
+      <div class="table-toolbar">
+        <h3 style="margin:0">السجلات الشهرية</h3>
+        <button class="btn btn-secondary" onclick="exportCSV()" style="margin-right:auto">📤 تصدير CSV</button>
+      </div>
+      <div class="table-wrap">
+        <table class="salary-table">
+          <thead id="salary-thead"></thead>
+          <tbody id="salary-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Category Management (إعدادات — في الأسفل بعيداً عن التدفق التحليلي) -->
     <div class="section-box">
       <h3>
         إدارة الفئات
@@ -540,20 +559,6 @@
           <option value="asset">📈 أصول</option>
         </select>
         <button class="btn btn-secondary" onclick="addCategory()">+ إضافة فئة</button>
-      </div>
-    </div>
-
-    <!-- Table -->
-    <div class="section-box">
-      <div class="table-toolbar">
-        <h3 style="margin:0">السجلات الشهرية</h3>
-        <button class="btn btn-secondary" onclick="exportCSV()" style="margin-right:auto">📤 تصدير CSV</button>
-      </div>
-      <div class="table-wrap">
-        <table class="salary-table">
-          <thead id="salary-thead"></thead>
-          <tbody id="salary-tbody"></tbody>
-        </table>
       </div>
     </div>
   </main>
