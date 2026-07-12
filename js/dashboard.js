@@ -2725,7 +2725,13 @@ async function onHoldingSaved(id, field, val) {
   // لو عدّل السعر يدوياً — ضع علامة حتى لا يُلمس في الـ refresh التلقائي
   if (field === 'current_price' && h) {
     h.price_manual = true;
-    await supabaseClient.from('holdings').update({ price_manual: true }).eq('id', id);
+    // تعديل السعر يدوياً = سعر حالي حقيقي: اختم وقت التحديث حتى لا يُعتبر قديماً
+    const nowISO = new Date().toISOString();
+    h.price_updated_at = nowISO;
+    _priceTimestamps[h.ticker] = nowISO;
+    _savePriceTimestamps();
+    await supabaseClient.from('holdings')
+      .update({ price_manual: true, price_updated_at: nowISO }).eq('id', id);
     checkPriceZones(h.ticker, +val);
   }
   renderStats();
@@ -3348,7 +3354,10 @@ async function saveHolding(e) {
     shares:        +g('h-shares').value    || 0,
     avg_price:     +g('h-avg-price').value || 0,
     current_price: +g('h-cur-price').value || 0,
-    target_weight: +g('h-target-wt').value || 0
+    target_weight: +g('h-target-wt').value || 0,
+    // السعر مُدخل يدوياً = حالي حقيقي: علّمه واختم وقته حتى لا يظهر قديماً
+    price_manual: true,
+    price_updated_at: new Date().toISOString()
   };
   let error;
   if (editingId) ({ error } = await supabaseClient.from('holdings').update(payload).eq('id', editingId));
