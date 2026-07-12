@@ -295,10 +295,14 @@ async function loadAllData() {
 
   // AUDIT-FIX: seed _priceTimestamps from DB's price_updated_at so staleness check
   // survives localStorage clearing without showing all prices as stale
+  // قاعدة البيانات هي المرجع للأسعار التلقائية: خذ الأحدث بين DB و localStorage
+  // (كان الشرط القديم !_priceTimestamps يرفض تحديث ختم عالق قديم في localStorage
+  //  فيظهر السعر الحديث مقترناً بختم قديم = «قديم» زوراً)
   holdings.forEach(h => {
-    if (h.price_updated_at && !_priceTimestamps[h.ticker]) {
-      _priceTimestamps[h.ticker] = h.price_updated_at;
-    }
+    if (!h.price_updated_at) return;
+    const dbTs    = new Date(h.price_updated_at).getTime();
+    const localTs = _priceTimestamps[h.ticker] ? new Date(_priceTimestamps[h.ticker]).getTime() : 0;
+    if (dbTs > localTs) _priceTimestamps[h.ticker] = h.price_updated_at;
   });
   _savePriceTimestamps();
 
