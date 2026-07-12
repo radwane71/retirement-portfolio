@@ -92,8 +92,10 @@ function getPriceAgeDays(ticker) {
 }
 
 // هل يوجد أي سهم في المحفظة سعره قديم أكثر من STALE_DAYS؟
+// السعر اليدوي (price_manual) يصونه المالك عمداً = لا يُعتبر قديماً أبداً.
 function hasStalePrice() {
   return holdings.some(h => {
+    if (h.price_manual) return false;
     const age = getPriceAgeDays(h.ticker);
     return age === null || age > STALE_DAYS;
   });
@@ -2687,7 +2689,11 @@ function renderTable() {
     // ── مؤشر قِدم السعر ───────────────────────────────────────
     const ageDays = getPriceAgeDays(h.ticker);
     let staleBadge = '';
-    if (ageDays === null) {
+    if (h.price_manual) {
+      // سعر يدوي يصونه المالك عمداً — لا يُوسَم قديماً
+      staleBadge = `<span title="سعر يدوي — تُدخله وتصونه بنفسك"
+        style="color:var(--text-muted);font-size:0.7rem;margin-right:4px;cursor:help">✋</span>`;
+    } else if (ageDays === null) {
       staleBadge = `<span title="السعر لم يُحدَّث بعد — انقر 🔄 لتحديث الأسعار"
         style="color:var(--text-muted);font-size:0.7rem;margin-right:4px;cursor:help">⏰?</span>`;
     } else if (ageDays > STALE_DAYS) {
