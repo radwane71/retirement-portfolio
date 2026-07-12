@@ -2694,9 +2694,10 @@ function renderTable() {
     const ageDays = getPriceAgeDays(h.ticker);
     let staleBadge = '';
     if (h.price_manual) {
-      // سعر يدوي يصونه المالك عمداً — لا يُوسَم قديماً
-      staleBadge = `<span title="سعر يدوي — تُدخله وتصونه بنفسك"
-        style="color:var(--text-muted);font-size:0.7rem;margin-right:4px;cursor:help">✋</span>`;
+      // سعر يدوي — انقر ✋ لإرجاع السهم للتحديث التلقائي
+      staleBadge = `<span title="سعر يدوي (مستثنى من التحديث التلقائي) — انقر لإرجاعه تلقائياً"
+        onclick="event.stopPropagation(); unmarkManualPrice('${esc(h.id)}')"
+        style="color:var(--warning,#f0ad4e);font-size:0.7rem;margin-right:4px;cursor:pointer">✋</span>`;
     } else if (ageDays === null) {
       staleBadge = `<span title="السعر لم يُحدَّث بعد — انقر 🔄 لتحديث الأسعار"
         style="color:var(--text-muted);font-size:0.7rem;margin-right:4px;cursor:help">⏰?</span>`;
@@ -2751,6 +2752,19 @@ async function onHoldingSaved(id, field, val) {
   renderBreakEvenCard();
   renderAllocationChart();
   renderRetirementCard();
+}
+
+// إلغاء علامة «سعر يدوي» وإرجاع السهم للتحديث التلقائي (نقرة على ✋)
+async function unmarkManualPrice(id) {
+  const h = holdings.find(x => x.id === id);
+  if (!h) return;
+  h.price_manual = false;
+  const { error } = await supabaseClient.from('holdings')
+    .update({ price_manual: false }).eq('id', id);
+  if (error) { showToast('تعذّر الإرجاع للتلقائي: ' + error.message, 'error'); return; }
+  showToast(`↩️ ${h.ticker} رجع للتحديث التلقائي — جارٍ جلب السعر…`, 'success');
+  renderTable();
+  await refreshPrices(true);   // اجلب السعر التلقائي فوراً ليُختم بوقت جديد
 }
 
 // ── Price Zone Alerts ─────────────────────────────────────────
@@ -3365,8 +3379,7 @@ async function saveHolding(e) {
     avg_price:     +g('h-avg-price').value || 0,
     current_price: +g('h-cur-price').value || 0,
     target_weight: +g('h-target-wt').value || 0,
-    // السعر مُدخل يدوياً = حالي حقيقي: علّمه واختم وقته حتى لا يظهر قديماً
-    price_manual: true,
+    // اختم وقت السعر حتى لا يظهر قديماً (دون فرض «يدوي» — يبقى تلقائياً)
     price_updated_at: new Date().toISOString()
   };
   let error;
