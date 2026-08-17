@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817i">
+  <link rel="stylesheet" href="css/style.css?v=20260817j">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -308,22 +308,44 @@
           <label>نوع الشركة <button class="help-icon" onclick="showHelp('companyType')">ℹ️</button></label>
           <select id="companyType" onchange="toggleCompanyType()">
             <option value="normal">شركة عادية</option>
+            <option value="cyclical">دوري (إسمنت / بتروكيماويات)</option>
             <option value="reit">صندوق ريت عقاري</option>
             <option value="bank">بنك / مصرف</option>
           </select>
           <div id="bankModeNotice" class="bank-warn" style="display:none;margin-top:8px;">
-            ⚠️ وضع البنك — DCF وFCF وCap Rate <strong>لا تنطبق</strong> على البنوك. تُستخدم هنا P/B وP/E، مع DDM (جوردون) عند توفر DPS.
+            ⚠️ وضع البنك — DCF وFCF وCap Rate <strong>لا تنطبق</strong> على البنوك. تُستخدم هنا P/B وP/E، مع DDM مخصوماً بـ<strong>تكلفة حقوق الملكية Ke</strong> (لا WACC — ودائع البنك مادة تشغيل لا تمويل).
+          </div>
+          <div id="cyclicalModeNotice" class="bank-warn" style="display:none;margin-top:8px;">
+            🏭 وضع دوري — القيمة العادلة للشركة الدورية تتبع <strong>موضع الدورة</strong> لا قيمة الشركة. أدخل أرباحاً وتدفقاً <strong>مُطبَّعَين</strong> (متوسط 5–7 سنوات) وإلا فالرقم يعكس القاع أو الذروة لا القيمة.
           </div>
         </div>
 
         <div id="normalCompanyInputs">
           <div class="ig"><label>الربح للسهم (EPS) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('eps')">ℹ️</button></label><input type="number" id="eps" value="5.0" step="0.01" oninput="runFieldChecks()"></div>
-          <div class="ig"><label>التدفق النقدي الحر للسهم (FCF) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('fcf')">ℹ️</button></label><input type="number" id="fcf" value="3.0" step="0.1" oninput="runFieldChecks()"></div>
+          <div class="ig">
+            <label>التدفق النقدي الحر للسهم (FCF) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('fcf')">ℹ️</button></label>
+            <input type="number" id="fcf" value="3.0" step="0.1" oninput="runFieldChecks()">
+            <p class="hint" id="fcfHint">FCFF = التدفق التشغيلي <strong>+ الفوائد بعد الضريبة</strong> − النفقات الرأسمالية. (التشغيلي − الرأسمالي وحده يعطي FCFE لأن الفوائد مخصومة داخل التشغيلي تحت IFRS.)</p>
+          </div>
+          <div class="ig">
+            <label>أساس التدفق المُدخَل <span class="unit-tag">اختيار</span> <button class="help-icon" onclick="showHelp('fcfBasis')">ℹ️</button></label>
+            <select id="fcfBasis" onchange="toggleFcfBasis();runFieldChecks()">
+              <option value="fcff">FCFF — تدفق حرّ للمنشأة (يُخصم بـ WACC ويُطرح الدين)</option>
+              <option value="fcfe">FCFE — تدفق حرّ لحقوق الملكية (يُخصم بـ Ke ولا يُطرح الدين)</option>
+            </select>
+            <p class="hint">الاختيار يحدّد آلياً معدل الخصم وهل يُطرح الدين — لمنع الخصم المزدوج.</p>
+          </div>
           <div class="ig">
             <label>الدين الصافي للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('netDebt')">ℹ️</button></label>
-            <input type="number" id="netDebt" value="0" step="0.1">
-            <p class="hint">= (إجمالي الديون − النقد) ÷ عدد الأسهم. سالب إذا كانت الشركة نقدية صافية.</p>
+            <input type="number" id="netDebt" value="" step="0.1" placeholder="إلزامي — أدخل القيمة أو علّم «لا يوجد دين»">
+            <div class="cg" style="margin-top:6px"><label><input type="checkbox" id="noNetDebt" onchange="runFieldChecks()"> ✅ لا يوجد دين صافٍ (صفر) — تأكيد صريح</label></div>
+            <p class="hint">= (إجمالي الديون − النقد) ÷ عدد الأسهم. سالب إذا كانت الشركة نقدية صافية. <strong>فارغ ≠ صفر</strong>: تركه فارغاً يرفع القيمة العادلة بلا سند.</p>
           </div>
+        </div>
+
+        <div id="cyclicalInputs" style="display:none;">
+          <div class="ig"><label>EPS مُطبَّع (متوسط 5–7 سنوات) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('normEps')">ℹ️</button></label><input type="number" id="normEps" value="" step="0.01" placeholder="اختياري — لكن بدونه الرقم يتبع موضع الدورة" oninput="runFieldChecks()"></div>
+          <div class="ig"><label>FCF مُطبَّع (متوسط 5–7 سنوات) <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('normFcf')">ℹ️</button></label><input type="number" id="normFcf" value="" step="0.01" placeholder="اختياري — يُستخدم في DCF بدل الرقم اللحظي" oninput="runFieldChecks()"></div>
         </div>
 
         <div id="reitInputs" style="display:none;">
@@ -332,7 +354,17 @@
           <div class="ig"><label>التدفقات النقدية التشغيلية للوحدة (FFO) <span class="unit-tag">ر.س/وحدة</span> <button class="help-icon" onclick="showHelp('ffo')">ℹ️</button></label><input type="number" id="ffo" value="8.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
           <div class="ig"><label>مضاعف P/FFO العادل <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('pffoMultiple')">ℹ️</button></label><input type="number" id="pffoMultiple" value="12" step="0.5" min="1" max="40"><p class="hint">الريتات السعودية: 10–16x</p></div>
           <div class="ig"><label>معدل الرسملة العقارية Cap Rate <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('capRate')">ℹ️</button></label><input type="number" id="capRate" value="8.0" step="0.1" min="0.1" max="30"></div>
-          <div class="ig"><label>إجمالي الديون <span class="unit-tag">ر.س إجمالي</span> <button class="help-icon" onclick="showHelp('totalDebt')">ℹ️</button></label><input type="number" id="totalDebt" value="0" step="1000" min="0"></div>
+          <div class="ig">
+            <label>صافي دخل التشغيل NOI (سنوي) <span class="unit-tag">ر.س إجمالي</span> <button class="help-icon" onclick="showHelp('noi')">ℹ️</button></label>
+            <input type="number" id="noi" value="" step="1000" min="0" placeholder="اتركه فارغاً إن لم يتوفر — لن يُحتسب Cap Rate" oninput="runFieldChecks()">
+            <p class="hint">Cap Rate يقابله <strong>NOI</strong> (إيراد الإيجار − مصاريف التشغيل، <strong>قبل</strong> الفوائد والإدارية والاستهلاك) — لا FFO. بدونه لا يُحتسب النموذج (§8: لا تقدير صامت).</p>
+          </div>
+          <div class="ig">
+            <label>إجمالي الديون <span class="unit-tag">ر.س إجمالي</span> <button class="help-icon" onclick="showHelp('totalDebt')">ℹ️</button></label>
+            <input type="number" id="totalDebt" value="" step="1000" min="0" placeholder="إلزامي — أدخل القيمة أو علّم «لا يوجد دين»">
+            <div class="cg" style="margin-top:6px"><label><input type="checkbox" id="noTotalDebt" onchange="runFieldChecks()"> ✅ لا يوجد دين (صفر) — تأكيد صريح</label></div>
+            <p class="hint"><strong>فارغ ≠ صفر</strong>: تركه فارغاً يضخّم NAV للوحدة ويعطي دائماً أعلى قيمة ممكنة.</p>
+          </div>
         </div>
 
         <!-- ── حقول البنك ── -->
@@ -365,24 +397,33 @@
           <input type="number" id="growthPerp" value="2.5" step="0.1" min="0" max="3" oninput="validateGrowthPerp();runFieldChecks()">
           <div id="growthPerpWarning">⚠️ النمو الدائم لا يتجاوز 3% — تم التصحيح تلقائياً</div>
         </div>
-        <div class="ig"><label>معدل الخصم WACC <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('discountRate')">ℹ️</button></label><input type="number" id="discountRate" value="8.0" step="0.1" min="0.1" oninput="runFieldChecks()"></div>
+        <div class="ig" id="discountRateRow"><label>معدل الخصم WACC <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('discountRate')">ℹ️</button></label><input type="number" id="discountRate" value="8.0" step="0.1" min="0.1" oninput="runFieldChecks()"></div>
+        <div class="ig" id="costOfEquityRow" style="display:none;">
+          <label>تكلفة حقوق الملكية Ke <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('costOfEquity')">ℹ️</button></label>
+          <input type="number" id="costOfEquity" value="" step="0.1" min="0.1" placeholder="اتركه فارغاً ليُحسب بـ CAPM من بيتا" oninput="runFieldChecks()">
+          <p class="hint" id="keHint">CAPM: Ke = العائد الخالي من المخاطر + بيتا × (عائد السوق − الخالي من المخاطر). يُحسب تلقائياً من حقل «بيتا» أدناه، ويمكن تجاوزه يدوياً هنا.</p>
+        </div>
         <div class="ig"><label>مكرر الربحية الحالي P/E <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('currentPe')">ℹ️</button></label><input type="number" id="currentPe" value="15.0" step="0.1" min="0"></div>
         <div class="ig"><label>مكرر ربحية القطاع <span class="unit-tag">مضاعف ×</span> <button class="help-icon" onclick="showHelp('sectorPe')">ℹ️</button></label><input type="number" id="sectorPe" value="18.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
         <div class="ig"><label>توزيعات الأرباح السنوية للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('dividends')">ℹ️</button></label><input type="number" id="dividends" value="1.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
         <div class="ig"><label>القيمة الدفترية للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('bookValue')">ℹ️</button></label><input type="number" id="bookValue" value="20.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
         <div class="ig"><label>عائد السندات الحكومية 10 سنوات <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('bondYield')">ℹ️</button></label><input type="number" id="bondYield" value="6.5" step="0.1" min="0.1" max="30" oninput="runFieldChecks()"></div>
         <div class="ig"><label>السعر الحالي للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('currentPrice')">ℹ️</button></label><input type="number" id="currentPrice" value="50.0" step="0.1" min="0"></div>
-        <div class="ig"><label>بيتا Beta <span class="unit-tag">معامل</span> <button class="help-icon" onclick="showHelp('betaMain')">ℹ️</button></label><input type="number" id="betaMain" value="" step="0.05" min="0" placeholder="مثال: 0.85 — اختياري للتسجيل"><p class="hint">يُسجَّل مع كل عملية للمقارنة اللاحقة. مصدر موصى به: TradingView مقابل تاسي.</p></div>
+        <div class="ig"><label>بيتا Beta <span class="unit-tag">معامل</span> <button class="help-icon" onclick="showHelp('betaMain')">ℹ️</button></label><input type="number" id="betaMain" value="" step="0.05" min="0" placeholder="مثال: 0.85" oninput="runFieldChecks()"><p class="hint">حقل بيتا <strong>الوحيد</strong> في الصفحة: يُسجَّل مع كل عملية، ويغذّي CAPM (تكلفة حقوق الملكية Ke) وحساب WACC التلقائي. مصدر موصى به: TradingView أو StockAnalysis مقابل تاسي. <strong>GuruFocus يرجّع 0.0 للأسهم السعودية و Yahoo يقيس على مؤشر أمريكي — كلاهما غير صالح.</strong></p></div>
       </div>
 
       <!-- بطاقة الإعدادات المتقدمة -->
       <div class="card">
         <div class="section-hdr">⚙️ الإعدادات المتقدمة</div>
-        <div class="ig cg"><label><input type="checkbox" id="useWacc"> حساب WACC تلقائياً <button class="help-icon" onclick="showHelp('useWacc')">ℹ️</button></label></div>
+        <div class="ig cg" id="useWaccRow"><label><input type="checkbox" id="useWacc"> حساب WACC تلقائياً <button class="help-icon" onclick="showHelp('useWacc')">ℹ️</button></label></div>
+        <div id="useWaccBankNote" class="bank-warn" style="display:none;">
+          🏦 «حساب WACC تلقائياً» <strong>معطَّل في وضع البنك عمداً</strong>. الودائع مادة تشغيل البنك لا مصدر تمويله، فإدخالها في وزن الدين يهبط بمعدل الخصم إلى مستوى غير حقيقي ويضخّم DDM أضعافاً. البنك يُخصم بـ<strong>تكلفة حقوق الملكية Ke</strong> فقط.
+        </div>
+        <div id="capmInputs" style="display:none;">
+          <div class="ig"><label>معدل العائد الخالي من المخاطر <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('riskFree')">ℹ️</button></label><input type="number" id="riskFree" value="4.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
+          <div class="ig"><label>عائد السوق المتوقع <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('marketReturn')">ℹ️</button></label><input type="number" id="marketReturn" value="8.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
+        </div>
         <div id="waccInputs" style="display:none;">
-          <div class="ig"><label>معدل العائد الخالي من المخاطر <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('riskFree')">ℹ️</button></label><input type="number" id="riskFree" value="4.0" step="0.1" min="0"></div>
-          <div class="ig"><label>بيتا Beta <span class="unit-tag">معامل (بلا وحدة)</span> <button class="help-icon" onclick="showHelp('beta')">ℹ️</button></label><input type="number" id="beta" value="1.2" step="0.05" min="0"></div>
-          <div class="ig"><label>عائد السوق المتوقع <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('marketReturn')">ℹ️</button></label><input type="number" id="marketReturn" value="8.0" step="0.1" min="0"></div>
           <div class="ig"><label>تكلفة الدين <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('debtCost')">ℹ️</button></label><input type="number" id="debtCost" value="5.0" step="0.1" min="0"></div>
           <div class="ig"><label>معدل الضريبة <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('taxRate')">ℹ️</button></label><input type="number" id="taxRate" value="20.0" step="0.1" min="0" max="100"></div>
           <div class="ig"><label>نسبة الدين إلى حقوق الملكية D/E <span class="unit-tag">نسبة ×</span> <button class="help-icon" onclick="showHelp('debtEquity')">ℹ️</button></label><input type="number" id="debtEquity" value="0.5" step="0.05" min="0"></div>
@@ -416,6 +457,24 @@
           <textarea id="calcNotes" placeholder="ملاحظاتك الخاصة عن هذا التقييم — تُحفظ مع العملية في السجل."></textarea>
         </div>
 
+        <!-- ربط التقييم بالقرار (§4 مخرَج الفلاتر) -->
+        <div class="section-hdr" style="margin-top:16px;">🧭 القرار المترتّب على هذا التقييم</div>
+        <div class="ig">
+          <label>القرار <span class="unit-tag">اختيار</span> <button class="help-icon" onclick="showHelp('decision')">ℹ️</button></label>
+          <select id="calcDecision">
+            <option value="">— لم يُتّخذ بعد —</option>
+            <option value="hold">احتفاظ</option>
+            <option value="accumulate">تجميع</option>
+            <option value="trim">تخفيف</option>
+            <option value="exit">خروج</option>
+            <option value="watch">مراقبة</option>
+          </select>
+        </div>
+        <div class="ig">
+          <label>سعر التنفيذ <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('execPrice')">ℹ️</button></label>
+          <input type="number" id="calcExecPrice" value="" step="0.01" min="0" placeholder="السعر الذي نُفِّذ عنده القرار (اختياري)">
+        </div>
+
         <div id="editModeBadge" class="edit-mode-badge">✏️ وضع التعديل — ستُحدَّث العملية المحددة عند الضغط على «احسب»</div>
         <button class="btn btn-secondary btn-sm" id="cancelEditBtn" style="display:none;margin-bottom:8px;width:100%" onclick="cancelEdit()">إلغاء التعديل ✕</button>
         <button class="calc-btn" onclick="calculateFairValue()">احسب القيمة العادلة</button>
@@ -425,18 +484,34 @@
 
     <!-- النتائج -->
     <div class="results-section" id="resultsSection">
-      <div class="result-card">
-        <h2>🏢 قيمة المنشأة (Enterprise Value)</h2>
+      <div class="result-card" id="enterpriseValueCard">
+        <h2 id="enterpriseValueTitle">🏢 قيمة المنشأة (Enterprise Value)</h2>
         <div class="result-amount" id="enterpriseValueRange">-</div>
         <div class="result-period"  id="enterpriseValueDetails">-</div>
-        <div class="disclaimer-note">⚠️ هذه القيمة إجمالي قيمة الشركة قبل خصم الديون الصافية</div>
+        <div class="disclaimer-note" id="enterpriseValueNote">⚠️ هذه القيمة إجمالي قيمة الشركة قبل خصم الديون الصافية</div>
+      </div>
+      <div id="sustainGateBanner" class="note" data-state="bad" style="display:none;margin-bottom:16px;">
+        <span class="ic">⛔</span><div id="sustainGateText"></div>
       </div>
       <div class="result-card">
         <h2>💰 القيمة العادلة للسهم الواحد</h2>
         <div class="result-amount" id="fairValueRange">-</div>
         <div class="result-period"  id="fairValueDetails">-</div>
+        <div id="bookFloorLine" style="display:none;font-size:0.84rem;color:var(--text-2);margin-top:8px;"></div>
+        <div id="marginDualLine" style="display:none;font-size:0.86rem;margin-top:8px;font-weight:600;"></div>
         <div class="disclaimer-note">⚠️ أداة تعليمية رياضية فقط — ليست توصية استثمارية</div>
       </div>
+      <div id="dispersionBox" class="note" data-state="warn" style="display:none;margin-bottom:16px;">
+        <span class="ic">📊</span>
+        <div style="flex:1">
+          <div id="dispersionText" style="margin-bottom:8px;"></div>
+          <div id="anchorPickerWrap" style="display:none;">
+            <label style="display:block;font-size:0.8rem;margin-bottom:4px;">اختر نموذج المرساة الذي يُحسب عليه الهامش (يُحفظ في السجل):</label>
+            <select id="anchorModel" onchange="onAnchorChange()" style="width:100%;max-width:340px;padding:7px 10px;background:var(--bg-1);border:1px solid var(--border);border-radius:7px;color:var(--text);font-family:'Tajawal',sans-serif;font-size:0.88rem;"></select>
+          </div>
+        </div>
+      </div>
+      <div id="bankSafetyWarning" class="outlier-warning"></div>
       <div id="outlierWarning" class="outlier-warning"></div>
 
       <div class="card">
@@ -473,11 +548,49 @@
         </div>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;">
-        <input type="search" id="hist-search" placeholder="🔎 ابحث برمز السهم أو اسمه…" oninput="onHistSearch()"
-               style="flex:1;min-width:200px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.88rem;">
+        <input type="search" id="hist-search" placeholder="🔎 ابحث برمز السهم أو اسمه أو داخل الملاحظات وتقييم Perplexity…" oninput="onHistSearch()"
+               style="flex:1;min-width:220px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.88rem;">
         <span id="hist-count" class="text-muted" style="font-size:0.8rem;"></span>
       </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;">
+        <select id="hist-f-type" onchange="onHistFilter()" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="">كل الأنواع</option>
+          <option value="normal">📊 شركة عادية</option>
+          <option value="cyclical">🏭 دوري</option>
+          <option value="reit">🏢 ريت عقاري</option>
+          <option value="bank">🏦 بنك / مصرف</option>
+        </select>
+        <select id="hist-f-verdict" onchange="onHistFilter()" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="">كل الأحكام</option>
+          <option value="under">✅ مقيّم بأقل (هامش أمان)</option>
+          <option value="over">🔴 مبالغ في تقييمه</option>
+          <option value="exit">⛔ فشل بوابة الاستدامة</option>
+          <option value="none">— بلا حكم</option>
+        </select>
+        <select id="hist-f-margin" onchange="onHistFilter()" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="">كل الهوامش</option>
+          <option value="gt30">هامش أمان &gt; 30%</option>
+          <option value="gt15">هامش أمان &gt; 15%</option>
+          <option value="0to15">هامش 0–15%</option>
+          <option value="neg">سالب (مبالغ فيه)</option>
+        </select>
+        <select id="hist-f-decision" onchange="onHistFilter()" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="">كل القرارات</option>
+          <option value="hold">احتفاظ</option>
+          <option value="accumulate">تجميع</option>
+          <option value="trim">تخفيف</option>
+          <option value="exit">خروج</option>
+          <option value="watch">مراقبة</option>
+          <option value="__none">بلا قرار مسجَّل</option>
+        </select>
+        <span id="hist-stale-count" class="tag" data-state="warn" style="display:none;"></span>
+      </div>
+      <div id="hist-timeline-wrap" style="display:none;margin-bottom:14px;">
+        <div class="chart-box"><canvas id="histTimelineChart"></canvas></div>
+        <p class="hint" style="margin-top:6px;text-align:center;">الخط الأزرق = القيمة العادلة · الأحمر = السعر وقت التقييم · المساحة الخضراء = هامش الأمان (§4 الفلتر 2: تطوّر المكوّن عبر الزمن)</p>
+      </div>
       <div id="historyList"></div>
+      <div id="hist-pager" style="display:none;justify-content:center;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;"></div>
     </div>
 
     <!-- المنهجية -->
@@ -485,13 +598,15 @@
       <div class="section-hdr">📚 كيف تعمل الحاسبة؟</div>
       <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:14px;">لتعزيز الشفافية، نوضح جميع المعادلات والنماذج المالية المستخدمة:</p>
       <div class="method-grid">
-        <div class="method-card"><h3>📊 DCF — التدفق النقدي المخصوم</h3><div class="formula">القيمة = Σ FCFt/(1+r)^t + TV/(1+r)^10<br>TV = FCF10 × (1+g) / (r − g)<br>قيمة السهم = EV − الدين الصافي للسهم</div><div class="formula-detail"><p>السنوات 1-5: FCF ينمو بـ growth_5yr | السنوات 6-10: بـ growth_perp</p><p>✅ الدين الصافي يُطرح من EV للحصول على قيمة حقوق الملكية الفعلية</p></div></div>
-        <div class="method-card"><h3>📈 معادلة جراهام المعدلة</h3><div class="formula">V = (EPS × min(8.5 + 2g, 25) × 4.4) / Y</div><div class="formula-detail"><p>g = نسبة النمو المتوقع (%) | Y = عائد السندات 10 سنوات (%)</p><p>الحد الأقصى للمضاعف 25 لمنع المبالغة بشركات النمو السريع</p></div></div>
+        <div class="method-card"><h3>📊 DCF — التدفق النقدي المخصوم</h3><div class="formula">القيمة = Σ FCFt/(1+r)^t + TV/(1+r)^10<br>TV = FCF10 × (1+g) / (r − g)<br>FCFF: قيمة السهم = EV − الدين الصافي للسهم<br>FCFE: قيمة السهم = EV (بلا طرح)</div><div class="formula-detail"><p>السنوات 1-5: FCF ينمو بـ growth_5yr | السنوات 6-10: بـ growth_perp</p><p>✅ معدل الخصم يتبع الأساس: FCFF ← WACC · FCFE ← Ke — ومنه يُحدَّد آلياً هل يُطرح الدين، منعاً للخصم المزدوج</p></div></div>
+        <div class="method-card"><h3>📈 معادلة جراهام المعدلة</h3><div class="formula">V = (EPS × min(8.5 + 2g, 25) × 4.4) / Y</div><div class="formula-detail"><p>g = نسبة النمو المتوقع (%) | Y = عائد السندات 10 سنوات (%)</p><p>⚠️ السقف 25 ينشط عند <strong>g = 8.25%</strong> (8.5 + 2×8.25 = 25) — أي نمو فوق ذلك بلا أثر على النتيجة إطلاقاً، ولا حتى السيناريو المتفائل</p></div></div>
         <div class="method-card"><h3>💰 نموذج P/E</h3><div class="formula">القيمة = EPS × min(P/E القطاع, 40)</div><div class="formula-detail"><p>الحد الأقصى 40 لمنع التضخم في التقييم</p></div></div>
-        <div class="method-card"><h3>🌱 نموذج جوردون (Gordon Growth)</h3><div class="formula">V = D₁ / (r − g) = Div × (1+g) / (r−g)</div><div class="formula-detail"><p>يُطبق فقط إذا كان r &gt; g | للشركات ذات التوزيعات المستقرة</p></div></div>
-        <div class="method-card"><h3>📖 القيمة الدفترية المعدلة</h3><div class="formula">V = القيمة الدفترية × P/B العادل</div></div>
-        <div class="method-card"><h3>🏢 تقييم الريت</h3><div class="formula">NAV للوحدة = (NAV − الديون) ÷ عدد الوحدات<br>قيمة P/FFO = FFO × مضاعف P/FFO</div><div class="formula-detail"><p>✅ P/FFO هو المقياس الصحيح للريتات</p></div></div>
-        <div class="method-card"><h3>⚙️ WACC</h3><div class="formula">WACC = (E/V × Re) + (D/V × Rd × (1−T))<br>Re = Rf + β × (Rm − Rf)</div></div>
+        <div class="method-card"><h3>🌱 نموذج جوردون (Gordon Growth)</h3><div class="formula">V = D₁ / (r − g) = Div × (1+g) / (r−g)</div><div class="formula-detail"><p>يُطبق فقط إذا كان r &gt; g | للشركات ذات التوزيعات المستقرة</p><p>🏦 في وضع البنك r = <strong>Ke</strong> لا WACC</p></div></div>
+        <div class="method-card"><h3>🧱 الأرضية الدفترية</h3><div class="formula">الأرضية = القيمة الدفترية × P/B العادل</div><div class="formula-detail"><p>قيمة <strong>تصفية</strong> لا قيمة منشأة عاملة — تُعرض حدّاً أدنى و<strong>لا تدخل متوسط القيمة العادلة</strong> للشركة العادية/الدورية (كانت تسحبه 11–16% لأسفل بانتظام)</p><p>استثناء: P/B في وضع البنك نموذج أساسي ويبقى داخل المتوسط</p></div></div>
+        <div class="method-card"><h3>🏭 الشركة الدورية</h3><div class="formula">جراهام / P/E ← EPS مُطبَّع<br>DCF ← FCF مُطبَّع<br>(متوسط 5–7 سنوات)</div><div class="formula-detail"><p>قيمة الشركة الدورية لا تتغيّر بتغيّر موضع الدورة، بينما ربحها اللحظي يتضاعف ويتلاشى — فالحساب على الرقم اللحظي يقول «غالٍ» عند القاع و«رخيص» عند الذروة</p><p>الدستور §3: مقياس استدامة الإسمنت والبتروكيماويات = تغطية FCF</p></div></div>
+        <div class="method-card"><h3>🏢 تقييم الريت</h3><div class="formula">NAV للوحدة = (NAV − الديون) ÷ عدد الوحدات<br>قيمة P/FFO = FFO × مضاعف P/FFO<br>Cap Rate = (NOI ÷ cap − الديون) ÷ الوحدات</div><div class="formula-detail"><p>✅ P/FFO هو المقياس الصحيح للريتات</p><p>⚠️ Cap Rate يقابله <strong>NOI</strong> (قبل الفوائد والإدارية) لا FFO (بعدهما) — لا يُحتسب بدون NOI ولا يدخل المتوسط ولا الرسم البياني</p></div></div>
+        <div class="method-card"><h3>⚙️ WACC مقابل Ke</h3><div class="formula">WACC = (E/V × Ke) + (D/V × Rd × (1−T))<br>Ke = Rf + β × (Rm − Rf)</div><div class="formula-detail"><p>🏦 <strong>البنك يُخصم بـ Ke لا بـ WACC</strong>: الودائع مادة تشغيله ومنتجه لا مصدر تمويله. إدخالها في وزن الدين يهبط بالخصم إلى 3–4% فيتضخّم DDM أضعافاً (372.73 بـ WACC مقابل 40.20 بـ Ke)</p></div></div>
+        <div class="method-card"><h3>📊 تشتّت النماذج (CV)</h3><div class="formula">CV = σ ÷ المتوسط<br>CV &gt; 30% ⇒ لا رقم واحد</div><div class="formula-detail"><p>فوق العتبة تُعرض النطاق وحده مع طلب اختيار <strong>نموذج مرساة</strong> يُحسب عليه الهامش ويُحفظ في السجل — لأن متوسط نماذج متباعدة رقم دقيق المظهر ضعيف السند</p></div></div>
       </div>
       <div class="method-note">
         <h4>⚠️ حدود الاستخدام:</h4>
@@ -500,8 +615,10 @@
           <li>جودة النتائج تعتمد على جودة المدخلات (GIGO)</li>
           <li>النماذج تستبعد الشركات الخاسرة (EPS ≤ 0) من حسابات جراهام و P/E</li>
           <li>نموذج Gordon يستبعد تلقائياً إذا كانت التوزيعات = 0 أو r ≤ g</li>
-          <li>الدين الصافي للسهم يُطرح من قيمة DCF — ضع قيمة سالبة للشركات النقدية</li>
-          <li>القيم الشاذة (outliers) يتم إبلاغك عنها تلقائياً</li>
+          <li><strong>حقول الدين إلزامية: فارغ ≠ صفر.</strong> إمّا قيمة أو تعليم «لا يوجد دين» صراحةً</li>
+          <li>القيم الشاذة (outliers) والتشتّت المرتفع يُبلَّغ عنهما تلقائياً في كل الأنواع</li>
+          <li><strong>بوابة الاستدامة (الفلتر 1) تسبق السعر:</strong> عند فشلها يُكتم هامش الأمان ويُعرض «خروج» — القيمة العادلة تبقى للعلم فقط (الدستور §4 و§8)</li>
+          <li>البيانات الناقصة تُعلن «غير متوفرة» ولا تُقدَّر بصمت (§8) — Ke بلا بيتا، Cap Rate بلا NOI</li>
         </ul>
       </div>
     </div>
@@ -510,9 +627,9 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260817i"></script>
-  <script src="js/auth.js?v=20260817i"></script>
-  <script src="js/utils.js?v=20260817i"></script>
+  <script src="js/supabase.js?v=20260817j"></script>
+  <script src="js/auth.js?v=20260817j"></script>
+  <script src="js/utils.js?v=20260817j"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -521,26 +638,32 @@
     // ===== Help System =====
     const helpContent = {
       eps:         { title: 'الربح للسهم (EPS)',         body: '<p>صافي ربح الشركة ÷ عدد الأسهم. يستخدم في نماذج جراهام و P/E.</p><p><strong>أين تجده:</strong> موقع تداول → البيانات المالية → الربح للسهم.</p>' },
-      fcf:         { title: 'التدفق النقدي الحر للسهم',  body: '<p>النقد المتاح بعد النفقات التشغيلية والاستثمارية. الأساس في نموذج DCF.</p><p>حساب: التدفق التشغيلي − نفقات رأس المال</p>' },
-      netDebt:     { title: 'الدين الصافي للسهم',        body: '<p>= (إجمالي الديون − النقد والمعادلات) ÷ عدد الأسهم.</p><p>يُطرح من قيمة المنشأة (EV) للوصول إلى قيمة حقوق الملكية الفعلية.</p><p>إذا كان النقد أكبر من الديون، أدخل قيمة سالبة (مثال: −5).</p>' },
+      fcf:         { title: 'التدفق النقدي الحر للسهم',  body: '<p>الأساس في نموذج DCF. <strong>المطلوب هنا FCFF</strong> (التدفق الحرّ للمنشأة):</p><p><strong>FCFF = التدفق التشغيلي + الفوائد المدفوعة بعد الضريبة − النفقات الرأسمالية</strong></p><p>لماذا نُعيد الفوائد؟ لأن معيار IFRS يخصم الفوائد المدفوعة داخل التدفق التشغيلي. فـ«التشغيلي − الرأسمالي» يعطي <strong>FCFE</strong> (تدفق حقوق الملكية) لا FCFF. لو خصمتَ FCFE بـ WACC ثم طرحتَ الدين مرة أخرى، تكون خصمتَ أثر الدين مرتين وأنقصتَ القيمة نحو 20–25%.</p><p>إن كان الرقم المتاح لديك هو FCFE، اختر «FCFE» في حقل أساس التدفق وستُخصم تلقائياً بـ Ke بلا طرح للدين.</p>' },
+      fcfBasis:    { title: 'أساس التدفق النقدي',        body: '<p><strong>FCFF</strong> — تدفق يخصّ كل مموّلي المنشأة (دائنين ومساهمين). يُخصم بـ <strong>WACC</strong>، والناتج قيمة منشأة يُطرح منها الدين الصافي للوصول لقيمة السهم.</p><p><strong>FCFE</strong> — تدفق يخصّ المساهمين وحدهم (بعد الفوائد وحركة الدين). يُخصم بـ <strong>Ke</strong> والناتج قيمة حقوق ملكية مباشرة — <strong>لا يُطرح منه الدين</strong>.</p><p>خلط الاثنين هو أشهر خطأ في DCF. هذا المفتاح يمنعه آلياً.</p>' },
+      normEps:     { title: 'EPS مُطبَّع',                body: '<p>متوسط ربح السهم عبر <strong>دورة كاملة</strong> (5–7 سنوات) — لا ربح السنة الأخيرة.</p><p>الشركة الدورية (إسمنت، بتروكيماويات) تربح كثيراً في الذروة وقليلاً في القاع دون أن تتغيّر قيمتها الجوهرية. استخدام ربح القاع يجعل الحاسبة تقول «غالٍ» عن سهم رخيص فعلاً، واستخدام ربح الذروة يقول «رخيص» عن سهم في قمّته.</p>' },
+      normFcf:     { title: 'FCF مُطبَّع',                body: '<p>متوسط التدفق النقدي الحرّ للسهم عبر دورة كاملة (5–7 سنوات). يُستخدم في DCF بدل الرقم اللحظي.</p><p>الدستور §3: مقياس استدامة الإسمنت والبتروكيماويات هو <strong>تغطية FCF</strong> — لذا الرقم المُطبَّع هو المرجع.</p>' },
+      noi:         { title: 'NOI — صافي دخل التشغيل',   body: '<p>إيراد الإيجار − مصاريف تشغيل العقار، <strong>قبل</strong> الفوائد والمصاريف الإدارية والاستهلاك.</p><p>Cap Rate مُعرَّف بالنسبة إلى NOI لا إلى FFO: FFO أصلاً <strong>بعد</strong> الفوائد والإدارية، فقسمته على Cap Rate يخلط مستويين مختلفين من الدخل ويعطي قيمة أقل من الحقيقية ثم لا يطرح الدين.</p><p>الصيغة الصحيحة: (NOI ÷ Cap Rate − إجمالي الديون) ÷ عدد الوحدات.</p>' },
+      costOfEquity:{ title: 'Ke — تكلفة حقوق الملكية',   body: '<p>العائد الذي يطلبه <strong>المساهم</strong> (لا مجموع المموّلين). يُحسب بـ CAPM: Ke = Rf + β × (Rm − Rf).</p><p><strong>لماذا هو معدل خصم البنك؟</strong> ودائع العملاء ليست «تمويلاً» للبنك بل <strong>مادة تشغيله</strong> ومنتجه. إدخالها في وزن الدين ضمن WACC يهبط بمعدل الخصم إلى 3–4% فيتضخّم DDM أضعافاً (مثال محسوب: 372.73 ر.س بـ WACC مقابل 40.20 ر.س بـ Ke — تسعة أضعاف).</p><p>يُستخدم أيضاً معدلَ خصم عند اختيار أساس التدفق FCFE.</p>' },
+      decision:    { title: 'القرار المترتّب',            body: '<p>مخرَج الفلاتر حسب الدستور §4: احتفاظ / تجميع / تخفيف / خروج / مراقبة. يُحفظ مع التقييم ليُقرأ لاحقاً بجانب الرقم الذي بُني عليه.</p>' },
+      execPrice:   { title: 'سعر التنفيذ',                body: '<p>السعر الذي نُفِّذ عنده القرار فعلياً (إن نُفِّذ). يفيد لاحقاً في قياس جودة القرار مقابل التقييم.</p>' },
+      netDebt:     { title: 'الدين الصافي للسهم',        body: '<p>= (إجمالي الديون − النقد والمعادلات) ÷ عدد الأسهم.</p><p>يُطرح من قيمة المنشأة (EV) للوصول إلى قيمة حقوق الملكية الفعلية — <strong>عند اختيار أساس FCFF فقط</strong>.</p><p>إذا كان النقد أكبر من الديون، أدخل قيمة سالبة (مثال: −5).</p><p><strong>إلزامي: فارغ ≠ صفر.</strong> تركه فارغاً كان يُقرأ صفراً بلا تحذير فيعطي دائماً أعلى قيمة عادلة ممكنة — انحياز صامت نحو الشراء. إن كانت الشركة بلا دين صافٍ، علّم المربع صراحةً.</p>' },
       nav:         { title: 'إجمالي قيمة الأصول (قبل الدين)', body: '<p>إجمالي قيمة أصول الريت بالسوق بالريال — <strong>قبل</strong> خصم الدين. المعادلة تطرح «إجمالي الديون» ثم تقسم على عدد الوحدات. لا تُدخل قيمة صافية هنا حتى لا يُطرح الدين مرتين.</p>' },
       totalUnits:  { title: 'عدد وحدات الريت',           body: '<p>عدد الوحدات الاستثمارية المصدرة. يُستخدم لتحويل NAV الإجمالي إلى NAV للوحدة.</p>' },
       ffo:         { title: 'FFO — التدفق النقدي التشغيلي', body: '<p>معيار أساسي لتقييم الريتات. يقيس التدفق النقدي بعد خصم الديون وبدون الاستهلاك.</p>' },
       pffoMultiple:{ title: 'مضاعف P/FFO العادل',        body: '<p>يشبه P/E للأسهم العادية. الريتات السعودية: 10–14x عادة. ريتات النمو: 14–18x.</p>' },
-      capRate:     { title: 'Cap Rate — معدل الرسملة',   body: '<p>نسبة دخل الإيجار الصافي إلى قيمة العقار. يُستخدم كمقياس ثانوي للتحقق.</p>' },
-      totalDebt:   { title: 'إجمالي الديون',              body: '<p>إجمالي ديون الريت بالريال. يُطرح من NAV الإجمالي لحساب صافي القيمة.</p>' },
+      capRate:     { title: 'Cap Rate — معدل الرسملة',   body: '<p>نسبة <strong>NOI</strong> إلى قيمة العقار. يُطبَّق فقط عند إدخال NOI — بدونه لا يُحتسب النموذج.</p>' },
+      totalDebt:   { title: 'إجمالي الديون',              body: '<p>إجمالي ديون الريت بالريال. يُطرح من NAV الإجمالي لحساب صافي القيمة.</p><p><strong>إلزامي: فارغ ≠ صفر.</strong> تركه فارغاً كان يُقرأ صفراً بلا حرف تحذير، فيعطي <em>دائماً</em> أعلى NAV ممكن — وهو أخطر شكل للخطأ الصامت لأنه منحاز للشراء. إن كان الريت بلا دين فعلاً، علّم المربع صراحةً.</p>' },
       growth5yr:   { title: 'نسبة النمو 5 سنوات',        body: '<p>النمو السنوي المتوقع للسنوات الخمس القادمة. معظم الشركات الناضجة 5-12%.</p>' },
       growthPerp:  { title: 'النمو الدائم',               body: '<p>النمو المتوقع بعد السنة 10. يجب أن يكون أقل من WACC وأقل من نمو الاقتصاد. عادة 2-3%.</p>' },
       discountRate:{ title: 'WACC — معدل الخصم',         body: '<p>العائد المطلوب من المستثمرين. شركة مستقرة ≈ 8%، مخاطرة عالية ≈ 12%.</p>' },
       currentPe:   { title: 'P/E الحالي',                body: '<p>سعر السهم ÷ EPS. للمقارنة مع P/E القطاع.</p>' },
       sectorPe:    { title: 'P/E القطاع',                body: '<p>متوسط P/E للشركات المنافسة. أساس نموذج التقييم النسبي.</p>' },
       dividends:   { title: 'التوزيعات السنوية',          body: '<p>التوزيعات النقدية للسهم سنوياً. يستخدمه نموذج Gordon.</p>' },
-      bookValue:   { title: 'القيمة الدفترية',            body: '<p>حقوق الملكية ÷ عدد الأسهم. يُضرب في P/B العادل.</p>' },
+      bookValue:   { title: 'القيمة الدفترية',            body: '<p>حقوق الملكية ÷ عدد الأسهم. يُضرب في P/B العادل.</p><p><strong>لا تدخل في متوسط القيمة العادلة للشركة العادية/الدورية.</strong> القيمة الدفترية <em>أرضية تصفوية</em> — ما تبقّى للمساهم لو صُفّيت الشركة — لا تقدير لقيمتها كمنشأة عاملة. إدخالها في متوسط متساوٍ كان يسحب المتوسط 11–16% لأسفل بانتظام لكل شركة نامية. تُعرض الآن سطراً منفصلاً «🧱 الأرضية الدفترية».</p><p>استثناء: في وضع البنك يبقى P/B <strong>نموذجاً أساسياً</strong> داخل المتوسط — الأصول المصرفية مالية وتُقاس دفترياً بحق.</p>' },
       bondYield:   { title: 'عائد السندات الحكومية',      body: '<p>يُستخدم في معادلة جراهام. في السعودية يتراوح 5.5-7.5%.</p>' },
       currentPrice:{ title: 'السعر الحالي',               body: '<p>يُستخدم لحساب هامش الأمان: (القيمة العادلة − السعر) ÷ القيمة العادلة.</p>' },
-      useWacc:     { title: 'حساب WACC تلقائياً',        body: '<p>يحسب WACC من CAPM + تكلفة الدين.</p>' },
+      useWacc:     { title: 'حساب WACC تلقائياً',        body: '<p>يحسب WACC من CAPM + تكلفة الدين.</p><p><strong>معطَّل في وضع البنك عمداً</strong> — البنك يُخصم بـ Ke لا بـ WACC.</p><p>عند إلغاء التحديد يُستعاد معدل الخصم الذي كان مكتوباً قبل التفعيل (لا يبقى الرقم المحسوب عالقاً).</p>' },
       riskFree:    { title: 'معدل الخالي من المخاطر',    body: '<p>عادةً عائد السندات الحكومية 10 سنوات.</p>' },
-      beta:        { title: 'Beta — معامل المخاطر',       body: '<p>β&lt;1: أقل تقلباً | β=1: مع السوق | β&gt;1: أكثر تقلباً.</p>' },
       marketReturn:{ title: 'عائد السوق',                 body: '<p>متوسط العائد السنوي للسوق. للتاسي 7-10% تاريخياً.</p>' },
       debtCost:    { title: 'تكلفة الدين',                body: '<p>معدل الفائدة على قروض الشركة. يُطبق عليه الوفر الضريبي.</p>' },
       taxRate:     { title: 'معدل الضريبة',               body: '<p>20% للشركات السعودية، 25% للأجنبية.</p>' },
@@ -554,10 +677,10 @@
       debtRatio:   { title: 'نسبة الدين',                body: '<p>&lt; 30% منخفض | 30-60% معتدل | &gt; 60% مرتفع.</p>' },
       liquidityRatio:{ title: 'نسبة السيولة',            body: '<p>&lt; 1 خطر | 1-1.5 مقبول | &gt; 1.5 جيد.</p>' },
       earningsQuality:{ title: 'ROE',                    body: '<p>&lt; 10% ضعيف | 10-15% جيد | &gt; 15% ممتاز.</p>' },
-      companyType: { title: 'نوع الشركة',                body: '<p><strong>شركة عادية:</strong> DCF + جراهام + P/E + Gordon + القيمة الدفترية.</p><p><strong>ريت عقاري:</strong> NAV للوحدة + مضاعف P/FFO + DDM عند توفر التوزيعات (CLAUDE.md §3).</p><p><strong>بنك / مصرف:</strong> P/B + P/E + DDM عند توفر DPS — DCF وCap Rate لا تنطبق على البنوك.</p>' },
+      companyType: { title: 'نوع الشركة',                body: '<p><strong>شركة عادية:</strong> DCF + جراهام + P/E + Gordon داخل المتوسط، والقيمة الدفترية أرضية منفصلة.</p><p><strong>دوري (إسمنت/بتروكيماويات):</strong> نفس نماذج الشركة العادية لكن على <strong>أرباح وتدفق مُطبَّعَين</strong> (متوسط 5–7 سنوات) — لأن قيمة الشركة الدورية لا تتغيّر بتغيّر موضع الدورة بينما ربحها اللحظي يتضاعف ويتلاشى. الدستور §3: مقياس استدامتها تغطية FCF.</p><p><strong>ريت عقاري:</strong> NAV للوحدة + مضاعف P/FFO + DDM عند توفر التوزيعات (§3).</p><p><strong>بنك / مصرف:</strong> P/B + P/E + DDM مخصوماً بـ Ke — DCF وCap Rate وWACC لا تنطبق على البنوك.</p>' },
       perplexity:  { title: 'تقييم Perplexity',          body: '<p>حقل نصّي حر لتدوين تقييم/تحليل Perplexity (أو أي مصدر) لهذا السهم. لا يدخل في الحساب — يُحفظ مع العملية في السجل للرجوع إليه لاحقاً.</p>' },
       notes:       { title: 'ملاحظات التقييم',           body: '<p>ملاحظاتك الشخصية عن هذا التقييم: مصدر البيانات، تحفظاتك، خلاصة قرارك. تُحفظ مع كل عملية وتُعرض في السجل.</p>' },
-      betaMain:    { title: 'Beta — معامل المخاطرة',      body: '<p>حقل للتسجيل مع كل عملية. يُستخدم لاحقاً في المقارنة بين التقييمات لنفس الرمز.</p><p>مصدر موصى به: TradingView مقابل مؤشر تاسي. GuruFocus وYahoo غير صالحَين للأسهم السعودية.</p>' },
+      betaMain:    { title: 'Beta — معامل المخاطرة',      body: '<p>حقل بيتا <strong>الوحيد</strong> في الصفحة (كان هناك حقلان منفصلان لنفس المفهوم: تسجيلي لا يغذّي الحساب، وحسابي داخل WACC — وُحِّدا).</p><p>يُسجَّل مع كل عملية للمقارنة الزمنية، ويغذّي CAPM لحساب تكلفة حقوق الملكية Ke وحساب WACC التلقائي.</p><p>مصدر موصى به: TradingView أو StockAnalysis مقابل مؤشر تاسي. <strong>GuruFocus يرجّع 0.0 للأسهم السعودية (غير صالح)، و Yahoo يقيسها على مؤشر أمريكي.</strong> إن لم تتوفر بيتا موثوقة، أدخل Ke يدوياً بدل ترك الحاسبة تقدّرها.</p>' },
       bvps:        { title: 'BVPS — القيمة الدفترية للسهم', body: '<p>حقوق الملكية الملموسة ÷ عدد الأسهم. الأساس في تقييم البنوك عبر P/B.</p>' },
       bankRoe:     { title: 'ROE — العائد على حقوق الملكية', body: '<p>صافي الربح ÷ حقوق الملكية. للبنوك السعودية الجيدة: 12–18%. أقل من 10% يستدعي مراجعة.</p>' },
       bankFairPb:  { title: 'P/B العادل للبنك',          body: '<p>P/B العادل = ROE ÷ تكلفة حقوق الملكية (Ke). بنك بـ ROE 15% و Ke 10% → P/B عادل 1.5x. مرجع تاريخي للقطاع السعودي: 1.2–2.0x.</p>' },
@@ -601,13 +724,96 @@
       else        { w.style.display = 'none'; }
     }
 
+    // شركة عادية ودورية تتشاركان نفس النماذج — الفرق أن الدورية تُقيَّم على أرقام مُطبَّعة
+    const isEquityLike = t => t === 'normal' || t === 'cyclical';
+
     function toggleCompanyType() {
       const t = document.getElementById('companyType').value;
-      document.getElementById('normalCompanyInputs').style.display = t === 'normal' ? '' : 'none';
+      document.getElementById('normalCompanyInputs').style.display = isEquityLike(t) ? '' : 'none';
+      document.getElementById('cyclicalInputs').style.display      = t === 'cyclical' ? '' : 'none';
+      document.getElementById('cyclicalModeNotice').style.display  = t === 'cyclical' ? '' : 'none';
       document.getElementById('reitInputs').style.display          = t === 'reit'   ? '' : 'none';
       document.getElementById('bankInputs').style.display          = t === 'bank'   ? '' : 'none';
       document.getElementById('bankModeNotice').style.display      = t === 'bank'   ? '' : 'none';
+
+      // ── وضع البنك: WACC معطَّل بنيوياً (لا مخفي فحسب) ──
+      // ودائع البنك مادة تشغيل لا تمويل؛ إدخالها في وزن الدين يهبط بالخصم لمستوى
+      // غير حقيقي فيتضخّم DDM أضعافاً. البنك يُخصم بـ Ke حصراً.
+      const bank = t === 'bank';
+      document.getElementById('useWaccRow').style.display      = bank ? 'none' : '';
+      document.getElementById('useWaccBankNote').style.display = bank ? '' : 'none';
+      if (bank && document.getElementById('useWacc').checked) {
+        document.getElementById('useWacc').checked = false;
+        restoreDiscountRate();
+      }
+      document.getElementById('discountRateRow').style.display = bank ? 'none' : '';
+      toggleFcfBasis();
       runFieldChecks();
+    }
+
+    // معدل الخصم المطبَّق يتبع أساس التدفق: FCFF←WACC · FCFE←Ke · بنك←Ke
+    function toggleFcfBasis() {
+      const t = document.getElementById('companyType').value;
+      const basis = document.getElementById('fcfBasis').value;
+      const needKe = t === 'bank' || (isEquityLike(t) && basis === 'fcfe');
+      document.getElementById('costOfEquityRow').style.display = needKe ? '' : 'none';
+      // CAPM يحتاج Rf و Rm — يظهران عند الحاجة إلى Ke أو عند تفعيل WACC التلقائي
+      const useW = document.getElementById('useWacc').checked;
+      document.getElementById('capmInputs').style.display = (needKe || useW) ? '' : 'none';
+      document.getElementById('waccInputs').style.display  = useW ? '' : 'none';
+      // الدين لا يُطرح مع FCFE — نوضّحه على الحقل نفسه بدل ترك المستخدم يخمّن
+      const ndHint = document.querySelector('#netDebt ~ .hint');
+      if (ndHint) ndHint.style.opacity = (isEquityLike(t) && basis === 'fcfe') ? '0.55' : '';
+    }
+
+    // ── Ke: قيمة يدوية إن وُجدت، وإلا CAPM من بيتا. لا تقدير صامت (§8) ──
+    function resolveKe() {
+      const raw = (document.getElementById('costOfEquity').value || '').trim();
+      if (raw !== '') {
+        const n = parseFloat(raw);
+        if (isFinite(n) && n > 0) return { ke: n / 100, source: 'manual', label: `Ke يدوي ${n.toFixed(2)}%` };
+      }
+      const bRaw = (document.getElementById('betaMain').value || '').trim();
+      const b  = parseFloat(bRaw);
+      const rf = parseFloat(document.getElementById('riskFree').value);
+      const rm = parseFloat(document.getElementById('marketReturn').value);
+      if (bRaw !== '' && isFinite(b) && b > 0 && isFinite(rf) && isFinite(rm)) {
+        const ke = (rf + b * (rm - rf)) / 100;
+        return { ke, source: 'capm', label: `Ke = ${rf.toFixed(1)}% + ${b}×(${rm.toFixed(1)}% − ${rf.toFixed(1)}%) = ${(ke*100).toFixed(2)}% (CAPM)` };
+      }
+      return { ke: null, source: 'missing', label: 'تكلفة حقوق الملكية Ke غير متوفرة — لا بيتا ولا إدخال يدوي' };
+    }
+
+    // ═══ حراس الإشارة: min="0" في HTML لا يمنع القيمة السالبة عند الكتابة اليدوية ═══
+    // كل حقل هنا لا معنى رياضياً لسالبه — يُرفض صراحة بدل أن يمرّ ويشوّه النموذج بصمت.
+    const NON_NEG_FIELDS = {
+      growth5yr:'نسبة النمو 5 سنوات', growthPerp:'النمو الدائم', discountRate:'معدل الخصم',
+      costOfEquity:'تكلفة حقوق الملكية Ke', currentPe:'P/E الحالي', sectorPe:'P/E القطاع',
+      dividends:'التوزيعات', bookValue:'القيمة الدفترية', bondYield:'عائد السندات',
+      currentPrice:'السعر الحالي', fairPb:'P/B العادل', betaMain:'بيتا',
+      growthMin:'الحد الأدنى للنمو', growthMax:'الحد الأعلى للنمو',
+      discountMin:'الحد الأدنى للخصم', discountMax:'الحد الأعلى للخصم',
+      debtRatio:'نسبة الدين', liquidityRatio:'نسبة السيولة', earningsQuality:'ROE',
+      nav:'قيمة الأصول', totalUnits:'عدد الوحدات', ffo:'FFO', pffoMultiple:'مضاعف P/FFO',
+      capRate:'Cap Rate', noi:'NOI', totalDebt:'إجمالي الديون',
+      bvps:'BVPS', bankFairPb:'P/B العادل (بنك)', bankCurrentPb:'P/B الحالي (بنك)',
+      bankFairPe:'P/E العادل (بنك)', bankCurrentPe:'P/E الحالي (بنك)', bankDps:'DPS',
+      bankPayout:'نسبة التوزيع', cet1:'CET1', npl:'NPL', provCoverage:'تغطية المخصصات', ldr:'LDR',
+      riskFree:'المعدل الخالي من المخاطر', marketReturn:'عائد السوق', debtCost:'تكلفة الدين',
+      taxRate:'معدل الضريبة', debtEquity:'D/E', calcExecPrice:'سعر التنفيذ',
+      // ملاحظة: eps · fcf · netDebt · normEps · normFcf · bankEps · bankRoe مستثناة عمداً —
+      // الخسارة والتدفق السالب والنقد الصافي حالات مشروعة تُقرأ كما هي.
+    };
+    function findNegativeField() {
+      for (const [id, label] of Object.entries(NON_NEG_FIELDS)) {
+        const el = document.getElementById(id);
+        if (!el) continue;
+        const raw = (el.value || '').trim();
+        if (raw === '') continue;
+        const n = parseFloat(raw);
+        if (isFinite(n) && n < 0) return { id, label, n };
+      }
+      return null;
     }
 
     // ===== الحاسبة الذكية: تحقّق فوري من كل مدخل حسب نوع الشركة المختار =====
@@ -631,26 +837,74 @@
     function runFieldChecks() {
       const t   = document.getElementById('companyType').value;
       const num = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
+      const raw = id => { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; };
+      const chk = id => { const el = document.getElementById(id); return !!(el && el.checked); };
 
-      if (t === 'normal') {
+      // معدل الخصم الفعلي المطبَّق على نماذج التوزيعات/التدفقات — يختلف باختلاف النوع والأساس
+      const keInfo = resolveKe();
+      const basis  = document.getElementById('fcfBasis').value;
+      const rateForPerp = (t === 'bank' || (isEquityLike(t) && basis === 'fcfe'))
+        ? (keInfo.ke != null ? keInfo.ke * 100 : NaN)
+        : num('discountRate');
+      const rateName = (t === 'bank' || (isEquityLike(t) && basis === 'fcfe')) ? 'تكلفة حقوق الملكية Ke' : 'معدل الخصم WACC';
+
+      if (isEquityLike(t)) {
         const eps = num('eps'), fcf = num('fcf'), div = num('dividends'), bv = num('bookValue'),
-              sectorPe = num('sectorPe'), bondYield = num('bondYield'), gp = num('growthPerp'), dr = num('discountRate');
-        setFieldNote('eps', eps <= 0 ? '⚠️ EPS سالب أو صفر — نموذجا جراهام وP/E لن يُحتسبا لهذا السهم' : '', 'warn');
-        setFieldNote('fcf', fcf <= 0 ? '⚠️ FCF سالب أو صفر — نموذج DCF لن يُحتسب' : '', 'warn');
+              sectorPe = num('sectorPe'), bondYield = num('bondYield'), gp = num('growthPerp'),
+              g5 = num('growth5yr');
+        const nEps = num('normEps'), nFcf = num('normFcf');
+        const effEps = (t === 'cyclical' && isFinite(nEps) && nEps !== 0) ? nEps : eps;
+        const effFcf = (t === 'cyclical' && isFinite(nFcf) && nFcf !== 0) ? nFcf : fcf;
+        setFieldNote('eps', effEps <= 0 ? '⚠️ EPS سالب أو صفر — نموذجا جراهام وP/E لن يُحتسبا لهذا السهم' : '', 'warn');
+        setFieldNote('fcf', effFcf <= 0 ? '⚠️ FCF سالب أو صفر — نموذج DCF لن يُحتسب' : '', 'warn');
         setFieldNote('dividends', div <= 0 ? 'ℹ️ بدون توزيعات — نموذج جوردون (DDM) لن يُطبَّق' : '', 'info');
-        setFieldNote('bookValue', bv <= 0 ? '⚠️ يجب أن تكون موجبة لتطبيق نموذج القيمة الدفترية' : '', 'warn');
+        setFieldNote('bookValue', bv <= 0
+          ? '⚠️ يجب أن تكون موجبة لعرض الأرضية الدفترية'
+          : 'ℹ️ الأرضية الدفترية تُعرض منفصلة ولا تدخل متوسط القيمة العادلة (قيمة تصفية لا قيمة منشأة عاملة)', bv <= 0 ? 'warn' : 'info');
         setFieldNote('sectorPe', sectorPe <= 0 ? '⚠️ يجب أن يكون موجباً ليُحتسب نموذج P/E' : (sectorPe > 40 ? 'ℹ️ سيُسقَّف تلقائياً عند 40× لمنع المبالغة بالتقييم' : ''), sectorPe <= 0 ? 'warn' : 'info');
         setFieldNote('bondYield', bondYield <= 0 ? '⚠️ يجب أن يكون موجباً — معادلة جراهام تعتمد عليه مباشرة' : '', 'warn');
-        setFieldNote('growthPerp', (isFinite(gp) && isFinite(dr) && gp >= dr) ? '❌ يجب أن يكون أقل من معدل الخصم WACC وإلا سيتوقف الحساب بالكامل' : '', 'warn');
+        // سقف مضاعف جراهام ينشط فعلياً عند 8.25% لا 15%: 8.5 + 2g = 25 ⇒ g = 8.25
+        setFieldNote('growth5yr', (isFinite(g5) && g5 > 8.25)
+          ? `ℹ️ فوق 8.25% لا أثر لهذا الرقم على جراهام — المضاعف يبلغ سقفه 25 عند 8.25% (8.5 + 2×8.25 = 25). حتى السيناريو المتفائل (+2%) لن يغيّر قيمة جراهام.`
+          : '', 'info');
+        // الدين الصافي: فارغ ≠ صفر
+        const ndRaw = raw('netDebt');
+        if (basis === 'fcfe') {
+          setFieldNote('netDebt', 'ℹ️ أساس FCFE مُختار — الدين لا يُطرح (التدفق أصلاً بعد الفوائد). الحقل يُسجَّل للمتابعة فقط.', 'info');
+        } else if (ndRaw === '' && !chk('noNetDebt')) {
+          setFieldNote('netDebt', '❌ إلزامي: أدخل الدين الصافي أو علّم «لا يوجد دين». تركه فارغاً يُقرأ صفراً ويعطي دائماً أعلى قيمة ممكنة — انحياز صامت للشراء.', 'warn');
+        } else if (ndRaw !== '' && chk('noNetDebt')) {
+          setFieldNote('netDebt', '⚠️ علّمتَ «لا يوجد دين» مع وجود قيمة — سيُعتمد صفر ويُتجاهل الرقم المكتوب.', 'warn');
+        } else setFieldNote('netDebt', '', '');
       } else {
-        ['eps','fcf','dividends','bookValue','sectorPe','bondYield','growthPerp'].forEach(id => setFieldNote(id, '', ''));
+        ['eps','fcf','netDebt','dividends','bookValue','sectorPe','bondYield','growth5yr'].forEach(id => setFieldNote(id, '', ''));
+      }
+
+      if (t === 'cyclical') {
+        setFieldNote('normEps', (raw('normEps') === '')
+          ? '⚠️ بدون EPS مُطبَّع سيُستخدم الربح اللحظي — والقيمة الناتجة تتبع موضع الدورة لا قيمة الشركة (القاع يقول «غالٍ» والذروة تقول «رخيص»).'
+          : 'ℹ️ سيُستخدم في جراهام و P/E بدل الربح اللحظي — وسيُعلَن ذلك في النتيجة والسجل.', raw('normEps') === '' ? 'warn' : 'info');
+        setFieldNote('normFcf', (raw('normFcf') === '')
+          ? '⚠️ بدون FCF مُطبَّع سيُستخدم التدفق اللحظي في DCF — نفس تحيّز الدورة.'
+          : 'ℹ️ سيُستخدم في DCF بدل التدفق اللحظي.', raw('normFcf') === '' ? 'warn' : 'info');
+      } else {
+        setFieldNote('normEps', '', ''); setFieldNote('normFcf', '', '');
       }
 
       if (t === 'reit') {
         const nav = num('nav'), ffo = num('ffo');
         setFieldNote('nav', (nav <= 0 && ffo <= 0) ? '⚠️ أدخل قيمة أصول أو FFO موجب على الأقل — وإلا لن يُحتسب أي تقييم لهذا الريت' : '', 'warn');
+        const tdRaw = raw('totalDebt');
+        if (tdRaw === '' && !chk('noTotalDebt')) {
+          setFieldNote('totalDebt', '❌ إلزامي: أدخل إجمالي الديون أو علّم «لا يوجد دين». تركه فارغاً يضخّم NAV للوحدة بلا حرف تحذير.', 'warn');
+        } else if (tdRaw !== '' && chk('noTotalDebt')) {
+          setFieldNote('totalDebt', '⚠️ علّمتَ «لا يوجد دين» مع وجود قيمة — سيُعتمد صفر ويُتجاهل الرقم المكتوب.', 'warn');
+        } else setFieldNote('totalDebt', '', '');
+        setFieldNote('noi', raw('noi') === ''
+          ? 'ℹ️ بدون NOI لن يُحتسب نموذج Cap Rate إطلاقاً — لا يُقدَّر من FFO (§8). NOI قبل الفوائد والإدارية، FFO بعدهما.'
+          : '', 'info');
       } else {
-        setFieldNote('nav', '', '');
+        setFieldNote('nav', '', ''); setFieldNote('totalDebt', '', ''); setFieldNote('noi', '', '');
       }
 
       if (t === 'bank') {
@@ -659,13 +913,44 @@
         else if (bvps <= 0) setFieldNote('bvps', 'ℹ️ بدون BVPS — نموذج P/B (الأساسي للبنوك) لن يُحتسب، سيُعتمد على P/E فقط', 'info');
         else setFieldNote('bvps', '', '');
         setFieldNote('bankEps', bankEps <= 0 ? 'ℹ️ بدون EPS — نموذج P/E لن يُحتسب، سيُعتمد على P/B فقط' : '', 'info');
+        const dps = num('bankDps');
+        setFieldNote('bankDps', (dps > 0 && keInfo.ke == null)
+          ? '❌ DDM لن يُحتسب: ' + keInfo.label + '. أدخل بيتا أو Ke يدوياً — البنك يُخصم بـ Ke لا بـ WACC.'
+          : '', 'warn');
       } else {
-        setFieldNote('bvps', '', ''); setFieldNote('bankEps', '', '');
+        setFieldNote('bvps', '', ''); setFieldNote('bankEps', '', ''); setFieldNote('bankDps', '', '');
       }
-    }
 
-    // ===== نماذج الحساب (منقولة حرفياً) =====
-    function calculate_dcf(fcf, growth_5yr, growth_perp, discount_rate, net_debt) {
+      // Ke: إعلان المصدر دائماً عند ظهور الحقل — لا تقدير صامت
+      if (document.getElementById('costOfEquityRow').style.display !== 'none') {
+        setFieldNote('costOfEquity',
+          keInfo.ke != null ? 'ℹ️ ' + keInfo.label : '❌ ' + keInfo.label + ' — النماذج المعتمدة عليه لن تُحتسب',
+          keInfo.ke != null ? 'info' : 'warn');
+      } else setFieldNote('costOfEquity', '', '');
+
+      // تحذير النمو الدائم ≥ معدل الخصم — يعمل الآن في كل الأنواع (كان يُمسح لغير العادية)
+      const gp2 = num('growthPerp');
+      setFieldNote('growthPerp',
+        (isFinite(gp2) && isFinite(rateForPerp) && gp2 >= rateForPerp)
+          ? `❌ النمو الدائم (${gp2}%) ≥ ${rateName} (${rateForPerp.toFixed(2)}%) — النماذج الأبدية (جوردون/DDM/DCF) لا تُعرَّف رياضياً وسيتوقف حسابها.`
+          : '', 'warn');
+
+      // حارس الإشارة الفوري (مع تنظيف ملاحظة الحقل السابق إن صُحِّح)
+      const neg = findNegativeField();
+      if (_lastNegFieldId && (!neg || neg.id !== _lastNegFieldId)) {
+        const still = document.getElementById(_lastNegFieldId);
+        if (still && parseFloat(still.value) >= 0) setFieldNote(_lastNegFieldId, '', '');
+      }
+      _lastNegFieldId = neg ? neg.id : null;
+      if (neg) setFieldNote(neg.id, `❌ «${neg.label}» لا يقبل قيمة سالبة (${neg.n}) — صحّحها قبل الحساب.`, 'warn');
+    }
+    let _lastNegFieldId = null;
+
+    // ===== نماذج الحساب (منقولة حرفياً — المعادلات لم تُمسّ) =====
+    // basis: 'fcff' (افتراضي) → المخرَج قيمة منشأة ويُطرح منها الدين الصافي
+    //        'fcfe'            → المخرَج قيمة حقوق ملكية مباشرة ولا يُطرح الدين
+    //        (وعلى المستدعي أن يمرّر Ke بدل WACC كمعدل خصم في حالة FCFE)
+    function calculate_dcf(fcf, growth_5yr, growth_perp, discount_rate, net_debt, basis) {
       if (discount_rate <= growth_perp) return null;
       if (fcf <= 0) return null;
       let pv_sum = 0;
@@ -683,8 +968,69 @@
       const tv               = tv_cf / (discount_rate - growth_perp);
       const pv_tv            = tv / Math.pow(1 + discount_rate, 10);
       const enterprise_value  = pv_sum + pv_tv;
-      const equity_value     = enterprise_value - (net_debt || 0);
-      return { enterpriseValue: enterprise_value, equityValue: equity_value };
+      // FCFE مخصوم بـ Ke = قيمة حقوق ملكية أصلاً؛ طرح الدين هنا خصمٌ مزدوج لأثر الدين.
+      const equity_value     = basis === 'fcfe' ? enterprise_value : enterprise_value - (net_debt || 0);
+      return {
+        enterpriseValue: enterprise_value,
+        equityValue: equity_value,
+        // حصّة القيمة النهائية من الإجمالي — مؤشر هشاشة النموذج الحقيقي
+        tvShare: enterprise_value > 0 ? pv_tv / enterprise_value : null,
+        basis: basis === 'fcfe' ? 'fcfe' : 'fcff'
+      };
+    }
+
+    // ═══ إحصاء تشتّت النماذج: معامل الاختلاف CV = σ ÷ المتوسط ═══
+    // فوق 30% النماذج لا تتفق فعلياً، وعرض متوسطها كرقم واحد يخفي الخلاف
+    // بدل أن يكشفه — فيصير الرقم أدقّ مظهراً وأضعف سنداً.
+    function dispersionOf(nums) {
+      const v = (nums || []).filter(x => x != null && isFinite(x) && x > 0);
+      if (v.length < 2) return { n: v.length, avg: v.length ? v[0] : null, sd: 0, cv: 0, min: v[0] ?? null, max: v[0] ?? null };
+      const avg = v.reduce((a, b) => a + b, 0) / v.length;
+      const sd  = Math.sqrt(v.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / v.length); // σ المجتمع
+      return { n: v.length, avg, sd, cv: avg > 0 ? sd / avg * 100 : 0, min: Math.min(...v), max: Math.max(...v) };
+    }
+    const CV_ALERT = 30; // % — فوقها لا يُعرض رقم واحد كقيمة عادلة
+
+    // ═══ بوابة الاستدامة (الفلتر 1) — تسبق السعر وتتقدّم عليه ═══
+    // الدستور §4: «فشل → الإجراء = خروج، بغض النظر عن السعر». عرض «هامش أمان»
+    // بجوار فشل الاستدامة يدعو للشراء عند النزول — وهو ما يحرّمه §8 نصّاً.
+    // القاعدة هنا صارمة ومحصورة في الكسور القاطعة فقط — لا اجتهاد ولا استنتاج.
+    function sustainabilityGate(type, g) {
+      const reasons = [], watch = [];
+      const n = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
+      if (type === 'bank') {
+        const payout = n(g.bankPayout), cet1 = n(g.cet1), prov = n(g.provCoverage);
+        if (payout != null && payout > 100) reasons.push(`نسبة التوزيع ${payout}% تتجاوز 100% من صافي الدخل — البنك يوزّع أكثر مما يكسب`);
+        if (cet1 != null && cet1 > 0 && cet1 < 12) reasons.push(`كفاية رأس المال CET1 ${cet1}% دون 12%`);
+        if (prov != null && prov > 0 && prov < 80) reasons.push(`تغطية المخصصات ${prov}% دون 80% — وسادة الخسائر الائتمانية غير كافية`);
+      } else if (type === 'reit') {
+        const ffo = n(g.ffo), dps = n(g.dividends);
+        if (ffo != null && ffo <= 0) reasons.push(`FFO غير موجب (${ffo}) — لا تدفق تشغيلي يغطّي التوزيع`);
+        else if (ffo != null && dps != null && dps > 0 && dps > ffo)
+          reasons.push(`التوزيع ${dps} يتجاوز FFO ${ffo} للوحدة — التوزيع غير مغطّى بالمقياس الصحيح للريت (§3)`);
+      } else if (type === 'cyclical') {
+        // §3: مقياس الإسمنت والبتروكيماويات تغطية FCF — والمقياس الصحيح هو المُطبَّع.
+        // §3 أيضاً: «نسبة توزيع مرتفعة في شركة راسخة قد تعكس قاع دورة، لا تعثّراً — السياق قبل التصنيف».
+        // لذلك: الفشل يُعلَن بالمُطبَّع فقط؛ خرق الرقم اللحظي وحده = مراقبة لا خروج.
+        const nf = n(g.normFcf), fcf = n(g.fcf), dps = n(g.dividends), nEps = n(g.normEps), eps = n(g.eps);
+        const effEps = (nEps != null && nEps !== 0) ? nEps : eps;
+        if (effEps != null && effEps <= 0 && (nEps != null && nEps !== 0))
+          reasons.push(`EPS المُطبَّع عبر الدورة ${effEps} غير موجب — خسارة عبر الدورة كاملة لا قاعَ دورة`);
+        if (dps != null && dps > 0) {
+          if (nf != null && nf !== 0 && dps > nf)
+            reasons.push(`التوزيع ${dps} يتجاوز FCF المُطبَّع ${nf} — غير مغطّى عبر الدورة كاملة (§3)`);
+          else if ((nf == null || nf === 0) && fcf != null && dps > fcf)
+            watch.push(`التوزيع ${dps} يتجاوز FCF اللحظي ${fcf} — قد يكون قاع دورة لا تعثّراً (§3). أدخل FCF مُطبَّعاً للحكم القاطع.`);
+        }
+      } else { // normal
+        const eps = n(g.eps), dps = n(g.dividends), fcf = n(g.fcf);
+        if (eps != null && eps <= 0) reasons.push(`EPS غير موجب (${eps}) — الشركة خاسرة`);
+        else if (eps != null && dps != null && dps > 0 && dps > eps)
+          reasons.push(`التوزيع ${dps} يتجاوز EPS ${eps} — نسبة توزيع فوق 100% من الأرباح (§3)`);
+        if (fcf != null && dps != null && dps > 0 && fcf > 0 && dps > fcf)
+          watch.push(`التوزيع ${dps} يتجاوز FCF ${fcf} — التوزيع مغطّى بالأرباح لا بالنقد`);
+      }
+      return { failed: reasons.length > 0, reasons, watch };
     }
 
     function calculateGraham(eps, growth_rate, bond_yield) {
@@ -716,6 +1062,55 @@
       return (e / v * re) + (d / v * debt_cost * (1 - tax_rate));
     }
 
+    // ═══ تركيب مخرَج القيمة العادلة: المتوسط أو النطاق حسب التشتّت ═══
+    // القاعدة: فوق CV 30% لا يُعرض رقم واحد إطلاقاً — يُعرض النطاق ويُطلب
+    // من المالك اختيار نموذج مرساة يُحسب عليه الهامش ويُحفظ في السجل.
+    function composeFair(o) {
+      const avgVals = o.avgNames.map(n => o.values[n]).filter(v => v != null && v > 0 && isFinite(v));
+      if (!avgVals.length) return null;
+      const d = dispersionOf(avgVals);
+      const highCV = d.n >= 2 && d.cv > CV_ALERT;
+      let anchorName = o.anchorModel || '';
+      if (anchorName && !(o.values[anchorName] > 0 && o.avgNames.includes(anchorName))) anchorName = '';
+      const anchorVal = anchorName ? o.values[anchorName] : null;
+      const headline  = highCV ? (anchorVal != null ? anchorVal : null) : d.avg;
+
+      const rangeText = d.n > 1 ? `${formatCurrency(d.min)} — ${formatCurrency(d.max)}` : formatCurrency(d.avg);
+      const parts = [];
+      if (highCV) {
+        parts.push(`⚠️ التشتّت ${d.cv.toFixed(0)}% — النماذج لا تتفق، لا تبنِ قراراً على رقم واحد`);
+        parts.push(anchorName
+          ? `⚓ نموذج المرساة: ${anchorName} = ${formatCurrency(anchorVal)}`
+          : `اختر نموذج مرساة أدناه ليُحسب عليه الهامش`);
+        parts.push(`(المتوسط الحسابي ${formatCurrency(d.avg)} معروض للعلم فقط)`);
+      } else {
+        parts.push(`المتوسط: ${formatCurrency(d.avg)}`);
+        if (d.n > 1) parts.push(`تشتّت النماذج ${d.cv.toFixed(0)}% (دون عتبة ${CV_ALERT}% — النماذج متوافقة)`);
+      }
+      if (o.extraParts && o.extraParts.length) parts.push(...o.extraParts);
+      return {
+        avg: d.avg, cv: d.cv, sd: d.sd, min: d.min, max: d.max, n: d.n,
+        highCV, anchorName, anchorVal, headline,
+        rangeText, detailText: parts.join(' | ')
+      };
+    }
+
+    // هامش الأمان مزدوج: على الطرف الأدنى (متحفّظ) وعلى المتوسط/المرساة —
+    // الفارق بينهما هو حجم الرهان على أن النموذج المتفائل هو الصحيح.
+    function marginPair(price, comp) {
+      if (!(price > 0) || !comp) return { text: '', dual: '' };
+      const pc = comp.min > 0 ? (comp.min - price) / comp.min * 100 : null;
+      const pa = comp.headline > 0 ? (comp.headline - price) / comp.headline * 100 : null;
+      const fmt = m => `${m > 0 ? '+' : ''}${m.toFixed(1)}%`;
+      const main = pa != null
+        ? `${pa > 0 ? '✅' : '⚠️'} ${Math.abs(pa).toFixed(1)}% ${pa > 0 ? 'هامش أمان' : 'مبالغ فيه'}`
+        : '';
+      const dual = (pc != null && pa != null && comp.n > 1)
+        ? `متحفّظ (أدنى نموذج ${formatCurrency(comp.min)}): <span style="color:${pc>0?'var(--st-good)':'var(--st-bad)'}">${fmt(pc)}</span>  ·  ${comp.highCV && comp.anchorName ? 'المرساة' : 'المتوسط'} (${formatCurrency(comp.headline)}): <span style="color:${pa>0?'var(--st-good)':'var(--st-bad)'}">${fmt(pa)}</span>`
+        : (pc != null && comp.n > 1 ? `متحفّظ (أدنى نموذج ${formatCurrency(comp.min)}): <span style="color:${pc>0?'var(--st-good)':'var(--st-bad)'}">${fmt(pc)}</span>` : '');
+      return { text: main, dual };
+    }
+
     // ===== الدالة الرئيسية =====
     async function calculateFairValue() {
       try {
@@ -732,15 +1127,25 @@
           if (!await confirmAsync('أنت في وضع التعديل — هل تريد تحديث العملية المحددة؟')) return;
         }
 
+        // ── حارس الإشارة: قيمة سالبة في حقل لا يقبلها تُرفض بدل أن تمرّ وتشوّه النموذج ──
+        const negField = findNegativeField();
+        if (negField) {
+          showToast(`❌ «${negField.label}» لا يقبل قيمة سالبة (${negField.n}).`, 'error');
+          document.getElementById(negField.id).focus();
+          return;
+        }
+
         document.getElementById('loadingOverlay').classList.remove('hidden');
-        _lastFairAvg = null;
+        _lastFairAvg = null; _lastSustain = null; _lastComp = null;
         const companyType = document.getElementById('companyType').value;
+        const fcfBasis    = document.getElementById('fcfBasis').value;
         let growth_perp   = (parseFloat(document.getElementById('growthPerp').value)    || 0) / 100;
         let discount_rate = (parseFloat(document.getElementById('discountRate').value)   || 0) / 100;
 
-        if (document.getElementById('useWacc').checked) {
+        // WACC التلقائي لا ينطبق على البنك إطلاقاً (ودائع = مادة تشغيل لا تمويل)
+        if (companyType !== 'bank' && document.getElementById('useWacc').checked) {
           const rf = (parseFloat(document.getElementById('riskFree').value)    || 0) / 100;
-          const b  =  parseFloat(document.getElementById('beta').value)         || 1;
+          const b  =  parseFloat(document.getElementById('betaMain').value)     || 1;
           const rm = (parseFloat(document.getElementById('marketReturn').value) || 0) / 100;
           const rd = (parseFloat(document.getElementById('debtCost').value)     || 0) / 100;
           const tx = (parseFloat(document.getElementById('taxRate').value)      || 0) / 100;
@@ -749,23 +1154,46 @@
           document.getElementById('discountRate').value = (discount_rate * 100).toFixed(2);
         }
 
+        // تكلفة حقوق الملكية — معدل الخصم الصحيح للبنك ولـ FCFE
+        const keInfo = resolveKe();
+        const needKe = companyType === 'bank' || (isEquityLike(companyType) && fcfBasis === 'fcfe');
+        if (needKe && keInfo.ke == null) {
+          document.getElementById('loadingOverlay').classList.add('hidden');
+          showToast(`❌ ${keInfo.label}. أدخل بيتا أو Ke يدوياً — لا تقدير صامت (§8).`, 'error');
+          document.getElementById('costOfEquity').focus();
+          return;
+        }
+
         const scenario   = document.getElementById('scenario').value;
         const growth_adj = scenario === 'optimistic' ? 0.02 : scenario === 'conservative' ? -0.02 : 0;
         // إصلاح استثماري: النمو الدائم لا يتجاوز 3% حتى بعد تعديل السيناريو المتفائل
         // (النمو الأبدي يجب ألا يتخطّى نمو الناتج المحلي طويل الأجل — وإلا تضخّمت القيمة النهائية).
+        // وأرضية عند 0: السيناريو المحتاط (−2%) كان ينتج نمواً دائماً سالباً — أي انكماشاً
+        // أبدياً للشركة إلى الصفر، وهو افتراض لا يقصده أحد ويقلّص القيمة النهائية بلا سند.
         let growth_perp_final = growth_perp + growth_adj;
         if (growth_perp_final > 0.03) growth_perp_final = 0.03;
+        if (growth_perp_final < 0)    growth_perp_final = 0;
 
-        if (growth_perp_final >= discount_rate) {
+        // معدل الخصم المطبَّق على النماذج الأبدية يتبع نوع الأصل وأساس التدفق
+        const perpRate     = needKe ? keInfo.ke : discount_rate;
+        const perpRateName = needKe ? 'تكلفة حقوق الملكية Ke' : 'معدل الخصم WACC';
+        if (growth_perp_final >= perpRate) {
           document.getElementById('loadingOverlay').classList.add('hidden');
-          showToast(`❌ خطأ: النمو الدائم (${(growth_perp_final*100).toFixed(1)}%) يجب أن يكون أقل من معدل الخصم (${(discount_rate*100).toFixed(1)}%).`, 'error');
+          showToast(`❌ خطأ: النمو الدائم (${(growth_perp_final*100).toFixed(1)}%) يجب أن يكون أقل من ${perpRateName} (${(perpRate*100).toFixed(2)}%).`, 'error');
           return;
         }
 
         let values = {};
+        let avgNames = [];          // النماذج الداخلة في المتوسط (بقيّتها عرضية)
         let enterprise_value = 0;
+        let evTitle = '🏢 قيمة المنشأة (Enterprise Value)';
+        let evNote  = '';
+        let bookFloorVal = null;
+        let comp = null;
         let fair_value_range = '';
         let fair_value_detail = '';
+        const _aSel = document.getElementById('anchorModel');
+        const anchorSel = _aSel.value || (_aSel.options.length ? '' : (_pendingAnchor || ''));
 
         // ── افتراضات معلنة: لا افتراض صامت — إن كان الحقل فارغاً نعتمد الافتراض ونعلنه في التفاصيل ──
         // فحص فراغ الحقل (وليس falsy) حتى لا يبتلع نمط || الصفرَ الصريح الذي أدخله المستخدم عمداً.
@@ -782,9 +1210,20 @@
           const nav_total  =  parseFloat(document.getElementById('nav').value)          || 0;
           const totalUnits = Math.max(parseFloat(document.getElementById('totalUnits').value) || 1, 1);
           const ffo        =  parseFloat(document.getElementById('ffo').value)          || 0;
-          const totalDebtR =  parseFloat(document.getElementById('totalDebt').value)    || 0;
+          // ── الدين إلزامي: فارغ ≠ صفر ──
+          const tdRaw      = (document.getElementById('totalDebt').value || '').trim();
+          const noDebt     = document.getElementById('noTotalDebt').checked;
+          if (tdRaw === '' && !noDebt) {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            showToast('❌ «إجمالي الديون» إلزامي: أدخل القيمة أو علّم «لا يوجد دين». فارغ ≠ صفر — تركه فارغاً يضخّم NAV للوحدة.', 'error');
+            document.getElementById('totalDebt').focus();
+            return;
+          }
+          const totalDebtR = noDebt ? 0 : (parseFloat(tdRaw) || 0);
           const capRate    = numOrDefault('capRate', 'Cap Rate %', 8) / 100;
           const pffo       = numOrDefault('pffoMultiple', 'مضاعف P/FFO', 12);
+          const noiRaw     = (document.getElementById('noi').value || '').trim();
+          const noiTotal   = noiRaw === '' ? null : (parseFloat(noiRaw) || 0);
           const dividendsR =  parseFloat(document.getElementById('dividends').value)    || 0;
           const currentPrice=  parseFloat(document.getElementById('currentPrice').value)|| 0;
           if (nav_total <= 0 && ffo <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ يجب إدخال NAV أو FFO موجب للريت.', 'error'); return; }
@@ -792,28 +1231,26 @@
           const pffo_value    = ffo > 0 ? ffo * pffo : null;
           // DDM (جوردون) للريت حسب CLAUDE.md §3: DDM + FFO multiple — يُطبَّق عند توفر توزيعات موجبة
           const ddm_reit      = calculate_gordon(dividendsR, growth_perp_final, discount_rate);
-          const caprate_check = (ffo > 0 && capRate > 0) ? ffo / capRate : null;
+          // Cap Rate الصحيح مركّباً: يقابله NOI (قبل الفوائد والإدارية) ثم يُطرح الدين
+          // ويُقسَم على الوحدات. الصيغة القديمة (FFO ÷ cap) خلطت مستويَي دخل ولم تطرح الدين.
+          const caprate_value = (noiTotal != null && noiTotal > 0 && capRate > 0)
+            ? (noiTotal / capRate - totalDebtR) / totalUnits : null;
           const ffo_yield     = currentPrice > 0 ? (ffo / currentPrice * 100) : 0;
           enterprise_value    = nav_total;
-          const valid_reit    = [nav_per_unit, pffo_value, ddm_reit].filter(v => v !== null && v > 0);
+          evTitle = '🏢 إجمالي قيمة الأصول العقارية';
+          evNote  = '⚠️ رقم <strong>إجمالي بالريال</strong> لكل الصندوق (قبل خصم الديون) — وليس للوحدة الواحدة. قيمة الوحدة في البطاقة التالية.';
+          values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'DDM': ddm_reit, 'Cap Rate (مرجع)': caprate_value };
+          avgNames = ['NAV للوحدة', 'مضاعف P/FFO', 'DDM'];
+          const reitExtras = [`عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`];
+          if (noiTotal == null) reitExtras.push('Cap Rate: غير متوفر — لم يُدخَل NOI (لا يُقدَّر من FFO §8)');
+          if (noDebt) reitExtras.push('أُقرّ صراحةً بعدم وجود دين');
+          comp = composeFair({ values, avgNames, anchorModel: anchorSel, extraParts: reitExtras });
           // لا نموذج صالح → لا نعرض ولا نحفظ قيمة عادلة صفرية بصمت
-          if (!valid_reit.length) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ لا يوجد نموذج صالح — تحقق من المدخلات.', 'error'); return; }
-          const avg_fair      = valid_reit.reduce((a,b)=>a+b,0) / valid_reit.length;
-          _lastFairAvg        = avg_fair;
-          values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'DDM': ddm_reit, 'Cap Rate (مرجع)': caprate_check };
-          fair_value_range  = formatCurrency(avg_fair);
-          // صياغة واضحة: نُسمّي كل طريقة وقيمتها، ولا نذكر إلا الطرق التي ساهمت فعلاً في المتوسط
-          const reitParts = [];
-          if (nav_per_unit > 0)            reitParts.push(`NAV للوحدة = ${formatCurrency(nav_per_unit)}`);
-          if (pffo_value && pffo_value > 0) reitParts.push(`تقييم P/FFO = ${formatCurrency(pffo_value)}`);
-          if (ddm_reit && ddm_reit > 0)     reitParts.push(`DDM = ${formatCurrency(ddm_reit)}`);
-          const reitAvgLabel = reitParts.length > 1
-            ? `القيمة العادلة (${formatCurrency(avg_fair)}) = متوسط ${reitParts.length} طرق`
-            : `القيمة العادلة = ${formatCurrency(avg_fair)}`;
-          fair_value_detail = `${reitAvgLabel}: ${reitParts.join('  ·  ')}  |  عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`;
-          document.getElementById('outlierWarning').style.display = 'none';
-          if (currentPrice > 0 && avg_fair > 0) { const margin=((avg_fair-currentPrice)/avg_fair*100); document.getElementById('dashboardMargin').textContent=`${margin>0?'✅':'⚠️'} ${Math.abs(margin).toFixed(1)}% ${margin>0?'هامش أمان':'مبالغ فيه'}`; }
-          else { document.getElementById('dashboardMargin').textContent='—'; }
+          if (!comp) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ لا يوجد نموذج صالح — تحقق من المدخلات.', 'error'); return; }
+          _lastFairAvg      = comp.headline != null ? comp.headline : comp.avg;
+          fair_value_range  = comp.rangeText;
+          fair_value_detail = comp.detailText;
+          _lastSustain = sustainabilityGate('reit', { ffo, dividends: dividendsR });
         } else if (companyType === 'bank') {
           // ── وضع البنك: فرع مستقل — لا يمر على فرع الشركة العادية ولا يقرأ حقولها المخفية ──
           const bvps         = parseFloat(document.getElementById('bvps').value)         || 0;
@@ -838,51 +1275,52 @@
 
           const pbVal = bvps > 0 && bankFairPb > 0 ? bvps * bankFairPb : null;
           const peVal = bankEps > 0 && bankFairPe > 0 ? bankEps * bankFairPe : null;
-          // DDM (جوردون) للبنك حسب CLAUDE.md §3: DDM / Graham — يُطبَّق عند توفر DPS موجب وحماية r > g
-          const ddmBank = calculate_gordon(bankDps, growth_perp_final, discount_rate);
+          // ══ DDM المصرفي يُخصم بـ Ke لا بـ WACC ══
+          // الودائع مادة تشغيل البنك ومنتجه، لا مصدر تمويله. إدخالها في وزن الدين
+          // ضمن WACC يهبط بمعدل الخصم إلى 3–4% فتنفجر قيمة جوردون D/(r−g) أضعافاً:
+          // بنسبة دين واقعية لبنك (D/E=7) ينتج DDM = 372.73 ر.س بينما الصحيح بـ Ke = 40.20 ر.س.
+          const ddmBank = calculate_gordon(bankDps, growth_perp_final, keInfo.ke);
           values = {};
           if (pbVal) values['P/B Fair Value'] = pbVal;
           if (peVal) values['P/E Fair Value'] = peVal;
           if (ddmBank && ddmBank > 0) values['DDM'] = ddmBank;
+          // P/B نموذج أساسي صحيح للبنوك ويبقى داخل المتوسط (بخلاف الشركة العادية)
+          avgNames = Object.keys(values);
 
-          const validBank = Object.values(values).filter(v => v > 0);
-          if (!validBank.length) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ تحقق من المدخلات.', 'error'); return; }
+          const bankExtras = [`معدل الخصم المطبَّق على DDM: ${keInfo.label}`];
+          if (bankDps > 0 && !(ddmBank > 0)) bankExtras.push('⚠️ DDM لم يُحتسب رغم وجود DPS — تحقّق من أن Ke > النمو الدائم');
+          comp = composeFair({ values, avgNames, anchorModel: anchorSel, extraParts: bankExtras });
+          if (!comp) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ تحقق من المدخلات.', 'error'); return; }
 
-          const avgBank = validBank.reduce((a,b)=>a+b,0) / validBank.length;
-          _lastFairAvg  = avgBank;
-          const minBank = Math.min(...validBank);
-          const maxBank = Math.max(...validBank);
-          fair_value_range  = validBank.length > 1 ? `${formatCurrency(minBank)} — ${formatCurrency(maxBank)}` : formatCurrency(avgBank);
-          fair_value_detail = `المتوسط: ${formatCurrency(avgBank)}`;
+          _lastFairAvg      = comp.headline != null ? comp.headline : comp.avg;
+          fair_value_range  = comp.rangeText;
+          fair_value_detail = comp.detailText;
           enterprise_value  = 0;
+          evTitle = '🏢 قيمة المنشأة (Enterprise Value)';
+          evNote  = '⚠️ لا تنطبق على البنوك — لا يُفصل الدين عن التشغيل في الميزانية المصرفية.';
 
-          // فلاتر الأمان
+          _lastSustain = sustainabilityGate('bank', { bankPayout, cet1: cet1Val, provCoverage: provCov });
+
+          // فلاتر الأمان — عنصر مستقل عن تنبيه القيم الشاذة (كانا يتنازعان عنصراً واحداً)
           const safetyFlags = [];
-          if (bankPayout > 100) safetyFlags.push(`⚠️ نسبة التوزيع تتجاوز 100% من صافي الدخل — إشارة فشل استدامة (الفلتر 1)`);
-          if (cet1Val > 0 && cet1Val < 12) safetyFlags.push(`⚠️ CET1 منخفض (${cet1Val}% < 12%)`);
+          if (bankPayout > 100) safetyFlags.push(`⛔ نسبة التوزيع ${bankPayout}% تتجاوز 100% من صافي الدخل — فشل بوابة الاستدامة (الفلتر 1)`);
+          if (cet1Val > 0 && cet1Val < 12) safetyFlags.push(`⛔ CET1 منخفض (${cet1Val}% < 12%)`);
           if (nplVal  > 0 && nplVal  > 4)  safetyFlags.push(`⚠️ NPL مرتفع (${nplVal}% > 4%)`);
-          if (provCov > 0 && provCov < 80) safetyFlags.push(`⚠️ تغطية مخصصات منخفضة (${provCov}% < 80%)`);
+          if (provCov > 0 && provCov < 80) safetyFlags.push(`⛔ تغطية مخصصات منخفضة (${provCov}% < 80%)`);
           if (ldrVal  > 0 && ldrVal  > 110) safetyFlags.push(`⚠️ LDR مرتفع (${ldrVal}% > 110%) — ضغط سيولة`);
 
+          const bankEl = document.getElementById('bankSafetyWarning');
           if (safetyFlags.length) {
-            const el = document.getElementById('outlierWarning');
-            el.style.display = 'block';
-            el.innerHTML = `🛡️ <strong>فلاتر أمان البنك:</strong><br>${safetyFlags.join('<br>')}`;
-          } else {
-            document.getElementById('outlierWarning').style.display = 'none';
-          }
+            bankEl.style.display = 'block';
+            bankEl.innerHTML = `🛡️ <strong>فلاتر أمان البنك:</strong><br>${safetyFlags.join('<br>')}`;
+          } else bankEl.style.display = 'none';
 
-          if (currentPrice2 > 0 && avgBank > 0) {
-            const margin = ((avgBank - currentPrice2) / avgBank * 100);
-            document.getElementById('dashboardMargin').textContent = `${margin>0?'✅':'⚠️'} ${Math.abs(margin).toFixed(1)}% ${margin>0?'هامش أمان':'مبالغ فيه'}`;
-          } else { document.getElementById('dashboardMargin').textContent = '—'; }
           document.getElementById('dashboardDebt').textContent      = nplVal ? `NPL ${nplVal}%` : '—';
           document.getElementById('dashboardLiquidity').textContent  = ldrVal ? `LDR ${ldrVal}%` : '—';
           document.getElementById('dashboardEarnings').textContent   = parseFloat(document.getElementById('bankRoe').value) ? `ROE ${document.getElementById('bankRoe').value}%` : '—';
         } else {
-          const eps          =  parseFloat(document.getElementById('eps').value)         || 0;
-          const fcf          =  parseFloat(document.getElementById('fcf').value)         || 0;
-          const net_debt     =  parseFloat(document.getElementById('netDebt').value)     || 0;
+          const epsSpot       =  parseFloat(document.getElementById('eps').value)         || 0;
+          const fcfSpot       =  parseFloat(document.getElementById('fcf').value)         || 0;
           const growth_5yr   = (parseFloat(document.getElementById('growth5yr').value)   || 0) / 100;
           const sector_pe    =  parseFloat(document.getElementById('sectorPe').value)    || 0;
           const dividends    =  parseFloat(document.getElementById('dividends').value)   || 0;
@@ -890,47 +1328,132 @@
           const bond_yield   = numOrDefault('bondYield', 'عائد السندات %', 6.5);
           const fair_pb      = numOrDefault('fairPb', 'P/B العادل', 1.5);
           const currentPrice =  parseFloat(document.getElementById('currentPrice').value)|| 0;
-          if (eps <= 0 && fcf <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ يجب إدخال EPS أو FCF موجب للشركة العادية.', 'error'); return; }
+
+          // ── الدين الصافي إلزامي مع أساس FCFF: فارغ ≠ صفر ──
+          const ndRaw  = (document.getElementById('netDebt').value || '').trim();
+          const noNd   = document.getElementById('noNetDebt').checked;
+          if (fcfBasis === 'fcff' && ndRaw === '' && !noNd) {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            showToast('❌ «الدين الصافي للسهم» إلزامي: أدخل القيمة أو علّم «لا يوجد دين». فارغ ≠ صفر — تركه فارغاً يعطي دائماً أعلى قيمة ممكنة.', 'error');
+            document.getElementById('netDebt').focus();
+            return;
+          }
+          const net_debt = noNd ? 0 : (parseFloat(ndRaw) || 0);
+
+          // ── الشركة الدورية: الأرقام المُطبَّعة تحلّ محلّ اللحظية في جراهام و P/E و DCF ──
+          const cyc      = companyType === 'cyclical';
+          const nEpsRaw  = (document.getElementById('normEps').value || '').trim();
+          const nFcfRaw  = (document.getElementById('normFcf').value || '').trim();
+          const nEps     = nEpsRaw === '' ? null : parseFloat(nEpsRaw);
+          const nFcf     = nFcfRaw === '' ? null : parseFloat(nFcfRaw);
+          const useNormEps = cyc && nEps != null && isFinite(nEps) && nEps !== 0;
+          const useNormFcf = cyc && nFcf != null && isFinite(nFcf) && nFcf !== 0;
+          const eps = useNormEps ? nEps : epsSpot;
+          const fcf = useNormFcf ? nFcf : fcfSpot;
+
+          if (eps <= 0 && fcf <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ يجب إدخال EPS أو FCF موجب.', 'error'); return; }
           if (bond_yield <= 0)      { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ عائد السندات يجب أن يكون موجباً.', 'error'); return; }
           const growth_5yr_adj = growth_5yr + growth_adj;
-          const dcf_result  = calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, discount_rate, net_debt);
+          // معدل خصم DCF يتبع أساس التدفق: FCFF←WACC · FCFE←Ke (بلا طرح للدين)
+          const dcfRate     = fcfBasis === 'fcfe' ? keInfo.ke : discount_rate;
+          const dcf_result  = calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, dcfRate, net_debt, fcfBasis);
           const dcf_value   = dcf_result ? dcf_result.equityValue : null;
           enterprise_value  = dcf_result ? dcf_result.enterpriseValue : 0;
           const graham_value = calculateGraham(eps, growth_5yr_adj * 100, bond_yield);
           const pe_value     = calculate_pe(eps, sector_pe);
-          const gordon_value = calculate_gordon(dividends, growth_perp_final, discount_rate);
+          const gordon_value = calculate_gordon(dividends, growth_perp_final, perpRate);
           const bv_value     = calculate_book_value(book_value, fair_pb);
           values = { 'DCF': dcf_value, 'جراهام': graham_value, 'مكرر الربحية P/E': pe_value, 'جوردون': gordon_value, 'القيمة الدفترية': bv_value };
-          const valid_values = Object.values(values).filter(v => v !== null && v > 0 && isFinite(v));
-          if (valid_values.length === 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ لم ينتج أي نموذج قيمة صالحة. تحقق من المدخلات.', 'error'); return; }
-          const avg  = valid_values.reduce((a,b)=>a+b,0) / valid_values.length;
-          _lastFairAvg = avg;
-          const minV = Math.min(...valid_values);
-          const maxV = Math.max(...valid_values);
-          fair_value_range  = `${formatCurrency(minV)} — ${formatCurrency(maxV)}`;
-          fair_value_detail = `المتوسط: ${formatCurrency(avg)} | السيناريو: ${scenario==='realistic'?'واقعي':scenario==='optimistic'?'متفائل':'محتاط'}`;
-          if (currentPrice > 0 && avg > 0) { const margin=((avg-currentPrice)/avg*100); document.getElementById('dashboardMargin').textContent=`${margin>0?'✅':'⚠️'} ${Math.abs(margin).toFixed(1)}% ${margin>0?'هامش أمان':'مبالغ فيه'}`; }
-          else { document.getElementById('dashboardMargin').textContent='—'; }
-          createSensitivityTable(fcf, growth_5yr_adj, growth_perp_final, discount_rate, net_debt);
-          detectAndShowOutliers(Object.fromEntries(Object.entries(values).filter(([,v])=>v!==null&&v>0)));
+          // ══ القيمة الدفترية خارج المتوسط ══
+          // هي أرضية تصفوية (ما يتبقّى للمساهم لو صُفّيت الشركة) لا تقدير لقيمة منشأة
+          // عاملة. إدخالها في متوسط متساوٍ يسحبه 11–16% لأسفل بانتظام لكل شركة نامية،
+          // فتظهر أسهم سليمة «مبالغاً فيها» بلا سبب مالي. تُعرض سطراً منفصلاً.
+          avgNames = ['DCF', 'جراهام', 'مكرر الربحية P/E', 'جوردون'];
+          bookFloorVal = (bv_value != null && bv_value > 0) ? bv_value : null;
+
+          const extras = [`السيناريو: ${scenario==='realistic'?'واقعي':scenario==='optimistic'?'متفائل':'محتاط'}`];
+          extras.push(fcfBasis === 'fcfe'
+            ? `أساس التدفق: FCFE مخصوم بـ ${keInfo.label} — الدين لا يُطرح`
+            : `أساس التدفق: FCFF مخصوم بـ WACC ${(discount_rate*100).toFixed(2)}% — الدين الصافي ${formatCurrency(net_debt)} مطروح`);
+          if (cyc) {
+            if (useNormEps) extras.push(`📐 EPS مُطبَّع ${eps} مستخدَم في جراهام و P/E بدل اللحظي ${epsSpot}`);
+            else extras.push(`⚠️ لا EPS مُطبَّع — جراهام و P/E محسوبان على ربح لحظي (${epsSpot}) يتبع موضع الدورة لا قيمة الشركة`);
+            if (useNormFcf) extras.push(`📐 FCF مُطبَّع ${fcf} مستخدَم في DCF بدل اللحظي ${fcfSpot}`);
+            else extras.push(`⚠️ لا FCF مُطبَّع — DCF محسوب على تدفق لحظي (${fcfSpot}) يتبع موضع الدورة`);
+          }
+          if (noNd) extras.push('أُقرّ صراحةً بعدم وجود دين صافٍ');
+
+          comp = composeFair({ values, avgNames, anchorModel: anchorSel, extraParts: extras });
+          if (!comp) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ لم ينتج أي نموذج قيمة صالحة. تحقق من المدخلات.', 'error'); return; }
+          _lastFairAvg      = comp.headline != null ? comp.headline : comp.avg;
+          fair_value_range  = comp.rangeText;
+          fair_value_detail = comp.detailText;
+          evTitle = fcfBasis === 'fcfe' ? '🏢 قيمة حقوق الملكية من DCF' : '🏢 قيمة المنشأة (Enterprise Value)';
+          evNote  = fcfBasis === 'fcfe'
+            ? '⚠️ رقم <strong>للسهم الواحد</strong> (ر.س/سهم) — قيمة حقوق ملكية مباشرة، لا يُطرح منها دين.'
+            : '⚠️ رقم <strong>للسهم الواحد</strong> (ر.س/سهم) قبل خصم الدين الصافي — ليس قيمة الشركة الإجمالية.';
+          createSensitivityTable(fcf, growth_5yr_adj, growth_perp_final, dcfRate, net_debt, fcfBasis);
+          _lastSustain = sustainabilityGate(companyType,
+            { eps: epsSpot, fcf: fcfSpot, dividends, normEps: nEpsRaw === '' ? null : nEps, normFcf: nFcfRaw === '' ? null : nFcf });
         }
+
+        // ── فحص التشتّت في كل الأنواع (كان محصوراً في الشركة العادية) ──
+        detectAndShowOutliers(Object.fromEntries(
+          Object.entries(values).filter(([k, v]) => v !== null && v > 0 && avgNames.includes(k))));
+
+        // ── لوحة التشتّت واختيار المرساة ──
+        renderDispersionBox(comp, avgNames, values);
+
+        // ── هامش الأمان: على الطرف الأدنى وعلى المتوسط/المرساة معاً ──
+        const priceNow = parseFloat(document.getElementById('currentPrice').value) || 0;
+        const mp = marginPair(priceNow, comp);
+        const dualEl = document.getElementById('marginDualLine');
+        if (mp.dual) { dualEl.style.display = ''; dualEl.innerHTML = '🎯 هامش الأمان — ' + mp.dual; }
+        else dualEl.style.display = 'none';
+        document.getElementById('dashboardMargin').textContent = mp.text || '—';
+
+        // ── الأرضية الدفترية سطراً منفصلاً تحت النطاق ──
+        const bfEl = document.getElementById('bookFloorLine');
+        if (bookFloorVal != null) {
+          bfEl.style.display = '';
+          bfEl.innerHTML = `🧱 الأرضية الدفترية: <strong>${formatCurrency(bookFloorVal)}</strong> — قيمة تصفية لا قيمة منشأة عاملة، خارج المتوسط عمداً.`;
+        } else bfEl.style.display = 'none';
+
+        // ══ بوابة الاستدامة (الفلتر 1) تسبق السعر: فشلها يكتم هامش الأمان ══
+        applySustainGate(_lastSustain, mp);
+        if (_lastSustain && _lastSustain.failed) {
+          fair_value_detail += '  |  ⛔ فشل بوابة الاستدامة (الفلتر 1) — القيمة معروضة للعلم فقط ولا يُبنى عليها قرار شراء';
+        }
+        _lastComp = comp;
+        _lastAvgNames = avgNames.slice();
 
         // إعلان الافتراضات المعتمدة ضمن تفاصيل النتيجة (تُحفظ مع العملية في السجل أيضاً)
         if (assumedDefaults.length) fair_value_detail += `  |  ${assumedDefaults.join('  ·  ')}`;
 
-        // جدول حساسية DCF يخص الشركة العادية فقط — يُخفى ويُمسح لغيرها حتى لا يُبنى من حقول مخفية
+        // جدول حساسية DCF يخص الشركة العادية والدورية فقط — يُخفى ويُمسح لغيرها حتى لا يُبنى من حقول مخفية
         const sensCard = document.getElementById('sensitivityCard');
-        if (companyType === 'normal') { sensCard.style.display = ''; }
+        if (isEquityLike(companyType)) { sensCard.style.display = ''; }
         else { sensCard.style.display = 'none'; document.getElementById('sensitivityTable').innerHTML = ''; }
 
+        // ── بطاقة قيمة المنشأة: نصّها يتغيّر بالنوع (للسهم في الشركة، إجمالي بالريال في الريت) ──
+        document.getElementById('enterpriseValueTitle').textContent   = evTitle;
         document.getElementById('enterpriseValueRange').textContent   = enterprise_value > 0 ? formatCurrency(enterprise_value) : 'غير متاح (FCF ≤ 0 أو لا يُستخدم هنا)';
-        document.getElementById('enterpriseValueDetails').textContent = enterprise_value > 0 ? 'قيمة الشركة الإجمالية قبل خصم الدين الصافي' : '—';
+        document.getElementById('enterpriseValueDetails').textContent = enterprise_value > 0
+          ? (companyType === 'reit' ? 'إجمالي قيمة أصول الصندوق بالريال — قبل خصم الديون'
+             : fcfBasis === 'fcfe'  ? 'قيمة حقوق الملكية للسهم الواحد (ر.س/سهم)'
+                                     : 'قيمة المنشأة للسهم الواحد (ر.س/سهم) — قبل خصم الدين الصافي')
+          : '—';
+        document.getElementById('enterpriseValueNote').innerHTML = evNote ||
+          '⚠️ هذه القيمة قبل خصم الديون الصافية';
         document.getElementById('fairValueRange').textContent   = fair_value_range;
         document.getElementById('fairValueDetails').textContent = fair_value_detail;
         // سياق الموثوقية للحساب الحيّ — نفس دالة السجل، مصدر واحد بلا تكرار
         _lastCtx = relCtxFromInputs(captureInputs());
-        buildModelsTable(values);
-        const chart_values = Object.fromEntries(Object.entries(values).filter(([,v])=>v!==null&&v>0&&isFinite(v)));
+        buildModelsTable(values, avgNames);
+        // Cap Rate والأرضية الدفترية خارج الرسم: عمود مساوٍ للبقية رغم استبعادهما
+        // من المتوسط يوحي بأنهما نموذجان مكافئان — وهما ليسا كذلك.
+        const chart_values = Object.fromEntries(Object.entries(values)
+          .filter(([k, v]) => v !== null && v > 0 && isFinite(v) && avgNames.includes(k)));
         createModelsChart(chart_values);
         // مؤشرات اللوحة العامة — لا تُطبَّق على البنك (له مؤشراته NPL/LDR/ROE المضبوطة أعلاه)
         if (companyType !== 'bank') {
@@ -950,6 +1473,99 @@
       }
     }
 
+    // ═══ لوحة التشتّت + اختيار نموذج المرساة ═══
+    let _lastSustain = null, _lastComp = null, _lastAvgNames = [];
+    function renderDispersionBox(comp, avgNames, values) {
+      const box = document.getElementById('dispersionBox');
+      const txt = document.getElementById('dispersionText');
+      const wrap = document.getElementById('anchorPickerWrap');
+      const sel = document.getElementById('anchorModel');
+      if (!comp || comp.n < 2) { box.style.display = 'none'; return; }
+      if (!comp.highCV) {
+        box.style.display = '';
+        box.setAttribute('data-state', 'good');
+        txt.innerHTML = `📊 <strong>تشتّت النماذج ${comp.cv.toFixed(0)}%</strong> (σ = ${formatCurrency(comp.sd || 0)}) — دون عتبة ${CV_ALERT}%، النماذج متوافقة والمتوسط يمثّلها تمثيلاً معقولاً.`;
+        wrap.style.display = 'none';
+        return;
+      }
+      box.style.display = '';
+      box.setAttribute('data-state', 'warn');
+      txt.innerHTML = `<strong>⚠️ التشتّت ${comp.cv.toFixed(0)}% — النماذج لا تتفق، لا تبنِ قراراً على رقم واحد.</strong><br>`
+        + `النطاق ${formatCurrency(comp.min)} — ${formatCurrency(comp.max)} عبر ${comp.n} نماذج. `
+        + `عندما يتجاوز معامل الاختلاف ${CV_ALERT}% يكون الفارق بين النماذج أكبر من أن يختصره متوسط واحد: `
+        + `المتوسط عندها رقم دقيق المظهر ضعيف السند. اختر النموذج الذي تثق أنه الأنسب لهذا الأصل ليُحسب عليه الهامش.`;
+      wrap.style.display = '';
+      const cur = sel.value;
+      const opts = ['<option value="">— بلا مرساة (النطاق فقط) —</option>'];
+      avgNames.forEach(n => {
+        if (!(values[n] > 0)) return;
+        opts.push(`<option value="${escHist(n)}">${escHist(n)} — ${formatCurrency(values[n])}</option>`);
+      });
+      sel.innerHTML = opts.join('');
+      sel.value = (comp.anchorName || cur || '');
+      _pendingAnchor = '';   // القائمة صارت مملوءة — لا حاجة للاحتياطي بعد الآن
+    }
+
+    // اختيار المرساة يعيد حساب الهامش ويُحفظ في السجل مع العملية
+    async function onAnchorChange() {
+      const anchor = document.getElementById('anchorModel').value || '';
+      const tk = (document.getElementById('stockTicker').value || '').trim().toUpperCase();
+      // العملية الأحدث لنفس الرمز هي التي نُحدّثها (هي التي أنتجت هذه النتيجة)
+      const entry = _history.find(e => (e.inputs?.ticker || '').toUpperCase() === tk);
+      if (!entry) { showToast('احسب أولاً ثم اختر المرساة', 'info'); return; }
+      entry.inputs = { ...entry.inputs, anchorModel: anchor };
+      const res = recomputeResults(entry.inputs);
+      if (res) entry.results = res;
+      // تحديث العرض الحيّ من نفس المصدر
+      if (res) {
+        document.getElementById('fairValueRange').textContent   = res.fairValueRange;
+        document.getElementById('fairValueDetails').textContent = res.fairValueDetail;
+        document.getElementById('dashboardMargin').textContent  = res.marginText || '—';
+        const dualEl = document.getElementById('marginDualLine');
+        if (res.marginDual) { dualEl.style.display = ''; dualEl.innerHTML = '🎯 هامش الأمان — ' + res.marginDual; }
+        _lastFairAvg = res.fairValueAvg;
+      }
+      await persistHistory();
+      renderHistory();
+      showToast(anchor ? `⚓ اعتُمد «${anchor}» مرساةً — حُفظ في السجل` : 'أُلغيت المرساة', 'success');
+    }
+
+    // ═══ بوابة الاستدامة: الفشل يكتم الحكم السعري ولا يلغي عرض القيمة ═══
+    // الدستور §4: «فشل → الإجراء = خروج، بغض النظر عن السعر». وعرض «✅ هامش أمان 18%»
+    // بجوار تحذير الفشل يقرأه العين دعوةً للشراء عند النزول — و§8 يحرّمه نصّاً.
+    function applySustainGate(gate, mp) {
+      const banner = document.getElementById('sustainGateBanner');
+      const txt    = document.getElementById('sustainGateText');
+      const dual   = document.getElementById('marginDualLine');
+      if (!gate || (!gate.failed && !(gate.watch && gate.watch.length))) { banner.style.display = 'none'; return; }
+      if (gate.failed) {
+        banner.style.display = '';
+        banner.setAttribute('data-state', 'bad');
+        txt.innerHTML = `<strong>خروج — فشل بوابة الاستدامة (الفلتر 1).</strong><br>`
+          + gate.reasons.map(r => '• ' + escHist(r)).join('<br>')
+          + `<br><span style="opacity:.85">الدستور §4: الفشل هنا يعني الإجراء «خروج» <em>بغض النظر عن السعر</em> — النزول إشارة خروج لا إشارة شراء (§8). `
+          + `القيمة العادلة تبقى معروضة للعلم فقط، ولا يُبنى عليها قرار شراء.</span>`;
+        // كتم الحكم السعري
+        document.getElementById('dashboardMargin').textContent = '⛔ خروج — فشل الفلتر 1';
+        dual.style.display = 'none';
+      } else {
+        banner.style.display = '';
+        banner.setAttribute('data-state', 'warn');
+        txt.innerHTML = `<strong>مراقبة — إشارة على بوابة الاستدامة (لم تبلغ حدّ الفشل).</strong><br>`
+          + gate.watch.map(r => '• ' + escHist(r)).join('<br>');
+      }
+    }
+
+    // استعادة معدل الخصم اليدوي عند إلغاء «حساب WACC تلقائياً»
+    let _prevDiscountRate = null;
+    let _pendingAnchor = '';   // مرساة مستعادة من عملية قيد التعديل قبل امتلاء القائمة
+    function restoreDiscountRate() {
+      if (_prevDiscountRate != null) {
+        document.getElementById('discountRate').value = _prevDiscountRate;
+        _prevDiscountRate = null;
+      }
+    }
+
     // ===== موثوقية كل نموذج لهذا السهم بالذات (وليست دقّة عامة ثابتة) =====
     // المصدر الوحيد للسياق: relCtxFromInputs(inp) — يشتق نفس القيم التي يشتقها recomputeResults
     // (السيناريو + WACC + سقف النمو الدائم 3%) من أي كائن مدخلات، سواء عملية حيّة أو عملية محفوظة
@@ -963,42 +1579,81 @@
       const growth_adj  = scenario === 'optimistic' ? 0.02 : scenario === 'conservative' ? -0.02 : 0;
 
       let discount_rate = (num(inp.discountRate) || 0) / 100;
-      if (inp.useWacc) {
-        const rf = (num(inp.riskFree)||0)/100, b = num(inp.beta)||1, rm = (num(inp.marketReturn)||0)/100,
+      // البنك لا يُخصم بـ WACC مهما كان المحفوظ في العملية القديمة
+      if (inp.useWacc && companyType !== 'bank') {
+        const rf = (num(inp.riskFree)||0)/100, b = num(inp.betaMain) || num(inp.beta) || 1, rm = (num(inp.marketReturn)||0)/100,
               rd = (num(inp.debtCost)||0)/100, tx = (num(inp.taxRate)||0)/100, de = num(inp.debtEquity)||0;
         discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
       }
+      const ke = keFromInputs(inp);
       let growth_perp_final = (num(inp.growthPerp) || 0) / 100 + growth_adj;
       if (growth_perp_final > 0.03) growth_perp_final = 0.03;
+      if (growth_perp_final < 0)    growth_perp_final = 0;
 
       if (companyType === 'reit') {
         return { companyType, ffo: num(inp.ffo), pffoMultiple: num(inp.pffoMultiple),
-                 capRate: num(inp.capRate), nav_total: num(inp.nav), totalUnits: num(inp.totalUnits),
-                 dps: num(inp.dividends), discount_rate, growth_perp_final };
+                 capRate: num(inp.capRate), noi: num(inp.noi), nav_total: num(inp.nav), totalUnits: num(inp.totalUnits),
+                 dps: num(inp.dividends), discount_rate, ke, growth_perp_final };
       }
       if (companyType === 'bank') {
         return { companyType, bvps: num(inp.bvps), bankEps: num(inp.bankEps),
                  bankFairPb: num(inp.bankFairPb), bankFairPe: num(inp.bankFairPe),
-                 dps: num(inp.bankDps), discount_rate, growth_perp_final };
+                 dps: num(inp.bankDps), discount_rate, ke, growth_perp_final };
       }
-      return { companyType: 'normal', fcf: num(inp.fcf), eps: num(inp.eps), dividends: num(inp.dividends),
+      // شركة عادية أو دورية — الدورية تُقيَّم على أرقام مُطبَّعة عند توفرها
+      const nEps = num(inp.normEps), nFcf = num(inp.normFcf);
+      const cyc  = companyType === 'cyclical';
+      const basis = inp.fcfBasis === 'fcfe' ? 'fcfe' : 'fcff';
+      return { companyType, cyclical: cyc, basis,
+               fcf: (cyc && nFcf != null && nFcf !== 0) ? nFcf : num(inp.fcf),
+               eps: (cyc && nEps != null && nEps !== 0) ? nEps : num(inp.eps),
+               normalized: cyc && (nEps != null || nFcf != null),
+               dividends: num(inp.dividends),
                book_value: num(inp.bookValue), sector_pe: num(inp.sectorPe), currentPe: num(inp.currentPe),
                growth_5yr_adj: (num(inp.growth5yr) || 0) / 100 + growth_adj, growth_perp_final,
-               discount_rate, bond_yield: num(inp.bondYield) };
+               discount_rate: basis === 'fcfe' && ke != null ? ke : discount_rate, ke,
+               bond_yield: num(inp.bondYield) };
     }
+
+    // Ke من كائن مدخلات محفوظ أو حيّ — يدوي أولاً ثم CAPM. لا تقدير صامت.
+    function keFromInputs(inp) {
+      const n = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
+      const manual = n(inp.costOfEquity);
+      if (manual != null && manual > 0) return manual / 100;
+      const b = n(inp.betaMain) ?? n(inp.beta);
+      const rf = n(inp.riskFree), rm = n(inp.marketReturn);
+      if (b != null && b > 0 && rf != null && rm != null) return (rf + b * (rm - rf)) / 100;
+      return null;
+    }
+    // حصّة القيمة النهائية من قيمة DCF — تُحسب من نفس سياق النموذج بلا افتراض جديد
+    function tvShareOf(c) {
+      if (!c || c.fcf == null || c.fcf <= 0) return null;
+      const r = c.discount_rate, g5 = c.growth_5yr_adj || 0, gp = c.growth_perp_final || 0;
+      if (!(r > gp)) return null;
+      const res = calculate_dcf(c.fcf, g5, gp, r, 0, 'fcff');
+      return res ? res.tvShare : null;
+    }
+
     function modelReliability(name, c) {
       c = c || {};
       switch (name) {
         case 'DCF': {
           if (c.fcf == null || c.fcf <= 0) return { label: '⛔ لا ينطبق', cls: 'rel-na', reason: 'FCF غير موجب — DCF يحتاج تدفقاً نقدياً حراً موجباً' };
           const gap = (c.discount_rate - c.growth_perp_final) * 100;
-          if (gap < 1.5) return { label: '🔴 منخفضة', cls: 'rel-low', reason: `الفارق بين الخصم والنمو الدائم ${gap.toFixed(1)}% فقط — القيمة النهائية (Terminal Value) تهيمن وتتضخّم مع أي تغيير بسيط بالافتراضات` };
-          if (c.growth_5yr_adj != null && c.growth_5yr_adj > 0.15) return { label: '🟡 متوسطة', cls: 'rel-mid', reason: 'نمو 5 سنوات مرتفع (>15%) — النموذج حسّاس جداً لدقّة هذا الافتراض' };
-          return { label: '🟢 مرتفعة', cls: 'rel-high', reason: `فارق خصم/نمو صحي (${gap.toFixed(1)}%) — الأنسب لشركات ناضجة بتدفقات نقدية مستقرة` };
+          // حصّة القيمة النهائية من القيمة الكلية: هي المقياس الحقيقي لهشاشة DCF.
+          // عند فارق 1.5% تبلغ ~87% من القيمة — أي أن «النموذج» ليس تدفقات عشر سنوات
+          // بل قسمةً واحدة على رقم صغير. العتبة الصحيحة للثقة المرتفعة ≥ 4%.
+          const tvs = tvShareOf(c);
+          const tvTxt = tvs != null ? ` · القيمة النهائية ${(tvs*100).toFixed(0)}% من القيمة الكلية` : '';
+          if (gap < 1.5 || (tvs != null && tvs > 0.85)) return { label: '🔴 منخفضة', cls: 'rel-low', reason: `الفارق بين الخصم والنمو الدائم ${gap.toFixed(1)}%${tvTxt} — القيمة كلها تقريباً قسمة على رقم شديد الصغر، تتضخّم مع أي تغيير بسيط بالافتراضات` };
+          if (gap < 4)   return { label: '🟡 متوسطة', cls: 'rel-mid', reason: `فارق الخصم/النمو ${gap.toFixed(1)}% دون 4%${tvTxt} — القيمة النهائية تهيمن على النتيجة أكثر من التدفقات المتوقعة نفسها` };
+          if (c.growth_5yr_adj != null && c.growth_5yr_adj > 0.15) return { label: '🟡 متوسطة', cls: 'rel-mid', reason: `نمو 5 سنوات مرتفع (>15%) — النموذج حسّاس جداً لدقّة هذا الافتراض${tvTxt}` };
+          return { label: '🟢 مرتفعة', cls: 'rel-high', reason: `فارق خصم/نمو صحي (${gap.toFixed(1)}% ≥ 4%)${tvTxt} — الأنسب لشركات ناضجة بتدفقات نقدية مستقرة` };
         }
         case 'جراهام': {
           if (c.eps == null || c.eps <= 0) return { label: '⛔ لا ينطبق', cls: 'rel-na', reason: 'EPS غير موجب — المعادلة لا تُعرَّف لشركة خاسرة' };
-          if (c.growth_5yr_adj != null && c.growth_5yr_adj * 100 > 15) return { label: '🟡 متوسطة', cls: 'rel-mid', reason: 'المعادلة تُسقّف مضاعف النمو عند 25 — تُقلّل قيمة شركات النمو السريع فعلياً' };
+          // السقف ينشط عند 8.25% لا 15%: المضاعف 8.5 + 2g يبلغ 25 عند g = 8.25
+          if (c.growth_5yr_adj != null && c.growth_5yr_adj * 100 > 8.25) return { label: '🟡 متوسطة', cls: 'rel-mid', reason: `النمو ${(c.growth_5yr_adj*100).toFixed(1)}% فوق 8.25% حيث يبلغ المضاعف سقفه 25 (8.5 + 2×8.25) — أي نمو فوق ذلك بلا أثر على جراهام إطلاقاً، ولا حتى السيناريو المتفائل يغيّرها. المعادلة تُقلّل قيمة شركات النمو السريع بنيوياً` };
           return { label: '🟢 مرتفعة', cls: 'rel-high', reason: 'مناسبة للشركات الناضجة ذات الأرباح المستقرة (الاستخدام الكلاسيكي للمعادلة)' };
         }
         case 'مكرر الربحية P/E': {
@@ -1019,7 +1674,7 @@
         }
         case 'القيمة الدفترية': {
           if (c.book_value == null || c.book_value <= 0) return { label: '⛔ لا ينطبق', cls: 'rel-na', reason: 'القيمة الدفترية غير موجبة' };
-          return { label: '🟡 متوسطة', cls: 'rel-mid', reason: 'الأنسب للقطاعات كثيفة الأصول (بنوك/عقار) — أقل دلالة لشركات الأصول غير الملموسة' };
+          return { label: '🧱 أرضية — خارج المتوسط', cls: 'rel-na', reason: 'قيمة تصفية: ما يتبقّى للمساهم لو صُفّيت الشركة — لا تقدير لقيمتها كمنشأة عاملة. تُعرض حدّاً أدنى ولا تدخل متوسط القيمة العادلة (كانت تسحبه 11–16% لأسفل بانتظام لكل شركة نامية)' };
         }
         case 'NAV للوحدة':
           return { label: '🟢 مرتفعة', cls: 'rel-high', reason: 'الأنسب لتقييم صناديق الريت — يعكس القيمة السوقية للأصول العقارية مباشرة' };
@@ -1028,15 +1683,20 @@
           return { label: '🟢 مرتفعة', cls: 'rel-high', reason: 'FFO هو مقياس التدفق الصحيح لصناديق الريت (بدل EPS)' };
         }
         case 'Cap Rate (مرجع)':
-          return { label: '⚪ مرجعي فقط', cls: 'rel-na', reason: 'لا يدخل في متوسط القيمة العادلة — يُعرض للمقارنة فقط' };
+          if (c.noi == null || !(c.noi > 0)) return { label: '⛔ غير متوفر', cls: 'rel-na', reason: 'لم يُدخَل NOI — Cap Rate يقابله صافي دخل التشغيل لا FFO، ولا يُقدَّر من FFO (§8: ممنوع تقدير بيانات ناقصة بصمت)' };
+          return { label: '⚪ مرجعي فقط', cls: 'rel-na', reason: '(NOI ÷ Cap Rate − الدين) ÷ الوحدات. لا يدخل متوسط القيمة العادلة ولا الرسم البياني — يُعرض للمقارنة فقط' };
         case 'DDM': {
           if (c.dps == null || c.dps <= 0) return { label: '⛔ لا ينطبق', cls: 'rel-na', reason: 'لا توزيعات مُدخَلة — DDM يحتاج توزيعاً موجباً' };
-          const gap = ((c.discount_rate || 0) - (c.growth_perp_final || 0)) * 100;
-          if (gap < 1.5) return { label: '🔴 منخفضة', cls: 'rel-low', reason: `فارق الخصم/النمو ${gap.toFixed(1)}% فقط — حسّاس جداً لأي تغيير بالافتراضات` };
-          return { label: '🟢 مرتفعة', cls: 'rel-high', reason: 'نموذج التوزيعات المخصومة (جوردون) — المقياس المعتمد في CLAUDE.md §3 للبنوك والريتات ذات التوزيع المستقر' };
+          const rate = c.companyType === 'bank' ? c.ke : c.discount_rate;
+          if (rate == null) return { label: '⛔ غير متوفر', cls: 'rel-na', reason: 'تكلفة حقوق الملكية Ke غير متوفرة — DDM المصرفي يُخصم بـ Ke لا بـ WACC، ولا يُقدَّر بصمت (§8)' };
+          const gap = (rate - (c.growth_perp_final || 0)) * 100;
+          const rn = c.companyType === 'bank' ? 'Ke' : 'الخصم';
+          if (gap < 1.5) return { label: '🔴 منخفضة', cls: 'rel-low', reason: `فارق ${rn}/النمو ${gap.toFixed(1)}% فقط — حسّاس جداً لأي تغيير بالافتراضات` };
+          if (gap < 4)   return { label: '🟡 متوسطة', cls: 'rel-mid', reason: `فارق ${rn}/النمو ${gap.toFixed(1)}% دون 4% — القيمة قسمة على رقم صغير، أي تعديل طفيف يحرّكها كثيراً` };
+          return { label: '🟢 مرتفعة', cls: 'rel-high', reason: `نموذج التوزيعات المخصومة (جوردون) بفارق ${rn}/النمو ${gap.toFixed(1)}% — المقياس المعتمد في CLAUDE.md §3 للبنوك والريتات ذات التوزيع المستقر` };
         }
         case 'P/B Fair Value':
-          return { label: '🟢 مرتفعة', cls: 'rel-high', reason: 'P/B هو المقياس الأساسي المعتمد لتقييم البنوك (رأس المال والأصول الملموسة)' };
+          return { label: '🟢 مرتفعة', cls: 'rel-high', reason: 'P/B هو المقياس الأساسي المعتمد لتقييم البنوك (رأس المال والأصول الملموسة) — يبقى داخل المتوسط بخلاف القيمة الدفترية للشركة العادية' };
         case 'P/E Fair Value':
           return { label: '🟡 متوسطة', cls: 'rel-mid', reason: 'مقياس ثانوي للبنوك — P/B عادة أكثر اعتماداً في القطاع المصرفي' };
         default:
@@ -1102,14 +1762,15 @@
       return isFinite(n) ? n : null;
     }
 
-    function buildModelsTable(values) {
+    function buildModelsTable(values, avgNames) {
       const currentPrice = parseFloat(document.getElementById('currentPrice').value) || 0;
+      const inAvg = new Set(avgNames || Object.keys(values));
       const tbody = document.getElementById('modelsTable');
       tbody.innerHTML = '';
-      const items = Object.entries(values).map(([name, val]) => ({ name, valueNum: (val != null && val > 0 && isFinite(val)) ? val : null }));
+      const items = Object.entries(values).map(([name, val]) => ({ name, valueNum: (val != null && val > 0 && isFinite(val)) ? val : null, inAvg: inAvg.has(name) }));
       scoreModels(items, _lastCtx);
       // نخزّن الصفوف بالقيمة الخام لحفظها في السجل (تمييز موثوقية دقيق لاحقاً بلا إعادة تحليل نص)
-      _lastModelRows = items.map(it => ({ name: it.name, value: it.valueNum != null ? formatCurrency(it.valueNum) : 'لا ينطبق', raw: it.valueNum }));
+      _lastModelRows = items.map(it => ({ name: it.name, value: it.valueNum != null ? formatCurrency(it.valueNum) : 'لا ينطبق', raw: it.valueNum, inAvg: it.inAvg }));
       items.forEach(it => {
         const val = it.valueNum;
         let status = '—';
@@ -1122,7 +1783,9 @@
               : `<span style="color:#f59e0b;font-weight:700">🟡 قرب القيمة العادلة</span>`;
         }
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td><strong>${it.name}</strong></td><td>${val!==null&&val>0?formatCurrency(val):'<span style="color:var(--text-muted)">لا ينطبق</span>'}</td><td>${status}</td>` +
+        const outTag = (!it.inAvg && val !== null && val > 0)
+          ? ` <span class="tag" style="font-size:.62rem">خارج المتوسط</span>` : '';
+        tr.innerHTML = `<td><strong>${escHist(it.name)}</strong>${outTag}</td><td>${val!==null&&val>0?formatCurrency(val):'<span style="color:var(--text-muted)">لا ينطبق</span>'}</td><td>${status}</td>` +
           `<td>${relCellHtml(it)}</td>`;
         tbody.appendChild(tr);
       });
@@ -1148,7 +1811,7 @@
       });
     }
 
-    function createSensitivityTable(fcf, base_growth, growth_perp, base_discount, net_debt) {
+    function createSensitivityTable(fcf, base_growth, growth_perp, base_discount, net_debt, basis) {
       const growthMin   = (parseFloat(document.getElementById('growthMin').value)   || 5)  / 100;
       const growthMax   = (parseFloat(document.getElementById('growthMax').value)   || 15) / 100;
       const discountMin = (parseFloat(document.getElementById('discountMin').value) || 6)  / 100;
@@ -1163,7 +1826,7 @@
       g_steps.forEach(g => {
         html += `<tr><td>${(g*100).toFixed(1)}%</td>`;
         d_steps.forEach(d => {
-          const res = calculate_dcf(fcf, g, growth_perp, d, net_debt || 0);
+          const res = calculate_dcf(fcf, g, growth_perp, d, net_debt || 0, basis);
           const v   = res ? res.equityValue : null;
           let color = 'transparent';
           if (v && currentPrice > 0) { color = v>currentPrice*1.15?'rgba(63,185,80,0.15)':v<currentPrice*0.85?'rgba(248,81,73,0.15)':'rgba(240,180,41,0.12)'; }
@@ -1190,8 +1853,16 @@
       else { el.style.display='none'; }
     }
 
+    // «حساب WACC تلقائياً» يكتب فوق حقل معدل الخصم. إلغاء التحديد كان يترك الرقم
+    // المحسوب عالقاً فيظنّه المستخدم اختياره اليدوي — نحفظ القيمة السابقة ونستعيدها.
     document.getElementById('useWacc').addEventListener('change', function() {
-      document.getElementById('waccInputs').style.display = this.checked ? '' : 'none';
+      if (this.checked) {
+        _prevDiscountRate = document.getElementById('discountRate').value;
+      } else {
+        restoreDiscountRate();
+      }
+      toggleFcfBasis();
+      runFieldChecks();
     });
 
     // ===== سجل العمليات — Supabase =====
@@ -1206,6 +1877,7 @@
       clearTimeout(_histSearchTimer);
       _histSearchTimer = setTimeout(() => {
         _histSearch = (document.getElementById('hist-search').value || '').trim().toLowerCase();
+        _histPage = 0;
         renderHistory();
       }, 200);
     }
@@ -1259,44 +1931,70 @@
 
       let growth_perp = num(inp.growthPerp) / 100;
       let discount_rate = num(inp.discountRate) / 100;
-      if (inp.useWacc) {
-        const rf = num(inp.riskFree) / 100, b = num(inp.beta, 1), rm = num(inp.marketReturn) / 100,
+      // البنك لا يُخصم بـ WACC مهما كان المحفوظ (كانت العمليات القديمة تحفظ useWacc للبنك)
+      if (inp.useWacc && companyType !== 'bank') {
+        const rf = num(inp.riskFree) / 100, b = (num(inp.betaMain) || num(inp.beta, 1)), rm = num(inp.marketReturn) / 100,
               rd = num(inp.debtCost) / 100, tx = num(inp.taxRate) / 100, de = num(inp.debtEquity);
         discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
       }
+      const ke = keFromInputs(inp);
       let growth_perp_final = growth_perp + growth_adj;
       if (growth_perp_final > 0.03) growth_perp_final = 0.03;   // نفس سقف 3% للمعادلة الحية
+      if (growth_perp_final < 0)    growth_perp_final = 0;      // أرضية 0 (السيناريو المحتاط)
 
       const currentPrice = num(inp.currentPrice);
-      const mk = (values, avg) => {
-        const models = Object.entries(values).map(([name, v]) => ({ name, value: (v != null && v > 0) ? formatCurrency(v) : 'لا ينطبق', raw: (v != null && v > 0) ? v : null }));
-        let marginText = '';
-        if (currentPrice > 0 && avg > 0) {
-          const m = (avg - currentPrice) / avg * 100;
-          marginText = `${m > 0 ? '✅' : '⚠️'} ${Math.abs(m).toFixed(1)}% ${m > 0 ? 'هامش أمان' : 'مبالغ فيه'}`;
-        }
-        return { models, marginText };
+      const anchorModel  = inp.anchorModel || '';
+      // البناء الموحّد: التشتّت + المرساة + الهامش المزدوج + بوابة الاستدامة
+      const mk = (values, avgNames, extraParts, gate) => {
+        const models = Object.entries(values).map(([name, v]) => ({
+          name, value: (v != null && v > 0) ? formatCurrency(v) : 'لا ينطبق',
+          raw: (v != null && v > 0) ? v : null, inAvg: avgNames.includes(name)
+        }));
+        const comp = composeFair({ values, avgNames, anchorModel, extraParts });
+        if (!comp) return null;
+        const mp = marginPair(currentPrice, comp);
+        const failed = !!(gate && gate.failed);
+        return {
+          fairValueRange: comp.rangeText,
+          fairValueDetail: comp.detailText + (failed
+            ? '  |  ⛔ فشل بوابة الاستدامة (الفلتر 1) — القيمة معروضة للعلم فقط ولا يُبنى عليها قرار شراء' : ''),
+          fairValueAvg: comp.headline != null ? comp.headline : comp.avg,
+          fairValueArithmeticAvg: comp.avg,
+          fairValueMin: comp.min, fairValueMax: comp.max,
+          dispersionCV: comp.cv, modelsInAvg: comp.n,
+          fairValueUnreliable: comp.highCV && !comp.anchorName,
+          anchorModel: comp.anchorName || '',
+          // فشل الفلتر 1 يكتم الحكم السعري نصّاً — لا «هامش أمان» بجوار «خروج»
+          marginText: failed ? '⛔ خروج — فشل بوابة الاستدامة (الفلتر 1)' : mp.text,
+          marginDual: failed ? '' : mp.dual,
+          sustainFail: failed,
+          sustainReasons: gate ? gate.reasons : [],
+          sustainWatch: gate ? gate.watch : [],
+          models
+        };
       };
 
       if (companyType === 'reit') {
         const nav_total = num(inp.nav), totalUnits = Math.max(num(inp.totalUnits, 1), 1),
-              ffo = num(inp.ffo), totalDebtR = num(inp.totalDebt), capRate = num(inp.capRate, 8) / 100,
+              ffo = num(inp.ffo), capRate = num(inp.capRate, 8) / 100,
               pffo = num(inp.pffoMultiple, 12);
+        // عملية قديمة قد لا تحمل الحقل أصلاً — يُعلَن ذلك ولا يُقدَّر بصمت (§8)
+        const tdMissing = !inp.noTotalDebt && (inp.totalDebt == null || String(inp.totalDebt).trim() === '');
+        const totalDebtR = inp.noTotalDebt ? 0 : num(inp.totalDebt);
         const nav_per_unit = (nav_total - totalDebtR) / totalUnits;
         const pffo_value = ffo > 0 ? ffo * pffo : null;
         const ddm_reit = calculate_gordon(num(inp.dividends), growth_perp_final, discount_rate);
-        const caprate_check = (ffo > 0 && capRate > 0) ? ffo / capRate : null;
+        const noiRaw = (inp.noi == null || String(inp.noi).trim() === '') ? null : num(inp.noi);
+        const caprate_value = (noiRaw != null && noiRaw > 0 && capRate > 0)
+          ? (noiRaw / capRate - totalDebtR) / totalUnits : null;
         const ffo_yield = currentPrice > 0 ? (ffo / currentPrice * 100) : 0;
-        const valid = [nav_per_unit, pffo_value, ddm_reit].filter(v => v != null && v > 0);
-        const avg = valid.length ? valid.reduce((a, b) => a + b, 0) / valid.length : 0;
-        const values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'DDM': ddm_reit, 'Cap Rate (مرجع)': caprate_check };
-        const { models, marginText } = mk(values, avg);
-        const parts = [];
-        if (nav_per_unit > 0) parts.push(`NAV للوحدة = ${formatCurrency(nav_per_unit)}`);
-        if (pffo_value && pffo_value > 0) parts.push(`تقييم P/FFO = ${formatCurrency(pffo_value)}`);
-        if (ddm_reit && ddm_reit > 0) parts.push(`DDM = ${formatCurrency(ddm_reit)}`);
-        const lbl = parts.length > 1 ? `القيمة العادلة (${formatCurrency(avg)}) = متوسط ${parts.length} طرق` : `القيمة العادلة = ${formatCurrency(avg)}`;
-        return { fairValueRange: formatCurrency(avg), fairValueDetail: `${lbl}: ${parts.join('  ·  ')}  |  عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`, fairValueAvg: avg, marginText, models };
+        const values = { 'NAV للوحدة': nav_per_unit > 0 ? nav_per_unit : null, 'مضاعف P/FFO': pffo_value, 'DDM': ddm_reit, 'Cap Rate (مرجع)': caprate_value };
+        const extras = [`عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`];
+        if (noiRaw == null) extras.push('Cap Rate: غير متوفر — لم يُدخَل NOI (لا يُقدَّر من FFO §8)');
+        if (tdMissing) extras.push('⚠️ إجمالي الديون غير مُسجَّل في هذه العملية — حُسب صفراً، والقيمة قد تكون مضخّمة');
+        const gate = sustainabilityGate('reit', { ffo, dividends: num(inp.dividends) });
+        // حارس مفقود كان في الفرعين الآخرين فقط: بلا نموذج صالح لا نكتب «0.00 ر.س» في السجل
+        return mk(values, ['NAV للوحدة', 'مضاعف P/FFO', 'DDM'], extras, gate);
       }
 
       if (companyType === 'bank') {
@@ -1304,39 +2002,60 @@
               bankEps = num(inp.bankEps), bankFairPe = num(inp.bankFairPe, 12);
         const pbVal = bvps > 0 && bankFairPb > 0 ? bvps * bankFairPb : null;
         const peVal = bankEps > 0 && bankFairPe > 0 ? bankEps * bankFairPe : null;
-        const ddmBank = calculate_gordon(num(inp.bankDps), growth_perp_final, discount_rate);
+        // DDM المصرفي يُخصم بـ Ke — وليس بـ WACC ولا بمعدل الخصم العام
+        const dpsBank = num(inp.bankDps);
+        const ddmBank = ke != null ? calculate_gordon(dpsBank, growth_perp_final, ke) : null;
         const values = {};
         if (pbVal) values['P/B Fair Value'] = pbVal;
         if (peVal) values['P/E Fair Value'] = peVal;
         if (ddmBank && ddmBank > 0) values['DDM'] = ddmBank;
-        const valid = Object.values(values).filter(v => v > 0);
-        if (!valid.length) return null;
-        const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
-        const min = Math.min(...valid), max = Math.max(...valid);
-        const { models, marginText } = mk(values, avg);
-        return { fairValueRange: valid.length > 1 ? `${formatCurrency(min)} — ${formatCurrency(max)}` : formatCurrency(avg), fairValueDetail: `المتوسط: ${formatCurrency(avg)}`, fairValueAvg: avg, marginText, models };
+        const extras = [];
+        if (ke != null) extras.push(`DDM مخصوم بـ Ke = ${(ke*100).toFixed(2)}%`);
+        else if (dpsBank > 0) extras.push('⚠️ DDM غير محتسب: تكلفة حقوق الملكية Ke غير متوفرة في هذه العملية (لا بيتا ولا Ke يدوي) — أُعلن ولم يُقدَّر (§8)');
+        const gate = sustainabilityGate('bank', { bankPayout: inp.bankPayout, cet1: inp.cet1, provCoverage: inp.provCoverage });
+        return mk(values, Object.keys(values), extras, gate);
       }
 
-      // شركة عادية
-      const eps = num(inp.eps), fcf = num(inp.fcf), net_debt = num(inp.netDebt),
-            growth_5yr = num(inp.growth5yr) / 100, sector_pe = num(inp.sectorPe),
+      // شركة عادية أو دورية
+      const cyc = companyType === 'cyclical';
+      const basis = inp.fcfBasis === 'fcfe' ? 'fcfe' : 'fcff';
+      const epsSpot = num(inp.eps), fcfSpot = num(inp.fcf);
+      const nEpsRaw = (inp.normEps == null || String(inp.normEps).trim() === '') ? null : num(inp.normEps);
+      const nFcfRaw = (inp.normFcf == null || String(inp.normFcf).trim() === '') ? null : num(inp.normFcf);
+      const useNormEps = cyc && nEpsRaw != null && nEpsRaw !== 0;
+      const useNormFcf = cyc && nFcfRaw != null && nFcfRaw !== 0;
+      const eps = useNormEps ? nEpsRaw : epsSpot;
+      const fcf = useNormFcf ? nFcfRaw : fcfSpot;
+      const ndMissing = !inp.noNetDebt && (inp.netDebt == null || String(inp.netDebt).trim() === '');
+      const net_debt = inp.noNetDebt ? 0 : num(inp.netDebt);
+      const growth_5yr = num(inp.growth5yr) / 100, sector_pe = num(inp.sectorPe),
             dividends = num(inp.dividends), book_value = num(inp.bookValue),
             bond_yield = num(inp.bondYield, 6.5), fair_pb = num(inp.fairPb, 1.5);
       const growth_5yr_adj = growth_5yr + growth_adj;
-      const dcf = calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, discount_rate, net_debt);
+      const dcfRate = basis === 'fcfe' ? ke : discount_rate;
+      const dcf = dcfRate != null ? calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, dcfRate, net_debt, basis) : null;
       const values = {
         'DCF': dcf ? dcf.equityValue : null,
         'جراهام': calculateGraham(eps, growth_5yr_adj * 100, bond_yield),
         'مكرر الربحية P/E': calculate_pe(eps, sector_pe),
-        'جوردون': calculate_gordon(dividends, growth_perp_final, discount_rate),
+        'جوردون': calculate_gordon(dividends, growth_perp_final, basis === 'fcfe' && ke != null ? ke : discount_rate),
         'القيمة الدفترية': calculate_book_value(book_value, fair_pb),
       };
-      const valid = Object.values(values).filter(v => v !== null && v > 0 && isFinite(v));
-      if (!valid.length) return null;
-      const avg = valid.reduce((a, b) => a + b, 0) / valid.length;
-      const min = Math.min(...valid), max = Math.max(...valid);
-      const { models, marginText } = mk(values, avg);
-      return { fairValueRange: `${formatCurrency(min)} — ${formatCurrency(max)}`, fairValueDetail: `المتوسط: ${formatCurrency(avg)} | السيناريو: ${scenLabel}`, fairValueAvg: avg, marginText, models };
+      const extras = [`السيناريو: ${scenLabel}`];
+      extras.push(basis === 'fcfe'
+        ? `أساس التدفق: FCFE مخصوم بـ Ke${ke != null ? ' ' + (ke*100).toFixed(2) + '%' : ' (غير متوفرة — DCF لم يُحتسب)'} — الدين لا يُطرح`
+        : `أساس التدفق: FCFF مخصوم بـ WACC ${(discount_rate*100).toFixed(2)}% — الدين الصافي ${formatCurrency(net_debt)} مطروح`);
+      if (cyc) {
+        extras.push(useNormEps ? `📐 EPS مُطبَّع ${eps} بدل اللحظي ${epsSpot} (جراهام و P/E)` : `⚠️ لا EPS مُطبَّع — القيمة تتبع موضع الدورة`);
+        extras.push(useNormFcf ? `📐 FCF مُطبَّع ${fcf} بدل اللحظي ${fcfSpot} (DCF)` : `⚠️ لا FCF مُطبَّع — DCF يتبع موضع الدورة`);
+      }
+      if (ndMissing) extras.push('⚠️ الدين الصافي غير مُسجَّل في هذه العملية — حُسب صفراً، والقيمة قد تكون مضخّمة');
+      const gate = sustainabilityGate(cyc ? 'cyclical' : 'normal',
+        { eps: epsSpot, fcf: fcfSpot, dividends, normEps: nEpsRaw, normFcf: nFcfRaw });
+      // القيمة الدفترية أرضية تصفوية — خارج المتوسط (تبقى في جدول النماذج للعرض)
+      const out = mk(values, ['DCF', 'جراهام', 'مكرر الربحية P/E', 'جوردون'], extras, gate);
+      if (out && values['القيمة الدفترية'] > 0) out.bookFloor = values['القيمة الدفترية'];
+      return out;
     }
 
     // ═══ إعادة حساب كل السجل بالمعادلة المحدّثة (المدخلات لا تتغيّر) ═══
@@ -1352,6 +2071,7 @@
         if (before == null || Math.abs((+before || 0) - (res.fairValueAvg || 0)) > 0.001) changed++;
       });
       await persistHistory();
+      _histBuilt.clear();
       renderHistory();
       showToast(`✅ أُعيد حساب السجل — ${changed} نتيجة تغيّرت${failed ? ` · ${failed} تعذّرت (مدخلات ناقصة)` : ''}`, 'success');
     }
@@ -1360,8 +2080,9 @@
     function exportHistoryMD() {
       if (!_history.length) { showToast('لا توجد عمليات للتصدير', 'info'); return; }
 
-      const typeMap = { reit: '🏢 ريت عقاري', bank: '🏦 بنك / مصرف', normal: '📊 شركة عادية' };
+      const typeMap = { reit: '🏢 ريت عقاري', bank: '🏦 بنك / مصرف', cyclical: '🏭 دوري (إسمنت/بتروكيماويات)', normal: '📊 شركة عادية' };
       const scenMap = { realistic: 'واقعي', optimistic: 'متفائل', conservative: 'محتاط' };
+      const decMap  = { hold:'احتفاظ', accumulate:'تجميع', trim:'تخفيف', exit:'خروج', watch:'مراقبة' };
       // مفاتيح وصفية/منفصلة تُعرض في أقسامها الخاصة، فلا تُكرَّر في جدول المدخلات
       const metaKeys = ['companyType', 'scenario', 'ticker', 'stockName', 'notes', 'perplexityEval'];
       // تهريب نص خلية الجدول في Markdown (الشرطة العمودية والأسطر الجديدة)
@@ -1396,18 +2117,32 @@
         lines.push('### النتيجة');
         lines.push('');
         lines.push(`- **القيمة العادلة (المدى):** ${res.fairValueRange || '—'}`);
-        lines.push(`- **المتوسط الرقمي:** ${res.fairValueAvg != null ? res.fairValueAvg : '—'}`);
+        lines.push(`- **الرقم المعتمد:** ${res.fairValueAvg != null ? res.fairValueAvg : '—'}${res.anchorModel ? ` (مرساة: ${res.anchorModel})` : ''}`);
+        if (res.fairValueArithmeticAvg != null && res.anchorModel) lines.push(`- **المتوسط الحسابي:** ${res.fairValueArithmeticAvg}`);
+        if (res.dispersionCV != null) lines.push(`- **تشتّت النماذج (CV):** ${res.dispersionCV.toFixed(1)}%${res.fairValueUnreliable ? ' ⚠️ فوق العتبة — لا يُعتمد رقم واحد' : ''}`);
+        if (res.bookFloor != null) lines.push(`- **🧱 الأرضية الدفترية (خارج المتوسط):** ${res.bookFloor}`);
         if (res.fairValueDetail) lines.push(`- **تفصيل القيمة العادلة:** ${res.fairValueDetail}`);
         if (res.marginText) lines.push(`- **هامش الأمان:** ${res.marginText}`);
+        if (res.sustainFail) {
+          lines.push(`- **⛔ بوابة الاستدامة (الفلتر 1): فشل — الإجراء «خروج» بغض النظر عن السعر**`);
+          (res.sustainReasons || []).forEach(r => lines.push(`  - ${r}`));
+        } else if (res.sustainWatch?.length) {
+          lines.push(`- **⚠️ إشارة على بوابة الاستدامة:**`);
+          res.sustainWatch.forEach(r => lines.push(`  - ${r}`));
+        }
+        if (inp.decision) lines.push(`- **🧭 القرار:** ${decMap[inp.decision] || inp.decision}${inp.execPrice ? ` — سعر التنفيذ ${inp.execPrice}` : ''}`);
         lines.push('');
 
         // ── النماذج (كل نموذج وقيمته العادلة) ──
         if (res.models && res.models.length) {
           lines.push('### نماذج القيمة العادلة');
           lines.push('');
-          lines.push('| النموذج | القيمة العادلة |');
-          lines.push('| --- | --- |');
-          res.models.forEach(m => lines.push(`| ${mdCell(m.name)} | ${mdCell(m.value)} |`));
+          lines.push('| النموذج | القيمة العادلة | داخل المتوسط |');
+          lines.push('| --- | --- | --- |');
+          res.models.forEach(m => {
+            const ia = (m.inAvg != null ? m.inAvg : !['Cap Rate (مرجع)','القيمة الدفترية'].includes(m.name));
+            lines.push(`| ${mdCell(m.name)} | ${mdCell(m.value)} | ${ia ? '✅' : '— (عرض فقط)'} |`);
+          });
           lines.push('');
         }
 
@@ -1488,6 +2223,15 @@
         liquidityRatio:  document.getElementById('liquidityRatio').value,
         earningsQuality: document.getElementById('earningsQuality').value,
         betaMain:        (document.getElementById('betaMain').value || '').trim(),
+        // Ke ومعطياته تُحفظ دائماً: بدونها لا يمكن إعادة حساب DDM المصرفي ولا FCFE لاحقاً
+        costOfEquity:    (document.getElementById('costOfEquity').value || '').trim(),
+        riskFree:        document.getElementById('riskFree').value,
+        marketReturn:    document.getElementById('marketReturn').value,
+        // قائمة المرساة تُملأ بعد الحساب فقط — قبل ذلك نعتمد المرساة المستعادة من العملية المُعدَّلة
+        anchorModel:     (function(){ const s = document.getElementById('anchorModel');
+                            return (s.value || (s.options.length ? '' : (_pendingAnchor || ''))); })(),
+        decision:        document.getElementById('calcDecision').value,
+        execPrice:       (document.getElementById('calcExecPrice').value || '').trim(),
         perplexityEval:  (document.getElementById('perplexityEval').value || '').trim(),
         notes:           (document.getElementById('calcNotes').value || '').trim(),
       };
@@ -1498,13 +2242,23 @@
           ffo:          document.getElementById('ffo').value,
           pffoMultiple: document.getElementById('pffoMultiple').value,
           capRate:      document.getElementById('capRate').value,
+          noi:          document.getElementById('noi').value,
           totalDebt:    document.getElementById('totalDebt').value,
+          noTotalDebt:  document.getElementById('noTotalDebt').checked,
         });
       } else {
         Object.assign(base, {
-          eps:     document.getElementById('eps').value,
-          fcf:     document.getElementById('fcf').value,
-          netDebt: document.getElementById('netDebt').value,
+          eps:       document.getElementById('eps').value,
+          fcf:       document.getElementById('fcf').value,
+          fcfBasis:  document.getElementById('fcfBasis').value,
+          netDebt:   document.getElementById('netDebt').value,
+          noNetDebt: document.getElementById('noNetDebt').checked,
+        });
+      }
+      if (companyType === 'cyclical') {
+        Object.assign(base, {
+          normEps: document.getElementById('normEps').value,
+          normFcf: document.getElementById('normFcf').value,
         });
       }
       if (companyType === 'bank') {
@@ -1524,12 +2278,10 @@
           ldr:           document.getElementById('ldr').value,
         });
       }
-      if (document.getElementById('useWacc').checked) {
+      // WACC التلقائي لا يُسجَّل للبنك إطلاقاً — لا ينطبق عليه بنيوياً
+      if (companyType !== 'bank' && document.getElementById('useWacc').checked) {
         Object.assign(base, {
           useWacc: true,
-          riskFree:     document.getElementById('riskFree').value,
-          beta:         document.getElementById('beta').value,
-          marketReturn: document.getElementById('marketReturn').value,
           debtCost:     document.getElementById('debtCost').value,
           taxRate:      document.getElementById('taxRate').value,
           debtEquity:   document.getElementById('debtEquity').value,
@@ -1556,6 +2308,7 @@
         _history.unshift({ id: Date.now(), date: new Date().toLocaleString('ar-SA'), inputs, results });
         if (_history.length > 5000) _history.splice(5000);
       }
+      invalidateHistIndex(); _histBuilt.clear();
       renderHistory();
       showHistSaving(true);
       await persistHistory();
@@ -1605,14 +2358,24 @@
       setVal('debtRatio',      inp.debtRatio);
       setVal('liquidityRatio', inp.liquidityRatio);
       setVal('earningsQuality',inp.earningsQuality);
-      setVal('betaMain',       inp.betaMain);
+      // بيتا موحّدة: العمليات القديمة قد تحمل beta (حقل WACC القديم) بدل betaMain
+      setVal('betaMain',       inp.betaMain || inp.beta || '');
+      setVal('costOfEquity',   inp.costOfEquity);
+      if (inp.riskFree != null)     setVal('riskFree', inp.riskFree);
+      if (inp.marketReturn != null) setVal('marketReturn', inp.marketReturn);
+      setVal('calcDecision',   inp.decision);
+      setVal('calcExecPrice',  inp.execPrice);
       setVal('perplexityEval', inp.perplexityEval);
       setVal('calcNotes',      inp.notes);
+      document.getElementById('noNetDebt').checked   = !!inp.noNetDebt;
+      document.getElementById('noTotalDebt').checked = !!inp.noTotalDebt;
+      setVal('fcfBasis', inp.fcfBasis || 'fcff');
+      setVal('normEps', inp.normEps); setVal('normFcf', inp.normFcf);
 
       if (inp.companyType === 'reit') {
         setVal('nav', inp.nav); setVal('totalUnits', inp.totalUnits);
         setVal('ffo', inp.ffo); setVal('pffoMultiple', inp.pffoMultiple);
-        setVal('capRate', inp.capRate); setVal('totalDebt', inp.totalDebt);
+        setVal('capRate', inp.capRate); setVal('noi', inp.noi); setVal('totalDebt', inp.totalDebt);
       } else if (inp.companyType === 'bank') {
         setVal('bvps', inp.bvps); setVal('bankRoe', inp.bankRoe);
         setVal('bankCurrentPb', inp.bankCurrentPb); setVal('bankFairPb', inp.bankFairPb);
@@ -1624,6 +2387,18 @@
       } else {
         setVal('eps', inp.eps); setVal('fcf', inp.fcf); setVal('netDebt', inp.netDebt);
       }
+
+      // إعدادات WACC المحفوظة تُستعاد أيضاً — وإلا أُعيد الحساب بمعدل خصم مختلف عن الأصل
+      const wc = document.getElementById('useWacc');
+      wc.checked = !!inp.useWacc && inp.companyType !== 'bank';
+      if (wc.checked) {
+        setVal('debtCost', inp.debtCost); setVal('taxRate', inp.taxRate); setVal('debtEquity', inp.debtEquity);
+        _prevDiscountRate = inp.discountRate;
+      }
+      toggleCompanyType();
+      // القائمة فارغة قبل أول حساب — نحتفظ بالمرساة حتى تُملأ
+      document.getElementById('anchorModel').innerHTML = '';
+      _pendingAnchor = inp.anchorModel || '';
 
       setEditMode(true, id);
       document.querySelector('.calc-grid').scrollIntoView({ behavior: 'smooth' });
@@ -1641,6 +2416,7 @@
       const lbl = e?.inputs?.ticker ? ` لـ «${e.inputs.ticker}»` : '';
       if (!await confirmAsync(`هل تريد حذف هذه العملية${lbl}؟ لا يمكن التراجع.`)) return;
       _history = _history.filter(x => x.id !== id);
+      invalidateHistIndex(); _histBuilt.clear();
       renderHistory();
       await persistHistory();
     }
@@ -1648,6 +2424,7 @@
     async function clearAllHistory() {
       if (!await confirmAsync('هل أنت متأكد من حذف جميع العمليات؟ لا يمكن التراجع.')) return;
       _history = [];
+      invalidateHistIndex(); _histBuilt.clear();
       renderHistory();
       await persistHistory();
     }
@@ -1664,6 +2441,7 @@
         el.classList.remove('open');
         btn.textContent = '👁️ عرض التفاصيل الكاملة';
       } else {
+        buildHistDetail(id);   // البناء الكسول: لوحة الاتجاه تُبنى عند الفتح لا قبله
         el.classList.add('open');
         btn.textContent = '🙈 إخفاء التفاصيل';
       }
@@ -1682,6 +2460,10 @@
       riskFree:'معدل خالي مخاطر %', beta:'Beta (WACC)', marketReturn:'عائد السوق %',
       debtCost:'تكلفة الدين %', taxRate:'معدل الضريبة %', debtEquity:'D/E',
       betaMain:'Beta', notes:'الملاحظات',
+      normEps:'EPS مُطبَّع', normFcf:'FCF مُطبَّع', fcfBasis:'أساس التدفق',
+      noNetDebt:'أُقرّ: لا دين صافٍ', noTotalDebt:'أُقرّ: لا دين', noi:'NOI (إجمالي)',
+      costOfEquity:'تكلفة حقوق الملكية Ke %', anchorModel:'نموذج المرساة',
+      decision:'القرار', execPrice:'سعر التنفيذ',
       bvps:'BVPS', bankRoe:'ROE %', bankCurrentPb:'P/B الحالي', bankFairPb:'P/B العادل',
       bankEps:'EPS البنك', bankCurrentPe:'P/E الحالي', bankFairPe:'P/E العادل',
       bankDps:'DPS', bankPayout:'Payout %', cet1:'CET1 %', npl:'NPL %',
@@ -1689,18 +2471,29 @@
     };
 
     // ── بيانات وصفية لكل بند: الفئة + اتجاه التحسّن ──
-    // cat: fund=أساسيات الشركة | market=مدفوع بالسوق | assum=افتراض من المستخدم
+    // cat: fund=رقم فعلي من قوائم الشركة يدخل معادلةً | market=مدفوع بالسوق
+    //      assum=افتراض من المستخدم | view=نسبة للعرض لا تدخل أي معادلة
     // dir: up=أعلى أفضل | down=أقل أفضل | neutral=حركة بلا حكم | context=يُبلَّغ بحذر
+    //
+    // مهم (§8): فئة 'fund' وحدها هي التي يُبنى عليها حكم «تحسّن الأساسيات»، وهو الحكم
+    // الذي يطفئ العلم الأحمر لقاعدة التثبيت. لذلك لا يدخلها إلا رقم فعلي من القوائم
+    // المالية يغذّي معادلة تقييم — لا نسبة عرضية ولا افتراض. وإلا صار تعديلُ رقمٍ
+    // عرضيّ يعطي «ارتفاع موثوق» بلا ارتفاع حقيقي: طمأنة كاذبة.
     const TREND_FIELDS = {
       eps:            { label:'EPS',              cat:'fund',  dir:'up',      unit:'ر.س' },
       fcf:            { label:'FCF/سهم',          cat:'fund',  dir:'up',      unit:'ر.س' },
+      normEps:        { label:'EPS مُطبَّع',        cat:'fund',  dir:'up',      unit:'ر.س' },
+      normFcf:        { label:'FCF مُطبَّع',        cat:'fund',  dir:'up',      unit:'ر.س' },
       dividends:      { label:'التوزيعات',         cat:'fund',  dir:'up',      unit:'ر.س' },
       bookValue:      { label:'القيمة الدفترية',   cat:'fund',  dir:'up',      unit:'ر.س' },
       netDebt:        { label:'الدين الصافي/سهم',  cat:'fund',  dir:'down',    unit:'ر.س' },
-      debtRatio:      { label:'نسبة الدين',        cat:'fund',  dir:'down',    unit:'%'   },
-      liquidityRatio: { label:'نسبة السيولة',      cat:'fund',  dir:'up',      unit:'×'   },
-      earningsQuality:{ label:'ROE',              cat:'fund',  dir:'up',      unit:'%'   },
-      debtEquity:     { label:'D/E',              cat:'fund',  dir:'down',    unit:'×'   },
+      // ↓ نسب «للعرض» — القسم في الواجهة معنون «النسب المالية (للعرض)» ولا تدخل أي معادلة.
+      //   كانت مصنّفة fund فيطفئ تعديلُها علمَ قاعدة التثبيت بلا ارتفاع رقم حقيقي.
+      debtRatio:      { label:'نسبة الدين',        cat:'view',  dir:'down',    unit:'%'   },
+      liquidityRatio: { label:'نسبة السيولة',      cat:'view',  dir:'up',      unit:'×'   },
+      earningsQuality:{ label:'ROE (للعرض)',      cat:'view',  dir:'up',      unit:'%'   },
+      debtEquity:     { label:'D/E',              cat:'assum', dir:'neutral',  unit:'×'   },
+      noi:            { label:'NOI (إجمالي)',      cat:'fund',  dir:'up',      unit:'ر.س' },
       nav:            { label:'NAV الإجمالي',      cat:'fund',  dir:'up',      unit:'ر.س' },
       ffo:            { label:'FFO',              cat:'fund',  dir:'up',      unit:'ر.س' },
       totalDebt:      { label:'إجمالي الديون',     cat:'fund',  dir:'down',    unit:'ر.س' },
@@ -1714,7 +2507,8 @@
       npl:            { label:'NPL',              cat:'fund',  dir:'down',    unit:'%'   },
       provCoverage:   { label:'تغطية المخصصات',    cat:'fund',  dir:'up',      unit:'%'   },
       ldr:            { label:'LDR',              cat:'fund',  dir:'context', unit:'%'  },
-      betaMain:       { label:'Beta',             cat:'fund',  dir:'down',    unit:''    },
+      // بيتا: تُقاس من السوق وتغذّي CAPM ⇒ افتراض تقييمي، لا رقماً من قوائم الشركة
+      betaMain:       { label:'Beta',             cat:'assum', dir:'neutral', unit:''    },
       currentPrice:   { label:'السعر الحالي',      cat:'market',dir:'neutral', unit:'ر.س' },
       currentPe:      { label:'P/E الحالي',        cat:'market',dir:'neutral', unit:'×'  },
       bankCurrentPb:  { label:'P/B الحالي (بنك)',  cat:'market',dir:'neutral', unit:'×'  },
@@ -1729,11 +2523,12 @@
       bondYield:      { label:'عائد السندات',      cat:'assum', dir:'neutral', unit:'%'  },
       bankFairPb:     { label:'P/B العادل (بنك)',  cat:'assum', dir:'neutral', unit:'×'  },
       bankFairPe:     { label:'P/E العادل (بنك)',  cat:'assum', dir:'neutral', unit:'×'  },
-      beta:           { label:'Beta (WACC)',      cat:'assum', dir:'neutral', unit:''   },
+      beta:           { label:'Beta (سجل قديم)',  cat:'assum', dir:'neutral', unit:''   },
       riskFree:       { label:'معدل خالٍ من المخاطر', cat:'assum', dir:'neutral', unit:'%' },
       marketReturn:   { label:'عائد السوق',        cat:'assum', dir:'neutral', unit:'%'  },
       debtCost:       { label:'تكلفة الدين',       cat:'assum', dir:'neutral', unit:'%'  },
       taxRate:        { label:'معدل الضريبة',      cat:'assum', dir:'neutral', unit:'%'  },
+      costOfEquity:   { label:'تكلفة حقوق الملكية Ke', cat:'assum', dir:'neutral', unit:'%' },
     };
 
     const fmtNum = v => (Math.round(v * 100) / 100).toString();
@@ -1773,6 +2568,8 @@
             status = f.cat === 'assum' ? (diff > 0 ? 'رفعت الافتراض' : 'خفّضت الافتراض')
                                        : (diff > 0 ? 'ارتفع' : 'انخفض');
           }
+          // النسب العرضية تُعرض بلا لون حكم — حركتها لا تعني تحسّناً ولا تراجعاً في القيمة
+          if (f.cat === 'view') cls = 'tr-flat';
         }
 
         // اتجاه متواصل عبر ≥3 نقاط
@@ -1823,9 +2620,10 @@
       }
 
       // تعليقات متخصصة
-      const eps_r=get('eps')||get('bankEps'), div_r=get('dividends')||get('bankDps'),
-            debt_r=get('debtRatio')||get('netDebt')||get('totalDebt'),
-            roe_r=get('earningsQuality')||get('bankRoe'), npl_r=get('npl'),
+      const eps_r=get('normEps')||get('eps')||get('bankEps'), div_r=get('dividends')||get('bankDps'),
+            // الأولوية للأرقام الفعلية لا للنِّسب العرضية (فئة view لا تحمل حكماً)
+            debt_r=get('netDebt')||get('totalDebt'),
+            roe_r=get('bankRoe'), npl_r=get('npl'),
             beta_r=get('betaMain'), payout_r=get('bankPayout'), cet1_r=get('cet1'),
             prov_r=get('provCoverage'), price_r=get('currentPrice');
       if (eps_r?.status === 'تراجع' && div_r && div_r.diff > 0)
@@ -1850,9 +2648,10 @@
         comments.push('📌 السعر يرتفع دون تحسّن في الأساسيات — حذار شراء المطاردة.');
 
       // بناء الصفوف مجمّعة بالفئة
-      const CAT_LABEL = { fund:'🏢 الأساسيات (أرقام الشركة)', market:'💹 السوق', assum:'⚙️ افتراضاتك (مدخلات النموذج)' };
+      const CAT_LABEL = { fund:'🏢 الأساسيات (أرقام الشركة التي تدخل المعادلات)', market:'💹 السوق',
+                          assum:'⚙️ افتراضاتك (مدخلات النموذج)', view:'📐 نسب للعرض (لا تدخل أي معادلة)' };
       let rowsHtml = '';
-      for (const cat of ['fund','market','assum']) {
+      for (const cat of ['fund','market','assum','view']) {
         const catRows = rows.filter(r => r.cat === cat);
         if (!catRows.length) continue;
         rowsHtml += `<div class="trend-cat-title">${CAT_LABEL[cat]}</div><div class="trend-rows">`;
@@ -1860,7 +2659,7 @@
           const pctStr    = r.pct !== null ? ` (${r.pct > 0 ? '+' : ''}${r.pct.toFixed(1)}%)` : '';
           const streakStr = r.streak ? ` <span class="tr-streak ${r.cls}">${r.streak}</span>` : '';
           return `<div class="trend-row">
-            <div class="tr-label">${r.label}${r.cat === 'assum' ? ' <span class="tr-tag">افتراض</span>' : ''}</div>
+            <div class="tr-label">${r.label}${r.cat === 'assum' ? ' <span class="tr-tag">افتراض</span>' : r.cat === 'view' ? ' <span class="tr-tag">عرض فقط</span>' : ''}</div>
             <div class="tr-val">${fmtNum(r.cur)}${r.unit ? ' '+r.unit : ''}</div>
             <div class="tr-delta ${r.cls}">${r.arrow} ${r.status}${pctStr}${streakStr} <span style="font-weight:400;opacity:.7">من ${fmtNum(r.prev)}${r.unit ? ' '+r.unit : ''}</span></div>
           </div>`;
@@ -1875,86 +2674,226 @@
       </div>`;
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // فهرس السجل: خريطة رمز ← عملياته مرتّبة زمنياً، تُبنى مرّة واحدة.
+    // renderHistory كان يمسح _history كاملاً داخل حلقة البطاقات (O(n²)):
+    // عند 800 عملية = 640 ألف مقارنة، وعند سقف 5000 = 25 مليوناً في كل
+    // إعادة رسم — بما فيها كل حرف يُكتب في مربع البحث.
+    // ══════════════════════════════════════════════════════════════════
+    let _histIndex = null;      // Map<ticker, entries[]> — الأقدم أولاً
+    let _histIndexStamp = null; // بصمة لإبطال الفهرس عند تغيّر السجل
+    function histIndex() {
+      const stamp = _history.length + ':' + (_history[0]?.id || 0) + ':' + (_history[_history.length-1]?.id || 0);
+      if (_histIndex && _histIndexStamp === stamp) return _histIndex;
+      const m = new Map();
+      for (const e of _history) {
+        const tk = (e.inputs?.ticker || '').trim().toUpperCase();
+        if (!tk) continue;
+        if (!m.has(tk)) m.set(tk, []);
+        m.get(tk).push(e);
+      }
+      for (const arr of m.values()) arr.sort((a, b) => (a.id || 0) - (b.id || 0));
+      _histIndex = m; _histIndexStamp = stamp;
+      return m;
+    }
+    function invalidateHistIndex() { _histIndex = null; _histIndexStamp = null; }
+
+    // زمن العملية: id طابع زمني بالمللي ثانية للعمليات المحفوظة من هذه الصفحة
+    function entryTime(e) {
+      const id = +e.id;
+      if (isFinite(id) && id > 1e12 && id < 4e12) return id;
+      const t = Date.parse(e.date || '');
+      return isFinite(t) ? t : null;
+    }
+    const STALE_DAYS = 180; // الدورة الروتينية في الدستور §5 — ستة أشهر
+    function monthsSince(ms) {
+      if (ms == null) return null;
+      return (Date.now() - ms) / (1000 * 60 * 60 * 24 * 30.4375);
+    }
+
+    // تشتّت عملية محفوظة: من النماذج الداخلة في المتوسط، مع دعم السجل القديم
+    // الذي لا يحمل الحقل inAvg (تُستبعد فيه الأرضية الدفترية والمرجعية بالاسم).
+    const NEVER_IN_AVG = new Set(['Cap Rate (مرجع)', 'القيمة الدفترية']);
+    function entryCV(res) {
+      if (res && res.dispersionCV != null && isFinite(res.dispersionCV)) return +res.dispersionCV;
+      const vals = (res?.models || [])
+        .filter(m => (m.inAvg != null ? m.inAvg : !NEVER_IN_AVG.has(m.name)))
+        .map(m => (m.raw != null ? +m.raw : parseArabicNum(m.value)))
+        .filter(v => v != null && isFinite(v) && v > 0);
+      return vals.length >= 2 ? dispersionOf(vals).cv : null;
+    }
+
+    // النموذج «الأصدق» لعملية محفوظة — بلا بناء الجدول كاملاً
+    function entryTopModel(entry) {
+      const res = entry.results || {};
+      if (!res.models?.length) return null;
+      const items = res.models.map(m => ({ name: m.name, valueNum: (m.raw != null ? +m.raw : parseArabicNum(m.value)) }));
+      scoreModels(items, relCtxFromInputs(entry.inputs || {}));
+      const top = items.find(it => it.isTop);
+      return top ? top.name : null;
+    }
+
+    // علم قاعدة التثبيت للبطاقة: ارتفعت القيمة العادلة بلا ارتفاع رقم فعلي؟
+    function stabilizationFlag(entry, priorList) {
+      const prev = priorList && priorList.length ? priorList[priorList.length - 1] : null;
+      if (!prev) return null;
+      const cur = +entry.results?.fairValueAvg, old = +prev.results?.fairValueAvg;
+      if (!isFinite(cur) || !isFinite(old) || old <= 0) return null;
+      if (cur <= old * 1.03) return null;
+      const n = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
+      const a = entry.inputs || {}, b = prev.inputs || {};
+      const pairs = [['eps','bankEps','normEps'], ['fcf','normFcf'], ['dividends','bankDps'], ['ffo'], ['bvps'], ['noi']];
+      for (const keys of pairs) {
+        for (const k of keys) {
+          const ca = n(a[k]), cb = n(b[k]);
+          if (ca != null && cb != null && ca > cb) return null; // ارتفاع حقيقي موجود
+        }
+      }
+      return `القيمة العادلة ارتفعت ${(((cur - old) / old) * 100).toFixed(1)}% دون ارتفاع في أي رقم فعلي (EPS/FCF/التوزيع/FFO) — غالباً من تعديل الافتراضات لا الأرقام (§4 قاعدة التثبيت)`;
+    }
+
+    let _histPage = 0;
+    const HIST_PAGE_SIZE = 25;
+    function onHistFilter() { _histPage = 0; renderHistory(); }
+
+    function histFiltered() {
+      const fType     = document.getElementById('hist-f-type').value;
+      const fVerdict  = document.getElementById('hist-f-verdict').value;
+      const fMargin   = document.getElementById('hist-f-margin').value;
+      const fDecision = document.getElementById('hist-f-decision').value;
+      return _history.filter(e => {
+        const inp = e.inputs || {}, res = e.results || {};
+        if (_histSearch) {
+          // البحث يشمل الملاحظات وتقييم Perplexity — أثمن ما في السجل تحليلياً
+          const hay = [inp.ticker, inp.stockName, inp.notes, inp.perplexityEval]
+            .map(v => (v || '').toString().toLowerCase()).join('   ');
+          if (!hay.includes(_histSearch)) return false;
+        }
+        if (fType && (inp.companyType || 'normal') !== fType) return false;
+        const mt = res.marginText || '';
+        const v = res.sustainFail || mt.includes('خروج') ? 'exit'
+                : mt.includes('هامش أمان') ? 'under'
+                : mt.includes('مبالغ فيه') ? 'over' : 'none';
+        if (fVerdict && v !== fVerdict) return false;
+        if (fMargin) {
+          const m = marginPctOf(e);
+          if (m == null) return false;
+          if (fMargin === 'gt30'  && !(m > 30)) return false;
+          if (fMargin === 'gt15'  && !(m > 15)) return false;
+          if (fMargin === '0to15' && !(m >= 0 && m <= 15)) return false;
+          if (fMargin === 'neg'   && !(m < 0)) return false;
+        }
+        if (fDecision) {
+          const d = inp.decision || '';
+          if (fDecision === '__none' ? d !== '' : d !== fDecision) return false;
+        }
+        return true;
+      });
+    }
+    // الهامش الرقمي لعملية محفوظة — من الأرقام لا من النص متى أمكن
+    function marginPctOf(entry) {
+      const res = entry?.results || {}, inp = entry?.inputs || {};
+      const fv = +res.fairValueAvg, p = parseFloat(inp.currentPrice);
+      if (isFinite(fv) && fv > 0 && isFinite(p) && p > 0) return (fv - p) / fv * 100;
+      const mt = res.marginText || '';
+      const m = mt.match(/([\d.]+)%/);
+      if (!m) return null;
+      const val = parseFloat(m[1]);
+      return mt.includes('مبالغ فيه') ? -val : val;
+    }
+
     function renderHistory() {
       const section = document.getElementById('historySection');
       const list    = document.getElementById('historyList');
+      const pager   = document.getElementById('hist-pager');
       if (_history.length === 0) {
         section.style.display = 'none';
-        list.innerHTML = '';
+        list.innerHTML = ''; pager.style.display = 'none';
         return;
       }
       section.style.display = '';
+      // إعادة الرسم تُنشئ حاويات تفاصيل فارغة — نُبطل ذاكرة البناء الكسول وإلا بقيت فارغة
+      _histBuilt.clear();
       const scenarioMap = { realistic:'واقعي', optimistic:'متفائل', conservative:'محتاط' };
+      const typeMap = { reit:'🏢 ريت عقاري', bank:'🏦 بنك / مصرف', cyclical:'🏭 دوري (إسمنت/بتروكيماويات)', normal:'📊 شركة عادية' };
+      const decMap  = { hold:'🤝 احتفاظ', accumulate:'➕ تجميع', trim:'✂️ تخفيف', exit:'🚪 خروج', watch:'👁️ مراقبة' };
 
-      // فلترة بالبحث (رمز أو اسم)
-      const filtered = _histSearch
-        ? _history.filter(e => {
-            const t = (e.inputs?.ticker || '').toLowerCase();
-            const n = (e.inputs?.stockName || '').toLowerCase();
-            return t.includes(_histSearch) || n.includes(_histSearch);
-          })
-        : _history;
+      const idx = histIndex();                 // مرّة واحدة — لا مسح داخل الحلقة
+      const filtered = histFiltered();
+
+      // ── عدّاد التقادم (§5): أحدث تقييم لكل رمز تجاوز 180 يوماً ──
+      let staleCount = 0;
+      const latestIds = new Set();
+      for (const arr of idx.values()) {
+        const latest = arr[arr.length - 1];
+        latestIds.add(latest.id);
+        const mo = monthsSince(entryTime(latest));
+        if (mo != null && mo * 30.4375 > STALE_DAYS) staleCount++;
+      }
+      const staleEl = document.getElementById('hist-stale-count');
+      if (staleCount > 0) {
+        staleEl.style.display = '';
+        staleEl.textContent = `⏰ ${staleCount} من الرموز تحتاج إعادة تقييم — آخر تقييم أقدم من 6 أشهر (§5)`;
+      } else staleEl.style.display = 'none';
 
       const countEl = document.getElementById('hist-count');
-      if (countEl) countEl.textContent = _histSearch
+      if (countEl) countEl.textContent = (filtered.length !== _history.length)
         ? `${filtered.length} من ${_history.length} عملية`
         : `${_history.length} عملية محفوظة`;
 
+      renderTimeline(filtered);
+
       if (!filtered.length) {
-        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">لا توجد عمليات مطابقة لـ «${escHist(_histSearch)}»</div>`;
+        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">لا توجد عمليات مطابقة للفلاتر الحالية</div>`;
+        pager.style.display = 'none';
         return;
       }
 
-      list.innerHTML = filtered.map(entry => {
+      // ── ترقيم الصفحات: 25 بطاقة كحد أقصى في الشاشة ──
+      const pages = Math.ceil(filtered.length / HIST_PAGE_SIZE);
+      if (_histPage >= pages) _histPage = 0;
+      const pageItems = filtered.slice(_histPage * HIST_PAGE_SIZE, (_histPage + 1) * HIST_PAGE_SIZE);
+
+      list.innerHTML = pageItems.map(entry => {
         const inp = entry.inputs || {};
         const res = entry.results || {};
-        const typeLabel  = inp.companyType === 'reit' ? '🏢 ريت عقاري' : inp.companyType === 'bank' ? '🏦 بنك / مصرف' : '📊 شركة عادية';
+        const typeLabel  = typeMap[inp.companyType] || typeMap.normal;
         const ticker     = inp.ticker    || '';
         const stockName  = inp.stockName || '';
+        const tk         = ticker.toUpperCase();
+        const series     = idx.get(tk) || [];
+        const pos        = series.findIndex(e => e.id === entry.id);
+        const prior      = pos > 0 ? series.slice(0, pos) : [];
 
-        const inputsHtml = Object.entries(inp)
-          .filter(([k]) => !['companyType','useWacc','scenario','ticker','stockName','perplexityEval','notes'].includes(k))
-          .map(([k,v]) => `<div class="hist-inp"><span>${INPUT_LABELS[k]||k}:</span><span>${escHist(v)}</span></div>`)
-          .join('');
-
-        const notesHtml = inp.notes
-          ? `<div class="hist-sec-h">📝 الملاحظات</div>
-               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;">${escHist(inp.notes)}</div>`
-          : '';
-
-        const perplexityHtml = inp.perplexityEval
-          ? `<div class="hist-sec-h">🔍 تقييم Perplexity</div>
-               <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;">${escHist(inp.perplexityEval)}</div>`
-          : '';
-
-        // مقارنة ذكية مع عمليات سابقة لنفس الرمز
-        const ticker_ = (inp.ticker || '').toUpperCase();
-        const sameTickerPrev = ticker_
-          ? _history.filter(e => e.id !== entry.id && (e.inputs?.ticker || '').toUpperCase() === ticker_)
-          : [];
-        const trendHtml = buildTrendAnalysis(entry, sameTickerPrev);
-
-        // موثوقية كل نموذج تُحسب من مدخلات هذه العملية نفسها + توافقها مع بقية نماذجها
-        const relCtx = relCtxFromInputs(inp);
-        let modelsHtml = '';
-        if (res.models?.length) {
-          const relItems = res.models.map(m => ({ name: m.name, value: m.value, valueNum: (m.raw != null ? m.raw : parseArabicNum(m.value)) }));
-          scoreModels(relItems, relCtx);
-          modelsHtml = `<div class="hist-sec-h">📋 النماذج وموثوقيتها لهذا السهم</div>
-             <div style="overflow-x:auto;"><table class="hist-models-tbl">
-               <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>الموثوقية والأصدق</th></tr></thead>
-               <tbody>${relItems.map(it => `<tr><td>${escHist(it.name)}</td><td>${escHist(it.value)}</td><td>${relCellHtml(it)}</td></tr>`).join('')}</tbody>
-             </table></div>`;
-        }
-
-        // الحكم اللوني من نص الهامش: هامش أمان=مقيّم بأقل / مبالغ فيه=مقيّم بأعلى
+        // ── الحكم: فشل الاستدامة يتقدّم على الحكم السعري ويكتم لونه ──
         const mt = res.marginText || '';
-        const verdict = mt.includes('هامش أمان') ? 'under' : mt.includes('مبالغ فيه') ? 'over' : (mt ? 'fair' : '');
-        const cardCls = verdict ? ` v-${verdict}` : '';
-        const pillHtml = mt
-          ? `<div class="hist-pill pill-${verdict}">${escHist(mt)}</div>`
-          : '';
+        const failed = !!res.sustainFail || mt.includes('فشل بوابة الاستدامة');
+        const verdict = failed ? '' : mt.includes('هامش أمان') ? 'under' : mt.includes('مبالغ فيه') ? 'over' : (mt ? 'fair' : '');
+        const cardCls = failed ? '' : (verdict ? ` v-${verdict}` : '');
+        const pillHtml = failed
+          ? `<div class="hist-pill pill-over">⛔ خروج — فشل بوابة الاستدامة (الفلتر 1)</div>`
+          : (mt ? `<div class="hist-pill pill-${verdict}">${escHist(mt)}</div>` : '');
         const scen = scenarioMap[inp.scenario] || inp.scenario || '—';
+
+        // ── رقائق واجهة البطاقة: الحسابات موجودة، لا داعي لدفنها خلف زر ──
+        const chips = [
+          `<span class="hist-chip">${typeLabel}</span>`,
+          `<span class="hist-chip">🎚️ ${escHist(scen)}</span>`,
+          `<span class="hist-chip">🕐 ${escHist(entry.date)}</span>`,
+        ];
+        const cv = entryCV(res);
+        if (cv != null) chips.push(`<span class="hist-chip" title="معامل الاختلاف بين النماذج — فوق ${CV_ALERT}% لا يمثّل المتوسطُ النماذجَ">📊 تشتّت CV ${cv.toFixed(0)}%${cv > CV_ALERT ? ' ⚠️' : ''}</span>`);
+        const top = entryTopModel(entry);
+        if (top) chips.push(`<span class="hist-chip" title="أعلى النماذج موثوقية لهذا السهم بحسب قاعدته ومدى توافقه مع البقية">⭐ الأصدق: ${escHist(top)}</span>`);
+        if (res.anchorModel) chips.push(`<span class="hist-chip">⚓ المرساة: ${escHist(res.anchorModel)}</span>`);
+        const sFlag = stabilizationFlag(entry, prior);
+        if (sFlag) chips.push(`<span class="hist-chip" style="color:var(--st-bad)" title="${escHist(sFlag)}">🚩 التغيّر من الافتراضات لا الأرقام</span>`);
+        if (inp.decision) chips.push(`<span class="hist-chip">🧭 ${escHist(decMap[inp.decision] || inp.decision)}${inp.execPrice ? ` @ ${escHist(inp.execPrice)}` : ''}</span>`);
+        if (latestIds.has(entry.id)) {
+          const mo = monthsSince(entryTime(entry));
+          if (mo != null && mo * 30.4375 > STALE_DAYS)
+            chips.push(`<span class="hist-chip" style="color:var(--st-warn)" title="الدستور §5: الدورة الروتينية كل 6 أشهر">⏰ آخر تقييم قبل ${Math.round(mo)} شهراً</span>`);
+        }
 
         return `<div class="hist-card${cardCls}">
           <div class="hist-top">
@@ -1963,67 +2902,224 @@
               ${stockName ? `<span class="hist-nm">${escHist(stockName)}</span>` : ''}
             </div>
             <div class="hist-actions">
+              <button class="hist-ico" title="أرسل القيمة العادلة إلى محرّك القرار" onclick="sendToDecisionEngine(${entry.id})">🧭</button>
               <button class="hist-ico e" title="تعديل" onclick="editHistoryItem(${entry.id})">✏️</button>
               <button class="hist-ico d" title="حذف" onclick="deleteHistoryItem(${entry.id})">🗑️</button>
             </div>
           </div>
-          <div class="hist-chips">
-            <span class="hist-chip">${typeLabel}</span>
-            <span class="hist-chip">🎚️ ${escHist(scen)}</span>
-            <span class="hist-chip">🕐 ${escHist(entry.date)}</span>
-          </div>
+          <div class="hist-chips">${chips.join('')}</div>
           <div class="hist-hero">
             <div class="hist-hero-l">
-              <span class="hist-hero-cap">القيمة العادلة للسهم</span>
+              <span class="hist-hero-cap">القيمة العادلة للسهم${res.fairValueUnreliable ? ' — النطاق فقط (تشتّت مرتفع)' : ''}</span>
               <span class="hist-hero-val">${escHist(res.fairValueRange||'—')}</span>
               ${res.fairValueDetail ? `<span class="hist-hero-sub">${escHist(res.fairValueDetail)}</span>` : ''}
+              ${res.bookFloor ? `<span class="hist-hero-sub">🧱 الأرضية الدفترية: ${escHist(formatCurrency(res.bookFloor))} — خارج المتوسط</span>` : ''}
+              ${res.marginDual && !failed ? `<span class="hist-hero-sub">🎯 ${res.marginDual}</span>` : ''}
             </div>
             ${pillHtml}
           </div>
           <button id="hist-btn-${entry.id}" class="hist-toggle" onclick="toggleHistDetail(${entry.id})">👁️ عرض التفاصيل الكاملة</button>
-          <div id="hist-detail-${entry.id}" class="hist-body">
-            <div class="hist-sec-h">📥 المدخلات</div>
-            <div class="hist-inputs-grid">${inputsHtml}</div>
-            ${modelsHtml}
-            ${notesHtml}
-            ${perplexityHtml}
-            <div class="hist-sec-h">📈 مقارنة الاتجاه عبر الزمن</div>
-            ${trendHtml}
-          </div>
+          <div id="hist-detail-${entry.id}" class="hist-body"></div>
         </div>`;
       }).join('');
+
+      // ── شريط الترقيم ──
+      if (pages > 1) {
+        pager.style.display = 'flex';
+        const btn = (p, lbl, dis) => `<button class="btn btn-secondary btn-sm" ${dis?'disabled style="opacity:.4"':''} onclick="gotoHistPage(${p})">${lbl}</button>`;
+        pager.innerHTML = btn(_histPage - 1, '‹ السابق', _histPage === 0)
+          + `<span style="font-size:0.82rem;color:var(--text-muted)">صفحة ${_histPage + 1} من ${pages} · ${filtered.length} عملية</span>`
+          + btn(_histPage + 1, 'التالي ›', _histPage >= pages - 1);
+      } else pager.style.display = 'none';
+    }
+
+    function gotoHistPage(p) {
+      _histPage = Math.max(0, p);
+      renderHistory();
+      document.getElementById('historySection').scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // ══ تفاصيل البطاقة تُبنى عند الفتح لا قبله ══
+    // لوحة الاتجاه تمسح كل عمليات الرمز وتُقارن عشرات الحقول — بناؤها لكل بطاقة
+    // مسبقاً كان يضاعف كلفة الرسم بلا أن يراها المستخدم.
+    const _histBuilt = new Set();
+    function buildHistDetail(id) {
+      if (_histBuilt.has(id)) return;
+      const entry = _history.find(x => x.id === id);
+      const host  = document.getElementById('hist-detail-' + id);
+      if (!entry || !host) return;
+      const inp = entry.inputs || {}, res = entry.results || {};
+
+      const inputsHtml = Object.entries(inp)
+        .filter(([k]) => !['companyType','useWacc','scenario','ticker','stockName','perplexityEval','notes'].includes(k))
+        .map(([k,v]) => `<div class="hist-inp"><span>${escHist(INPUT_LABELS[k]||k)}:</span><span>${escHist(typeof v === 'boolean' ? (v ? 'نعم' : 'لا') : v)}</span></div>`)
+        .join('');
+
+      let sustainHtml = '';
+      if (res.sustainFail && res.sustainReasons?.length) {
+        sustainHtml = `<div class="hist-sec-h">⛔ بوابة الاستدامة (الفلتر 1)</div>
+          <div class="note" data-state="bad"><span class="ic">⛔</span><div>
+          <strong>خروج — بغض النظر عن السعر (§4).</strong><br>
+          ${res.sustainReasons.map(r => '• ' + escHist(r)).join('<br>')}
+          <br><span style="opacity:.85">القيمة العادلة أعلاه معروضة للعلم فقط ولا يُبنى عليها قرار شراء (§8).</span></div></div>`;
+      } else if (res.sustainWatch?.length) {
+        sustainHtml = `<div class="hist-sec-h">⚠️ إشارة على بوابة الاستدامة</div>
+          <div class="note" data-state="warn"><span class="ic">⚠️</span><div>${res.sustainWatch.map(r => '• ' + escHist(r)).join('<br>')}</div></div>`;
+      }
+
+      const notesHtml = inp.notes
+        ? `<div class="hist-sec-h">📝 الملاحظات</div>
+             <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;">${escHist(inp.notes)}</div>`
+        : '';
+      const perplexityHtml = inp.perplexityEval
+        ? `<div class="hist-sec-h">🔍 تقييم Perplexity</div>
+             <div style="font-size:0.82rem;line-height:1.7;white-space:pre-wrap;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;">${escHist(inp.perplexityEval)}</div>`
+        : '';
+
+      const tk = (inp.ticker || '').toUpperCase();
+      const series = histIndex().get(tk) || [];
+      const trendHtml = buildTrendAnalysis(entry, series.filter(e => e.id !== entry.id));
+
+      let modelsHtml = '';
+      if (res.models?.length) {
+        const relItems = res.models.map(m => ({ name: m.name, value: m.value, valueNum: (m.raw != null ? m.raw : parseArabicNum(m.value)), inAvg: (m.inAvg != null ? m.inAvg : !NEVER_IN_AVG.has(m.name)) }));
+        scoreModels(relItems, relCtxFromInputs(inp));
+        modelsHtml = `<div class="hist-sec-h">📋 النماذج وموثوقيتها لهذا السهم</div>
+           <div style="overflow-x:auto;"><table class="hist-models-tbl">
+             <thead><tr><th>النموذج</th><th>القيمة العادلة</th><th>الموثوقية والأصدق</th></tr></thead>
+             <tbody>${relItems.map(it => `<tr><td>${escHist(it.name)}${!it.inAvg ? ' <span class="tag" style="font-size:.6rem">خارج المتوسط</span>' : ''}</td><td>${escHist(it.value)}</td><td>${relCellHtml(it)}</td></tr>`).join('')}</tbody>
+           </table></div>`;
+      }
+
+      host.innerHTML = `${sustainHtml}
+        <div class="hist-sec-h">📥 المدخلات</div>
+        <div class="hist-inputs-grid">${inputsHtml}</div>
+        ${modelsHtml}
+        ${notesHtml}
+        ${perplexityHtml}
+        <div class="hist-sec-h">📈 مقارنة الاتجاه عبر الزمن</div>
+        ${trendHtml}`;
+      _histBuilt.add(id);
+    }
+
+    // ══ خط زمني لسهم واحد: القيمة العادلة مقابل السعر (§4 الفلتر 2) ══
+    let _timelineChart = null;
+    function renderTimeline(filtered) {
+      const wrap = document.getElementById('hist-timeline-wrap');
+      // يظهر فقط عندما تخصّ النتائج رمزاً واحداً — وإلا فالخط بلا معنى
+      const tickers = new Set(filtered.map(e => (e.inputs?.ticker || '').toUpperCase()).filter(Boolean));
+      if (tickers.size !== 1 || filtered.length < 2 || typeof Chart === 'undefined') {
+        wrap.style.display = 'none';
+        if (_timelineChart) { _timelineChart.destroy(); _timelineChart = null; }
+        return;
+      }
+      const series = filtered.slice().sort((a, b) => (a.id || 0) - (b.id || 0));
+      const labels = series.map(e => (e.date || '').split('،')[0] || '—');
+      const fair   = series.map(e => { const v = +e.results?.fairValueAvg; return isFinite(v) && v > 0 ? v : null; });
+      const price  = series.map(e => { const v = parseFloat(e.inputs?.currentPrice); return isFinite(v) && v > 0 ? v : null; });
+      if (fair.every(v => v == null)) { wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      const ctx = document.getElementById('histTimelineChart').getContext('2d');
+      if (_timelineChart) _timelineChart.destroy();
+      // ألوان من متغيّرات نظام التصميم — لا لون جديد مكتوب يدوياً
+      const cBad = C('--st-bad') || C('--danger'), cSeries = C('--series-2') || C('--primary'), cGood = C('--st-good') || C('--success');
+      const soft = (hex, a) => { const h = (hex || '').replace('#',''); if (h.length !== 6) return 'rgba(63,185,80,' + a + ')';
+        return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`; };
+      _timelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            { label: 'السعر وقت التقييم', data: price, borderColor: cBad, backgroundColor: soft(cBad, 0.10),
+              borderWidth: 2, pointRadius: 3, tension: 0.25, spanGaps: true, fill: false },
+            // التظليل بين الخطين = هامش الأمان
+            { label: 'القيمة العادلة', data: fair, borderColor: cSeries, backgroundColor: soft(cGood, 0.16),
+              borderWidth: 2.5, pointRadius: 3, tension: 0.25, spanGaps: true, fill: '-1' },
+          ]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { labels: { color: C('--text-2'), font: { family: 'Tajawal' } } },
+            tooltip: { callbacks: {
+              label: c => `${c.dataset.label}: ${formatCurrency(c.parsed.y)}`,
+              afterBody: items => {
+                const i = items[0]?.dataIndex;
+                if (i == null || fair[i] == null || price[i] == null || !(fair[i] > 0)) return '';
+                const m = (fair[i] - price[i]) / fair[i] * 100;
+                return `هامش الأمان: ${m > 0 ? '+' : ''}${m.toFixed(1)}%`;
+              }
+            } }
+          },
+          scales: {
+            y: { beginAtZero: false, ticks: { color: C('--text-2'), callback: v => formatCurrency(v), font: { family: 'Tajawal' } }, grid: { color: 'rgba(255,255,255,0.05)' } },
+            x: { ticks: { color: C('--text-2'), font: { family: 'Tajawal' }, maxRotation: 60, minRotation: 0 }, grid: { color: 'rgba(255,255,255,0.05)' } }
+          }
+        }
+      });
+    }
+
+    // ══ أرسل القيمة العادلة إلى محرّك القرار ══
+    // المحرّك يقرأ القيمة العادلة آلياً من نفس السجل (valuation_history_v1)، لكنه
+    // لا يحتفظ بقرار المالك ولا سعر تنفيذه. هذا الزر يكتب في decision_engine_v1
+    // للرمز: الرقم وتاريخه والقرار وسعر التنفيذ ضمن حقل «ملاحظتك» الذي يعرضه
+    // المحرّك في بطاقة السهم — فتُغلَق الحلقة بين الحاسبة والمحرّك.
+    const DE_STORE_KEY = 'decision_engine_v1';
+    async function sendToDecisionEngine(id) {
+      const entry = _history.find(x => x.id === id);
+      if (!entry) return;
+      const inp = entry.inputs || {}, res = entry.results || {};
+      const tk = (inp.ticker || '').trim().toUpperCase();
+      if (!tk) { showToast('لا رمز سهم في هذه العملية', 'error'); return; }
+      const fv = +res.fairValueAvg;
+      if (!isFinite(fv) || fv <= 0) { showToast('لا توجد قيمة عادلة رقمية في هذه العملية', 'error'); return; }
+      const decMap = { hold:'احتفاظ', accumulate:'تجميع', trim:'تخفيف', exit:'خروج', watch:'مراقبة' };
+      const bits = [`القيمة العادلة ${typeof formatNum === 'function' ? formatNum(fv) : fv.toFixed(2)} (${(entry.date||'').split('،')[0]})`];
+      if (res.fairValueUnreliable) bits.push(`⚠️ تشتّت النماذج ${(res.dispersionCV||0).toFixed(0)}% — النطاق ${res.fairValueRange}`);
+      if (res.anchorModel) bits.push(`مرساة: ${res.anchorModel}`);
+      if (res.sustainFail) bits.push(`⛔ فشل بوابة الاستدامة: ${(res.sustainReasons||[]).join(' · ')}`);
+      if (inp.decision) bits.push(`القرار: ${decMap[inp.decision] || inp.decision}${inp.execPrice ? ` عند ${inp.execPrice}` : ''}`);
+      const line = `[من حاسبة القيمة العادلة] ${bits.join(' · ')}`;
+
+      if (!await confirmAsync(`إرسال إلى محرّك القرار للرمز ${tk}؟\n\n${line}`)) return;
+      try {
+        const cur = await loadUserSetting(DE_STORE_KEY);
+        const cfg = (cur && typeof cur === 'object') ? cur : {};
+        const prev = (cfg[tk] && typeof cfg[tk] === 'object') ? cfg[tk] : {};
+        // الحقول المهيكلة للاستهلاك اللاحق + notes الذي يعرضه المحرّك اليوم
+        const oldNotes = (prev.notes || '').split('\n').filter(l => !l.startsWith('[من حاسبة القيمة العادلة]')).join('\n').trim();
+        cfg[tk] = {
+          ...prev,
+          fairValueAvg: fv,
+          fairValueDate: entry.date || '',
+          fairValueSource: 'stock-valuation',
+          fairValueUnreliable: !!res.fairValueUnreliable,
+          decision: inp.decision || '',
+          execPrice: inp.execPrice || '',
+          notes: (oldNotes ? oldNotes + '\n' : '') + line,
+        };
+        const ok = await saveUserSetting(DE_STORE_KEY, cfg);
+        showToast(ok ? `✅ أُرسلت إلى محرّك القرار للرمز ${tk}` : 'تعذّر الحفظ — تحقق من الاتصال', ok ? 'success' : 'error');
+      } catch (e) {
+        console.warn(e);
+        showToast('تعذّر الإرسال إلى محرّك القرار', 'error');
+      }
     }
 
     // ── patch calculateFairValue لحفظ النتيجة ──
+    // المصدر الوحيد للنتيجة المحفوظة هو recomputeResults(inputs) — لا كشط نصوص
+    // من الـDOM ولا انتظار 300ms. هكذا تتطابق العملية المحفوظة مع ما يعرضه السجل
+    // ومع ما تنتجه «إعادة حساب السجل» حرفياً، بلا انحراف بين ثلاثة مسارات.
     const _origCalc = calculateFairValue;
     calculateFairValue = async function() {
       const inputs = captureInputs();
       const ok = await _origCalc();
       if (ok !== true) return; // أُلغي التعديل أو فشلت المدخلات → لا تحفظ
-      setTimeout(async () => {
-        const fairRange  = document.getElementById('fairValueRange').textContent;
-        const fairDetail = document.getElementById('fairValueDetails').textContent;
-        const marginEl   = document.getElementById('dashboardMargin').textContent;
-        // نحفظ الصفوف بقيمها الخام (raw) من آخر حساب — لتمييز موثوقية دقيق لاحقاً بلا إعادة تحليل نص
-        let models = (_lastModelRows && _lastModelRows.length)
-          ? _lastModelRows.map(r => ({ ...r }))
-          : [];
-        if (!models.length) {
-          document.querySelectorAll('#modelsTable tr').forEach(tr => {
-            const tds = tr.querySelectorAll('td');
-            if (tds.length >= 2) models.push({ name: tds[0].innerText, value: tds[1].innerText });
-          });
-        }
-        if (fairRange && fairRange !== '-' && fairRange !== '—') {
-          await saveCalcToHistory(inputs, {
-            fairValueRange: fairRange,
-            fairValueDetail: fairDetail,
-            fairValueAvg: (_lastFairAvg != null && isFinite(_lastFairAvg)) ? _lastFairAvg : null,
-            marginText: (marginEl && marginEl !== '—') ? marginEl : '',
-            models
-          });
-        }
-      }, 300);
+      // المدخلات المحفوظة تحمل معدل الخصم النهائي الذي طُبِّق فعلاً بعد حساب WACC التلقائي
+      inputs.discountRate = document.getElementById('discountRate').value;
+      const results = recomputeResults(inputs);
+      if (!results) return;
+      await saveCalcToHistory(inputs, results);
     };
 
     // ===== إعادة تعيين الحاسبة =====
@@ -2047,10 +3143,17 @@
       }
       document.getElementById('waccInputs').style.display = 'none';
       document.getElementById('growthPerpWarning').style.display = 'none';
+      _prevDiscountRate = null; _pendingAnchor = '';
+      document.getElementById('anchorModel').innerHTML = '';
       toggleCompanyType();
       setEditMode(false);
       document.getElementById('resultsSection').style.display = 'none';
       document.getElementById('outlierWarning').style.display = 'none';
+      document.getElementById('bankSafetyWarning').style.display = 'none';
+      document.getElementById('dispersionBox').style.display = 'none';
+      document.getElementById('sustainGateBanner').style.display = 'none';
+      document.getElementById('bookFloorLine').style.display = 'none';
+      document.getElementById('marginDualLine').style.display = 'none';
       showToast('تم إعادة تعيين الحاسبة', 'success');
       document.querySelector('.calc-grid').scrollIntoView({ behavior: 'smooth' });
     }
@@ -2060,7 +3163,9 @@
       if (!user) return;
       setActiveNav('nav-stock-valuation');
       await loadHistoryFromDB();
+      invalidateHistIndex();
       renderHistory();
+      toggleCompanyType();
       runFieldChecks();
     }
 
