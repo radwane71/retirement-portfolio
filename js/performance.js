@@ -79,6 +79,105 @@ window.CARD_INFO = {
   },
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم + مولّدات المكوّنات
+// ──────────────────────────────────────────────────────────────────────
+// ربط: نسخة طبق الأصل من مولّدات js/dashboard.js (أعلى الملف) — صفحة الأداء
+// لا تُحمّل dashboard.js، فتُنسخ هنا بنفس التوقيعات بالضبط. أي تعديل هناك
+// يجب أن يُنسخ هنا (والعكس). المكوّنات معرَّفة في css/style.css تحت
+// «نظام مكوّنات اللوحة»: .card-head .hero-num .tag .meter .brow .kvs .note .stack .dot
+// قاعدة ثابتة: لا لون سداسي مكتوب يدوياً في هذا الملف — رموز التصميم فقط،
+// واللون وحده لا يحمل معنى (كل حالة معها أيقونة ونص).
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون سلسلة بيانات بالترتيب الثابت (1..6) — لا تُدوَّر عشوائياً
+function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// شفافية على رمز تصميم: #rrggbb + قناة ألفا سِتّ‌عشرية (لا لون جديد يُخترع)
+function tint(color, aa) {
+  const c = String(color || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(c) ? c + aa : c;
+}
+// ثيم Chart.js المشتق من رموز التصميم (يتحدّث مع الوضع الفاتح)
+function chartTheme() {
+  return {
+    text:    cssVar('--text'),
+    muted:   cssVar('--text-2'),
+    surface: cssVar('--bg-2'),
+    border:  cssVar('--border'),
+    grid:    tint(cssVar('--border'), 'aa'),
+    accent:  cssVar('--accent'),
+    font:    'Tajawal',
+  };
+}
+// إعدادات tooltip موحّدة
+function chartTooltipStyle() {
+  const t = chartTheme();
+  return {
+    backgroundColor: t.surface, titleColor: t.text, bodyColor: t.muted,
+    borderColor: t.border, borderWidth: 1,
+    titleFont: { family: t.font }, bodyFont: { family: t.font },
+  };
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// صف وزن في قائمة (.brow)
+function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
+  const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
+  const dColor = diffState ? stateColorOf(diffState) : cssVar('--text-2');
+  return `<div class="brow"${title ? ` title="${title}"` : ''}>
+      <div class="br-k"><span class="dot" style="background:${color}"></span><span>${name}</span>${sub ? `<span class="small text-muted num">${sub}</span>` : ''}</div>
+      <div class="br-track"><div class="br-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="br-v">${valueTxt}${diffTxt ? `<span class="d" style="color:${dColor}">${diffTxt}</span>` : ''}</div>
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+// رقم بطل: رقم واحد يقود البطاقة (.hero-num + .hero-cap)
+function heroHtml(valueTxt, caption = '', color = '') {
+  return `<div><div class="hero-num"${color ? ` style="color:${color}"` : ''}>${valueTxt}</div>` +
+    (caption ? `<div class="hero-cap">${caption}</div>` : '') + `</div>`;
+}
+// كتلة تفاصيل قابلة للطيّ — «البساطة»: التفصيل يُخبَّأ لا يُحذَف
+function detailsHtml(summary, innerHtml, open = false) {
+  return `<details class="perf-details"${open ? ' open' : ''}><summary>${summary}</summary><div class="dt-body">${innerHtml}</div></details>`;
+}
+
 let _tx       = [];
 let _holdings = [];
 let _divs     = [];
@@ -257,9 +356,11 @@ function buildPositionData() {
       // مغلق بالكامل — المنهج الزمني يكافئ (حصيلة البيع − كامل تكلفة الشراء)
       const realizedPnL = _realized;
       p.realizedPnL  = realizedPnL;
-      p.realizedPct  = p.buyCost > 0 ? realizedPnL / p.buyCost * 100 : 0;
+      // AUDIT-FIX (2026-08): تكلفة صفرية (مركز أسهم منحة بالكامل) كانت تُعرَض 0.00%
+      // وهي قيمة غير معرَّفة رياضياً (قسمة على صفر) — الآن null ⇒ «—» صراحةً.
+      p.realizedPct  = p.buyCost > 0 ? realizedPnL / p.buyCost * 100 : null;
       p.totalReturn  = realizedPnL + p.divReceived;
-      p.totalReturnPct = p.buyCost > 0 ? p.totalReturn / p.buyCost * 100 : 0;
+      p.totalReturnPct = p.buyCost > 0 ? p.totalReturn / p.buyCost * 100 : null;
       // مدة الاحتفاظ — M-6: use parseDateLocal to avoid UTC-midnight off-by-one
       if (p.firstBuyDate && p.lastSellDate) {
         const days = Math.floor((parseDateLocal(p.lastSellDate) - parseDateLocal(p.firstBuyDate)) / 86400000);
@@ -279,7 +380,10 @@ function buildPositionData() {
       const costOfSold    = Math.max(0, p.buyCost - _cost);
       p.partialRealizedPnL = _realized;
       p.totalReturn        = (p.unrealizedPnL || 0) + p.partialRealizedPnL + p.divReceived;
-      p.totalReturnPct     = costOfRemaining > 0 ? p.totalReturn / (costOfRemaining + costOfSold) * 100 : 0;
+      // AUDIT-FIX (2026-08): المقام = كل ما أُنفق على الرمز (متبقٍّ + مُباع). كان
+      // الشرط على costOfRemaining وحده، والصفر يُعرَض 0.00% رغم وجود عائد فعلي.
+      p.totalReturnBasis   = costOfRemaining + costOfSold;
+      p.totalReturnPct     = p.totalReturnBasis > 0 ? p.totalReturn / p.totalReturnBasis * 100 : null;
       // XIRR للمراكز المفتوحة (القيمة الحالية كتدفق نهائي)
       p.xirr = _calcPositionXIRR(p, divsByTicker[p.ticker] || [], p.marketValue);
       if (p.sellShares > 0.001) partial.push(p);
@@ -313,15 +417,25 @@ function renderKPIs() {
   const hhiEl  = document.getElementById('pk-hhi');
   const hhiSub = document.getElementById('pk-hhi-sub');
   if (hhiEl && _holdings.length) {
-    const totalMkt = _holdings.reduce((s,h) => s + +h.shares * +h.current_price, 0);
+    // AUDIT-FIX (2026-08): الأسهم بلا سعر حالي كانت تدخل بوزن صفر بصمت فتُزيّن
+    // التنويع (تُخفض HHI دون أن تُذكر). الآن تُستبعَد صراحةً ويُعلَن عددها.
+    const priced   = _holdings.filter(h => h.current_price != null && +h.current_price > 0 && +h.shares > 0);
+    const skipped  = _holdings.length - priced.length;
+    const totalMkt = priced.reduce((s, h) => s + +h.shares * +h.current_price, 0);
     const hhi = totalMkt > 0
-      ? _holdings.reduce((s,h) => { const w = (+h.shares * +h.current_price) / totalMkt; return s + w*w; }, 0)
+      ? priced.reduce((s, h) => { const w = (+h.shares * +h.current_price) / totalMkt; return s + w * w; }, 0)
       : 0;
     const effectiveN = hhi > 0 ? (1 / hhi).toFixed(1) : '—';
-    hhiEl.innerHTML   = `${hhi.toFixed(4)} <span style="font-size:.7rem;color:var(--text-2)" title="العدد الفعلي للمراكز المستقلة = 1 ÷ HHI">(N=${effectiveN})</span>`;
+    const _mDiv = assessMetricMaturity('diversification', { stockCount: priced.length });
+    hhiEl.innerHTML = `${hhi.toFixed(4)} <span class="hhi-n" title="العدد الفعلي للمراكز المستقلة = 1 ÷ HHI">(N=${effectiveN})</span>`
+      + maturityBadge(_mDiv.level, _mDiv.reason);
     // AUDIT-FIX (2026-08): العتبات مواءَمة مع الهدف الموثّق N_فعّال ≥ 15 (HHI ≤ 1/15 ≈ 0.067)
     hhiEl.className   = 'value num ' + (hhi <= 0.067 ? 'text-success' : hhi <= 0.10 ? 'text-warning' : 'text-danger');
-    if (hhiSub) hhiSub.textContent = hhi <= 0.067 ? 'تنويع ممتاز — N الفعّال ≥ 15 (الهدف)' : hhi <= 0.10 ? 'تنويع مقبول — N الفعّال 10–15، دون الهدف ⚠️' : 'تركز عالٍ — N الفعّال أقل من 10 ❌';
+    if (hhiSub) hhiSub.textContent =
+      (hhi <= 0.067 ? '✅ تنويع ممتاز — N الفعّال ≥ 15 (الهدف)'
+       : hhi <= 0.10 ? '⚠️ تنويع مقبول — N الفعّال 10–15، دون الهدف'
+       : '❌ تركز عالٍ — N الفعّال أقل من 10')
+      + (skipped > 0 ? ` · ${skipped} سهم بلا سعر مُستبعَد` : '');
   }
 
   // Max Drawdown — AUDIT-FIX (H3): compute on the flow-adjusted TWR index, NOT raw net worth.
@@ -499,7 +613,7 @@ function renderOpenPositions() {
       <td class="num ${pnlCls} bold">${p.unrealizedPnL != null ? formatSAR(p.unrealizedPnL, true) : '—'}</td>
       <td class="num ${pnlCls}">${p.unrealizedPct != null ? p.unrealizedPct.toFixed(2) + '%' : '—'}</td>
       <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
-      <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}<br><span class="small" style="font-weight:400">${p.totalReturnPct != null ? p.totalReturnPct.toFixed(2)+'%' : ''}</span></td>
+      <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}<br><span class="small t-sub">${p.totalReturnPct != null ? p.totalReturnPct.toFixed(2)+'%' : '—'}</span></td>
       <td class="num ${p.xirr == null ? 'text-muted' : p.xirr >= 0 ? 'text-success' : 'text-danger'}" title="XIRR الفردي لهذا المركز — يشمل مشتريات وأرباح والقيمة الحالية">${p.xirr != null ? (p.xirr >= 0 ? '+' : '') + p.xirr.toFixed(2) + '%' + xirrBadge : '—'}</td>
     </tr>`;
   }).join('');
@@ -516,15 +630,15 @@ function renderOpenPositions() {
     const costOfRem = p.avgCost * p.remainingShares;
     return s + costOfRem + Math.max(0, p.buyCost - costOfRem);
   }, 0);
-  const totalRetPct = totalRetBasis > 0 ? totalRet / totalRetBasis * 100 : 0;
-  tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
+  const totalRetPct = totalRetBasis > 0 ? totalRet / totalRetBasis * 100 : null;
+  tfoot.innerHTML = `<tr class="t-total">
     <td colspan="5"><strong class="small">الإجمالي</strong></td>
     <td class="num bold">${formatSAR(totalCost)}</td>
     <td class="num bold text-accent">${formatSAR(totalMkt)}</td>
     <td class="num bold ${totalUPnL>=0?'text-success':'text-danger'}">${formatSAR(totalUPnL,true)}</td>
     <td class="num ${totalUPnL>=0?'text-success':'text-danger'}">${totalUPct.toFixed(2)}%</td>
     <td class="num text-success">${formatSAR(totalDiv)}</td>
-    <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}<br><span class="small" style="font-weight:400">${totalRetPct.toFixed(2)}%</span></td>
+    <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}<br><span class="small t-sub">${totalRetPct != null ? totalRetPct.toFixed(2) + '%' : '—'}</span></td>
     <td></td>
   </tr>`;
 }
@@ -559,7 +673,7 @@ function renderClosedPositions() {
       <td class="num text-muted">${formatSAR(p.buyCost)}</td>
       <td class="num text-accent">${formatSAR(p.sellRevenue)}</td>
       <td class="num ${pnlCls} bold">${formatSAR(p.realizedPnL, true)}</td>
-      <td class="num ${pnlCls}">${p.realizedPct.toFixed(2)}%</td>
+      <td class="num ${p.realizedPct == null ? 'text-muted' : pnlCls}" ${p.realizedPct == null ? 'title="تكلفة الشراء صفر (أسهم منحة) — النسبة غير معرَّفة"' : ''}>${p.realizedPct != null ? p.realizedPct.toFixed(2) + '%' : '—'}</td>
       <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
       <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}</td>
     </tr>`;
@@ -570,13 +684,13 @@ function renderClosedPositions() {
   const totalRealPnL   = closed.reduce((s, p) => s + p.realizedPnL,   0);
   const totalDiv       = closed.reduce((s, p) => s + p.divReceived,   0);
   const totalRet       = closed.reduce((s, p) => s + p.totalReturn,   0);
-  const totalRealPct   = totalBuyCost > 0 ? totalRealPnL / totalBuyCost * 100 : 0;
-  tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
+  const totalRealPct   = totalBuyCost > 0 ? totalRealPnL / totalBuyCost * 100 : null;
+  tfoot.innerHTML = `<tr class="t-total">
     <td colspan="6"><strong class="small">الإجمالي</strong></td>
     <td class="num bold text-muted">${formatSAR(totalBuyCost)}</td>
     <td class="num bold text-accent">${formatSAR(totalSellRev)}</td>
     <td class="num bold ${totalRealPnL>=0?'text-success':'text-danger'}">${formatSAR(totalRealPnL,true)}</td>
-    <td class="num ${totalRealPnL>=0?'text-success':'text-danger'}">${totalRealPct.toFixed(2)}%</td>
+    <td class="num ${totalRealPnL>=0?'text-success':'text-danger'}">${totalRealPct != null ? totalRealPct.toFixed(2) + '%' : '—'}</td>
     <td class="num text-success">${formatSAR(totalDiv)}</td>
     <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}</td>
   </tr>`;
@@ -687,8 +801,13 @@ function buildMonthlyData() {
       : null;
     const portfolioValue = latestSnap ? +latestSnap.total_value : null;
     const isAutoSnap     = latestSnap ? isAutoSnapshot(latestSnap.notes) : false;
+    // AUDIT-FIX (2026-08): لا لقطة في هذا الشهر ⇒ القيمة مُرحَّلة من شهر أسبق.
+    // كانت تُعرَض كأنها قيمة الشهر نفسه بلا أي إشارة. نُصدِّر تاريخ اللقطة وعلَم
+    // «قديمة» ليُعلَن مصدرها في الجدول (لا تقدير صامت — CLAUDE.md §8).
+    const snapDate     = latestSnap ? latestSnap.date : null;
+    const snapIsStale  = !!snapDate && snapDate.slice(0, 7) !== ym;
 
-    return { ym, yr, mo, buys, sells, divs, cumulativeCapital, netMove, portfolioValue, isAutoSnap };
+    return { ym, yr, mo, buys, sells, divs, cumulativeCapital, netMove, portfolioValue, isAutoSnap, snapDate, snapIsStale };
   });
 }
 
@@ -729,8 +848,8 @@ function renderMonthlyTimeline() {
     if (!existingValCol && hasPortfolioValues) {
       const th = document.createElement('th');
       th.className = 'col-portfolio-val';
-      th.title = 'قيمة المحفظة الإجمالية في ذلك الشهر (من net_worth_snapshots)\n✦ = تسجيل تلقائي | ✎ = تسجيل يدوي';
-      th.innerHTML = 'قيمة المحفظة <span style="font-size:.65rem;opacity:.6">▲</span>';
+      th.title = 'قيمة المحفظة الإجمالية في ذلك الشهر (من net_worth_snapshots)\n✦ = تسجيل تلقائي | ✎ = تسجيل يدوي | ⏳ = مُرحَّلة من شهر أسبق (لا لقطة لهذا الشهر)';
+      th.innerHTML = 'قيمة المحفظة <span class="col-hint">▲</span>';
       thead.insertBefore(th, thead.children[1]); // بعد عمود الشهر
     } else if (existingValCol && !hasPortfolioValues) {
       existingValCol.remove();
@@ -751,10 +870,12 @@ function renderMonthlyTimeline() {
     if (hasPortfolioValues) {
       if (r.portfolioValue != null) {
         const icon = r.isAutoSnap ? '✦' : '✎';
-        const tip  = r.isAutoSnap
-          ? 'تسجيل تلقائي عند فتح الداشبورد'
-          : 'تسجيل يدوي من صافي الثروة';
-        valCell = `<td class="num text-accent bold" title="${tip}">${formatSAR(r.portfolioValue)} <span class="small text-muted">${icon}</span></td>`;
+        const src  = r.isAutoSnap ? 'تسجيل تلقائي عند فتح الداشبورد' : 'تسجيل يدوي من صافي الثروة';
+        // لقطة مُرحَّلة من شهر أسبق: تُوسَم ⏳ ويُذكر تاريخها الحقيقي
+        const tip  = r.snapIsStale
+          ? `لا توجد لقطة في هذا الشهر — القيمة مُرحَّلة من لقطة ${formatDate(r.snapDate)} (${src})`
+          : `لقطة ${formatDate(r.snapDate)} — ${src}`;
+        valCell = `<td class="num ${r.snapIsStale ? 'text-muted' : 'text-accent bold'}" title="${esc(tip)}">${formatSAR(r.portfolioValue)} <span class="small text-muted">${r.snapIsStale ? '⏳' : icon}</span></td>`;
       } else {
         valCell = `<td class="num text-muted small" title="لا يوجد snapshot لهذا الشهر — افتح الداشبورد لتسجيله تلقائياً">—</td>`;
       }
@@ -796,54 +917,73 @@ function renderMonthlyChart() {
   const portfolioVals  = data.map(r => r.portfolioValue);
   const hasPortVals    = portfolioVals.some(v => v != null);
 
+  // ── ألوان السلاسل من رموز التصميم فقط ──────────────────────────────
+  // ترتيب ثابت لا يتغيّر بين الأوضاع: رأس المال ذهبي · الثروة أزرق ·
+  // الأرباح أخضر · المشتريات سماوي · المبيعات أحمر. نفس ترتيب دليل الرسم
+  // في performance.html (.lg-cap / .lg-nw / .lg-div / .lg-buy).
+  const th     = chartTheme();
+  const cCap   = seriesColor(0);   // --series-1 ذهبي
+  const cNW    = seriesColor(1);   // --series-2 أزرق
+  const cDiv   = seriesColor(2);   // --series-3 أخضر
+  const cBuy   = seriesColor(5);   // --series-6 سماوي
+  const cSell  = seriesColor(4);   // --series-5 أحمر
+
+  const axis = (color) => ({
+    ticks: { color: color || th.muted, font: { family: th.font, size: 10 }, maxTicksLimit: 24 },
+    grid:  { color: th.grid },
+  });
+  const yAxis = (color, extra = {}) => ({
+    ticks: { color: color || th.muted, font: { family: th.font, size: 11 }, callback: v => fmtShortK(v) },
+    grid:  { color: th.grid },
+    ...extra,
+  });
+
   const baseOpts = {
     responsive: true, maintainAspectRatio: false,
     interaction: { mode: 'index', intersect: false },
     plugins: {
-      legend: { position: 'bottom', labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 12, usePointStyle: true } },
-      tooltip: { callbacks: { label: c => ` ${c.dataset.label}: ${formatSAR(c.raw ?? c.parsed?.y ?? 0)}` } }
+      legend: { position: 'bottom', labels: { color: th.muted, font: { family: th.font, size: 11 }, padding: 12, usePointStyle: true } },
+      tooltip: { ...chartTooltipStyle(), callbacks: { label: c => ` ${c.dataset.label}: ${formatSAR(c.raw ?? c.parsed?.y ?? 0)}` } }
     },
-    scales: {
-      x: { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, maxTicksLimit: 24 }, grid: { color: 'rgba(48,54,61,0.5)' } },
-      y: { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, callback: v => fmtShortK(v) }, grid: { color: 'rgba(48,54,61,0.3)' } }
-    }
+    scales: { x: axis(), y: yAxis() }
   };
 
-  // ① مدمج — الأصلي (خط رأس المال + أعمدة أرباح + مشتريات، محورين)
+  // ① مدمج — خط رأس المال + أعمدة أرباح ومشتريات (محوران)
   if (_monthlyChartMode === 'combined') {
     _monthlyChart = new Chart(canvas, {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: 'رأس المال المُودَع (تراكمي)', data: capital,       type: 'line', backgroundColor: 'rgba(240,180,41,0.15)', borderColor: '#f0b429', borderWidth: 2, tension: 0.3, fill: true,  pointRadius: 2, yAxisID: 'y',  order: 1 },
-          ...(hasPortVals ? [{ label: 'صافي الثروة المُسجَّلة (أسهم + نقد + عقارات)', data: portfolioVals, type: 'line', backgroundColor: 'rgba(59,130,246,0.10)',  borderColor: '#3b82f6', borderWidth: 2, tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y',  order: 0, borderDash: [5,3], spanGaps: true }] : []),
-          { label: 'أرباح موزعة شهرية',           data: divs,          backgroundColor: 'rgba(63,185,80,0.65)',  borderColor: '#3fb950', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 2 },
-          { label: 'مشتريات شهرية',               data: buys,          backgroundColor: 'rgba(88,166,255,0.5)', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 3 },
+          { label: 'رأس المال المُودَع (تراكمي)', data: capital, type: 'line', backgroundColor: tint(cCap, '26'), borderColor: cCap, borderWidth: 2, tension: 0.3, fill: true, pointRadius: 2, yAxisID: 'y', order: 1 },
+          ...(hasPortVals ? [{ label: 'صافي الثروة المُسجَّلة (أسهم + نقد + عقارات)', data: portfolioVals, type: 'line', backgroundColor: tint(cNW, '1a'), borderColor: cNW, borderWidth: 2, tension: 0.3, fill: false, pointRadius: 3, yAxisID: 'y', order: 0, borderDash: [5, 3], spanGaps: true }] : []),
+          { label: 'أرباح موزعة شهرية', data: divs, backgroundColor: tint(cDiv, 'a6'), borderColor: cDiv, borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 2 },
+          { label: 'مشتريات شهرية',     data: buys, backgroundColor: tint(cBuy, '80'), borderColor: cBuy, borderWidth: 1, borderRadius: 3, yAxisID: 'y2', order: 3 },
         ]
       },
       options: {
         ...baseOpts,
         scales: {
-          x:  { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, maxTicksLimit: 24 }, grid: { color: 'rgba(48,54,61,0.5)' } },
-          y:  { position: 'right', ticks: { color: '#f0b429', callback: v => fmtShortK(v) }, grid: { color: 'rgba(48,54,61,0.3)' } },
-          y2: { position: 'left',  ticks: { color: '#3fb950', callback: v => fmtShortK(v) }, grid: { display: false } },
+          x:  axis(),
+          y:  yAxis(cCap, { position: 'right' }),
+          y2: { ...yAxis(cDiv, { position: 'left' }), grid: { display: false } },
         }
       }
     });
     return;
   }
 
-  // ② خطوط — كل البيانات كخطوط، محور واحد
+  // ② خطوط — كل البيانات كخطوط تراكمية، محور واحد
   if (_monthlyChartMode === 'lines') {
+    const cum = arr => arr.map((_, i) => arr.slice(0, i + 1).reduce((s, v) => s + v, 0));
     _monthlyChart = new Chart(canvas, {
       type: 'line',
       data: {
         labels,
         datasets: [
-          { label: 'رأس المال المُودَع (تراكمي)', data: capital, borderColor: '#f0b429', backgroundColor: 'rgba(240,180,41,0.08)', borderWidth: 2.5, pointRadius: 2, tension: 0.3, fill: true },
-          { label: 'أرباح موزعة (تراكمية)',       data: data.map((_, i) => divs.slice(0, i+1).reduce((s,v) => s+v, 0)), borderColor: '#3fb950', backgroundColor: 'rgba(63,185,80,0.06)', borderWidth: 2, pointRadius: 2, tension: 0.3, fill: true },
-          { label: 'مشتريات (تراكمية)',            data: data.map((_, i) => buys.slice(0, i+1).reduce((s,v) => s+v, 0)), borderColor: '#58a6ff', backgroundColor: 'rgba(88,166,255,0.05)', borderWidth: 1.5, pointRadius: 1, tension: 0.3, fill: false, borderDash: [4,3] },
+          { label: 'رأس المال المُودَع (تراكمي)', data: capital,   borderColor: cCap, backgroundColor: tint(cCap, '14'), borderWidth: 2.5, pointRadius: 2, tension: 0.3, fill: true },
+          { label: 'أرباح موزعة (تراكمية)',       data: cum(divs), borderColor: cDiv, backgroundColor: tint(cDiv, '10'), borderWidth: 2,   pointRadius: 2, tension: 0.3, fill: true },
+          { label: 'مشتريات (تراكمية)',            data: cum(buys), borderColor: cBuy, backgroundColor: 'transparent',    borderWidth: 1.5, pointRadius: 1, tension: 0.3, fill: false, borderDash: [4, 3] },
         ]
       },
       options: baseOpts
@@ -851,23 +991,23 @@ function renderMonthlyChart() {
     return;
   }
 
-  // ③ مكدس — أعمدة مكدسة: أرباح + مشتريات + مبيعات لكل شهر
+  // ③ مكدس — أعمدة مكدسة: مشتريات + أرباح + مبيعات لكل شهر
   if (_monthlyChartMode === 'stacked') {
     _monthlyChart = new Chart(canvas, {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: 'مشتريات',  data: buys,  backgroundColor: 'rgba(88,166,255,0.75)', borderColor: '#58a6ff', borderWidth: 1, borderRadius: 2 },
-          { label: 'أرباح',    data: divs,  backgroundColor: 'rgba(63,185,80,0.75)',  borderColor: '#3fb950', borderWidth: 1, borderRadius: 2 },
-          { label: 'مبيعات',   data: sells, backgroundColor: 'rgba(248,81,73,0.65)',  borderColor: '#f85149', borderWidth: 1, borderRadius: 2 },
+          { label: 'مشتريات', data: buys,  backgroundColor: tint(cBuy, 'bf'),  borderColor: cBuy,  borderWidth: 1, borderRadius: 2 },
+          { label: 'أرباح',   data: divs,  backgroundColor: tint(cDiv, 'bf'),  borderColor: cDiv,  borderWidth: 1, borderRadius: 2 },
+          { label: 'مبيعات',  data: sells, backgroundColor: tint(cSell, 'a6'), borderColor: cSell, borderWidth: 1, borderRadius: 2 },
         ]
       },
       options: {
         ...baseOpts,
         scales: {
-          x: { stacked: true, ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, maxTicksLimit: 24 }, grid: { color: 'rgba(48,54,61,0.5)' } },
-          y: { stacked: true, ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, callback: v => fmtShortK(v) }, grid: { color: 'rgba(48,54,61,0.3)' } }
+          x: { ...axis(), stacked: true },
+          y: { ...yAxis(), stacked: true }
         }
       }
     });
@@ -876,24 +1016,28 @@ function renderMonthlyChart() {
 
   // ④ أرباح فقط — تركيز كامل على الدخل الموزع شهرياً
   if (_monthlyChartMode === 'divonly') {
-    const maxDiv    = Math.max(...divs);
-    const barColors = divs.map(v => v >= maxDiv * 0.8 ? 'rgba(63,185,80,0.9)' : v > 0 ? 'rgba(63,185,80,0.55)' : 'rgba(255,255,255,0.07)');
-    const cumDiv    = data.map((_, i) => divs.slice(0, i+1).reduce((s,v) => s+v, 0));
+    const maxDiv    = Math.max(0, ...divs);
+    // درجة واحدة من --series-3: الشهر الأقوى معتم، وبقية الأشهر أفتح، والصفر شبه شفاف
+    const barColors = divs.map(v =>
+      v <= 0            ? tint(th.muted, '1f')
+      : maxDiv > 0 && v >= maxDiv * 0.8 ? tint(cDiv, 'e6')
+      : tint(cDiv, '8c'));
+    const cumDiv    = data.map((_, i) => divs.slice(0, i + 1).reduce((s, v) => s + v, 0));
     _monthlyChart = new Chart(canvas, {
       type: 'bar',
       data: {
         labels,
         datasets: [
-          { label: 'أرباح الشهر',        data: divs,   backgroundColor: barColors, borderColor: barColors.map(c => c.replace('0.9','1').replace('0.55','0.8')), borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
-          { label: 'الأرباح التراكمية',  data: cumDiv, type: 'line', borderColor: '#f0b429', backgroundColor: 'rgba(240,180,41,0.1)', borderWidth: 2, pointRadius: 2, tension: 0.4, fill: false, yAxisID: 'y2', order: 0 },
+          { label: 'أرباح الشهر',       data: divs,   backgroundColor: barColors, borderColor: cDiv, borderWidth: 1, borderRadius: 4, yAxisID: 'y' },
+          { label: 'الأرباح التراكمية', data: cumDiv, type: 'line', borderColor: cCap, backgroundColor: tint(cCap, '1a'), borderWidth: 2, pointRadius: 2, tension: 0.4, fill: false, yAxisID: 'y2', order: 0 },
         ]
       },
       options: {
         ...baseOpts,
         scales: {
-          x:  { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, maxTicksLimit: 24 }, grid: { color: 'rgba(48,54,61,0.5)' } },
-          y:  { position: 'left',  ticks: { color: '#3fb950', font: { family: 'Tajawal', size: 11 }, callback: v => fmtShortK(v) }, grid: { color: 'rgba(48,54,61,0.3)' } },
-          y2: { position: 'right', ticks: { color: '#f0b429', font: { family: 'Tajawal', size: 11 }, callback: v => fmtShortK(v) }, grid: { display: false } },
+          x:  axis(),
+          y:  yAxis(cDiv, { position: 'left' }),
+          y2: { ...yAxis(cCap, { position: 'right' }), grid: { display: false } },
         }
       }
     });
@@ -960,6 +1104,7 @@ function renderDividendMetrics() {
   // وسيط DPS لآخر «دورية» دفعات × الدورية × الأسهم الحالية. الطريقة السابقة
   // (مجموع المستلم في آخر 12 شهراً) كانت تبخس المراكز المُضاف إليها حديثاً.
   const now = new Date();
+  const _fwdBasis = {};   // ticker → { payments, freq, dpsPoints } — أساس التقدير للإعلان
   const _ftx = {};
   _tx.forEach(t => {
     if (!t.date) return;
@@ -995,6 +1140,10 @@ function renderDividendMetrics() {
       const sh = _sharesAt(ticker, e.date);
       if (sh >= 0.001) dpsSeries.push(e.amount / sh);
     });
+    // AUDIT-FIX (2026-08): سجّل الأساس الذي بُني عليه التقدير لكل رمز حتى يُعلَن
+    // في الجدول (كم دفعة، وأي دورية افتُرضت). دفعة واحدة مسجّلة ⇒ تُفترض سنوية،
+    // وهو أخطر افتراض في محفظة عمرها ~سنة: يبخس سهماً ربع سنوي إلى الرُّبع.
+    _fwdBasis[ticker] = { payments: entries.length, freq, dpsPoints: dpsSeries.length };
     let dps;
     if (dpsSeries.length) {
       const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
@@ -1013,6 +1162,8 @@ function renderDividendMetrics() {
   }
 
   // ── Portfolio Efficiency Ratio (عمولات vs أرباح) ──
+  // ⚠️ البسط يشمل الربح غير المحقّق (مراكز مفتوحة) — يُعلَن في التلميح والملاحظة،
+  // فهو «كل ما ولّدته المحفظة حتى الآن ÷ ما دفعته رسوماً»، لا ربحاً محقّقاً فقط.
   const totalCommissions = _tx.reduce((s, t) => s + (+t.commission || 0) + (+t.vat || 0), 0);
   const { closed } = getPositionData();
   const totalRealGains = closed.reduce((s, p) => s + (p.totalReturn || 0), 0)
@@ -1020,31 +1171,88 @@ function renderDividendMetrics() {
   const effRatio = totalCommissions > 0 ? totalRealGains / totalCommissions : null;
 
   // ── KPI شريط الملخص ──
-  const portfolioFwdDiv = open.reduce((s, p) => {
-    return s + forwardAnnualDiv(p.ticker, p.remainingShares);
-  }, 0);
-  const portfolioCost = open.reduce((s, p) => s + p.avgCost * p.remainingShares, 0);
-  const portfolioMktVal = open.reduce((s, p) => s + (p.marketValue || 0), 0);
-  const portfolioYoC = portfolioCost > 0 ? portfolioFwdDiv / portfolioCost * 100 : 0;
-  const portfolioCurYield = portfolioMktVal > 0 ? portfolioFwdDiv / portfolioMktVal * 100 : 0;
+  const portfolioFwdDiv = open.reduce((s, p) => s + forwardAnnualDiv(p.ticker, p.remainingShares), 0);
+  const portfolioCost   = open.reduce((s, p) => s + p.avgCost * p.remainingShares, 0);
+  const portfolioYoC    = portfolioCost > 0 ? portfolioFwdDiv / portfolioCost * 100 : null;
+
+  // AUDIT-FIX (2026-08): Current Yield — المقام كان يجمع marketValue||0 فيُسقِط
+  // الأسهم بلا سعر من المقام بينما يبقى توزيعها المتوقّع في البسط ⇒ عائد متضخّم.
+  // الآن البسط والمقام على نفس المجموعة (الأسهم المسعّرة فقط)، ويُعلَن المستبعَد.
+  const pricedOpen      = open.filter(p => p.marketValue != null && p.marketValue > 0);
+  const pricedMktVal    = pricedOpen.reduce((s, p) => s + p.marketValue, 0);
+  const pricedFwdDiv    = pricedOpen.reduce((s, p) => s + forwardAnnualDiv(p.ticker, p.remainingShares), 0);
+  const unpricedCount   = open.length - pricedOpen.length;
+  const portfolioCurYield = pricedMktVal > 0 ? pricedFwdDiv / pricedMktVal * 100 : null;
+
+  // AUDIT-FIX (2026-08): Div ROI — الشريط كان يقسم على تكلفة المتبقي فقط بينما
+  // صفوف الجدول تقسم على buyCost (كل ما أُنفق). عند وجود بيع جزئي كان الشريط
+  // يضخّم النسبة (مثال مُتحقَّق منه: 8% في الصف مقابل 16% في الشريط). وُحِّد المقام.
   const totalDivReceived = open.reduce((s, p) => s + p.divReceived, 0);
-  const portfolioDivROI  = portfolioCost > 0 ? totalDivReceived / portfolioCost * 100 : 0;
+  const totalSpentOpen   = open.reduce((s, p) => s + p.buyCost, 0);
+  const portfolioDivROI  = totalSpentOpen > 0 ? totalDivReceived / totalSpentOpen * 100 : null;
+
+  // شارة نضج التوزيعات — دورة توزيع سنوية كاملة أم لا (CLAUDE.md §8: إعلان لا صمت)
+  const _divDates  = _divs.filter(d => d.date).map(d => d.date).sort();
+  const _divYears  = _divDates.length
+    ? (parseDateLocal(_divDates[_divDates.length - 1]) - parseDateLocal(_divDates[0])) / (365.25 * 86400000)
+    : 0;
+  const _mDiv = assessMetricMaturity('divYield', { divCount: _divs.length, divYears: _divYears });
+  const _divBadge = maturityBadge(_mDiv.level, _mDiv.reason);
 
   if (kpiEl) {
+    const pct = v => v == null ? '—' : v.toFixed(2) + '%';
     kpiEl.innerHTML = [
-      { lbl: 'YoC المحفظة', val: portfolioYoC.toFixed(2) + '%', sub: 'عائد على تكلفتك', cls: 'text-success' },
-      { lbl: 'Current Yield', val: portfolioCurYield.toFixed(2) + '%', sub: 'عائد على سعر السوق', cls: '' },
-      { lbl: 'Div ROI', val: portfolioDivROI.toFixed(2) + '%', sub: 'استرددت من رأس مالك', cls: portfolioDivROI >= 20 ? 'text-success' : '' },
-      { lbl: 'التوزيعات السنوية المتوقعة', val: formatSAR(portfolioFwdDiv), sub: 'Forward 12M', cls: 'text-success' },
-      effRatio != null
-        ? { lbl: 'كفاءة رأس المال', val: effRatio.toFixed(1) + '×', sub: 'ربح / عمولة', cls: effRatio >= 20 ? 'text-success' : effRatio >= 10 ? '' : 'text-danger', title: `إجمالي العمولات: ${formatSAR(totalCommissions)}` }
-        : { lbl: 'كفاءة رأس المال', val: '—', sub: 'ربح / عمولة', cls: 'text-muted' },
-    ].map(k => `<div class="stat-card" ${k.title ? `title="${k.title}"` : ''}>
-      <div class="label">${k.lbl}</div>
-      <div class="value num ${k.cls}">${k.val}</div>
+      { lbl: 'YoC المحفظة', eng: 'Yield on Cost', val: pct(portfolioYoC), badge: _divBadge,
+        sub: `${formatSAR(portfolioFwdDiv)} ÷ تكلفة ${formatSAR(portfolioCost)}`,
+        title: 'التوزيعات السنوية المتوقعة ÷ تكلفة حيازتك الحالية' },
+      { lbl: 'العائد على السوق', eng: 'Current Yield', val: pct(portfolioCurYield), badge: _divBadge,
+        sub: unpricedCount > 0 ? `⚠️ ${unpricedCount} سهم بلا سعر مُستبعَد` : `على ${formatSAR(pricedMktVal)} قيمة سوقية`,
+        title: 'محسوب على الأسهم المسعّرة فقط — البسط والمقام على نفس المجموعة' },
+      { lbl: 'استرداد بالتوزيعات', eng: 'Div ROI', val: pct(portfolioDivROI),
+        sub: `${formatSAR(totalDivReceived)} من ${formatSAR(totalSpentOpen)} أُنفقت`,
+        title: 'مجموع التوزيعات المستلمة ÷ إجمالي ما أُنفق على المراكز المفتوحة (نفس مقام صفوف الجدول)' },
+      { lbl: 'التوزيعات المتوقعة', eng: 'Forward 12M', val: formatSAR(portfolioFwdDiv), badge: _divBadge,
+        sub: 'للسنة القادمة بمعدّل الدفع الحالي',
+        title: 'وسيط DPS لآخر دورة دفعات × الدورية × الأسهم الحالية' },
+      { lbl: 'كفاءة رأس المال', eng: 'Return / Fees', val: effRatio != null ? effRatio.toFixed(1) + '×' : '—',
+        sub: `مقابل ${formatSAR(totalCommissions)} عمولة وضريبة`,
+        title: 'إجمالي العائد (يشمل غير المحقّق) ÷ إجمالي العمولات والضريبة' },
+    ].map(k => `<div class="stat-card" title="${esc(k.title)}">
+      <div class="label">${k.lbl} <span class="eng-label">${k.eng}</span></div>
+      <div class="value num">${k.val}${k.badge || ''}</div>
       <div class="sub">${k.sub}</div>
     </div>`).join('');
   }
+
+  // ── ملاحظات المنهجية (تحت الشريط) — إعلان صريح لحدود الأرقام ──
+  const noteEl = document.getElementById('dv-notes');
+  if (noteEl) {
+    noteEl.innerHTML = [
+      _mDiv.level !== 'reliable'
+        ? noteHtml('🌱', `<b>لم تكتمل دورة توزيع سنوية كاملة بعد</b> (${_divs.length} توزيعة على مدى ${_divYears.toFixed(1)} سنة). كل أرقام «المتوقّع» و YoC و«سنوات الاسترداد» مبنية على استقراء دفعات جزئية — تُقرأ كاتجاه لا كرقم نهائي.`, 'warn')
+        : '',
+      unpricedCount > 0
+        ? noteHtml('⚪', `<b>${unpricedCount}</b> سهم بلا سعر حالي — مُستبعَد من «العائد على السوق» ومن القيمة السوقية، ويظهر «—» في عموده. لم يُقدَّر سعره بصمت.`, '')
+        : '',
+      noteHtml('📐', `<b>سنوات الاسترداد</b> = تكلفة حيازتك الحالية ÷ التوزيع السنوي المتوقّع، <b>بلا افتراض نمو</b> و<b>بلا خصم</b> ما استلمته سابقاً (ذلك يظهر في عمود «استرداد بالتوزيعات»). و<b>كفاءة رأس المال</b> بسطها يشمل الربح غير المحقّق، فهو ليس ربحاً في اليد.`, ''),
+    ].filter(Boolean).join('');
+  }
+
+  // ── إعلان أساس تقدير «التوزيعات المتوقعة» لكل رمز ──
+  // دورية مُفترَضة من دفعة أو دفعتين ليست معلومة — تُوسَم 🌱 ويُشرح الأساس.
+  const FREQ_AR = { 1: 'سنوية', 2: 'نصف سنوية', 4: 'ربع سنوية' };
+  const fwdWeak = tk => {
+    const b = _fwdBasis[tk];
+    return !!b && b.payments < 3;   // أقل من 3 دفعات ⇒ الدورية استنتاج هشّ
+  };
+  const fwdBasisTxt = tk => {
+    const b = _fwdBasis[tk];
+    if (!b) return 'لا توزيعات مسجّلة لهذا الرمز — لا يمكن تقدير توزيع متوقّع.';
+    return `مبني على ${b.payments} دفعة مسجّلة، بدورية مُفترَضة ${FREQ_AR[b.freq] || b.freq + '×'}` +
+      (b.payments < 3
+        ? '. ⚠️ بدفعة أو دفعتين فقط تُستنتَج الدورية من فجوة واحدة — لو كان السهم يوزّع ربع سنوياً وسُجّلت دفعة واحدة، فالتقدير يبخسه إلى الرُّبع. سجّل بقية الدفعات ليستقرّ الرقم.'
+        : '.');
+  };
 
   // ── جدول التفاصيل لكل سهم ──
   const rows = open.map(p => {
@@ -1068,8 +1276,8 @@ function renderDividendMetrics() {
       <td class="num bold ${yocCls}" title="التوزيع السنوي ${formatSAR(fwdAnnDiv)} ÷ تكلفة ${formatSAR(costBasis)}">${yoc != null ? yoc.toFixed(2) + '%' : '—'}</td>
       <td class="num ${curYield != null ? '' : 'text-muted'}">${curYield != null ? curYield.toFixed(2) + '%' : '—'}</td>
       <td class="num ${divROICls}" title="استردّ ${formatSAR(p.divReceived)} من ${formatSAR(totalSpent)}">${divROI != null ? divROI.toFixed(2) + '%' : '—'}</td>
-      <td class="num ${beCls}" title="عند ${formatSAR(fwdAnnDiv)} / سنة">${breakEvenYrs != null ? breakEvenYrs.toFixed(1) + ' سنة' : '—'}</td>
-      <td class="num text-success">${fwdAnnDiv > 0 ? formatSAR(fwdAnnDiv) : '—'}</td>
+      <td class="num ${beCls}" title="عند ${formatSAR(fwdAnnDiv)} / سنة، بلا نمو وبلا خصم ما استلمته سابقاً">${breakEvenYrs != null ? breakEvenYrs.toFixed(1) + ' سنة' : '—'}</td>
+      <td class="num text-success" title="${esc(fwdBasisTxt(p.ticker))}">${fwdAnnDiv > 0 ? formatSAR(fwdAnnDiv) : '—'}${fwdWeak(p.ticker) ? ' ' + maturityBadge('early', fwdBasisTxt(p.ticker)) : ''}</td>
       <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
       <td class="num text-muted">${formatSAR(costBasis)}</td>
     </tr>`;
@@ -1093,38 +1301,88 @@ function renderBehavioralAudit() {
     return;
   }
 
+  const n = closed.length;
+
   // ── حسابات السلوك ──
   const winners = closed.filter(p => p.totalReturn > 0);
   const losers  = closed.filter(p => p.totalReturn <= 0);
 
-  const winRate     = closed.length > 0 ? winners.length / closed.length * 100 : 0;
+  const winRate     = n > 0 ? winners.length / n * 100 : 0;
   const totalGains  = winners.reduce((s, p) => s + p.totalReturn, 0);
   const totalLosses = Math.abs(losers.reduce((s, p) => s + p.totalReturn, 0));
-  const profitFactor = totalLosses > 0 ? totalGains / totalLosses : totalGains > 0 ? Infinity : 0;
+  // AUDIT-FIX (2026-08): تعادل تام (لا ربح ولا خسارة) كان يُنتج 0 فتظهر رسالة
+  // «خسائرك أكبر من أرباحك» وهي خاطئة. الآن null ⇒ «غير قابل للحساب».
+  const profitFactor = totalLosses > 0 ? totalGains / totalLosses
+                     : totalGains  > 0 ? Infinity
+                     : null;
 
-  const avgHoldWinners = winners.length > 0
-    ? winners.reduce((s, p) => s + (p.holdDays || 0), 0) / winners.length : 0;
-  const avgHoldLosers  = losers.length > 0
-    ? losers.reduce((s, p) => s + (p.holdDays || 0), 0) / losers.length : 0;
+  // AUDIT-FIX (2026-08): مدّة الاحتفاظ — الصفقات بلا holdDays (تاريخ فتح أو إغلاق
+  // ناقص) كانت تُحسب 0 يوم فتسحب المتوسط للأسفل بصمت. الآن تُستبعد من المقام
+  // ويُعلَن عددها صراحةً (دستور CLAUDE.md §8: ممنوع تقدير بيانات ناقصة بصمت).
+  const _avgHold = arr => {
+    const known = arr.filter(p => p.holdDays != null);
+    return { avg: known.length ? known.reduce((s, p) => s + p.holdDays, 0) / known.length : null, nKnown: known.length, nTotal: arr.length };
+  };
+  const hW = _avgHold(winners);
+  const hL = _avgHold(losers);
+  const avgHoldWinners = hW.avg;   // null = لا بيانات مدّة
+  const avgHoldLosers  = hL.avg;
+  const missingHoldDays = (hW.nTotal - hW.nKnown) + (hL.nTotal - hL.nKnown);
 
   // متوسط الربح في الصفقة الرابحة vs متوسط الخسارة
-  const avgWin  = winners.length > 0 ? totalGains / winners.length : 0;
-  const avgLoss = losers.length  > 0 ? totalLosses / losers.length  : 0;
-  const riskReward = avgLoss > 0 ? avgWin / avgLoss : null;
+  const avgWin  = winners.length > 0 ? totalGains / winners.length : null;
+  const avgLoss = losers.length  > 0 ? totalLosses / losers.length  : null;
+  const riskReward = (avgWin != null && avgLoss > 0) ? avgWin / avgLoss : null;
 
   // عدد الصفقات شهرياً
-  const firstBuyDate = _tx.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0];
-  const monthsActive = firstBuyDate
-    ? Math.max(1, (new Date() - parseDateLocal(firstBuyDate)) / (30.44 * 86400000))
+  // AUDIT-FIX (2026-08): أسهم المنحة (grant) دخول فعلي للمحفظة — استبعادها من
+  // «أول تاريخ» كان يقصّر عمر النشاط فيضخّم «صفقة/شهر».
+  const firstActDate = _tx.filter(t => (t.type === 'buy' || t.type === 'grant') && t.date).map(t => t.date).sort()[0];
+  const monthsActive = firstActDate
+    ? Math.max(1, (new Date() - parseDateLocal(firstActDate)) / (30.44 * 86400000))
     : 1;
-  const buyCount  = _tx.filter(t => t.type === 'buy').length;
+  const buyCount  = _tx.filter(t => t.type === 'buy' || t.type === 'grant').length;
   const sellCount = _tx.filter(t => t.type === 'sell').length;
   const tradesPerMonth = (buyCount + sellCount) / monthsActive;
+
+  // ══════════════════════════════════════════════════════════════
+  // حدّ العيّنة — إعلان صريح لا استنتاج صامت
+  // ──────────────────────────────────────────────────────────────
+  // كل مقاييس هذا التبويب مشتقّة من n = عدد الصفقات المغلقة فقط. لمحفظة
+  // عمرها ~سنة يكون n صغيراً جداً، فأي «نمط سلوكي» قد يكون ضجيجاً محضاً.
+  // نعلن ذلك عددياً بفاصل ثقة Wilson 95% لمعدّل الربح: نصف عرض الفاصل هو
+  // مقدار الجهل الحقيقي. مثال: n=4 و p=75% ⇒ الفاصل ≈ [30%, 95%] — أي أن
+  // «معدل ربح ممتاز» و«معدل ربح ضعيف» كلاهما متّسق مع نفس البيانات.
+  // العتبات: <8 لا تشخيص · <20 تشخيص أوّلي · ≥20 مقبول (وتبقى إحصاءً لا يقيناً)
+  // ══════════════════════════════════════════════════════════════
+  const BEHAV_MIN_DIAG = 8;    // أقل عيّنة تسمح بإطلاق جملة تشخيصية
+  const BEHAV_OK_N     = 20;   // العيّنة التي يصبح عندها التشخيص مقبولاً
+  function wilson95(k, total) {
+    if (!total) return null;
+    const z = 1.959964, p = k / total;
+    const d = 1 + z * z / total;
+    const c = (p + z * z / (2 * total)) / d;
+    const h = (z * Math.sqrt(p * (1 - p) / total + z * z / (4 * total * total))) / d;
+    return { lo: Math.max(0, (c - h) * 100), hi: Math.min(100, (c + h) * 100) };
+  }
+  const wr    = wilson95(winners.length, n);
+  const wrTxt = wr ? `${wr.lo.toFixed(0)}% – ${wr.hi.toFixed(0)}%` : '—';
+  const sampleLevel = n < BEHAV_MIN_DIAG ? 'bad' : n < BEHAV_OK_N ? 'warn' : 'good';
+  const sampleIcon  = n < BEHAV_MIN_DIAG ? '⛔' : n < BEHAV_OK_N ? '🌱' : '✅';
+  const sampleLabel = n < BEHAV_MIN_DIAG ? 'عيّنة أصغر من أن تُستخرج منها أنماط'
+                    : n < BEHAV_OK_N     ? 'عيّنة صغيرة — تشخيص أوّلي'
+                    :                      'عيّنة كافية للتشخيص';
+  const canDiagnose = n >= BEHAV_MIN_DIAG;
+  // عدد السنوات التقويمية المغطّاة — لتقييد أي ادّعاء موسمي
+  const yearsCovered = new Set(
+    _tx.filter(t => t.date && (t.type === 'buy' || t.type === 'sell' || t.type === 'grant'))
+       .map(t => t.date.slice(0, 4))
+  ).size;
 
   // توزيع الصفقات على أشهر السنة
   const MONTHS_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
   const monthDist = Array(12).fill(0);
-  _tx.filter(t => t.date && (t.type === 'buy' || t.type === 'sell')).forEach(t => {
+  _tx.filter(t => t.date && (t.type === 'buy' || t.type === 'sell' || t.type === 'grant')).forEach(t => {
     const d = parseDateLocal(t.date);
     if (d) monthDist[d.getMonth()]++;
   });
@@ -1132,137 +1390,154 @@ function renderBehavioralAudit() {
 
   // أفضل وأسوأ 3 صفقات — AUDIT-FIX (2026-08): عند أقل من 6 صفقات مغلقة تتداخل
   // القائمتان (نفس الصفقة في «الأفضل» و«الأسوأ») — لا تُعرضان حينها
-  const showTopBottom  = closed.length >= 6;
+  const showTopBottom  = n >= 6;
   const sortedByReturn = [...closed].sort((a, b) => b.totalReturn - a.totalReturn);
   const top3    = sortedByReturn.slice(0, 3);
   const bottom3 = sortedByReturn.slice(-3).reverse();
+  const maxAbsRet = Math.max(1, ...closed.map(p => Math.abs(p.totalReturn || 0)));
 
   // ── التشخيص السلوكي ──
-  // AUDIT-FIX (2026-08): حارس القسمة على صفر — لا نسبة إذا كان أحد المتوسطين صفراً
+  // كل جملة تشخيصية تُطلق فقط عند n ≥ BEHAV_MIN_DIAG؛ دونها تُعرض الأرقام
+  // بلا حُكم. state ∈ good/warn/bad ⇒ data-state على .note (اللون مع أيقونة ونص).
+  // AUDIT-FIX (2026-08): حارس القسمة على صفر + التعامل مع null (مدّة غير معلومة)
   let holdBias;
-  if (avgHoldWinners > 0 && avgHoldLosers > avgHoldWinners * 1.3) {
-    holdBias = { icon: '⚠️', text: `تُمسك بخاسريك ${(avgHoldLosers / avgHoldWinners).toFixed(1)}× أطول من رابحيك — Loss Aversion نمطي. الخاسرون يستهلكون وقتاً أكثر مما يستحقون.`, cls: 'text-danger' };
-  } else if (avgHoldLosers > 0 && avgHoldWinners > avgHoldLosers * 1.3) {
-    holdBias = { icon: '✅', text: `تُمسك برابحيك أطول من خاسريك — هذا النمط الصحيح "دع أرباحك تجري".`, cls: 'text-success' };
-  } else if (avgHoldWinners <= 0 || avgHoldLosers <= 0) {
-    holdBias = { icon: '🟡', text: `نسبة مدة الاحتفاظ: — (أحد الجانبين رابح/خاسر بلا صفقات كافية للمقارنة).`, cls: '' };
+  if (avgHoldWinners > 0 && avgHoldLosers > 0 && avgHoldLosers > avgHoldWinners * 1.3) {
+    holdBias = { icon: '⚠️', state: 'bad', text: `تُمسك بخاسريك ${(avgHoldLosers / avgHoldWinners).toFixed(1)}× أطول من رابحيك — نمط Loss Aversion. الخاسرون يستهلكون وقتاً أكثر مما يستحقون.` };
+  } else if (avgHoldWinners > 0 && avgHoldLosers > 0 && avgHoldWinners > avgHoldLosers * 1.3) {
+    holdBias = { icon: '✅', state: 'good', text: 'تُمسك برابحيك أطول من خاسريك — النمط الصحيح «دع أرباحك تجري».' };
+  } else if (avgHoldWinners == null || avgHoldLosers == null) {
+    holdBias = { icon: '⚪', state: '', text: 'نسبة مدة الاحتفاظ غير قابلة للحساب — أحد الجانبين (رابح/خاسر) بلا صفقات أو بلا تواريخ مكتملة.' };
   } else {
-    holdBias = { icon: '🟡', text: `مدة الاحتفاظ بالرابحين والخاسرين متقاربة — النمط السلوكي محايد.`, cls: '' };
+    holdBias = { icon: '🟡', state: '', text: 'مدة الاحتفاظ بالرابحين والخاسرين متقاربة — لا انحياز واضح في هذه العيّنة.' };
   }
 
   const winRateDiag = winRate >= 60
-    ? { icon: '✅', text: `معدل الربح ${winRate.toFixed(0)}% ممتاز — أكثر من نصف صفقاتك تنتهي بربح.` }
+    ? { icon: '✅', state: 'good', text: `معدل الربح ${winRate.toFixed(0)}% — أكثر من نصف صفقاتك تنتهي بربح. (فاصل ثقة 95%: ${wrTxt})` }
     : winRate >= 40
-    ? { icon: '🟡', text: `معدل الربح ${winRate.toFixed(0)}% معقول — مقبول إذا كانت أرباحك أكبر من خسائرك.` }
-    : { icon: '⚠️', text: `معدل الربح ${winRate.toFixed(0)}% منخفض — أكثر من نصف صفقاتك تنتهي بخسارة.` };
+    ? { icon: '🟡', state: '',     text: `معدل الربح ${winRate.toFixed(0)}% — مقبول إذا كانت أرباحك أكبر من خسائرك. (فاصل ثقة 95%: ${wrTxt})` }
+    : { icon: '⚠️', state: 'warn', text: `معدل الربح ${winRate.toFixed(0)}% — أكثر من نصف صفقاتك تنتهي بخسارة. (فاصل ثقة 95%: ${wrTxt})` };
 
-  const pfDiag = profitFactor === Infinity
-    ? { icon: '✅', text: 'لا خسائر محققة حتى الآن.' }
+  const pfDiag = profitFactor == null
+    ? { icon: '⚪', state: '', text: 'Profit Factor غير قابل للحساب — لا أرباح ولا خسائر محقّقة في العيّنة.' }
+    : profitFactor === Infinity
+    ? { icon: '✅', state: 'good', text: 'لا خسائر محقّقة حتى الآن — Profit Factor بلا مقام.' }
     : profitFactor >= 2
-    ? { icon: '✅', text: `Profit Factor ${profitFactor.toFixed(2)} — ممتاز. كل ريال خسرته تعوّضه بـ ${profitFactor.toFixed(1)} ريال ربح.` }
+    ? { icon: '✅', state: 'good', text: `Profit Factor ${profitFactor.toFixed(2)} — كل ريال خسرته تعوّضه بـ ${profitFactor.toFixed(1)} ريال ربح.` }
     : profitFactor >= 1
-    ? { icon: '🟡', text: `Profit Factor ${profitFactor.toFixed(2)} — مقبول. الأرباح تفوق الخسائر لكن الهامش ضيق.` }
-    : { icon: '⚠️', text: `Profit Factor ${profitFactor.toFixed(2)} — خطر. خسائرك أكبر من أرباحك إجمالاً.` };
+    ? { icon: '🟡', state: '',     text: `Profit Factor ${profitFactor.toFixed(2)} — الأرباح تفوق الخسائر لكن الهامش ضيّق.` }
+    : { icon: '⚠️', state: 'bad',  text: `Profit Factor ${profitFactor.toFixed(2)} — خسائرك أكبر من أرباحك إجمالاً.` };
 
   const tradingFreqDiag = tradesPerMonth > 8
-    ? { icon: '⚠️', text: `${tradesPerMonth.toFixed(1)} صفقة / شهر — مرتفع جداً. كل صفقة إضافية تُكلّف عمولة وتُعرّضك لقرارات متسرعة.` }
+    ? { icon: '⚠️', state: 'bad',  text: `${tradesPerMonth.toFixed(1)} صفقة/شهر — مرتفع. كل صفقة إضافية تُكلّف عمولة وتُعرّضك لقرار متسرّع.` }
     : tradesPerMonth > 4
-    ? { icon: '🟡', text: `${tradesPerMonth.toFixed(1)} صفقة / شهر — متوسط. راقب أن كل صفقة لها مبرر واضح.` }
-    : { icon: '✅', text: `${tradesPerMonth.toFixed(1)} صفقة / شهر — منضبط. هذا نمط المستثمر لا المضارب.` };
+    ? { icon: '🟡', state: 'warn', text: `${tradesPerMonth.toFixed(1)} صفقة/شهر — متوسط. راقب أن لكل صفقة مبرراً واضحاً.` }
+    : { icon: '✅', state: 'good', text: `${tradesPerMonth.toFixed(1)} صفقة/شهر — منضبط. نمط المستثمر لا المضارب.` };
 
-  const fmtDays = d => d >= 365
-    ? `${(d/365).toFixed(1)} سنة`
-    : d >= 30
-    ? `${Math.round(d/30)} شهر`
+  // AUDIT-FIX (2026-08): «—» عند غياب البيانات بدل «0 يوم» الموهم بأن المدّة صفر
+  const fmtDays = d => d == null ? '—'
+    : d >= 365 ? `${(d / 365).toFixed(1)} سنة`
+    : d >= 30  ? `${Math.round(d / 30)} شهر`
     : `${Math.round(d)} يوم`;
 
   // ── بناء HTML ──
+  // البساطة: رقم بطل واحد (حجم العيّنة) يقود التبويب، لأن كل ما تحته مشروط به.
+  // ثم التشخيصات، ثم الأرقام، ثم التفاصيل خلف <details>.
+  const pctTxt = v => v != null ? v.toFixed(1) + '%' : '—';
+  const tradeRow = (p, state) => browHtml({
+    name: esc(p.ticker),
+    color: stateColorOf(state),
+    pct: Math.abs(p.totalReturn || 0) / maxAbsRet * 100,
+    valueTxt: formatSAR(p.totalReturn, true),
+    diffTxt: pctTxt(p.totalReturnPct),
+    diffState: state,
+    sub: fmtDays(p.holdDays),
+    title: `${esc(p.name)} — مدّة الاحتفاظ ${fmtDays(p.holdDays)}`,
+  });
+
+  const diagnosticsHtml = [holdBias, winRateDiag, pfDiag, tradingFreqDiag]
+    .map(d => noteHtml(d.icon, d.text, canDiagnose ? d.state : '')).join('');
+
   el.innerHTML = `
-    <!-- KPIs السلوكية -->
-    <div class="stats-grid" style="margin-bottom:20px">
-      <div class="stat-card">
-        <div class="label">معدل الربح <span class="eng-label">Win Rate</span></div>
-        <div class="value num ${winRate>=55?'text-success':winRate>=40?'':'text-danger'}">${winRate.toFixed(1)}%</div>
-        <div class="sub">${winners.length} / ${closed.length} صفقة</div>
-      </div>
-      <div class="stat-card" title="مجموع أرباح الصفقات الرابحة ÷ مجموع خسائر الصفقات الخاسرة">
-        <div class="label">Profit Factor</div>
-        <div class="value num ${profitFactor>=2?'text-success':profitFactor>=1?'':'text-danger'}">${profitFactor === Infinity ? '∞' : profitFactor.toFixed(2)}</div>
-        <div class="sub">ربح/خسارة</div>
-      </div>
-      <div class="stat-card" title="متوسط أيام الاحتفاظ بالصفقات الرابحة">
-        <div class="label">مدة الرابحين</div>
-        <div class="value num text-success">${fmtDays(avgHoldWinners)}</div>
-        <div class="sub">متوسط الاحتفاظ</div>
-      </div>
-      <div class="stat-card" title="متوسط أيام الاحتفاظ بالصفقات الخاسرة">
-        <div class="label">مدة الخاسرين</div>
-        <div class="value num ${avgHoldLosers > avgHoldWinners*1.3 ? 'text-danger' : 'text-muted'}">${fmtDays(avgHoldLosers)}</div>
-        <div class="sub">متوسط الاحتفاظ</div>
-      </div>
-      <div class="stat-card" title="متوسط الربح في صفقة رابحة ÷ متوسط الخسارة في صفقة خاسرة">
-        <div class="label">Risk/Reward</div>
-        <div class="value num ${riskReward!=null&&riskReward>=1.5?'text-success':riskReward!=null&&riskReward>=1?'':'text-danger'}">${riskReward != null ? riskReward.toFixed(2)+'×' : '—'}</div>
-        <div class="sub">ربح/خسارة متوسط</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">وتيرة التداول</div>
-        <div class="value num ${tradesPerMonth>8?'text-danger':tradesPerMonth>4?'':'text-success'}">${tradesPerMonth.toFixed(1)}</div>
-        <div class="sub">صفقة / شهر</div>
-      </div>
-    </div>
+    <div class="stack-4">
 
-    <!-- التشخيصات السلوكية -->
-    <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:20px">
-      <div class="section-title" style="font-size:.85rem;margin-bottom:4px">🔍 التشخيصات السلوكية</div>
-      ${[holdBias, winRateDiag, pfDiag, tradingFreqDiag].map(d => `
-        <div style="padding:10px 14px;background:var(--bg-3);border-radius:var(--radius);border:1px solid var(--border);font-size:.83rem;line-height:1.6">
-          <span style="margin-left:6px">${d.icon}</span><span class="${d.cls || 'text-muted'}">${d.text}</span>
-        </div>`).join('')}
-    </div>
+      <!-- ① الرقم البطل: حجم العيّنة — كل ما تحته مشروط به -->
+      <div class="perf-hero">
+        ${heroHtml(`${n} <span class="unit">صفقة مغلقة</span>`,
+          `هذه هي كل عيّنتك. معدّل الربح ${winRate.toFixed(0)}% — لكن فاصل الثقة 95% يمتد من <b>${wrTxt}</b>.`)}
+        <div>${tagHtml(sampleIcon, sampleLabel, sampleLevel)}</div>
+      </div>
 
-    <!-- توزيع الصفقات على الشهور -->
-    <div style="margin-bottom:20px">
-      <div class="section-title" style="font-size:.85rem;margin-bottom:10px">📅 توزيع نشاطك الشهري (كل الصفقات)</div>
-      <div style="display:flex;gap:6px;align-items:flex-end;height:80px;padding:0 4px">
-        ${monthDist.map((cnt, i) => {
-          const h = maxMonth > 0 ? Math.max(4, cnt / maxMonth * 70) : 4;
-          return `<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:default" title="${MONTHS_AR[i]}: ${cnt} صفقة">
-            <div style="font-size:.6rem;color:var(--text-2)">${cnt > 0 ? cnt : ''}</div>
-            <div style="width:100%;height:${h}px;background:${cnt === maxMonth ? 'var(--accent)' : 'rgba(88,166,255,0.4)'};border-radius:3px 3px 0 0;transition:height .3s"></div>
-            <div style="font-size:.6rem;color:var(--text-2)">${MONTHS_AR[i].substring(0,3)}</div>
-          </div>`;
-        }).join('')}
-      </div>
-      ${maxMonth > 0 ? `<p class="small text-muted" style="margin-top:6px">⚡ أعلى نشاط في: <strong>${MONTHS_AR[monthDist.indexOf(maxMonth)]}</strong></p>` : ''}
-    </div>
+      ${n < BEHAV_OK_N ? noteHtml('📏', `
+        <b>حدّ العيّنة معلَن صراحةً.</b> بـ${n} صفقة مغلقة، معدّل ربحك الحقيقي يقع في أي مكان بين
+        <b class="num">${wrTxt}</b> — أي أن «ممتاز» و«ضعيف» كلاهما متّسق مع نفس بياناتك.
+        تحتاج ≈ <b>${BEHAV_OK_N}</b> صفقة مغلقة ليضيق الفاصل بما يكفي لاستخراج نمط.
+        ${!canDiagnose ? ` لذلك <b>حُجبت الجُمل التشخيصية</b> (تحتاج ${BEHAV_MIN_DIAG} صفقة على الأقل) — الأرقام معروضة كما هي بلا حُكم.` : ''}
+        ${missingHoldDays > 0 ? `<br>⚪ ${missingHoldDays} صفقة بلا تاريخ فتح/إغلاق مكتمل — مُستبعَدة من متوسطات المدّة (لا تُحتسب صفراً).` : ''}
+      `, n < BEHAV_MIN_DIAG ? 'bad' : 'warn') : ''}
 
-    <!-- أفضل وأسوأ الصفقات -->
-    ${!showTopBottom ? `<p class="small text-muted" style="margin-top:4px">📌 قائمة أفضل/أسوأ 3 صفقات تظهر عند وجود 6 صفقات مغلقة على الأقل (لديك ${closed.length}) — أقل من ذلك تتداخل القائمتان.</p>` : `
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
-      <div>
-        <div class="section-title" style="font-size:.85rem;margin-bottom:8px">🏆 أفضل 3 صفقات</div>
-        ${top3.map(p => `
-          <div style="padding:8px 12px;background:rgba(63,185,80,.07);border:1px solid rgba(63,185,80,.2);border-radius:var(--radius);margin-bottom:6px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <strong class="text-accent" style="font-size:.88rem">${esc(p.ticker)}</strong>
-              <span class="num text-success" style="font-weight:700">${formatSAR(p.totalReturn, true)}</span>
-            </div>
-            <div class="small text-muted">${p.holdDays != null ? fmtDays(p.holdDays) : '—'} · ${p.totalReturnPct?.toFixed(1) || '—'}%</div>
-          </div>`).join('')}
+      <!-- ② التشخيصات -->
+      ${canDiagnose
+        ? `<div class="stack-2">${diagnosticsHtml}</div>`
+        : detailsHtml(`🔍 التشخيصات الأولية — غير موثوقة عند ${n} صفقة`, `<div class="stack-2">${diagnosticsHtml}</div>`)}
+
+      <!-- ③ الأرقام الخام -->
+      <div class="stats-grid">
+        <div class="stat-card" title="عدد الصفقات الرابحة ÷ إجمالي الصفقات المغلقة">
+          <div class="label">معدل الربح <span class="eng-label">Win Rate</span></div>
+          <div class="value num">${winRate.toFixed(1)}%</div>
+          <div class="sub">${winners.length}/${n} · ثقة 95%: ${wrTxt}</div>
+        </div>
+        <div class="stat-card" title="مجموع عوائد الصفقات الرابحة ÷ مجموع خسائر الخاسرة (العائد يشمل التوزيعات)">
+          <div class="label">Profit Factor</div>
+          <div class="value num">${profitFactor == null ? '—' : profitFactor === Infinity ? '∞' : profitFactor.toFixed(2)}</div>
+          <div class="sub">ربح ÷ خسارة</div>
+        </div>
+        <div class="stat-card" title="متوسط أيام الاحتفاظ بالصفقات الرابحة — الصفقات بلا تواريخ مكتملة مُستبعَدة">
+          <div class="label">مدة الرابحين</div>
+          <div class="value num">${fmtDays(avgHoldWinners)}</div>
+          <div class="sub">من ${hW.nKnown}/${hW.nTotal} صفقة</div>
+        </div>
+        <div class="stat-card" title="متوسط أيام الاحتفاظ بالصفقات الخاسرة — الصفقات بلا تواريخ مكتملة مُستبعَدة">
+          <div class="label">مدة الخاسرين</div>
+          <div class="value num">${fmtDays(avgHoldLosers)}</div>
+          <div class="sub">من ${hL.nKnown}/${hL.nTotal} صفقة</div>
+        </div>
+        <div class="stat-card" title="متوسط الربح في صفقة رابحة ÷ متوسط الخسارة في صفقة خاسرة">
+          <div class="label">Risk/Reward</div>
+          <div class="value num">${riskReward != null ? riskReward.toFixed(2) + '×' : '—'}</div>
+          <div class="sub">${avgWin != null ? formatSAR(avgWin) : '—'} مقابل ${avgLoss != null ? formatSAR(avgLoss) : '—'}</div>
+        </div>
+        <div class="stat-card" title="إجمالي عمليات الشراء والمنحة والبيع ÷ عدد أشهر النشاط">
+          <div class="label">وتيرة التداول</div>
+          <div class="value num">${tradesPerMonth.toFixed(1)}</div>
+          <div class="sub">صفقة/شهر على ${Math.round(monthsActive)} شهر</div>
+        </div>
       </div>
-      <div>
-        <div class="section-title" style="font-size:.85rem;margin-bottom:8px">📉 أسوأ 3 صفقات</div>
-        ${bottom3.map(p => `
-          <div style="padding:8px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.18);border-radius:var(--radius);margin-bottom:6px">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <strong class="text-muted" style="font-size:.88rem">${esc(p.ticker)}</strong>
-              <span class="num text-danger" style="font-weight:700">${formatSAR(p.totalReturn, true)}</span>
-            </div>
-            <div class="small text-muted">${p.holdDays != null ? fmtDays(p.holdDays) : '—'} · ${p.totalReturnPct?.toFixed(1) || '—'}%</div>
-          </div>`).join('')}
-      </div>
-    </div>`}`;
+
+      <!-- ④ التفاصيل خلف طيّات -->
+      ${detailsHtml(`📅 توزيع نشاطك على شهور السنة${yearsCovered < 3 ? ` — ${yearsCovered} سنة فقط` : ''}`, `
+        <div class="stack-2">
+          ${yearsCovered < 3 ? noteHtml('📏', `نشاطك يغطّي <b>${yearsCovered}</b> سنة تقويمية فقط. أي «موسمية» هنا مبنية على ملاحظة واحدة لكل شهر تقريباً — تُقرأ كسجل نشاط، <b>لا كنمط موسمي</b>.`, 'warn') : ''}
+          <div>${monthDist.map((cnt, i) => browHtml({
+            name: MONTHS_AR[i],
+            color: cnt === maxMonth && maxMonth > 0 ? cssVar('--accent') : seriesColor(1),
+            pct: maxMonth > 0 ? cnt / maxMonth * 100 : 0,
+            valueTxt: String(cnt),
+            title: `${MONTHS_AR[i]}: ${cnt} صفقة عبر ${yearsCovered} سنة`,
+          })).join('')}</div>
+        </div>`)}
+
+      ${showTopBottom
+        ? detailsHtml('🏆 أفضل وأسوأ الصفقات', `
+            <div class="stack-2">
+              <div class="small text-muted">🏆 الأفضل</div>
+              <div>${top3.map(p => tradeRow(p, 'good')).join('')}</div>
+              <div class="small text-muted">📉 الأسوأ</div>
+              <div>${bottom3.map(p => tradeRow(p, 'bad')).join('')}</div>
+            </div>`)
+        : noteHtml('📌', `قائمة أفضل/أسوأ 3 صفقات تظهر عند <b>6</b> صفقات مغلقة على الأقل (لديك ${n}) — دون ذلك تتداخل القائمتان فتُعرَض نفس الصفقة في الجانبين.`)}
+
+    </div>`;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1289,40 +1564,76 @@ function _bmMigrateLegacyKey(key) {
   } catch (_) {}
 }
 
+// ══════════════════════════════════════════════════════════════
+// مصدر كل نقطة تاسي — src ∈ 'manual' | 'auto' | 'seed'
+// ──────────────────────────────────────────────────────────────
+// 'manual' : أدخلها المالك بيده (أو استوردها من CSV) — لا تُداس أبداً بالجلب
+//            التلقائي. نفس فلسفة السعر اليدوي ✋ في لوحة التحكم: ما كتبه
+//            المالك عمداً يصونه النظام حتى يفكّه بنفسه.
+// 'auto'   : جاءت من الدالة السحابية — قابلة للتحديث والاستبدال بحرية.
+// 'seed'   : بيانات TASI_SEED المضمّنة — ليست إدخالاً بشرياً، فتُعامَل معاملة
+//            'auto' وتُستبدَل بالبيانات المجلوبة الأدقّ.
+// توافق رجعي: نقطة قديمة بلا حقل src تُعامَل 'manual' (الافتراض الأكثر صوناً)،
+// إلا إذا طابقت TASI_SEED تاريخاً وقيمةً بالضبط ⇒ تُرقَّى إلى 'seed' في الترحيل.
+// ══════════════════════════════════════════════════════════════
+const BM_SRC_META = {
+  manual: { icon: '✋', label: 'يدوي',  state: '' },
+  auto:   { icon: '🔄', label: 'تلقائي', state: 'good' },
+  seed:   { icon: '🌱', label: 'مضمّن', state: '' },
+};
+function _bmSrcOf(e) {
+  const s = e && e.src;
+  return (s === 'auto' || s === 'seed') ? s : 'manual';
+}
+// نقطة صالحة؟ تاريخ ISO + قيمة موجبة منتهية
+function _bmValid(e) {
+  return !!e && /^\d{4}-\d{2}-\d{2}$/.test(String(e.date)) && isFinite(+e.value) && +e.value > 0;
+}
+function _bmNormalize(arr) {
+  return (Array.isArray(arr) ? arr : [])
+    .filter(_bmValid)
+    .map(e => ({ date: e.date, value: +e.value, src: _bmSrcOf(e) }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+}
+
 // ── تحميل وحفظ بيانات التاسي ─────────────────────────────────
 // S-4: localStorage is the read cache; Supabase user_settings is the durable store.
 // _saveBenchmark writes both; _loadBenchmark reads from localStorage (fast path).
 function _loadBenchmark() {
-  try { return JSON.parse(localStorage.getItem(userLsKey(BM_KEY))) || []; } catch { return []; }
+  try { return _bmNormalize(JSON.parse(localStorage.getItem(userLsKey(BM_KEY)))); } catch { return []; }
 }
 function _saveBenchmark(entries) {
-  localStorage.setItem(userLsKey(BM_KEY), JSON.stringify(entries));
+  const clean = _bmNormalize(entries);
+  localStorage.setItem(userLsKey(BM_KEY), JSON.stringify(clean));
   // async Supabase sync — fire-and-forget, localStorage remains the read source
   // (مفتاح user_settings يبقى غير مخصوص — الجدول مقيّد بـ user_id أصلاً)
-  saveUserSetting(BM_KEY, entries).catch(() => {});
+  saveUserSetting(BM_KEY, clean).catch(() => {});
 }
 
 // على أول فتح للتبويب: اجلب من Supabase وحدّث localStorage إن كانت هناك بيانات أحدث
 async function _syncBenchmarkFromSupabase() {
   try {
-    const remote = await loadUserSetting(BM_KEY);
-    if (!remote?.length) return;
+    const remote = _bmNormalize(await loadUserSetting(BM_KEY));
+    if (!remote.length) return;
     const local = _loadBenchmark();
-    // AUDIT-FIX (2026-08): تصحيح التعليق ليطابق السلوك الفعلي (المقصود): الدمج بالتاريخ،
-    // وعند تعارض نفس اليوم تفوز نسخة السحابة (Supabase = المصدر الدائم، أسبقية سحابية) —
-    // لا توجد أختام تعديل لكل نقطة تسمح بمنطق «الأحدث تعديلاً يفوز».
-    // النقاط المحلية غير الموجودة سحابياً تُحفَظ كما هي.
+    // الدمج بالتاريخ. عند تعارض نفس اليوم: السحابة تفوز (المصدر الدائم) —
+    // إلا أن تكون النسخة المحلية يدوية والسحابية غير يدوية، فالمُدخَل بشرياً
+    // لا يُداس بنقطة آلية (نفس أسبقية اليدوي في الجلب التلقائي).
+    // AUDIT-FIX (2026-08): الدمج كان يُسقِط حقل src فيُحوِّل كل النقاط إلى يدوية
+    // عند أول مزامنة، مما يشلّ الجلب التلقائي لاحقاً. الآن يُحفَظ المصدر.
     const map = {};
-    local.forEach(e  => { map[e.date] = e.value; });
-    remote.forEach(e => { map[e.date] = e.value; });
-    const merged = Object.entries(map)
-      .map(([date, value]) => ({ date, value }))
-      .sort((a, b) => a.date.localeCompare(b.date));
+    local.forEach(e  => { map[e.date] = e; });
+    remote.forEach(e => {
+      const cur = map[e.date];
+      if (cur && _bmSrcOf(cur) === 'manual' && _bmSrcOf(e) !== 'manual') return;
+      map[e.date] = e;
+    });
+    const merged = _bmNormalize(Object.values(map));
     localStorage.setItem(userLsKey(BM_KEY), JSON.stringify(merged));
   } catch (_) {}
 }
 
-// ── إضافة نقطة جديدة ─────────────────────────────────────────
+// ── إضافة نقطة جديدة (يدوياً — تبقى تعمل كما هي ولا تُحذف) ────
 function addBenchmarkEntry() {
   const date  = document.getElementById('bm-date')?.value?.trim();
   const value = parseFloat(document.getElementById('bm-value')?.value);
@@ -1333,19 +1644,31 @@ function addBenchmarkEntry() {
   const entries = _loadBenchmark();
   const existing = entries.findIndex(e => e.date === date);
   if (existing >= 0) {
-    // تحديث القيمة الموجودة لنفس التاريخ
-    entries[existing].value = value;
-    showToast('تم تحديث قيمة هذا التاريخ', 'success');
+    // تحديث القيمة الموجودة لنفس التاريخ — وترقيتها إلى «يدوي» فتُصان من الجلب
+    const was = _bmSrcOf(entries[existing]);
+    entries[existing] = { date, value, src: 'manual' };
+    showToast(was === 'manual' ? '✋ تم تحديث القيمة اليدوية' : '✋ تم تثبيت القيمة يدوياً — لن يدوسها الجلب التلقائي', 'success');
   } else {
-    entries.push({ date, value });
-    showToast('تمت الإضافة ✓', 'success');
+    entries.push({ date, value, src: 'manual' });
+    showToast('✋ تمت الإضافة كنقطة يدوية محميّة', 'success');
   }
-  entries.sort((a, b) => a.date.localeCompare(b.date));
   _saveBenchmark(entries);
 
   if (document.getElementById('bm-date'))  document.getElementById('bm-date').value  = '';
   if (document.getElementById('bm-value')) document.getElementById('bm-value').value = '';
 
+  renderBenchmarkTab();
+}
+
+// ── فكّ حماية نقطة يدوية: تصبح 'auto' فيجوز للجلب تحديثها ─────
+// نفس منطق زر ✋ في لوحة التحكم: المالك يُرجِع النقطة للتحديث الآلي بنقرة.
+function unlockBenchmarkEntry(date) {
+  const entries = _loadBenchmark();
+  const i = entries.findIndex(e => e.date === date);
+  if (i < 0) return;
+  entries[i] = { ...entries[i], src: 'auto' };
+  _saveBenchmark(entries);
+  showToast('🔄 أُعيدت النقطة للتحديث التلقائي', 'success');
   renderBenchmarkTab();
 }
 
@@ -1469,16 +1792,66 @@ function _computeTWR(snapshots, cashflows) {
   return { twrMap, sortedSnaps: sorted, suspiciousPeriods };
 }
 
+// ── تقرير الجلب التلقائي: نجاح مفصَّل أو فشل صريح ────────────
+// لا فشل صامت: عند تعذّر الجلب نشرح السبب ونذكّر بأن الدالة السحابية قد
+// تحتاج نشراً يدوياً (supabase functions deploy update-prices).
+function _renderTasiFetchReport(bmEntries) {
+  const el = document.getElementById('bm-fetch-report');
+  if (!el) return;
+
+  if (_tasiLastError) {
+    el.innerHTML = noteHtml('⚠️', `
+      <b>تعذّر جلب تاسي تلقائياً.</b><br>
+      <span class="small">${esc(_tasiLastError)}</span><br>
+      <b>الأرجح:</b> الدالة السحابية <code>update-prices</code> لم تُنشَر بعد بنسخة تدعم
+      <code>tasiHistory</code>. النشر خطوة يدوية لمرة واحدة من طرفك
+      (<code>supabase functions deploy update-prices</code>).<br>
+      ✋ <b>الإدخال اليدوي أدناه يعمل كما هو</b> ولم يتأثر — يمكنك متابعة إدخال القيم أسبوعياً كالمعتاد.
+    `, 'bad');
+    return;
+  }
+
+  if (_tasiLastReport) {
+    const r = _tasiLastReport;
+    el.innerHTML = noteHtml('✅', `
+      <b>اكتمل الجلب التلقائي</b> — مدى ${esc(r.range)}، ${r.fetched} نقطة مُستلَمة
+      تغطّي ${formatDate(r.from)} ← ${formatDate(r.to)}.<br>
+      ${kvsHtml([
+        ['🆕 أُضيفت',            `${r.added} نقطة`],
+        ['🔄 حُدِّثت',            `${r.updated} نقطة`],
+        ['⏸️ بلا تغيير',         `${r.unchanged} نقطة`],
+        ['✋ تُجوهِلت (يدوية)',  `${r.skippedManual} نقطة`],
+        ['📊 الإجمالي الآن',     `${r.total} نقطة`],
+      ])}
+      ${r.skippedManual ? `<div class="small text-muted mt-2">النقاط اليدوية محميّة عمداً. لفكّ أيٍّ منها اضغط 🔄 بجانبها في الجدول أدناه.</div>` : ''}
+    `, 'good');
+    return;
+  }
+
+  // لا جلب بعد — تلميح صغير فقط
+  const autoCount = (bmEntries || []).filter(e => _bmSrcOf(e) === 'auto').length;
+  el.innerHTML = autoCount ? '' : noteHtml('💡',
+    'بدل الإدخال الأسبوعي اليدوي: اضغط <b>🔄 جلب تاسي تلقائياً</b> أعلاه. الجلب <b>يدمج ولا يستبدل</b>، ولن يدوس أي نقطة أدخلتها بيدك (✋).');
+}
+
 // ── رسم التبويب كاملاً ────────────────────────────────────────
 function renderBenchmarkTab() {
-  const bmEntries = _loadBenchmark();  // [{ date, value }] مرتبة
+  const bmEntries = _loadBenchmark();  // [{ date, value, src }] مرتبة
   const snapshots = [..._snapshots].sort((a, b) => a.date.localeCompare(b.date));
+
+  // ── تقرير الجلب التلقائي / تحذير النشر ───────────────────
+  _renderTasiFetchReport(bmEntries);
 
   // ── جدول بيانات تاسي ─────────────────────────────────────
   const entriesWrap  = document.getElementById('bm-entries-wrap');
   const entriesTbody = document.getElementById('bm-entries-tbody');
   const entriesCount = document.getElementById('bm-entries-count');
-  if (entriesCount) entriesCount.textContent = bmEntries.length ? `(${bmEntries.length} نقطة)` : '';
+  const _srcTally = bmEntries.reduce((a, e) => { a[_bmSrcOf(e)] = (a[_bmSrcOf(e)] || 0) + 1; return a; }, {});
+  if (entriesCount) {
+    entriesCount.textContent = bmEntries.length
+      ? `(${bmEntries.length} نقطة · ✋ ${_srcTally.manual || 0} يدوية · 🔄 ${_srcTally.auto || 0} تلقائية · 🌱 ${_srcTally.seed || 0} مضمّنة)`
+      : '';
+  }
   if (entriesTbody) {
     if (bmEntries.length) {
       if (entriesWrap) entriesWrap.style.display = '';
@@ -1490,11 +1863,18 @@ function renderBenchmarkTab() {
           const cls = pct >= 0 ? 'text-success' : 'text-danger';
           changeTd = `<td class="num ${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</td>`;
         }
+        const src = _bmSrcOf(e), meta = BM_SRC_META[src];
+        const srcTd = `<td>${tagHtml(meta.icon, meta.label, meta.state)}</td>`;
+        // زر فكّ الحماية يظهر لليدوية فقط — يُرجعها للتحديث التلقائي (نفس ✋ اللوحة)
+        const unlockBtn = src === 'manual'
+          ? `<button class="btn btn-secondary btn-sm" title="أعِد هذه النقطة للتحديث التلقائي — سيدوسها الجلب القادم" onclick="unlockBenchmarkEntry('${esc(e.date)}')">🔄</button>`
+          : '';
         return `<tr>
           <td>${formatDate(e.date)}</td>
           <td class="num bold">${e.value.toLocaleString('en-US', { maximumFractionDigits: 2 })}</td>
           ${changeTd}
-          <td><button class="btn btn-danger btn-sm" onclick="deleteBenchmarkEntry('${esc(e.date)}')">✕</button></td>
+          ${srcTd}
+          <td class="bm-acts">${unlockBtn}<button class="btn btn-danger btn-sm" onclick="deleteBenchmarkEntry('${esc(e.date)}')">✕</button></td>
         </tr>`;
       }).join('');
     } else {
@@ -1578,6 +1958,11 @@ function renderBenchmarkTab() {
   const canvas = document.getElementById('benchmark-chart');
   if (!canvas) return;
 
+  // ألوان المخطط من رموز التصميم فقط (تتبدّل مع الوضع الفاتح/الداكن تلقائياً)
+  const th      = chartTheme();
+  const cPort   = seriesColor(2);   // --series-3 أخضر — المحفظة
+  const cTasi   = seriesColor(1);   // --series-2 أزرق — المؤشر
+
   _bmChart = new Chart(canvas, {
     type: 'line',
     data: {
@@ -1586,19 +1971,20 @@ function renderBenchmarkTab() {
         {
           label:           'محفظتك (TWR)',
           data:            portNorm,
-          borderColor:     '#3fb950',
-          backgroundColor: 'rgba(63,185,80,0.10)',
+          borderColor:     cPort,
+          backgroundColor: tint(cPort, '1a'),
           borderWidth:     2.5,
           pointRadius:     3,
           pointHoverRadius: 6,
           tension:         0.35,
           fill:            true,
+          spanGaps:        true,
         },
         {
-          label:           'مؤشر تاسي',
+          label:           'مؤشر تاسي (سعري)',
           data:            tasiNorm,
-          borderColor:     '#58a6ff',
-          backgroundColor: 'rgba(88,166,255,0.06)',
+          borderColor:     cTasi,
+          backgroundColor: 'transparent',
           borderWidth:     2,
           pointRadius:     3,
           pointHoverRadius: 6,
@@ -1609,7 +1995,7 @@ function renderBenchmarkTab() {
         {
           label:           'خط القاعدة (100)',
           data:            Array(labels.length).fill(100),
-          borderColor:     'rgba(139,148,158,0.3)',
+          borderColor:     tint(th.muted, '55'),
           backgroundColor: 'transparent',
           borderWidth:     1,
           borderDash:      [3, 4],
@@ -1626,10 +2012,11 @@ function renderBenchmarkTab() {
       plugins: {
         legend: {
           position: 'bottom',
-          labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 14, usePointStyle: true },
+          labels: { color: th.muted, font: { family: th.font, size: 11 }, padding: 14, usePointStyle: true },
         },
         tooltip: {
           rtl: true,
+          ...chartTooltipStyle(),
           callbacks: {
             title: items => items[0].label,
             label: ctx => {
@@ -1643,24 +2030,30 @@ function renderBenchmarkTab() {
       },
       scales: {
         x: {
-          ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, maxTicksLimit: 14 },
-          grid:  { color: 'rgba(48,54,61,0.5)' },
+          ticks: { color: th.muted, font: { family: th.font, size: 10 }, maxTicksLimit: 14 },
+          grid:  { color: th.grid },
         },
         y: {
-          ticks: {
-            color: '#8b949e',
-            font:  { family: 'Tajawal', size: 11 },
-            callback: v => v + '',
-          },
-          grid:  { color: 'rgba(48,54,61,0.3)' },
+          ticks: { color: th.muted, font: { family: th.font, size: 11 }, callback: v => v + '' },
+          grid:  { color: th.grid },
         },
       },
     },
   });
 
   // ── ملخص الأداء ──────────────────────────────────────────
-  const lastPort  = portNorm[portNorm.length - 1];
+  // AUDIT-FIX (2026-08): حارس — لو تعذّر حساب TWR عند آخر نقطة (سلسلة لقطات
+  // مختلطة الأساس مثلاً) كان `null − 100` يُنتج «−100.00%» وهمية. الآن نأخذ آخر
+  // قيمة غير فارغة، وإن لم توجد أصلاً نُخفي الملخّص بدل عرض رقم مُختلَق.
+  const lastPort  = [...portNorm].reverse().find(v => v != null);
   const lastTasi  = tasiNorm[tasiNorm.length - 1];
+  if (lastPort == null || lastTasi == null) {
+    if (summaryEl) {
+      summaryEl.style.display = '';
+      summaryEl.innerHTML = noteHtml('⚪', 'تعذّر حساب عائد المحفظة (TWR) على الفترة المشتركة — لا يمكن استخراج Alpha. راجع لقطات صافي الثروة في صفحة صافي الثروة.', 'warn');
+    }
+    return;
+  }
   const portDelta = lastPort - 100;
   const tasiDelta = lastTasi - 100;
   // AUDIT-FIX (H2): the portfolio line is TWR (total return — includes dividends) but the manually
@@ -1679,125 +2072,96 @@ function renderBenchmarkTab() {
   const fmtPct = (v, sign = true) =>
     `${sign && v > 0 ? '+' : ''}${v.toFixed(2)}%`;
 
-  const alphaColor  = alpha >= 0 ? '#3fb950' : '#f85149';
-  const portColor   = portDelta >= 0 ? '#3fb950' : '#f85149';
-  const tasiColor   = tasiDelta >= 0 ? '#3fb950' : '#f85149';
+  const alphaState  = alpha >= 0 ? 'good' : 'bad';
   const periodLabel = `${formatDate(points[0].date)} — ${formatDate(points[points.length - 1].date)}`;
+
+  // شارة نضج على Alpha: على فترة قصيرة يكون الفارق ضجيجاً لا مهارة
+  const _mAlpha = assessMetricMaturity('return', { ageMonths: yearsElapsed * 12 });
+  const _alphaBadge = maturityBadge(_mAlpha.level, _mAlpha.reason);
 
   if (summaryEl) {
     summaryEl.style.display = '';
+    // البساطة: Alpha هو الرقم البطل — هو وحده يجيب «هل تفوّقت على السوق؟».
+    // البقية أرقام مساندة في .kvs، والمنهجية في .note، والتفاصيل خلف <details>.
     summaryEl.innerHTML = `
-      <div style="
-        display:flex;flex-wrap:wrap;gap:12px;
-        background:var(--bg-3);border:1px solid var(--border);
-        border-radius:var(--radius);padding:14px 16px;margin-bottom:12px
-      ">
-        <div style="flex:1;min-width:140px">
-          <div class="small text-muted">عائد محفظتك</div>
-          <div class="num bold" style="font-size:1.2rem;color:${portColor}">${fmtPct(portDelta)}</div>
-          <div class="small text-muted">${periodLabel}</div>
+      <div class="card stack">
+        <div class="perf-hero">
+          ${heroHtml(`${fmtPct(alpha)}${_alphaBadge}`, `الأداء الزائد على تاسي (Alpha) خلال ${periodLabel}`, stateColorOf(alphaState))}
+          <div>${tagHtml(alpha >= 0 ? '✅' : '⚠️', alpha >= 0 ? 'محفظتك تتفوّق على تاسي' : 'تاسي يتفوّق على محفظتك', alphaState)}</div>
         </div>
-        <div style="flex:1;min-width:140px">
-          <div class="small text-muted">عائد تاسي (سعري)</div>
-          <div class="num bold" style="font-size:1.2rem;color:${tasiColor}">${fmtPct(tasiDelta)}</div>
-          <div class="small text-muted">+ توزيعات ≈ ${fmtPct(tasiTriDelta)} (TRI)</div>
-        </div>
-        <div style="flex:1;min-width:140px;border-right:2px solid var(--border);padding-right:12px">
-          <div class="small text-muted">الأداء الزائد (Alpha مقابل TRI)</div>
-          <div class="num bold" style="font-size:1.3rem;color:${alphaColor}">${fmtPct(alpha)}</div>
-          <div class="small" style="color:${alphaColor};font-weight:600">
-            ${betterThan ? '✅ محفظتك تتفوق على تاسي' : '⚠️ تاسي يتفوق على محفظتك'}
-          </div>
-          <div class="small text-muted">مقابل السعري: ${fmtPct(alphaPrice)}</div>
-        </div>
-        <div style="flex:1;min-width:140px">
-          <div class="small text-muted">عدد نقاط المقارنة</div>
-          <div class="num bold" style="font-size:1.2rem">${points.length}</div>
-          <div class="small text-muted">${bmEntries.length} نقطة تاسي · ${snapshots.length} لقطة محفظة</div>
-        </div>
-      </div>
-      <p class="small text-muted">
-        📌 عائد محفظتك محسوب بطريقة <strong>TWR (Time-Weighted Return)</strong> — يُزيل أثر الإيداعات والسحوبات لعزل أداء قراراتك الاستثمارية فقط.
-        مؤشر تاسي مُدخَّل يدوياً. كلاهما مُنسَّب إلى 100 عند <strong>${formatDate(points[0].date)}</strong>.
-      </p>
-      <p class="small" style="color:var(--warning,#f0b429);background:rgba(240,180,41,.08);border:1px solid rgba(240,180,41,.25);border-radius:6px;padding:8px 10px;margin-top:6px">
-        ⚠️ <strong>ملاحظة منهجية:</strong> عائد محفظتك (TWR) يشمل توزيعاتك، لذا تُقارن مع <strong>تاسي للعائد الإجمالي (TRI)</strong>
-        المُقدَّر = تاسي السعري + عائد توزيعات تقديري ${(TASI_DIV_YIELD*100).toFixed(1)}%/سنة (مُركّب على ${yearsElapsed.toFixed(1)} سنة).
-        هذا تقدير — عائد توزيعات تاسي الفعلي يتغيّر سنوياً.
-      </p>
-      ${suspiciousPeriods.length ? `
-      <div style="margin-top:10px;padding:10px 12px;background:rgba(248,81,73,.06);border:1px solid rgba(248,81,73,.25);border-radius:8px">
-        <div class="small" style="color:#f85149;font-weight:700;margin-bottom:8px">
-          🔍 ${suspiciousPeriods.length} فترة بها تغيّر كبير غير مُفسَّر — قد تُشوّه الـ TWR
-        </div>
-        <div class="small text-muted" style="margin-bottom:6px">
-          السبب الأكثر شيوعاً: إيداع أو سحب لم يُسجَّل في <strong>صفحة التدفقات النقدية</strong>.
-          سجّل هذه الحركات لتصحيح الحساب تلقائياً.
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:.78rem">
-          <thead>
-            <tr style="color:var(--text-muted)">
-              <th style="text-align:right;padding:3px 6px">الفترة</th>
-              <th style="text-align:right;padding:3px 6px">التغيّر</th>
-              <th style="text-align:right;padding:3px 6px">التدفق المسجَّل</th>
-              <th style="text-align:right;padding:3px 6px">قيمة البداية</th>
-              <th style="text-align:right;padding:3px 6px">قيمة النهاية</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${suspiciousPeriods.map(p => `
-            <tr style="border-top:1px solid var(--border)">
-              <td style="padding:4px 6px">${formatDate(p.startDate)} ← ${formatDate(p.endDate)}</td>
-              <td style="padding:4px 6px;font-weight:700;color:${p.r >= 0 ? '#3fb950' : '#f85149'}">${p.r >= 0 ? '+' : ''}${p.r}%</td>
-              <td style="padding:4px 6px;color:var(--text-muted)">${p.netCF !== 0 ? formatSAR(p.netCF, true) : '—'}</td>
-              <td style="padding:4px 6px">${formatSAR(p.startVal)}</td>
-              <td style="padding:4px 6px">${formatSAR(p.endVal)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
-      </div>` : ''}
-      `;
+
+        ${kvsHtml([
+          ['عائد محفظتك (TWR)',        fmtPct(portDelta)],
+          ['تاسي — سعري',              fmtPct(tasiDelta)],
+          ['تاسي — عائد إجمالي (TRI)', fmtPct(tasiTriDelta)],
+          ['Alpha مقابل السعري',       fmtPct(alphaPrice)],
+          ['نقاط المقارنة',            `${points.length}`],
+          ['مصادر البيانات',           `${bmEntries.length} نقطة تاسي · ${snapshots.length} لقطة محفظة`],
+        ])}
+
+        ${noteHtml('⚠️', `
+          <b>عائد توزيعات تاسي رقم تقديري لا فعلي.</b> محفظتك (TWR) تشمل توزيعاتك، فلا تُقارن بمؤشر
+          <em>سعري</em> لا يشملها. لذلك نبني «تاسي للعائد الإجمالي (TRI)» =
+          السعري × <b>(1 + ${(TASI_DIV_YIELD * 100).toFixed(1)}%)^${yearsElapsed.toFixed(1)}</b> —
+          حيث ${(TASI_DIV_YIELD * 100).toFixed(1)}%/سنة <b>افتراض ثابت مكتوب في الكود</b>، وليس عائد
+          التوزيعات الفعلي للمؤشر (يتغيّر سنوياً بين ~2% و~5%). كل نقطة مئوية خطأ في هذا الافتراض
+          تنتقل مباشرةً إلى Alpha. الرقم مقابل <b>تاسي السعري</b> (${fmtPct(alphaPrice)}) معروض أعلاه
+          كمرجع خالٍ من هذا الافتراض.`, 'warn')}
+
+        ${noteHtml('📌', `
+          عائد محفظتك محسوب بـ <b>TWR (Time-Weighted Return)</b> بمنهج Modified Dietz — يعزل أداء
+          قراراتك عن إيداعاتك وسحوباتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>.`)}
+
+        ${suspiciousPeriods.length ? detailsHtml(
+          `🔍 ${suspiciousPeriods.length} فترة بتغيّر كبير غير مُفسَّر — قد تُشوّه TWR`, `
+          <div class="stack-2">
+            ${noteHtml('💡', 'السبب الأكثر شيوعاً: إيداع أو سحب لم يُسجَّل في <b>صفحة التدفقات النقدية</b>. سجّل هذه الحركات ليُصحَّح الحساب تلقائياً.')}
+            <div class="table-wrapper"><table class="bm-susp">
+              <thead><tr><th>الفترة</th><th>التغيّر</th><th>التدفق المسجَّل</th><th>قيمة البداية</th><th>قيمة النهاية</th></tr></thead>
+              <tbody>${suspiciousPeriods.map(p => `
+                <tr>
+                  <td class="small">${formatDate(p.startDate)} ← ${formatDate(p.endDate)}</td>
+                  <td class="num bold ${p.r >= 0 ? 'text-success' : 'text-danger'}">${p.r >= 0 ? '+' : ''}${p.r}%</td>
+                  <td class="num text-muted">${p.netCF !== 0 ? formatSAR(p.netCF, true) : '—'}</td>
+                  <td class="num">${formatSAR(p.startVal)}</td>
+                  <td class="num">${formatSAR(p.endVal)}</td>
+                </tr>`).join('')}</tbody>
+            </table></div>
+          </div>`) : ''}
+      </div>`;
   }
 }
 
 // ── معلومات الاستخدام ─────────────────────────────────────────
+// AUDIT-FIX (2026-08): كان يبني نافذة يدوياً بألوان سداسية مكتوبة. الآن يستخدم
+// openInfoModal المشتركة من utils.js — لا لون خارج رموز التصميم.
 function showBenchmarkInfo() {
-  // S-3: replace alert() with DOM modal
-  const lines = [
-    ['📊 مقارنة محفظتك بمؤشر تاسي', true],
-    ['كيف تعمل؟', false],
-    ['• كلا الخطين مُنسَّبان إلى 100 عند أول نقطة مشتركة', false],
-    ['• الفرق = Alpha (أداؤك الزائد/الناقص عن السوق)', false],
-    ['استيراد CSV:', false],
-    ['• الصيغة المقبولة: Date,OPEN,CLOSE أو Date,CLOSE', false],
-    ['• التاريخ: MM/DD/YYYY أو YYYY-MM-DD', false],
-    ['• الأرقام يمكن أن تحتوي فواصل (مثل "10,991.09")', false],
-    ['• الاستيراد يدمج مع الموجود (upsert بالتاريخ)', false],
-    ['تصدير CSV:', false],
-    ['• ينتج ملف بنفس الصيغة يمكن استيراده مستقبلاً', false],
-    ['المحفظة:', false],
-    ['• مصدرها net_worth_snapshots (من الداشبورد)', false],
-    ['• الداشبورد يسجّل لقطة تلقائياً كل شهر', false],
-  ];
-  const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
-  const content = lines.map(([l, bold]) =>
-    `<p style="margin:0 0 7px;font-size:${bold?'.88':'0.8'}rem;${bold?'font-weight:700;color:var(--text-1)':'color:var(--text-2)'}">${esc(l)}</p>`
-  ).join('');
-  overlay.innerHTML = `
-    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:460px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-height:85vh;display:flex;flex-direction:column">
-      <div style="overflow-y:auto;flex:1">${content}</div>
-      <div style="display:flex;justify-content:flex-end;margin-top:16px">
-        <button id="bi-close" class="btn btn-secondary" style="min-width:80px">إغلاق</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-  const close = () => overlay.remove();
-  overlay.querySelector('#bi-close').onclick = close;
-  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', function escKey(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escKey); }
-  });
+  openInfoModal('📊 مقارنة محفظتك بمؤشر تاسي', `
+    <p><b>كيف تعمل؟</b></p>
+    <ul>
+      <li>كلا الخطّين مُنسَّبان إلى 100 عند أول نقطة مشتركة.</li>
+      <li>الفرق = <b>Alpha</b> — أداؤك الزائد أو الناقص عن السوق.</li>
+      <li>خط محفظتك هو <b>TWR</b> (يعزل الإيداعات والسحوبات) ويشمل توزيعاتك،
+          لذا يُقارَن بتاسي للعائد الإجمالي (TRI) المُقدَّر لا بالسعري وحده.</li>
+    </ul>
+    <p><b>🔄 الجلب التلقائي</b></p>
+    <ul>
+      <li>يستدعي الدالة السحابية <code>update-prices</code> ويطلب سلسلة تاسي التاريخية.</li>
+      <li><b>يدمج ولا يستبدل</b>: النقاط الجديدة تُضاف، والقديمة التلقائية تُحدَّث.</li>
+      <li><b>✋ نقاطك اليدوية لا تُداس أبداً</b> — تُتجاهَل ويُذكر عددها في التقرير.
+          لفكّ حماية نقطة اضغط 🔄 بجانبها في الجدول.</li>
+      <li>يحتاج نشر الدالة مرة واحدة: <code>supabase functions deploy update-prices</code>.</li>
+    </ul>
+    <p><b>الإدخال اليدوي وCSV — يعملان كما هما</b></p>
+    <ul>
+      <li>صيغة الملف: <code>Date,OPEN,CLOSE</code> أو <code>Date,CLOSE</code>.</li>
+      <li>التاريخ: <code>MM/DD/YYYY</code> أو <code>YYYY-MM-DD</code>؛ والأرقام تقبل الفواصل (<code>"10,991.09"</code>).</li>
+      <li>الاستيراد يدمج بالتاريخ، وكل ما يأتي من ملفك يُوسَم <b>يدوياً</b> فيُصان.</li>
+    </ul>
+    <p><b>بيانات المحفظة</b></p>
+    <ul>
+      <li>مصدرها <code>net_worth_snapshots</code> — تُسجَّل تلقائياً عند فتح لوحة التحكم، أو يدوياً من صفحة صافي الثروة.</li>
+    </ul>`);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1837,15 +2201,91 @@ const TASI_SEED = [
 ];
 
 // ── دمج مع البيانات الموجودة (upsert بالتاريخ) ───────────────
-function _mergeBenchmark(newEntries) {
+// defaultSrc: مصدر النقاط الواردة — 'manual' للاستيراد من CSV (إدخال بشري
+// يُصان)، و'seed' للبيانات المضمّنة (تُستبدَل لاحقاً بالجلب التلقائي).
+function _mergeBenchmark(newEntries, defaultSrc = 'manual') {
   const map = {};
-  _loadBenchmark().forEach(e => { map[e.date] = e.value; });
-  newEntries.forEach(e => { map[e.date] = e.value; });   // الجديد يُغلّب القديم
-  const merged = Object.entries(map)
-    .map(([date, value]) => ({ date, value }))
-    .sort((a, b) => a.date.localeCompare(b.date));
+  _loadBenchmark().forEach(e => { map[e.date] = e; });
+  _bmNormalize(newEntries.map(e => ({ ...e, src: e.src || defaultSrc })))
+    .forEach(e => { map[e.date] = e; });   // الجديد يُغلّب القديم
+  const merged = _bmNormalize(Object.values(map));
   _saveBenchmark(merged);
   return merged.length;
+}
+
+// ══════════════════════════════════════════════════════════════
+// 🔄 جلب تاسي تلقائياً من الدالة السحابية update-prices
+// ──────────────────────────────────────────────────────────────
+// العقد (ثابت):
+//   invoke('update-prices', { body: { tasiHistory: true, range: '1y'|'2y'|'5y' } })
+//   ⇒ data.tasi = { symbol, points: [{date:'YYYY-MM-DD', value: 12102.55}, …], count }
+//   أو عند الفشل: data.tasi = { error: '…', tried: [ …مصادر مُجرَّبة… ] }
+// شكل النقطة يطابق التخزين القائم في tharwa-benchmark_v1 بالضبط.
+//
+// قاعدة التعارض: النقطة اليدوية (src='manual') لا تُداس أبداً. تُحتسب ضمن
+// «تجاهَل» في التقرير، ويستطيع المالك فكّها بزر ✋ في الجدول.
+// ══════════════════════════════════════════════════════════════
+let _tasiFetching   = false;
+let _tasiLastReport = null;   // { added, updated, skippedManual, unchanged, from, to, range }
+let _tasiLastError  = null;   // نص الخطأ — يبقى معروضاً حتى نجاح لاحق
+
+function _mergeAutoTasi(points) {
+  const byDate = {};
+  _loadBenchmark().forEach(e => { byDate[e.date] = e; });
+
+  let added = 0, updated = 0, skippedManual = 0, unchanged = 0;
+  for (const p of points) {
+    const cur = byDate[p.date];
+    if (!cur) { byDate[p.date] = { date: p.date, value: p.value, src: 'auto' }; added++; continue; }
+    if (_bmSrcOf(cur) === 'manual') { skippedManual++; continue; }   // ✋ يصونه المالك عمداً
+    if (Math.abs(cur.value - p.value) > 1e-9) updated++; else unchanged++;
+    byDate[p.date] = { date: p.date, value: p.value, src: 'auto' };
+  }
+  const merged = _bmNormalize(Object.values(byDate));
+  _saveBenchmark(merged);
+  return { added, updated, skippedManual, unchanged, total: merged.length };
+}
+
+async function fetchTasiAuto() {
+  if (_tasiFetching) return;
+  const range = document.getElementById('bm-range')?.value || '5y';
+  const btn   = document.getElementById('bm-fetch-btn');
+  _tasiFetching = true;
+  if (btn) { btn.disabled = true; btn.dataset.label = btn.textContent; btn.textContent = '⏳ جارٍ الجلب…'; }
+
+  try {
+    const { data, error } = await supabaseClient.functions.invoke('update-prices', {
+      body: { tasiHistory: true, range },
+    });
+    if (error) throw new Error(error.message || 'تعذّر الاتصال بالدالة السحابية update-prices');
+
+    const t = data?.tasi;
+    if (!t) throw new Error('الدالة السحابية ردّت بلا حقل tasi — الأرجح أن النسخة المنشورة لا تدعم tasiHistory بعد.');
+    if (t.error) {
+      throw new Error(t.error + (Array.isArray(t.tried) && t.tried.length
+        ? ` (المصادر المُجرَّبة: ${t.tried.join('، ')})` : ''));
+    }
+
+    const pts = _bmNormalize(t.points).map(p => ({ date: p.date, value: p.value }));
+    if (!pts.length) throw new Error('لم تُرجِع الدالة أي نقطة صالحة (تاريخ ISO + قيمة موجبة).');
+
+    const r = _mergeAutoTasi(pts);
+    _tasiLastError  = null;
+    _tasiLastReport = { ...r, range, from: pts[0].date, to: pts[pts.length - 1].date, fetched: pts.length };
+
+    const bits = [`أُضيفت ${r.added}`, `حُدِّثت ${r.updated}`];
+    if (r.skippedManual) bits.push(`تُجوهِلت ${r.skippedManual} يدوية ✋`);
+    showToast(`✓ تاسي: ${bits.join(' · ')} — الإجمالي ${r.total} نقطة`, 'success');
+  } catch (e) {
+    _tasiLastError  = e?.message || String(e);
+    _tasiLastReport = null;
+    console.error('[performance] fetchTasiAuto', e);
+    showToast('⚠️ تعذّر جلب تاسي تلقائياً — التفاصيل في التبويب', 'error');
+  } finally {
+    _tasiFetching = false;
+    if (btn) { btn.disabled = false; btn.textContent = btn.dataset.label || '🔄 جلب تاسي تلقائياً'; }
+    renderBenchmarkTab();
+  }
 }
 
 // ── تحليل صف CSV (يتعامل مع القيم المحاطة بعلامات تنصيص) ────
@@ -1910,7 +2350,8 @@ function importBenchmarkFromCSV(input) {
     try {
       const parsed = _parseTasiCSV(e.target.result);
       if (!parsed.length) { showToast('لم تُعثر على بيانات صالحة في الملف', 'error'); return; }
-      const total = _mergeBenchmark(parsed);
+      // ملف يرفعه المالك = إدخال بشري ⇒ 'manual' فيُصان من الجلب التلقائي
+      const total = _mergeBenchmark(parsed, 'manual');
       showToast(`✓ تم استيراد ${parsed.length} نقطة — الإجمالي: ${total}`, 'success');
       renderBenchmarkTab();
     } catch (err) {
@@ -1947,6 +2388,30 @@ function exportBenchmarkCSV() {
 
 // ── تهيئة التبويب عند أول فتح ────────────────────────────────
 const BM_SEEDED_KEY = 'tharwa-benchmark-seeded-v1';  // flag: هل تم الـ seed؟
+const BM_SRC_MIGRATED_KEY = 'tharwa-benchmark-src-migrated-v1';
+
+// ترحيل مصدر النقاط (مرة واحدة): النقاط المخزَّنة بلا src تُعامَل يدوية افتراضاً،
+// لكن ما طابق TASI_SEED تاريخاً **وقيمةً بالضبط** فهو من الـ seed لا من يد المالك
+// ⇒ يُوسَم 'seed' فيجوز للجلب التلقائي تحديثه بقيمة أدقّ. أي نقطة أخرى تبقى
+// محميّة كـ 'manual' — الافتراض الأكثر صوناً لعمل المالك.
+function _bmMigrateSources() {
+  if (localStorage.getItem(userLsKey(BM_SRC_MIGRATED_KEY))) return;
+  try {
+    const seedMap = {};
+    TASI_SEED.forEach(s => { seedMap[s.date] = s.value; });
+    const raw = JSON.parse(localStorage.getItem(userLsKey(BM_KEY))) || [];
+    if (raw.length) {
+      const migrated = raw.map(e => {
+        if (e && e.src) return e;                                  // مُوسَّم أصلاً
+        const seedVal = seedMap[e?.date];
+        const isSeed  = seedVal != null && Math.abs(+e.value - seedVal) < 1e-9;
+        return { date: e.date, value: +e.value, src: isSeed ? 'seed' : 'manual' };
+      });
+      localStorage.setItem(userLsKey(BM_KEY), JSON.stringify(_bmNormalize(migrated)));
+    }
+    localStorage.setItem(userLsKey(BM_SRC_MIGRATED_KEY), '1');
+  } catch (_) {}
+}
 
 function initBenchmarkTab() {
   const dateInp = document.getElementById('bm-date');
@@ -1955,12 +2420,14 @@ function initBenchmarkTab() {
   // AUDIT-FIX (2026-08): ترحيل المفاتيح القديمة غير المخصوصة بالمستخدم (مرة واحدة)
   _bmMigrateLegacyKey(BM_KEY);
   _bmMigrateLegacyKey(BM_SEEDED_KEY);
+  _bmMigrateSources();
 
   // auto-seed: استورد بيانات تاسي التاريخية مرة واحدة فقط (إذا لم تُفعَّل من قبل)
   if (!localStorage.getItem(userLsKey(BM_SEEDED_KEY))) {
-    const total = _mergeBenchmark(TASI_SEED);
+    _mergeBenchmark(TASI_SEED, 'seed');
     localStorage.setItem(userLsKey(BM_SEEDED_KEY), '1');
-    showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي تلقائياً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
+    localStorage.setItem(userLsKey(BM_SRC_MIGRATED_KEY), '1');
+    showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي مضمّناً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
   }
 
   // S-4: sync from Supabase (covers device-switch / cleared browser data)

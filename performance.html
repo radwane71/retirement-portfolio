@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817d">
   <style>
     .perf-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
     .perf-tab  { padding:7px 16px; border-radius:var(--radius); border:1px solid var(--border);
@@ -24,22 +24,86 @@
     .perf-tab.active { background:var(--accent); color:#000; border-color:var(--accent); font-weight:700; }
     .perf-tab:hover:not(.active) { background:var(--bg-3); color:var(--text); }
 
-    .timeline-dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-left:6px; flex-shrink:0; }
-
-    .position-open   { border-right:3px solid #3fb950; }
-    .position-closed { border-right:3px solid #8b949e; }
-    .position-partial{ border-right:3px solid #f0b429; }
+    /* شريط حالة المركز — رمز التصميم فقط، ومعه أيقونة/نص في الخلية دائماً */
+    .position-open   { border-right:3px solid var(--st-good); }
+    .position-closed { border-right:3px solid var(--text-2); }
+    .position-partial{ border-right:3px solid var(--st-warn); }
 
     .monthly-chart-wrap { height:320px; }
 
-    /* CSV import */
-    .import-zone {
-      border: 2px dashed var(--border); border-radius:var(--radius-lg);
-      padding:28px; text-align:center; cursor:pointer;
-      transition:border-color .2s;
+    /* ═══ مكوّنات صفحة الأداء ═══════════════════════════════════════
+       تعتمد على «نظام مكوّنات اللوحة» في css/style.css:
+       .card-head .hero-num .tag[data-state] .meter .brow .kvs .note .stack .dot
+       ما هنا هو ما تحتاجه هذه الصفحة وحدها فقط. */
+
+    /* الرقم البطل + وسم حالته على سطر واحد */
+    .perf-hero {
+      display:flex; align-items:flex-start; justify-content:space-between;
+      gap:var(--sp-3); flex-wrap:wrap;
     }
-    .import-zone:hover { border-color:var(--accent); }
-    .import-zone .icon { font-size:2rem; margin-bottom:8px; }
+
+    /* التفاصيل المطويّة — «لا تحذف معلومة، أعِد ترتيبها» */
+    .perf-details { border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-2); }
+    .perf-details > summary {
+      cursor:pointer; list-style:none; padding:10px 14px;
+      font-size:.83rem; font-weight:600; color:var(--text-2);
+      display:flex; align-items:center; gap:var(--sp-2);
+    }
+    .perf-details > summary::-webkit-details-marker { display:none; }
+    .perf-details > summary::after { content:'▾'; margin-inline-start:auto; transition:transform .18s; }
+    .perf-details[open] > summary::after { transform:rotate(180deg); }
+    .perf-details > summary:hover { color:var(--text); }
+    .perf-details[open] > summary { border-bottom:1px solid var(--border); }
+    .perf-details .dt-body { padding:14px; }
+
+    /* صفوف الإجمالي في الجداول */
+    tfoot tr.t-total { border-top:2px solid var(--border); background:var(--bg-3); }
+    .t-sub  { font-weight:400; }
+    .hhi-n  { font-size:.7rem; color:var(--text-2); }
+    .col-hint { font-size:.65rem; opacity:.6; }
+
+    /* .form-control كانت مستعملة في هذه الصفحة بلا تعريف في أي ملف CSS
+       (حقول تاسي كانت بمظهر المتصفح الافتراضي). عُرِّفت هنا بنفس مظهر
+       .form-group input في css/style.css — رموز تصميم فقط. */
+    .form-control {
+      background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius);
+      padding:8px 12px; color:var(--text); font-family:inherit; font-size:.875rem;
+      transition:border-color .15s; direction:rtl;
+    }
+    .form-control:focus { outline:none; border-color:var(--accent); }
+    input.form-control[type="date"]   { min-width:150px; }
+    input.form-control[type="number"] { min-width:170px; }
+    .bm-toolbar label { display:block; margin-bottom:4px; }
+
+    /* تبويب المقارنة */
+    .bm-acts { display:flex; gap:6px; justify-content:flex-end; }
+    .bm-empty { padding:40px; text-align:center; color:var(--text-2); }
+    .bm-empty .icon { font-size:2rem; margin-bottom:8px; }
+    #bm-chart-wrap { height:360px; margin-bottom:var(--sp-4); }
+    #bm-summary { margin-bottom:var(--sp-4); }
+
+    /* زر ⓘ داخل عنوان قسم (لا في زاوية البطاقة) */
+    .info-inline { position:static; opacity:.7; }
+    /* سطر شرح تحت رأس القسم */
+    .sub-hint { margin-top:-8px; }
+    .bm-toolbar { display:flex; align-items:center; gap:var(--sp-2); flex-wrap:wrap; }
+    .bm-susp { width:100%; font-size:.78rem; }
+    #bm-fetch-report:not(:empty) { margin-bottom:var(--sp-4); }
+    #dv-notes:not(:empty) { display:flex; flex-direction:column; gap:var(--sp-2); margin-bottom:var(--sp-4); }
+
+    /* دليل الرسم البياني — نقاط ملوّنة من رموز التصميم لا من ألوان مكتوبة */
+    .lg-row  { display:flex; gap:10px; align-items:flex-start; }
+    .lg-key  { display:flex; align-items:center; gap:5px; flex-shrink:0; padding-top:3px; }
+    .lg-line { width:28px; height:3px; border-radius:2px; }
+    .lg-bar  { width:14px; height:18px; border-radius:2px; flex-shrink:0; }
+    .lg-ttl  { font-weight:700; font-size:.85rem; }
+    .lg-txt  { font-size:.78rem; color:var(--text-2); margin:3px 0 0; line-height:1.6; }
+    .lg-cap  { color:var(--series-1); } .lg-cap-bg  { background:var(--series-1); }
+    .lg-nw   { color:var(--series-2); } .lg-nw-bg   { background:var(--series-2); }
+    .lg-div  { color:var(--series-3); } .lg-div-bg  { background:var(--series-3); }
+    .lg-buy  { color:var(--series-6); } .lg-buy-bg  { background:var(--series-6); }
+    .lg-dash { background:repeating-linear-gradient(90deg,
+                 var(--series-2) 0, var(--series-2) 5px, transparent 5px, transparent 8px); }
   </style>
 </head>
 <body>
@@ -134,38 +198,47 @@
       <button class="btn btn-secondary" onclick="exportPerformanceCSV()">⬇ تصدير CSV</button>
     </div>
 
-    <!-- KPI strip -->
+    <!-- ① أين أنت الآن — الأربعة التي تُقرأ أولاً -->
     <div class="stats-grid" id="perf-kpis">
       <div class="stat-card"><div class="label">مراكز مفتوحة <span class="eng-label">Open</span></div><div class="value num text-success" id="pk-open">—</div><div class="sub">سهم نشط</div></div>
       <div class="stat-card"><div class="label">مراكز مغلقة <span class="eng-label">Closed</span></div><div class="value num text-muted" id="pk-closed">—</div><div class="sub">صفقات منتهية</div></div>
       <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-realized')">ⓘ</button><div class="label">إجمالي ر/خ محقق <span class="eng-label">Realized P&amp;L</span></div><div class="value num" id="pk-realized">—</div><div class="sub">من صفقات البيع</div></div>
       <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-unrealized')">ⓘ</button><div class="label">ر/خ غير محقق <span class="eng-label">Unrealized P&amp;L</span></div><div class="value num" id="pk-unrealized">—</div><div class="sub">على المراكز الحالية</div></div>
-      <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-drawdown')">ⓘ</button><div class="label">أقصى تراجع <span class="eng-label">Max Drawdown</span></div><div class="value num text-muted" id="pk-max-drawdown">—</div><div class="sub">من قمة إلى قاع</div></div>
-      <div class="stat-card">
-        <button class="info-btn" type="button" onclick="showCardInfo('kpi-hhi')">ⓘ</button>
-        <div class="label">تركز المحفظة <span class="eng-label">HHI</span></div>
-        <div class="value num" id="pk-hhi">—</div>
-        <div class="sub" id="pk-hhi-sub">مقياس التنويع</div>
-      </div>
-      <div class="stat-card">
-        <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
-        <div class="label">التذبذب السنوي <span class="eng-label">Volatility</span></div>
-        <div class="value num" id="pk-volatility">—</div>
-        <div class="sub" id="pk-volatility-sub">🟡 تقريبي (لقطات شهرية)</div>
-      </div>
-      <div class="stat-card">
-        <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
-        <div class="label">شارب <span class="eng-label">Sharpe</span></div>
-        <div class="value num" id="pk-sharpe">—</div>
-        <div class="sub" id="pk-sharpe-sub">🟡 تقريبي</div>
-      </div>
-      <div class="stat-card">
-        <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
-        <div class="label">سورتينو <span class="eng-label">Sortino</span></div>
-        <div class="value num" id="pk-sortino">—</div>
-        <div class="sub" id="pk-sortino-sub">🟡 تقريبي</div>
-      </div>
     </div>
+
+    <!-- ② المخاطرة والتنويع — تفصيل ثانوي، مطويّ افتراضياً لا محذوف -->
+    <details class="perf-details mt-4 mb-4">
+      <summary>⚖️ المخاطرة والتنويع — أقصى تراجع · تركّز · تذبذب · شارب · سورتينو</summary>
+      <div class="dt-body">
+        <div class="stats-grid">
+          <div class="stat-card"><button class="info-btn" type="button" onclick="showCardInfo('kpi-drawdown')">ⓘ</button><div class="label">أقصى تراجع <span class="eng-label">Max Drawdown</span></div><div class="value num text-muted" id="pk-max-drawdown">—</div><div class="sub">من قمة إلى قاع</div></div>
+          <div class="stat-card">
+            <button class="info-btn" type="button" onclick="showCardInfo('kpi-hhi')">ⓘ</button>
+            <div class="label">تركز المحفظة <span class="eng-label">HHI</span></div>
+            <div class="value num" id="pk-hhi">—</div>
+            <div class="sub" id="pk-hhi-sub">مقياس التنويع</div>
+          </div>
+          <div class="stat-card">
+            <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
+            <div class="label">التذبذب السنوي <span class="eng-label">Volatility</span></div>
+            <div class="value num" id="pk-volatility">—</div>
+            <div class="sub" id="pk-volatility-sub">🟡 تقريبي (لقطات شهرية)</div>
+          </div>
+          <div class="stat-card">
+            <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
+            <div class="label">شارب <span class="eng-label">Sharpe</span></div>
+            <div class="value num" id="pk-sharpe">—</div>
+            <div class="sub" id="pk-sharpe-sub">🟡 تقريبي</div>
+          </div>
+          <div class="stat-card">
+            <button class="info-btn" type="button" onclick="showCardInfo('kpi-risk')">ⓘ</button>
+            <div class="label">سورتينو <span class="eng-label">Sortino</span></div>
+            <div class="value num" id="pk-sortino">—</div>
+            <div class="sub" id="pk-sortino-sub">🟡 تقريبي</div>
+          </div>
+        </div>
+      </div>
+    </details>
 
     <!-- Tabs -->
     <div class="perf-tabs">
@@ -182,11 +255,11 @@
     <div id="pview-open" class="card">
       <div class="section-header">
         <span class="section-title">المراكز المفتوحة — Open Positions
-          <button class="info-btn" type="button" onclick="showCardInfo('open-pos')" title="ماذا تعني هذه الأعمدة؟" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn" type="button" onclick="showCardInfo('open-pos')" title="ماذا تعني هذه الأعمدة؟" class="info-inline">ⓘ</button>
         </span>
         <span class="small text-muted">الأسهم الموجودة حالياً في المحفظة</span>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">الأسهم مرتبة بالربح/الخسارة غير المحقق — التكلفة من متوسط سعر الشراء المرجّح</p>
+      <p class="small text-muted mb-4 sub-hint">الأسهم مرتبة بالربح/الخسارة غير المحقق — التكلفة من متوسط سعر الشراء المرجّح</p>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -215,7 +288,7 @@
     <div id="pview-closed" class="card" style="display:none">
       <div class="section-header">
         <span class="section-title">المراكز المغلقة — Closed Positions
-          <button class="info-btn" type="button" onclick="showCardInfo('closed-pos')" title="ما هي المراكز المغلقة؟" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn" type="button" onclick="showCardInfo('closed-pos')" title="ما هي المراكز المغلقة؟" class="info-inline">ⓘ</button>
         </span>
         <span class="small text-muted">صفقات تم إغلاقها بالكامل (بيع = شراء)</span>
       </div>
@@ -243,13 +316,12 @@
       <div class="section-header">
         <span class="section-title">التايم لاين الشهري</span>
         <div class="flex gap-2">
-          <select id="timeline-year-filter" onchange="renderMonthlyTimeline()"
-            style="padding:5px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.85rem">
+          <select id="timeline-year-filter" class="form-control" onchange="renderMonthlyTimeline()">
             <option value="">كل السنوات</option>
           </select>
         </div>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">
+      <p class="small text-muted mb-4 sub-hint">
         رأس المال المُودَع = إجمالي الإيداعات − السحوبات التراكمية من صفحة التدفقات النقدية حتى نهاية كل شهر
       </p>
       <div class="table-wrapper">
@@ -273,7 +345,7 @@
 
     <!-- ── TAB: Monthly chart ── -->
     <div id="pview-monthly-chart" class="card" style="display:none">
-      <div class="section-header" style="flex-wrap:wrap;gap:8px">
+      <div class="section-header">
         <span class="section-title">رسم بياني — رأس المال والأرباح عبر الزمن</span>
         <div class="chart-mode-btns">
           <button class="chart-mode-btn active" onclick="setMonthlyChartMode('combined')" id="mcm-combined">مدمج</button>
@@ -284,80 +356,64 @@
       </div>
       <div class="monthly-chart-wrap"><canvas id="monthly-chart"></canvas></div>
 
-      <!-- دليل الخطوط والأعمدة -->
-      <div id="chart-legend-guide" style="margin-top:18px;padding:14px 16px;background:var(--bg-3);border-radius:var(--radius);border:1px solid var(--border)">
-        <div style="font-size:0.78rem;font-weight:700;color:var(--text-2);margin-bottom:10px;text-transform:uppercase;letter-spacing:.04em">دليل الرسم البياني</div>
-        <div style="display:flex;flex-direction:column;gap:10px">
+      <!-- كيف تقرأ الرسم — الخلاصة ظاهرة، والتفصيل مطويّ -->
+      <div class="note mt-4"><span class="ic">💡</span><div>
+        الفجوة بين خط <b class="lg-nw">صافي الثروة</b> وخط <b class="lg-cap">رأس المال المُودَع</b> هي
+        <b>أرباحك الرأسمالية + التوزيعات المُعاد استثمارها</b>. كلما اتّسعت، كان أداؤك أفضل.
+      </div></div>
 
-          <!-- الخط الأزرق المتقطع -->
-          <div style="display:flex;gap:10px;align-items:flex-start">
-            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
-              <div style="width:28px;height:3px;background:#3b82f6;border-radius:2px;
-                background:repeating-linear-gradient(90deg,#3b82f6 0,#3b82f6 5px,transparent 5px,transparent 8px)"></div>
-              <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;flex-shrink:0"></div>
+      <details class="perf-details mt-2" id="chart-legend-guide">
+        <summary>📖 دليل الرسم البياني — ماذا يمثّل كل خط وعمود؟</summary>
+        <div class="dt-body stack">
+
+          <div class="lg-row">
+            <div class="lg-key">
+              <div class="lg-line lg-dash"></div>
+              <div class="dot lg-nw-bg"></div>
             </div>
             <div>
-              <span style="font-weight:700;color:#3b82f6;font-size:0.85rem">صافي الثروة المُسجَّلة (لقطة)</span>
-              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
+              <span class="lg-ttl lg-nw">صافي الثروة المُسجَّلة (لقطة)</span>
+              <p class="lg-txt">
                 قيمة ثروتك الإجمالية في تاريخ اللقطة = <strong>أسهم + نقد عند الوسيط + عقارات</strong>.
-                تُسجَّل تلقائياً مرة في الشهر عند دخول لوحة التحكم، أو يدوياً من صفحة صافي الثروة.
-                <br>
-                <span style="color:var(--accent)">⚠️ لهذا الرقم أكبر من مشترياتك الشهرية</span> — لأنه يمثل إجمالي ما تملكه، لا فقط ما اشتريته هذا الشهر.
-                الخط متقطع لأنه يمتد بآخر لقطة محفوظة حتى تُسجَّل لقطة جديدة.
+                تُسجَّل تلقائياً مرة في الشهر عند دخول لوحة التحكم، أو يدوياً من صفحة صافي الثروة.<br>
+                ⚠️ <b>لهذا هو أكبر من مشترياتك الشهرية</b> — يمثّل إجمالي ما تملكه لا ما اشتريته هذا الشهر.
+                الخط متقطّع لأنه يمتدّ بآخر لقطة محفوظة حتى تُسجَّل لقطة جديدة.
               </p>
             </div>
           </div>
 
-          <!-- الخط الأصفر -->
-          <div style="display:flex;gap:10px;align-items:flex-start">
-            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
-              <div style="width:28px;height:3px;background:#f0b429;border-radius:2px"></div>
-              <div style="width:8px;height:8px;border-radius:50%;background:#f0b429;flex-shrink:0"></div>
+          <div class="lg-row">
+            <div class="lg-key">
+              <div class="lg-line lg-cap-bg"></div>
+              <div class="dot lg-cap-bg"></div>
             </div>
             <div>
-              <span style="font-weight:700;color:#f0b429;font-size:0.85rem">رأس المال المُودَع (تراكمي)</span>
-              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
-                إجمالي ما أضفته للمحفظة من إيداعات ناقصاً السحوبات حتى نهاية كل شهر — من صفحة التدفقات النقدية.
-                يمثل <strong>ما دفعته فعلاً</strong> بغض النظر عن أداء الأسهم.
+              <span class="lg-ttl lg-cap">رأس المال المُودَع (تراكمي)</span>
+              <p class="lg-txt">
+                إجمالي إيداعاتك ناقصاً سحوباتك حتى نهاية كل شهر — من صفحة التدفقات النقدية.
+                يمثّل <strong>ما دفعته فعلاً</strong> بغضّ النظر عن أداء الأسهم.
               </p>
             </div>
           </div>
 
-          <!-- الأعمدة الزرقاء الفاتحة -->
-          <div style="display:flex;gap:10px;align-items:flex-start">
-            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
-              <div style="width:14px;height:18px;background:rgba(88,166,255,0.6);border-radius:2px;flex-shrink:0"></div>
-            </div>
+          <div class="lg-row">
+            <div class="lg-key"><div class="lg-bar lg-buy-bg"></div></div>
             <div>
-              <span style="font-weight:700;color:#58a6ff;font-size:0.85rem">مشتريات شهرية</span>
-              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
-                إجمالي ما اشتريته من أسهم في ذلك الشهر تحديداً — من سجل المعاملات.
-              </p>
+              <span class="lg-ttl lg-buy">مشتريات شهرية</span>
+              <p class="lg-txt">إجمالي ما اشتريته من أسهم في ذلك الشهر تحديداً — من سجل المعاملات.</p>
             </div>
           </div>
 
-          <!-- الأعمدة الخضراء -->
-          <div style="display:flex;gap:10px;align-items:flex-start">
-            <div style="display:flex;align-items:center;gap:5px;flex-shrink:0;padding-top:2px">
-              <div style="width:14px;height:18px;background:rgba(63,185,80,0.7);border-radius:2px;flex-shrink:0"></div>
-            </div>
+          <div class="lg-row">
+            <div class="lg-key"><div class="lg-bar lg-div-bg"></div></div>
             <div>
-              <span style="font-weight:700;color:#3fb950;font-size:0.85rem">أرباح موزعة شهرية</span>
-              <p style="font-size:0.78rem;color:var(--text-2);margin:3px 0 0;line-height:1.6">
-                الأرباح التي استلمتها من الشركات في ذلك الشهر — من سجل الأرباح الموزعة.
-              </p>
+              <span class="lg-ttl lg-div">أرباح موزعة شهرية</span>
+              <p class="lg-txt">الأرباح التي استلمتها من الشركات في ذلك الشهر — من سجل الأرباح الموزعة.</p>
             </div>
           </div>
 
         </div>
-
-        <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);
-          font-size:0.75rem;color:var(--text-2);line-height:1.7">
-          💡 <strong>كيف تقرأ الرسم:</strong>
-          الفرق بين الخط الأزرق (صافي الثروة) والخط الأصفر (رأس المال المُودَع) هو
-          <strong>إجمالي أرباحك الرأسمالية + التوزيعات المُعاد استثمارها</strong> — كلما اتسعت الفجوة بينهما كان أداؤك أفضل.
-        </div>
-      </div>
+      </details>
     </div>
 
     <!-- ── TAB: Benchmark ── -->
@@ -371,89 +427,91 @@
       <input type="file" id="bm-csv-input" accept=".csv,text/csv" style="display:none"
              onchange="importBenchmarkFromCSV(this)">
 
-      <!-- شريط الأدوات -->
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px">
-        <button class="btn btn-primary btn-sm" onclick="document.getElementById('bm-csv-input').value='';document.getElementById('bm-csv-input').click()">
-          ⬆ استيراد CSV
-        </button>
-        <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير CSV</button>
-        <span class="small text-muted" style="margin-right:4px">
-          صيغة الملف: <code style="background:var(--bg-3);padding:1px 6px;border-radius:4px;font-size:.75rem">Date, OPEN, CLOSE</code>
-          مع تواريخ <code style="background:var(--bg-3);padding:1px 6px;border-radius:4px;font-size:.75rem">MM/DD/YYYY</code>
-        </span>
-        <button class="btn btn-secondary btn-sm" onclick="showBenchmarkInfo()" style="margin-right:auto">ⓘ</button>
+      <!-- ① الطريق الأسرع: الجلب التلقائي -->
+      <div class="bm-toolbar mb-4">
+        <button class="btn btn-primary" id="bm-fetch-btn" onclick="fetchTasiAuto()">🔄 جلب تاسي تلقائياً</button>
+        <label class="small text-muted" for="bm-range">المدى</label>
+        <select id="bm-range" class="form-control" title="طول السلسلة التاريخية المطلوبة من الدالة السحابية">
+          <option value="1y">سنة</option>
+          <option value="2y">سنتان</option>
+          <option value="5y" selected>5 سنوات</option>
+        </select>
+        <button class="btn btn-secondary btn-sm" onclick="showBenchmarkInfo()" title="كيف يعمل هذا التبويب؟">ⓘ</button>
       </div>
 
-      <!-- مدخلات قيمة يدوية -->
-      <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:20px">
-        <div style="font-size:.82rem;font-weight:600;margin-bottom:10px;color:var(--text-2)">إضافة نقطة يدوية</div>
-        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
-          <div style="display:flex;flex-direction:column;gap:4px">
-            <label class="small text-muted">التاريخ</label>
-            <input type="date" id="bm-date" class="form-control" style="min-width:150px">
+      <!-- تقرير الجلب / تحذير النشر / الفشل الصريح -->
+      <div id="bm-fetch-report"></div>
+
+      <!-- ② الإدخال اليدوي و CSV — يبقيان كما هما -->
+      <details class="perf-details mb-4">
+        <summary>✋ الإدخال اليدوي واستيراد/تصدير CSV — يعملان كما هما</summary>
+        <div class="dt-body stack">
+          <div class="bm-toolbar">
+            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('bm-csv-input').value='';document.getElementById('bm-csv-input').click()">⬆ استيراد CSV</button>
+            <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير CSV</button>
+            <span class="small text-muted">الصيغة: <code>Date, OPEN, CLOSE</code> بتواريخ <code>MM/DD/YYYY</code> أو <code>YYYY-MM-DD</code></span>
           </div>
-          <div style="display:flex;flex-direction:column;gap:4px">
-            <label class="small text-muted">قيمة الإغلاق (CLOSE)</label>
-            <input type="number" id="bm-value" class="form-control" placeholder="مثال: 10991.09" step="0.01" style="min-width:170px">
+          <div class="bm-toolbar">
+            <div>
+              <label class="small text-muted" for="bm-date">التاريخ</label>
+              <input type="date" id="bm-date" class="form-control">
+            </div>
+            <div>
+              <label class="small text-muted" for="bm-value">قيمة الإغلاق (CLOSE)</label>
+              <input type="number" id="bm-value" class="form-control" placeholder="مثال: 10991.09" step="0.01">
+            </div>
+            <button class="btn btn-primary" onclick="addBenchmarkEntry()">+ إضافة</button>
           </div>
-          <button class="btn btn-primary" onclick="addBenchmarkEntry()">+ إضافة</button>
+          <div class="note"><span class="ic">✋</span><div>
+            كل نقطة تُدخلها هنا (أو تستوردها من ملفك) تُوسَم <b>يدوية</b> — <b>لن يدوسها الجلب التلقائي أبداً</b>.
+            لإرجاع نقطة للتحديث الآلي اضغط 🔄 بجانبها في جدول البيانات أدناه.
+          </div></div>
         </div>
-        <p class="small text-muted" style="margin-top:8px;margin-bottom:0">
-          💡 عند الاستيراد من CSV يُستخدم عمود CLOSE تلقائياً — يمكنك إضافة أي عدد من الأسابيع دفعةً واحدة
-        </p>
-      </div>
+      </details>
 
       <!-- الرسم البياني -->
-      <div id="bm-chart-wrap" style="height:360px;margin-bottom:20px;display:none">
+      <div id="bm-chart-wrap" style="display:none">
         <canvas id="benchmark-chart"></canvas>
       </div>
-      <div id="bm-empty" style="padding:40px;text-align:center;color:var(--text-muted)">
-        <div style="font-size:2rem;margin-bottom:8px">📊</div>
+      <div id="bm-empty" class="bm-empty">
+        <div class="icon">📊</div>
         <p>أضف قيمتين على الأقل لمؤشر تاسي لعرض الرسم البياني<br>
         <span class="small">يحتاج أيضاً وجود لقطات صافي الثروة من الداشبورد</span></p>
       </div>
 
       <!-- ملخص الأداء المقارن -->
-      <div id="bm-summary" style="display:none;margin-bottom:20px"></div>
+      <div id="bm-summary" style="display:none"></div>
 
       <!-- جدول بيانات تاسي -->
       <div id="bm-entries-wrap" style="display:none">
-        <div class="section-header" style="margin-top:8px">
+        <div class="section-header mt-2">
           <span class="section-title small">بيانات مؤشر تاسي <span id="bm-entries-count" class="small text-muted"></span></span>
-          <div style="display:flex;gap:6px">
+          <div class="bm-acts">
             <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير</button>
             <button class="btn btn-danger btn-sm"    onclick="clearAllBenchmark()">حذف الكل</button>
           </div>
         </div>
         <div class="table-wrapper">
           <table>
-            <thead><tr><th>التاريخ</th><th>قيمة تاسي</th><th>التغيير</th><th></th></tr></thead>
+            <thead><tr><th>التاريخ</th><th>قيمة تاسي</th><th>التغيير</th><th title="✋ يدوي = أدخلته بنفسك ولا يُداس · 🔄 تلقائي = من الدالة السحابية · 🌱 مضمّن = بيانات البذرة">المصدر</th><th></th></tr></thead>
             <tbody id="bm-entries-tbody"></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <footer class="site-footer">
-      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
-      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
-    </footer>
-
     <!-- ── TAB: Dividend Metrics ── -->
     <div id="pview-div-metrics" class="card" style="display:none">
       <div class="section-header">
         <span class="section-title">💰 مؤشرات التوزيعات المتقدمة
-          <button class="info-btn" type="button" onclick="showCardInfo('div-metrics')" title="شرح هذه المؤشرات" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn" type="button" onclick="showCardInfo('div-metrics')" title="شرح هذه المؤشرات" class="info-inline">ⓘ</button>
         </span>
         <span class="small text-muted">YoC · Dividend ROI · سنوات الاسترداد</span>
       </div>
-      <p class="small text-muted" style="margin-bottom:12px">
-        <strong>YoC</strong> = عائد التوزيعات على تكلفتك الأصلية (لا سعر السوق) ·
-        <strong>Div ROI</strong> = نسبة ما استردّه من توزيعات من رأس مالك ·
-        <strong>سنوات الاسترداد</strong> = متى تسترد تكلفتك من التوزيعات وحدها
-      </p>
       <!-- KPI شريط الملخص -->
-      <div class="stats-grid" id="dv-kpi-strip" style="margin-bottom:16px"></div>
+      <div class="stats-grid mb-4" id="dv-kpi-strip"></div>
+      <!-- ملاحظات المنهجية وحدود الأرقام (تُبنى في performance.js) -->
+      <div id="dv-notes"></div>
       <!-- جدول التفاصيل -->
       <div class="table-wrapper">
         <table>
@@ -480,11 +538,11 @@
     <div id="pview-behavioral" class="card" style="display:none">
       <div class="section-header">
         <span class="section-title">🧠 تحليل السلوك الاستثماري
-          <button class="info-btn" type="button" onclick="showCardInfo('behavioral')" title="ماذا يكشف هذا التحليل؟" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn" type="button" onclick="showCardInfo('behavioral')" title="ماذا يكشف هذا التحليل؟" class="info-inline">ⓘ</button>
         </span>
         <span class="small text-muted">مرآة تكشف أنماطك الفعلية في الشراء والبيع</span>
       </div>
-      <p class="small text-muted" style="margin-bottom:16px">
+      <p class="small text-muted mb-4">
         مبني على صفقاتك المغلقة. الهدف: اكتشاف التحيزات السلوكية قبل أن تتكرر.
       </p>
       <div id="behavioral-body">
@@ -492,15 +550,22 @@
       </div>
     </div>
 
+    <!-- AUDIT-FIX (2026-08): كان التذييل محشوراً بين تبويبَي «المقارنة» و«التوزيعات»
+         فيظهر في منتصف الصفحة. نُقل إلى نهاية <main> ليكون آخر ما يُقرأ. -->
+    <footer class="site-footer">
+      ثروة — مفكرة حسابية شخصية لتدوين البيانات الاستثمارية<br>
+      أداة تقنية مستقلة للحساب الشخصي، لا تقدم خدمات مالية ولا توصيات استثمارية ولا ترتبط بأي جهة تنظيمية
+    </footer>
+
   </main>
 
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/performance.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817d"></script>
+  <script src="js/auth.js?v=20260817d"></script>
+  <script src="js/utils.js?v=20260817d"></script>
+  <script src="js/performance.js?v=20260817d"></script>
 </body>
 </html>
