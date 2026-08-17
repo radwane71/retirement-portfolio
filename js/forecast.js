@@ -352,6 +352,7 @@ async function init() {
     buildScenarios();
     renderScenarioCards();
     runForecast();
+    syncPlanHorizonFromGlobal();   // خانة أفق الخطة تبدأ متبعةً للأفق العام
     await loadForecastPlans();
     renderForecastPlans();
   } catch (e) {
@@ -1432,12 +1433,47 @@ function _snapshotContext() {
   };
 }
 
+// ── أفق خطة الضخ (مستقل عن أفق الصفحة) ──────────────────────────────
+// الأفق العام محصور بخيارات قائمة، أما هذا فحرّ (1–45) لأن المالك يجرّب
+// مُدداً محدّدة («سنة، 5، 20») لا خيارات مُعدّة.
+const PLAN_H_MIN = 1, PLAN_H_MAX = 45;
+
+function planHorizonYears() {
+  const el = document.getElementById('plan-horizon');
+  const v  = el ? parseInt(el.value, 10) : NaN;
+  if (Number.isFinite(v) && v >= PLAN_H_MIN && v <= PLAN_H_MAX) return v;
+  return parseInt(document.getElementById('inp-horizon')?.value, 10) || 35;
+}
+
+// وسم اللمس: بعده لا يدهس الأفقُ العام قيمةَ المالك
+function onPlanHorizonInput() {
+  const el = document.getElementById('plan-horizon');
+  if (el) el.dataset.touched = el.value.trim() ? '1' : '';
+}
+
+// يعكس الأفق العام على خانة الخطة ما لم يلمسها المالك
+function syncPlanHorizonFromGlobal() {
+  const el = document.getElementById('plan-horizon');
+  if (!el || el.dataset.touched === '1') return;
+  el.value = parseInt(document.getElementById('inp-horizon')?.value, 10) || 35;
+}
+
+// ضبط خانة الخطة صراحةً (تحميل خطة محفوظة) — يُعدّ لمساً فلا يُدهَس لاحقاً
+function setPlanHorizon(years) {
+  const el = document.getElementById('plan-horizon');
+  if (!el || !Number.isFinite(+years)) return;
+  el.value = Math.min(PLAN_H_MAX, Math.max(PLAN_H_MIN, Math.round(+years)));
+  el.dataset.touched = '1';
+}
+
 // قراءة مدخلات الصفحة الحالية للخطة
 function _readPlanInputs() {
   return {
     startValue:     parseFloat(document.getElementById('inp-current-value').value) || (_hist?.currentValue) || 0,
     lumpSum:        parseFloat(document.getElementById('inp-lump-sum').value) || 0,
-    horizonYears:   parseInt(document.getElementById('inp-horizon').value) || 35,
+    // أفق الخطة مستقل عن أفق الصفحة: المالك يجرّب «كم أضخّ لأصل خلال 5 سنوات؟»
+    // بلا أن يقلب الرسم والجدول. فارغ = يتبع الأفق العام (السلوك السابق).
+    horizonYears:   planHorizonYears(),
     reinvest:       document.getElementById('inp-reinvest').checked,
     adjustInflation:document.getElementById('inp-inflation').checked,
     inflationRate:  readInflationRate(),
@@ -1880,6 +1916,8 @@ function recalcPlanWithToday(id) {
     const opts = [...hSel.options].map(o => +o.value);
     hSel.value = opts.reduce((pp, c) => Math.abs(c - i.horizonYears) < Math.abs(pp - i.horizonYears) ? c : pp);
   }
+  // الأفق العام محصور بخيارات القائمة فيُقرَّب؛ أفق الخطة حرّ فيأخذ القيمة الأصلية كما حُفظت
+  setPlanHorizon(i.horizonYears);
 
   runForecast();
   computeContributionPlan();
@@ -1971,6 +2009,8 @@ function loadForecastPlanIntoInputs(id) {
     const opts = [...hSel.options].map(o => +o.value);
     hSel.value = opts.reduce((pp, c) => Math.abs(c - i.horizonYears) < Math.abs(pp - i.horizonYears) ? c : pp);
   }
+  // الأفق العام محصور بخيارات القائمة فيُقرَّب؛ أفق الخطة حرّ فيأخذ القيمة الأصلية كما حُفظت
+  setPlanHorizon(i.horizonYears);
   runForecast();
   computeContributionPlan();
   document.getElementById('plan-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
