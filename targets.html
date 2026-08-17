@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817h">
+  <link rel="stylesheet" href="css/style.css?v=20260817i">
   <style>
     /* ══ صفحة الأهداف — كل لون من رموز التصميم، لا قيم سداسية مكتوبة يدوياً ══ */
 
@@ -35,6 +35,11 @@
     }
     .target-input:focus { outline: none; border-color: var(--accent); }
     .mini-warn { font-size: .63rem; font-weight: 700; color: var(--st-bad); margin-top: 4px; white-space: nowrap; }
+    /* ── إبراز الصف المخالف للسقف الدستوري عند منع الحفظ (§1) ── */
+    tr.cap-violation { background: color-mix(in srgb, var(--st-bad) 15%, transparent);
+                       border-right: 3px solid var(--st-bad); }
+    .target-input.cap-violation { border-color: var(--st-bad);
+                       box-shadow: 0 0 0 2px color-mix(in srgb, var(--st-bad) 30%, transparent); }
     /* زر ⓘ داخل عنوان القسم (لا في زاوية البطاقة) */
     .info-inline { position: static; opacity: .7; }
     /* سطر شرح تحت عنوان القسم مباشرةً */
@@ -373,10 +378,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817h"></script>
-  <script src="js/auth.js?v=20260817h"></script>
-  <script src="js/utils.js?v=20260817h"></script>
-  <script src="js/tickerdb.js?v=20260817h"></script>
-  <script src="js/targets.js?v=20260817h"></script>
+  <script src="js/supabase.js?v=20260817i"></script>
+  <script src="js/auth.js?v=20260817i"></script>
+  <script src="js/utils.js?v=20260817i"></script>
+  <script src="js/tickerdb.js?v=20260817i"></script>
+  <script src="js/targets.js?v=20260817i"></script>
 </body>
 </html>

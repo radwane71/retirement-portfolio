@@ -95,7 +95,9 @@ function kvsHtml(items) {
 
 // ══════════════════════════════════════════════════════════════════════
 // الأسقف الدستورية (CLAUDE.md §1) — نفس ثوابت decision-engine.js و watchlist.js
-// ⚠️ تُستخدم هنا للعرض والتنبيه فقط: لا تدخل في أي معادلة حفظ أو توزيع.
+// ⚖️ قيود صلبة نافذة لا عرضية: تمنع الحفظ فوق السقف (saveAllTargets/saveSectorTargets)
+// وتقصّ الهدف الفعّال في محرّك إعادة التوازن (min(الهدف المحفوظ، السقف)).
+// منطقة السماح تُستخدم للتنبيه فقط — لا تدخل معادلة منع ولا معادلة شراء.
 // ══════════════════════════════════════════════════════════════════════
 const TG_CAP_SINGLE    = 7;     // سقف السهم الواحد
 const TG_CAP_BLUECHIP  = 12;    // سقف السهم القيادي
@@ -312,6 +314,9 @@ function attachStockListeners() {
       let v = +(inp.value);
       if (v < 0)   { inp.value = 0;   v = 0; }
       if (v > 100) { inp.value = 100; v = 100; }
+      // أزل إبراز المخالفة فور التعديل — الحكم يُعاد عند محاولة الحفظ التالية
+      inp.classList.remove(CAP_BAD_CLS);
+      inp.closest('tr')?.classList.remove(CAP_BAD_CLS);
       updateStockTotal();
       updateStockTargetSumInFooter();
     });
@@ -367,6 +372,8 @@ function attachSectorListeners() {
       let v = +(inp.value);
       if (v < 0)   { inp.value = 0;   v = 0; }
       if (v > 100) { inp.value = 100; v = 100; }
+      inp.classList.remove(CAP_BAD_CLS);
+      inp.closest('tr')?.classList.remove(CAP_BAD_CLS);
       updateSectorTotal();
       updateSectorTargetSumInFooter();
     });
@@ -811,6 +818,74 @@ function validateSectorConsistency() {
   return violations;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🚧 حارس الأسقف الدستورية عند الحفظ (CLAUDE.md §1 — «قيود صلبة، ممنوع تليينها»)
+// هدف فوق سقفه لا يُحفَظ أصلاً: منعه هنا يمنع كل ما يُبنى عليه لاحقاً.
+// استثناء وحيد: هدف يساوي السقف بالضبط مسموح (السقف نفسه ليس مخالفة).
+// منطقة السماح (0.75/1.25) لا تدخل هنا: هي «لا تنبّه ضمنها» لا إذن بتجاوز الهدف.
+// ══════════════════════════════════════════════════════════════════════
+const TG_CAP_EPS  = 1e-9;             // تسامح عائم فقط — لا منطقة سماح
+const CAP_BAD_CLS = 'cap-violation';  // إبراز بصري للصف والحقل المخالفين
+
+function clearCapHighlights(tbodyId) {
+  document.querySelectorAll(`#${tbodyId} .${CAP_BAD_CLS}`)
+    .forEach(el => el.classList.remove(CAP_BAD_CLS));
+}
+
+function markCapViolations(list) {
+  list.forEach(v => {
+    if (!v.el) return;
+    v.el.classList.add(CAP_BAD_CLS);
+    const tr = v.el.closest('tr');
+    if (tr) tr.classList.add(CAP_BAD_CLS);
+  });
+  // انقل المستخدم لأول مخالفة كي يصلحها بلا بحث
+  if (list[0]?.el?.scrollIntoView) list[0].el.scrollIntoView({ block: 'center' });
+}
+
+// مخالفات أهداف الأسهم: كل صف مرسوم يُقاس بسقفه هو (7% أو 12% للقيادي)
+function collectStockCapViolations() {
+  const holdingTickers = new Set(holdings.map(h => h.ticker));
+  const tickers = [
+    ...holdings.map(h => h.ticker),
+    ...userStocks.filter(s => !holdingTickers.has(s.ticker)).map(s => s.ticker),
+  ];
+  const out = [];
+  tickers.forEach(t => {
+    const el = document.getElementById(stInputId(t));
+    if (!el) return;                                  // صف غير مرسوم — لا قيمة يُحكم عليها
+    const value = +(el.value || 0);
+    const cap   = tgCapOf(t);
+    if (value > cap + TG_CAP_EPS) out.push({ key: t, value, cap, el, blueChip: tgIsBlueChip(t) });
+  });
+  return out;
+}
+
+// مخالفات أهداف القطاعات: السقف الدستوري 25% لكل قطاع
+function collectSectorCapViolations() {
+  const secSet = new Set([
+    ...holdings.map(h => (h.sector || '').trim() || 'غير مصنف'),
+    ...Object.keys(sectorTargets),
+  ]);
+  const out = [];
+  [...secSet].forEach(sec => {
+    const id = secInputId(sec);
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+    const value = +(el.value || 0);
+    if (value > TG_CAP_SECTOR + TG_CAP_EPS) out.push({ key: sec, value, cap: TG_CAP_SECTOR, el });
+  });
+  return out;
+}
+
+// رسالة المنع: تُسمّي كل صف مخالف وقيمته وسقفه — لا رفض مبهم
+function capViolationMsg(list, what) {
+  return `⛔ لا يمكن الحفظ — ${list.length} ${what} فوق السقف الدستوري (CLAUDE.md §1):\n`
+    + list.map(v => `• ${v.key}: ${v.value.toFixed(1)}% > سقف ${v.cap}%${v.blueChip ? ' (قيادي)' : ''}`).join('\n')
+    + `\nالأسقف قيود صلبة — صحّح الصفوف المُبرَزة ثم أعد الحفظ.`;
+}
+
 // ── مساعد: احسب إجمالي النسب المئوية فقط (بدون مناطق الشراء/البيع) ──
 function sumTargetInputs(tbodyId) {
   let sum = 0;
@@ -821,7 +896,16 @@ function sumTargetInputs(tbodyId) {
 
 // ── حفظ أهداف الأسهم ──────────────────────────────────────
 async function saveAllTargets() {
-  // ── تحقق من الإجمالي أولاً ─────────────────────────────
+  // ── الأسقف الدستورية أولاً: قيد صلب يمنع الحفظ (§1) ────
+  clearCapHighlights('stock-targets-tbody');
+  const capViolations = collectStockCapViolations();
+  if (capViolations.length) {
+    markCapViolations(capViolations);
+    showToast(capViolationMsg(capViolations, 'هدف سهم'), 'error');
+    return;
+  }
+
+  // ── تحقق من الإجمالي ───────────────────────────────────
   const stockSum = sumTargetInputs('stock-targets-tbody');
   if (stockSum > 100.05) {
     showToast(`⛔ لا يمكن الحفظ — إجمالي أهداف الأسهم ${stockSum.toFixed(1)}% يتجاوز 100%`, 'error');
@@ -883,7 +967,16 @@ async function saveAllTargets() {
 
 // ── حفظ أهداف القطاعات ────────────────────────────────────
 async function saveSectorTargets() {
-  // ── تحقق من الإجمالي أولاً ─────────────────────────────
+  // ── سقف القطاع 25% أولاً: قيد صلب يمنع الحفظ (§1) ──────
+  clearCapHighlights('sector-targets-tbody');
+  const secCapViolations = collectSectorCapViolations();
+  if (secCapViolations.length) {
+    markCapViolations(secCapViolations);
+    showToast(capViolationMsg(secCapViolations, 'هدف قطاع'), 'error');
+    return;
+  }
+
+  // ── تحقق من الإجمالي ───────────────────────────────────
   const secSum = sumTargetInputs('sector-targets-tbody');
   if (secSum > 100.05) {
     showToast(`⛔ لا يمكن الحفظ — إجمالي أهداف القطاعات ${secSum.toFixed(1)}% يتجاوز 100%`, 'error');
@@ -1068,6 +1161,42 @@ function runRebalancing() {
     return;
   }
 
+  // ── بناء قائمة المرشحين ─────────────────────────────────────
+  // فقط الأسهم الفعلية (ليس المخطط) ذات الهدف المحدد والسعر الموجود
+  //
+  // ⚖️ السقف الدستوري قيد صلب لا هدف استرشادي (CLAUDE.md §1 + الفلتر 4):
+  // الهدف الفعّال = min(الهدف المحفوظ، السقف) — 7% للسهم و12% للقيادي.
+  // السقف الأساس بلا منطقة السماح: السماح يعني «لا تنبّه ضمنه» لا «اشترِ داخله عمداً».
+  const candidatesAll = holdings
+    .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0)
+    .map(h => {
+      const currentPct  = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
+      const savedTarget = stockTargets[h.ticker] || 0;     // ما حفظه المالك
+      const capPct      = tgCapOf(h.ticker);               // 12 للقيادي · 7 لغيره
+      const targetPct   = Math.min(savedTarget, capPct);   // الهدف الفعّال — يقود كل حساب بعده
+      const capBound    = targetPct < savedTarget - 1e-9;  // قُصَّ بالسقف → إفصاح إلزامي (§8)
+      const gap         = targetPct - currentPct;          // موجب = ناقص الهدف الفعّال
+      const zone        = stockZones[h.ticker] || {};
+      const inZone      = !zone.entry_price || +h.current_price <= +zone.entry_price;
+      const val         = valuationScore(h.ticker, +h.current_price);
+      // الدرجة الفعّالة: 1 عند إيقاف مراعاة التقييم (سلوك قديم بالضبط)
+      const effScore    = valAware ? val.score : 1;
+      // الأولوية = الفجوة × جاذبية السعر → سهم قريب من المتضخم يهبط للأسفل ولو فجوته كبيرة
+      const priority    = gap * effScore;
+      return { ...h, currentPct, savedTarget, capPct, targetPct, capBound,
+               blueChip: tgIsBlueChip(h.ticker), gap, inZone, val, effScore, priority };
+    });
+
+  const candidates = candidatesAll
+    .filter(c => c.gap > 0.05)                             // فقط الناقص فعلاً (فوق 0.05%)
+    .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
+    .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
+
+  // مستبعَد لأن وزنه بلغ سقفه الدستوري وإن كان هدفه المحفوظ أعلى — لا قصّ صامت (§8)
+  const capBlocked = candidatesAll.filter(c => c.capBound && c.gap <= 0.05);
+  // مرشّح دخل التوزيع لكن بهدف مقصوص عند السقف
+  const capTrimmed = candidates.filter(c => c.capBound);
+
   // ── إفصاح نطاق المحرّك (عرض فقط) ────────────────────────────
   // قرار مؤكَّد من المالك: التوزيع على المملوك فقط. نُعلنه صراحةً مع عدّ
   // المستبعَدين حتى لا يظنّ المستخدم أن سهماً «اختفى» بلا سبب.
@@ -1078,53 +1207,32 @@ function runRebalancing() {
   const scopeNote = noteHtml('ℹ️',
     `<strong>نطاق المحرّك: الأسهم المملوكة فقط.</strong> يوزّع على ما له وزن حالي قابل للقياس وهدف محدَّد وسعر حالي > 0.`
     + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`
-    + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي.`
-    + ` السهم بلا وزن حالي وبلا سعر لا فجوة له تُقاس، فلا يدخل التوزيع.`, '');
+    + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي`
+    + (capBlocked.length ? ` · ${capBlocked.length} سهماً بلغ سقفه الدستوري` : '')
+    + `. السهم بلا وزن حالي وبلا سعر لا فجوة له تُقاس، فلا يدخل التوزيع.`, '');
 
-  // ── بناء قائمة المرشحين ─────────────────────────────────────
-  // فقط الأسهم الفعلية (ليس المخطط) ذات الهدف المحدد والسعر الموجود
-  const candidates = holdings
-    .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0)
-    .map(h => {
-      const currentPct = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
-      const targetPct  = stockTargets[h.ticker] || 0;
-      const gap        = targetPct - currentPct;           // موجب = ناقص الهدف
-      const zone       = stockZones[h.ticker] || {};
-      const inZone     = !zone.entry_price || +h.current_price <= +zone.entry_price;
-      const val        = valuationScore(h.ticker, +h.current_price);
-      // الدرجة الفعّالة: 1 عند إيقاف مراعاة التقييم (سلوك قديم بالضبط)
-      const effScore   = valAware ? val.score : 1;
-      // الأولوية = الفجوة × جاذبية السعر → سهم قريب من المتضخم يهبط للأسفل ولو فجوته كبيرة
-      const priority   = gap * effScore;
-      return { ...h, currentPct, targetPct, gap, inZone, val, effScore, priority };
-    })
-    .filter(c => c.gap > 0.05)                             // فقط الناقص فعلاً (فوق 0.05%)
-    .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
-    .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
+  // ── لافتة القصّ الدستوري: تُعرض في كل مخرَج (§8: لا تقليص صامت) ──
+  const capNoteItems = [
+    ...capTrimmed.map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — الهدف المحفوظ ${c.savedTarget}% · الفعّال ${c.capPct}% (السقف الدستوري${c.blueChip ? ' — قيادي' : ''})</li>`),
+    ...capBlocked.map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — الهدف المحفوظ ${c.savedTarget}% · الفعّال ${c.capPct}% (السقف الدستوري${c.blueChip ? ' — قيادي' : ''}) · وزنه ${c.currentPct.toFixed(2)}% بلغ السقف فلا شراء</li>`),
+  ];
+  const capNote = capNoteItems.length ? noteHtml('⛔',
+    `<strong>قصّ دستوري للهدف (الفلتر 4):</strong> المحرّك يوزّع نحو الهدف الفعّال = min(هدفك المحفوظ، السقف)
+     — لا يشتري داخل منطقة السماح عمداً.
+     <ul class="sum-ul">${capNoteItems.join('')}</ul>`, 'bad') : '';
 
   if (!candidates.length) {
     const msg = entryFilter
-      ? 'لا توجد أسهم ناقصة عن هدفها <strong>ضمن منطقة الشراء</strong> حالياً — حاول رفع الفلتر'
-      : 'المحفظة متوازنة — لا توجد أسهم ناقصة عن أوزانها المستهدفة';
-    resultEl.innerHTML = `<div class="stack">${noteHtml('✅', msg, 'good')}${scopeNote}</div>`;
+      ? 'لا توجد أسهم ناقصة عن هدفها الفعّال <strong>ضمن منطقة الشراء</strong> حالياً — حاول رفع الفلتر'
+      : 'المحفظة متوازنة — لا توجد أسهم ناقصة عن أوزانها المستهدفة الفعّالة';
+    resultEl.innerHTML = `<div class="stack">${noteHtml('✅', msg, 'good')}${capNote}${scopeNote}</div>`;
     return;
   }
 
-  // ── الحد الأقصى لكل سهم: ما يُوصله لهدفه بالضبط لا يتجاوزه ─
-  // maxAlloc = (هدف% / 100) × (قيمة المحفظة + الميزانية) − قيمة السهم الحالية
-  // هذا يضمن أن الوزن بعد الشراء ≤ الهدف بغض النظر عن حجم الميزانية
-  const newPortfolioTotal = totalValue + budget;
-
-  const candidates_ = candidates.map(c => {
-    const currentValue = +c.shares * +c.current_price;
-    const maxAlloc     = Math.max(0, (c.targetPct / 100) * newPortfolioTotal - currentValue);
-    return { ...c, maxAlloc };
-  });
-
   // ── إن كانت مراعاة التقييم مُفعّلة وكل الأسهم الناقصة قريبة من سعرها المتضخم ──
   // لا نشتري سهماً غالياً لمجرد وجود فجوة. هذا هو السلوك الذكي الذي طلبه المالك.
-  if (valAware && candidates_.every(c => c.effScore <= 0.05)) {
-    const list = candidates_
+  if (valAware && candidates.every(c => c.effScore <= 0.05)) {
+    const list = [...candidates]
       .sort((a, b) => b.gap - a.gap)
       .map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — فجوة ${c.gap.toFixed(1)}% · ${esc(c.val.label)} <span class="text-muted small">(${esc(c.val.reason)})</span></li>`)
       .join('');
@@ -1134,59 +1242,119 @@ function runRebalancing() {
         الفجوة وحدها لا تبرّر الشراء عند سعر مرتفع.
         <ul class="sum-ul">${list}</ul>
         <div class="small text-muted mt-2">💡 أوقف «مراعاة موقع السعر من التقييم» لتجاهل التقييم والتوزيع بالفجوة فقط، أو انتظر نزول الأسعار لمناطق التجميع.</div>`, 'warn')}
+      ${capNote}
       ${scopeNote}
     </div>`;
     return;
   }
 
-  // ── حساب التوزيع حسب الطريقة — مع تطبيق الحد الأقصى ────────
-  let allocations = [];
+  // ══════════════════════════════════════════════════════════════
+  // تمرير الفائض (cascade) — نفس منهج طريقة «الأولى بالأولوية» مُعمَّماً
+  // على «الفجوة» و«متساوٍ»: في كل جولة نوزّع المتبقي على من بقيت لهم سعة
+  // (maxAlloc − allocated) بنفس منطق الطريقة، ونكرّر حتى تنفد الميزانية أو
+  // تنفد السعة — بدل قصّ المرشح عند maxAlloc وترك الفائض نقداً.
+  // حارسا الحلقة اللانهائية: سقف جولات ثابت + شرط تقدّم أدنى في كل جولة.
+  // ══════════════════════════════════════════════════════════════
+  const CASCADE_MAX_ROUNDS = 60;
+  const CASCADE_MIN_STEP   = 0.005;   // نصف هللة — دون ذلك لا تقدّم يُذكر
+  function cascadeAllocate(list, amount, weightOf) {
+    const alloc = new Array(list.length).fill(0);
+    let remaining = amount;
+    for (let round = 0; round < CASCADE_MAX_ROUNDS && remaining > CASCADE_MIN_STEP; round++) {
+      const active = [];
+      for (let i = 0; i < list.length; i++) {
+        if (list[i].maxAlloc - alloc[i] > 1e-9) active.push(i);
+      }
+      if (!active.length) break;                       // نفدت السعة
+      let wSum = 0;
+      active.forEach(i => { wSum += Math.max(0, weightOf(list[i])); });
+      const equalFallback = !(wSum > 0);               // أوزان كلها صفر → بالتساوي كي لا تتجمّد
+      const roundBudget = remaining;                   // ثابت داخل الجولة كي تبقى النسب متسقة
+      let spentRound = 0;
+      active.forEach(i => {
+        const w    = equalFallback ? 1 / active.length : Math.max(0, weightOf(list[i])) / wSum;
+        const give = Math.min(roundBudget * w, list[i].maxAlloc - alloc[i]);
+        if (give > 0) { alloc[i] += give; spentRound += give; }
+      });
+      remaining -= spentRound;
+      if (spentRound <= CASCADE_MIN_STEP) break;       // شرط التقدّم الأدنى
+    }
+    return list.map((c, i) => ({ ...c, allocated: alloc[i] }));
+  }
 
-  if (method === 'gap') {
-    // بالتناسب مع الأولوية (الفجوة × جاذبية السعر) ثم تقليص لـ maxAlloc
-    const totalW = candidates_.reduce((s, c) => s + c.priority, 0) || 1;
-    allocations = candidates_.map(c => ({
+  // ── التوزيع على «مقام» معطى: maxAlloc ثم الطريقة ────────────
+  // maxAlloc = (الهدف الفعّال% / 100) × المقام − قيمة السهم الحالية
+  function allocateOn(basisTotal) {
+    const cands = candidates.map(c => ({
       ...c,
-      allocated: Math.min(budget * (c.priority / totalW), c.maxAlloc)
+      maxAlloc: Math.max(0, (c.targetPct / 100) * basisTotal - (+c.shares * +c.current_price)),
     }));
-  } else if (method === 'equal') {
-    // توزيع متساوٍ بين المؤهّلين — عند مراعاة التقييم نستبعد القريب من المتضخم (درجة ≤ 0.15)
-    const eligible = valAware ? candidates_.filter(c => c.effScore > 0.15) : candidates_;
-    const pool = eligible.length ? eligible : candidates_;
-    const each = budget / pool.length;
-    allocations = pool.map(c => ({ ...c, allocated: Math.min(each, c.maxAlloc) }));
-  } else {
-    // الأولى بالأولوية (فجوة × تقييم) — مع تمرير الفائض (cascade): إذا قيّد
-    // maxAlloc المرشح الأول، ينتقل المتبقي للمرشح التالي حتى تُستهلك الميزانية
-    // أو ينفد المرشحون (بدل ترك الفائض نقداً بلا سبب)
-    allocations = [];
+    if (method === 'gap') {
+      // بالتناسب مع الأولوية (الفجوة × جاذبية السعر) + تمرير الفائض
+      return cascadeAllocate(cands, budget, c => c.priority);
+    }
+    if (method === 'equal') {
+      // توزيع متساوٍ بين المؤهّلين — عند مراعاة التقييم نستبعد القريب من المتضخم (درجة ≤ 0.15)
+      const eligible = valAware ? cands.filter(c => c.effScore > 0.15) : cands;
+      const pool = eligible.length ? eligible : cands;
+      return cascadeAllocate(pool, budget, () => 1);
+    }
+    // الأولى بالأولوية (فجوة × تقييم) — تمرير الفائض للتالي بالترتيب
+    const out = [];
     let remaining = budget;
-    for (const c of candidates_) {
+    for (const c of cands) {
       if (remaining <= 0) break;
       const amt = Math.min(remaining, c.maxAlloc);
-      if (amt > 0) {
-        allocations.push({ ...c, allocated: amt });
-        remaining -= amt;
-      }
+      if (amt > 0) { out.push({ ...c, allocated: amt }); remaining -= amt; }
     }
+    return out;
   }
 
   // ── احسب عدد الأسهم القابل للشراء (تقريب للأسفل دائماً) ────
-  let totalSpent = 0;
+  function buildRows(allocs) {
+    let spent = 0;
+    const list = allocs.map(c => {
+      // AUDIT-FIX: guard against current_price = 0 (unpriced holding) to prevent
+      // Math.floor(Infinity) propagating into cost/totalSpent corrupting the rebalancer
+      const price       = +c.current_price || 0;
+      const sharesToBuy = price > 0 ? Math.floor(c.allocated / price) : 0;
+      const cost        = sharesToBuy * price;
+      spent += cost;
+      const newShares   = +c.shares + sharesToBuy;
+      return { ...c, sharesToBuy, cost, newShares, newValue: newShares * price };
+    }).filter(r => r.sharesToBuy > 0);
+    return { list, spent };
+  }
 
-  const rows = allocations.map(c => {
-    // AUDIT-FIX: guard against current_price = 0 (unpriced holding) to prevent
-    // Math.floor(Infinity) propagating into cost/totalSpent corrupting the rebalancer
-    const price        = +c.current_price || 0;
-    const sharesToBuy  = price > 0 ? Math.floor(c.allocated / price) : 0;
-    const cost         = sharesToBuy * price;
-    totalSpent        += cost;
-    const newShares    = +c.shares + sharesToBuy;
-    const newValue     = newShares * +c.current_price;
-    const newPct       = newPortfolioTotal > 0 ? newValue / newPortfolioTotal * 100 : 0;
-    const gapAfter     = c.targetPct - newPct;   // موجب = ما زال ناقصاً | سالب = تجاوز (لا يحدث)
-    return { ...c, sharesToBuy, cost, newPct, gapAfter };
-  }).filter(r => r.sharesToBuy > 0);
+  // ── حلّ ذاتي الاتساق للمقام (تصحيح ضروري فوق البند 4) ───────
+  // المقام المتحفّظ (قيمة المحفظة + كامل الميزانية) صحيح فقط لو أُنفقت الميزانية
+  // كلها. حين تنفد السعة ويبقى نقد، القسمة الفعلية على (القيمة + المُنفَق) أصغر،
+  // فيخرج الوزن أعلى من الهدف الفعّال وقد يكسر السقف رغم maxAlloc. لذلك نعيد الحل
+  // بمقام = القيمة + الإنفاق الفعلي: هو دائماً ≤ المقام المتحفّظ (لا يوسّع التوزيع
+  // أبداً) ويتناقص رتيباً فيتقارب لنقطة ثابتة يتحقّق عندها الوزن ≤ السقف بالضبط.
+  const BASIS_MAX_PASSES = 8;
+  let basisTotal  = totalValue + budget;     // البداية = المقام المتحفّظ كما هو مقرّر
+  let allocations = [];
+  let rows        = [];
+  let totalSpent  = 0;
+  for (let pass = 0; pass < BASIS_MAX_PASSES; pass++) {
+    allocations = allocateOn(basisTotal);
+    const built = buildRows(allocations);
+    rows = built.list; totalSpent = built.spent;
+    const nextBasis = totalValue + totalSpent;
+    if (nextBasis >= basisTotal - 0.5) break;   // استقرّ (فرق أقل من نصف ريال)
+    basisTotal = nextBasis;
+  }
+
+  // ── تمريرة ثانية: النِّسب بعد اكتمال الإنفاق الفعلي (البند 4) ──
+  // المقام هنا هو الإنفاق الفعلي لا الميزانية كاملة: التقريب للأسفل يجعل المُنفَق
+  // أقل دائماً، والقسمة على الميزانية الكاملة كانت تُظهر المحفظة أبعد عن أسقفها
+  // مما هي فعلاً. (maxAlloc أعلاه يبقى على مقامه الخاص — انظر التعليق فوقه.)
+  const actualTotal = totalValue + totalSpent;
+  rows = rows.map(r => {
+    const newPct = actualTotal > 0 ? r.newValue / actualTotal * 100 : 0;
+    return { ...r, newPct, gapAfter: r.targetPct - newPct };   // مقابل الهدف الفعّال
+  });
 
   const leftover = budget - totalSpent;
 
@@ -1194,7 +1362,8 @@ function runRebalancing() {
   if (!rows.length) {
     resultEl.innerHTML = `<div class="stack">
       ${noteHtml('⚠️', `المبلغ غير كافٍ لشراء ولو سهم واحد من الأسهم المرشحة.
-        <div class="small text-muted">أدنى سعر بين المرشحين: ${formatSAR(Math.min(...candidates_.map(c => +c.current_price)))}</div>`, 'warn')}
+        <div class="small text-muted">أدنى سعر بين المرشحين: ${formatSAR(Math.min(...candidates.map(c => +c.current_price)))}</div>`, 'warn')}
+      ${capNote}
       ${scopeNote}
     </div>`;
     return;
@@ -1215,7 +1384,8 @@ function runRebalancing() {
         ${meterHtml({
           label: 'المستخدَم من الميزانية', valueTxt: `${spentPct.toFixed(1)}%`,
           pct: spentPct, state: leftoverState,
-          foot: `المتبقي نقداً ${formatSAR(leftover)} — لا يكفي لسهم كامل بعد تقريب الكميات للأسفل`,
+          foot: `المتبقي نقداً ${formatSAR(leftover)} — بعد تمرير الفائض على من بقيت لهم سعة، ما لم يُنفق`
+              + ` إمّا لا يكفي لسهم كامل (تقريب للأسفل) أو نفدت سعة كل المرشحين عند أهدافهم الفعّالة`,
         })}
       </div>
       <div class="reb-hero-kv">
@@ -1224,13 +1394,17 @@ function runRebalancing() {
           ['إجمالي التكلفة', formatSAR(totalSpent)],
           ['المتبقي نقداً', formatSAR(leftover)],
           ['عدد الأسهم المختلفة', `${rows.length} سهم`],
+          ['أهداف قُصَّت عند السقف', capNoteItems.length ? `${capNoteItems.length} سهم` : 'لا شيء'],
+          ['مقام «الوزن بعد»', `${formatSAR(actualTotal)} (القيمة + المُنفَق فعلاً)`],
         ])}
       </div>
     </div>
 
-    ${capHits.length ? noteHtml('⛔', `<strong>تنبيه دستوري (الفلتر 4):</strong>
+    ${capNote}
+
+    ${capHits.length ? noteHtml('⛔', `<strong>خلل يستوجب المراجعة (الفلتر 4):</strong>
       ${capHits.map(r => `<strong>${esc(r.ticker)}</strong> سيصل وزنه ${r.newPct.toFixed(2)}% متجاوزاً سقفه ${tgCapOf(r.ticker)}% + سماح ${TG_CAP_BUFFER}%`).join(' · ')}.
-      المحرّك يوزّع نحو <em>هدفك المحفوظ</em> ولا يقصّه عند السقف الدستوري — راجع الهدف نفسه أو خفّض المبلغ.`, 'bad') : ''}
+      المحرّك يقصّ الهدف عند السقف الدستوري، فظهور هذه اللافتة يعني عدم استقرار الحساب — لا تنفّذ قبل المراجعة.`, 'bad') : ''}
 
     <!-- جدول التوصيات -->
     <div class="table-wrapper">
@@ -1242,8 +1416,8 @@ function runRebalancing() {
             <th>السعر الحالي</th>
             <th>أسهم تشتري</th>
             <th>التكلفة</th>
-            <th>الوزن: قبل ← بعد (مقابل الهدف والسقف)</th>
-            <th>الفجوة المتبقية</th>
+            <th>الوزن: قبل ← بعد (مقابل الهدف الفعّال والسقف)</th>
+            <th title="مقابل الهدف الفعّال = min(الهدف المحفوظ، السقف الدستوري)">الفجوة المتبقية</th>
             ${valAware ? '<th class="valcol">موقع السعر من التقييم</th>' : ''}
             <th>منطقة الشراء</th>
           </tr>
@@ -1271,8 +1445,11 @@ function runRebalancing() {
                 ${weightMeterHtml({
                   current: r.newPct, target: r.targetPct, cap, scale: rScale,
                   state: r.newPct > cap + TG_CAP_BUFFER ? 'bad' : 'good',
-                  title: `بعد الشراء ${r.newPct.toFixed(2)}% · الهدف ${r.targetPct}% · السقف ${cap}%`,
+                  title: `بعد الشراء ${r.newPct.toFixed(2)}% · الهدف الفعّال ${r.targetPct}% · السقف ${cap}%`,
                 })}
+                ${r.capBound
+                  ? `<div class="small text-muted num">⛔ الهدف المحفوظ ${r.savedTarget}% · الفعّال ${r.capPct}% (السقف الدستوري${r.blueChip ? ' — قيادي' : ''})</div>`
+                  : ''}
               </td>
               <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>
               ${valAware ? `<td class="valcol">${valScaleHtml(r.val)}</td>` : ''}
@@ -1302,6 +1479,10 @@ function showRebInfo() {
     '• توزيع متساوٍ: كل سهم ناقص يأخذ نفس المبلغ',
     '• الأولى بالأولوية: كل المبلغ للسهم الأعلى أولوية',
     '',
+    '🔁 تمرير الفائض في الطرق الثلاث: إذا بلغ سهم حدّه الأقصى، يُمرَّر المتبقي',
+    'لمن بقيت لهم سعة بنفس منطق الطريقة ويتكرّر حتى تنفد الميزانية أو السعة —',
+    'فلا يُترك جزء من مبلغك عاطلاً بلا سبب.',
+    '',
     '⚖️ مراعاة موقع السعر من التقييم (مُفعّلة افتراضياً):',
     'لا يكتفي المحرك بالفجوة، بل يقرأ لكل سهم أسعار التجميع/التخفيف/البيع',
     'من صفحة التقييمات، وآخر قيمة عادلة من سجل حاسبة القيمة العادلة.',
@@ -1317,9 +1498,14 @@ function showRebInfo() {
     'يُشترَ بعد) لا وزن حالي له ولا سعر، فلا فجوة تُقاس له — مستبعَد عمداً.',
     'كذلك أي سهم بلا هدف محدَّد أو بلا سعر حالي.',
     '',
-    '⚠️ الأسقف الدستورية: المحرّك يوزّع نحو هدفك المحفوظ لا نحو السقف.',
-    'إن كان هدفك أعلى من 7% (أو 12% للقيادي) فقد يدفع الوزن فوق السقف —',
-    'تظهر لك عندها لافتة تنبيه حمراء فوق الجدول.',
+    '⚖️ الأسقف الدستورية قيد صلب: المحرّك يوزّع نحو «الهدف الفعّال» =',
+    'min(هدفك المحفوظ، السقف) — 7% للسهم و12% للقيادي، بلا منطقة سماح',
+    '(السماح يعني «لا تنبيه ضمنه» لا إذناً بالشراء داخله). إن كان هدفك أعلى',
+    'من السقف يُقصّ صراحةً وتُعلن اللافتة الحمراء أي سهم قُصَّ ولماذا.',
+    '',
+    '📐 «الوزن بعد» يُقاس على الإنفاق الفعلي (قيمة المحفظة + ما أُنفق فعلاً)',
+    'لا على الميزانية كاملة — القسمة على الميزانية كاملة كانت تُظهر المحفظة',
+    'أبعد عن أسقفها مما هي، وهو انحياز في اتجاه واحد دائماً.',
   ];
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
