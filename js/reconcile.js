@@ -48,8 +48,8 @@ const BROKER_NAME_MAP = {
   'JADWA REIT SAUDI':         '4342',
   'MODERN MILLS':             '2284',
   'RIYAD BANK':               '1010',
-  'FAKEEH CARE':              'FAKEEH',   // مجهول — سيظهر كتحذير
-  'FITNESS TIME':             'FITNESS',  // مجهول — سيظهر كتحذير
+  'FAKEEH CARE':              null,   // رمز غير معروف — يُعامل كاسم مجهول ويظهر في التحذير
+  'FITNESS TIME':             null,   // رمز غير معروف — يُعامل كاسم مجهول ويظهر في التحذير
 };
 
 let _dbTx      = [];
@@ -57,6 +57,21 @@ let _dtEntries = [];   // DivTracker entries
 let _bkEntries = [];   // Broker statement entries
 let _allRef    = [];   // merged reference (DivTracker preferred, broker supplemental)
 let _matches   = [];
+let _unknownNames = [];   // أسماء الوسيط المجهولة — تبقى بعد التطبيق حتى لا تختفي الإحصاءات
+
+// ── Dirty-tickers: نفس مفتاح وصيغة transactions.js (R-1) ─────────────
+// تغيير التاريخ يغيّر ترتيب البيع بين الشراءات → WAC يحتاج إعادة حساب.
+// صفحة المعاملات تُنهي إعادة الحساب تلقائياً عند فتحها (_flushDirtyTickers).
+const DIRTY_TICKERS_KEY = 'tharwa-dirty-tickers';
+function _markDirtyTickers(userId, tickers) {
+  try {
+    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
+    if (!tickers.length) return;
+    const prev = JSON.parse(localStorage.getItem(key) || '[]');
+    const next = [...new Set([...prev, ...tickers])];
+    localStorage.setItem(key, JSON.stringify(next));
+  } catch (_) {}
+}
 
 async function init() {
   const user = await requireAuth();
@@ -162,9 +177,13 @@ function parseBrokerStatement(csv) {
 
 // ── Load DB transactions ──────────────────────────────────────────────
 async function loadDbTx() {
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user?.id) throw new Error('انتهت الجلسة — أعد تسجيل الدخول');
   const { data, error } = await supabaseClient
     .from('transactions')
     .select('id, ticker, name, shares, price, type, date, total')
+    .eq('user_id', user.id)          // دفاع متعدد الطبقات — نفس نمط transactions.js
+    .eq('is_archived', false)        // المؤرشف خارج الحسابات، فلا يدخل التسوية
     .order('date');
   if (error) throw error;
   return data || [];
@@ -227,8 +246,11 @@ async function runReconcile() {
   } catch (e) { showToast('خطأ في تحميل المعاملات: ' + e.message, 'error'); return; }
 
   _allRef.forEach(r => r.used = false);
+  _unknownNames = unknownNames;
 
   _matches = _dbTx.map(tx => {
+    // معاملات المنح لا تظهر في كشف الوسيط ولا DivTracker — خارج نطاق الأداة
+    if (tx.type === 'grant') return { tx, ref: null, status: 'oos', checked: false };
     const ref = findBestMatch(tx, _allRef);
     if (ref) {
       ref.used = true;
@@ -254,11 +276,13 @@ function renderStats(refUnused, unknownNames) {
   const fix      = _matches.filter(m => m.status === 'fix').length;
   const same     = _matches.filter(m => m.status === 'same').length;
   const unmatched= _matches.filter(m => m.status === 'unmatched').length;
+  const oos      = _matches.filter(m => m.status === 'oos').length;
   document.getElementById('stats-row').innerHTML = `
     <div class="stat-pill">إجمالي بالداتابيس: <strong>${_dbTx.length}</strong></div>
     <div class="stat-pill" style="color:#f0b429">تحتاج تصحيح: <strong>${fix}</strong></div>
     <div class="stat-pill" style="color:#3fb950">تاريخ صحيح: <strong>${same}</strong></div>
     <div class="stat-pill" style="color:#8b949e">غير مطابقة: <strong>${unmatched}</strong></div>
+    ${oos ? `<div class="stat-pill" style="color:#8b949e">🎁 منح خارج نطاق الأداة: <strong>${oos}</strong></div>` : ''}
     ${refUnused.length ? `<div class="stat-pill" style="color:#f85149">في المرجع بدون تطابق: <strong>${refUnused.length}</strong></div>` : ''}
     ${unknownNames.length ? `<div class="stat-pill" style="color:#f85149">أسماء مجهولة بالوسيط: <strong>${unknownNames.length}</strong></div>` : ''}
   `;
@@ -270,7 +294,7 @@ function renderResults() {
   const tbody    = document.getElementById('result-tbody');
   const TYPE_AR  = { buy: 'شراء', sell: 'بيع', grant: 'منحة' };
   let rows = _matches;
-  if (hideSame) rows = rows.filter(m => m.status !== 'same');
+  if (hideSame) rows = rows.filter(m => m.status !== 'same' && m.status !== 'oos');
 
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="icon">✅</div><p>كل التواريخ صحيحة أو مخفية</p></div></td></tr>`;
@@ -291,6 +315,9 @@ function renderResults() {
       badgeHtml = `<span class="badge badge-ok">✓ صحيح</span>`;
       newDate   = tx.date;
       source    = ref.source;
+    } else if (m.status === 'oos') {
+      badgeHtml = `<span class="badge badge-skip">🎁 خارج نطاق الأداة</span>`;
+      newDate   = '—'; source = '—';
     } else {
       badgeHtml = `<span class="badge badge-skip">— غير مطابق</span>`;
       newDate   = '—'; source = '—';
@@ -364,6 +391,7 @@ async function applyChanges() {
   document.getElementById('progress-bar').style.display = '';
 
   let done = 0, errors = 0;
+  const fixedTickers = new Set();   // الرموز المتأثرة بتغيير التاريخ — تحتاج إعادة حساب WAC
   for (const m of toFix) {
     status.textContent = `جارٍ… ${done + 1}/${toFix.length}`;
     fill.style.width   = ((done / toFix.length) * 100) + '%';
@@ -372,22 +400,30 @@ async function applyChanges() {
       .update({ date: m.ref.date }).eq('id', m.tx.id);
 
     if (error) { errors++; console.error(error); }
-    else { m.tx.date = m.ref.date; m.status = 'same'; m.checked = false; }
+    else { m.tx.date = m.ref.date; m.status = 'same'; m.checked = false; fixedTickers.add(m.tx.ticker); }
     done++;
   }
 
   fill.style.width = '100%';
   btn.disabled     = false;
 
+  // تغيير التاريخ يغيّر ترتيب البيع بين الشراءات → علّم الرموز dirty،
+  // وصفحة المعاملات تُكمل إعادة حساب الحيازات تلقائياً عند فتحها.
+  if (fixedTickers.size) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (user?.id) _markDirtyTickers(user.id, [...fixedTickers]);
+  }
+  const recomputeNote = fixedTickers.size ? ' — افتح صفحة المعاملات لإتمام إعادة حساب الحيازات' : '';
+
   if (!errors) {
-    showToast(`✅ تم تحديث ${done} معاملة`, 'success');
-    status.textContent = `✅ اكتمل — ${done} تحديث`;
+    showToast(`✅ تم تحديث ${done} معاملة${recomputeNote}`, 'success');
+    status.textContent = `✅ اكتمل — ${done} تحديث${recomputeNote}`;
   } else {
-    showToast(`${done-errors} نجح، ${errors} فشل`, 'warn');
-    status.textContent = `⚠️ ${done-errors} نجح، ${errors} فشل`;
+    showToast(`${done-errors} نجح، ${errors} فشل${recomputeNote}`, 'warn');
+    status.textContent = `⚠️ ${done-errors} نجح، ${errors} فشل${recomputeNote}`;
   }
 
-  renderStats(_allRef.filter(r => !r.used && !r.unknown), []);
+  renderStats(_allRef.filter(r => !r.used && !r.unknown), _unknownNames);
   renderResults();
   updateSelectedCount();
 }

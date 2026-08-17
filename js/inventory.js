@@ -25,9 +25,10 @@ async function loadItemsRemote() {
     try { localStorage.setItem(userLsKey(INV_KEY), JSON.stringify(items)); } catch {}
     return;
   }
-  // أول مرة على السحابة → رحّل مخزون هذا الجهاز (إن وُجد) لتظهر على بقية أجهزتك
+  // لا يوجد إعداد سحابي (أو فشلت الشبكة) → اعرض الكاش المحلي فقط.
+  // AUDIT-FIX: لا نرفع الكاش المحلي للسحابة في مسار التحميل — فشل شبكة عابر
+  // كان يدهس نسخة السحابة الأحدث بكاش قديم. الرفع يحدث فقط عند تعديل فعلي (saveItems).
   items = loadItemsLocal();
-  if (items.length) await saveUserSetting(INV_KEY, items);
 }
 
 function saveItems(list) {
@@ -37,6 +38,12 @@ function saveItems(list) {
 
 let items = [];
 let editingId = null, deletingId = null;
+
+// كمية العنصر: الصفر قيمة صالحة (نفاد المخزون) — الافتراض 1 فقط عند غياب القيمة
+function qtyOf(i) {
+  const q = parseInt(i.qty);
+  return isNaN(q) ? 1 : q;
+}
 
 const COND_CLASS = {
   'جيد':        'cond-good',
@@ -80,7 +87,7 @@ function renderDash() {
   const good     = items.filter(i => i.cond === 'جيد').length;
   const replace  = items.filter(i => i.cond === 'للاستبدال').length;
   const missing  = items.filter(i => i.cond === 'مفقود').length;
-  const totalVal = items.reduce((s,i) => s + ((+i.value||0) * (+i.qty||1)), 0);
+  const totalVal = items.reduce((s,i) => s + ((+i.value||0) * qtyOf(i)), 0);
 
   document.getElementById('inv-dash').innerHTML = `
     <div class="inv-card"><div class="lbl">إجمالي العناصر</div><div class="val">${total}</div></div>
@@ -114,7 +121,8 @@ function renderTable() {
   }
   tbody.innerHTML = list.map(i => {
     const condC = COND_CLASS[i.cond] || 'cond-good';
-    const val   = i.value ? formatSAR((+i.value) * (+i.qty||1)) : '—';
+    const qty   = qtyOf(i);
+    const val   = i.value ? formatSAR((+i.value) * qty) : '—';
     const note  = i.notes && i.notes.trim()
       ? `<button class="notes-badge" data-note="${esc(i.notes)}" onclick="showNotePopup(this)" title="ملاحظات">💬</button>` : '';
     return `<tr>
@@ -122,7 +130,7 @@ function renderTable() {
       <td><span class="loc-badge">${esc(i.cat||'—')}</span></td>
       <td><span class="loc-badge">${esc(i.loc||'—')}</span></td>
       <td><span class="cond-badge ${condC}">${esc(i.cond)}</span></td>
-      <td style="text-align:center"><span class="qty-num ${(+i.qty||1) === 0 ? 'qty-low':''}">${+i.qty||1}</span></td>
+      <td style="text-align:center"><span class="qty-num ${qty === 0 ? 'qty-low':''}">${qty}</span></td>
       <td class="num">${val}</td>
       <td style="text-align:center">${note}</td>
       <td class="actions-cell">
@@ -157,7 +165,7 @@ function openEditModal(id) {
   document.getElementById('i-cat').value   = i.cat   || 'أجهزة كهربائية';
   document.getElementById('i-loc').value   = i.loc   || 'صالة';
   document.getElementById('i-cond').value  = i.cond  || 'جيد';
-  document.getElementById('i-qty').value   = i.qty   || '1';
+  document.getElementById('i-qty').value   = String(qtyOf(i));   // الصفر يبقى صفراً
   document.getElementById('i-value').value = i.value || '';
   document.getElementById('i-notes').value = i.notes || '';
   document.getElementById('item-modal').classList.add('open');
@@ -173,7 +181,8 @@ function saveItem() {
     cat:   document.getElementById('i-cat').value,
     loc:   document.getElementById('i-loc').value,
     cond:  document.getElementById('i-cond').value,
-    qty:   parseInt(document.getElementById('i-qty').value) || 1,
+    // الصفر مسموح (نفاد المخزون) — الافتراض 1 فقط عند حقل فارغ/غير رقمي
+    qty:   (() => { const q = parseInt(document.getElementById('i-qty').value); return isNaN(q) ? 1 : Math.max(0, q); })(),
     value: parseFloat(document.getElementById('i-value').value) || 0,
     notes: document.getElementById('i-notes').value.trim()
   };

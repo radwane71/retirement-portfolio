@@ -37,13 +37,26 @@ function _markDirtyTickers(userId, tickers) {
   } catch (_) {}
 }
 
+// أزل رمزاً واحداً من قائمة dirty — يُستدعى فقط بعد نجاح إعادة حسابه
+function _unmarkDirtyTicker(userId, ticker) {
+  try {
+    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
+    const rest = JSON.parse(localStorage.getItem(key) || '[]').filter(t => t !== ticker);
+    if (rest.length) localStorage.setItem(key, JSON.stringify(rest));
+    else localStorage.removeItem(key);
+  } catch (_) {}
+}
+
 async function _flushDirtyTickers(userId) {
   try {
-    const key   = `${DIRTY_TICKERS_KEY}:${userId}`;
-    const dirty = JSON.parse(localStorage.getItem(key) || '[]');
+    const dirty = JSON.parse(localStorage.getItem(`${DIRTY_TICKERS_KEY}:${userId}`) || '[]');
     if (!dirty.length) return;
-    localStorage.removeItem(key);
-    for (const ticker of dirty) await recomputeHoldingFromTx(userId, ticker);
+    // لا نحذف المفتاح قبل إتمام العمل: كل رمز يُزال فور نجاح إعادة حسابه فقط،
+    // فإغلاق الصفحة في منتصف الحلقة لا يُضيع الرموز المتبقية.
+    for (const ticker of dirty) {
+      await recomputeHoldingFromTx(userId, ticker);
+      _unmarkDirtyTicker(userId, ticker);
+    }
   } catch (_) {}
 }
 
@@ -74,31 +87,6 @@ function onSingleTickerInput() {
   const name = official?.name || TICKER_DB[ticker];
   // FIX: always update name — clear old name when ticker changes, fill when found
   document.getElementById('t-name').value = name || '';
-  hideTickerWarning();
-}
-
-function showTickerWarning() {
-  const el = document.getElementById('ticker-warning');
-  if (el) el.style.display = 'flex';
-}
-
-function hideTickerWarning() {
-  const el = document.getElementById('ticker-warning');
-  if (el) el.style.display = 'none';
-}
-
-// يُستدعى عند الضغط على "متابعة" في تحذير الرمز غير المعروف
-function confirmUnknownTicker() {
-  hideTickerWarning();
-  // أكمل الإرسال برمج غير رسمي — المستخدم أكد
-  const form = document.getElementById('tx-form');
-  if (form) form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-}
-
-// يُستدعى عند الضغط على "إلغاء" في تحذير الرمز غير المعروف
-function cancelUnknownTicker() {
-  hideTickerWarning();
-  document.getElementById('t-ticker')?.focus();
 }
 
 function onTypeChange(type) {
@@ -145,6 +133,11 @@ function updateSingleCalc() {
 
 async function addSingleTransaction(e) {
   e.preventDefault();
+  // حماية من النقر المزدوج: عطّل زر «تسجيل» من البداية حتى النهاية
+  const submitBtn = document.getElementById('tx-submit-btn');
+  if (submitBtn?.disabled) return;
+  if (submitBtn) submitBtn.disabled = true;
+  try {
   const shares = +document.getElementById('t-shares').value;
   const price  = +document.getElementById('t-price').value;
   const type   = document.getElementById('t-type').value;
@@ -198,13 +191,16 @@ async function addSingleTransaction(e) {
   // R-1: mark dirty before recompute so a crash/close can't leave holdings stale
   _markDirtyTickers(user.id, [payload.ticker]);
   await recomputeHoldingFromTx(user.id, payload.ticker);
-  _markDirtyTickers(user.id, []);   // recompute done — clear the flag
+  _unmarkDirtyTicker(user.id, payload.ticker);   // recompute done — clear this ticker only
   showToast('تمت إضافة المعاملة', 'success');
   document.getElementById('tx-form').reset();
   document.getElementById('t-date').value = todayISO();
   await loadTransactions();
   renderTable();
   document.getElementById('tx-tbody').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } finally {
+    if (submitBtn) submitBtn.disabled = false;
+  }
 }
 
 // ── Bulk staging ──────────────────────────────────────────────
@@ -303,6 +299,8 @@ function renderStaging() {
 }
 
 async function saveAllStaging() {
+  const btn = document.getElementById('btn-save-all');
+  if (btn?.disabled) return;   // حماية من النقر المزدوج
   const invalid = stagingRows.filter(r => !r.date || !r.ticker.trim() || !r.name.trim() || !+r.shares || (r.type !== 'grant' && !+r.price));
   if (invalid.length) { showToast(`${invalid.length} صف بحقول ناقصة`, 'error'); return; }
 
@@ -322,7 +320,6 @@ async function saveAllStaging() {
   if (!await confirmAsync(`هل تريد إضافة ${stagingRows.length} معاملة؟`)) return;
 
   const { data: { user } } = await supabaseClient.auth.getUser();
-  const btn = document.getElementById('btn-save-all');
   if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الحفظ…'; }
 
   // Build all payloads first, then insert in one atomic request
@@ -337,24 +334,31 @@ async function saveAllStaging() {
   });
 
   const { error } = await supabaseClient.from('transactions').insert(payloads);
-  if (btn) btn.disabled = false;
 
   if (error) {
+    if (btn) { btn.disabled = false; btn.textContent = `إضافة معاملات (${stagingRows.length})`; }
     showToast(`خطأ في الحفظ: ${error.message}`, 'error');
-    if (btn) btn.textContent = `إضافة معاملات (${stagingRows.length})`;
     return;
   }
+
+  // نجح الإدراج: فرّغ صفوف التحضير فوراً حتى لا تُدرَج مرتين بنقرة مزدوجة،
+  // وأبقِ الزر معطلاً حتى نهاية إعادة الحساب
+  stagingRows = [];
+  _stagingId  = 0;
+  renderStaging();
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ إعادة الحساب…'; }
 
   // R-1: mark dirty before loop so a crash mid-loop still recovers on next load
   const affectedTickers = [...new Set(payloads.map(p => p.ticker))];
   _markDirtyTickers(user.id, affectedTickers);
-  for (const ticker of affectedTickers) await recomputeHoldingFromTx(user.id, ticker);
-  _markDirtyTickers(user.id, []);   // all recomputes done — clear the flag
+  for (const ticker of affectedTickers) {
+    await recomputeHoldingFromTx(user.id, ticker);
+    _unmarkDirtyTicker(user.id, ticker);   // أزل الرمز فقط بعد نجاح إعادة حسابه
+  }
 
   showToast(`تم إضافة ${payloads.length} معاملة بنجاح`, 'success');
-  stagingRows = [];
-  _stagingId  = 0;
   addStagingRow();
+  if (btn) btn.disabled = false;
   await loadTransactions();
   renderTable();
   document.getElementById('tx-tbody').scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -362,6 +366,7 @@ async function saveAllStaging() {
 
 // ── DB helpers ────────────────────────────────────────────────
 const TX_PAGE_LIMIT = 3000;
+let _txTotalCount = 0;   // العدد الكلي في قاعدة البيانات (قد يتجاوز المحمّل)
 
 async function loadTransactions() {
   const { data, error, count } = await supabaseClient
@@ -373,6 +378,7 @@ async function loadTransactions() {
 
   if (error) { showToast('خطأ في تحميل البيانات', 'error'); return; }
   transactions = data || [];
+  _txTotalCount = (typeof count === 'number') ? count : transactions.length;
   if (count > TX_PAGE_LIMIT) {
     showToast(`⚠️ يتم عرض ${TX_PAGE_LIMIT} معاملة فقط من أصل ${count} — أرشف المعاملات القديمة لتحسين الأداء`, 'warning');
   }
@@ -553,15 +559,20 @@ async function applyCorpAction() {
   const btn = document.getElementById('corp-apply-btn');
   if (btn) { btn.disabled = true; btn.textContent = 'جارٍ التطبيق…'; }
 
+  // التجزئة غير ذرّية (صف-صفاً): علّم الرمز dirty قبل البدء حتى يُستكمل
+  // إصلاح الحيازة عند أي انقطاع (R-1)
+  _markDirtyTickers(user.id, [ticker]);
+
   // تعديل كل معاملة: shares×factor و price÷factor (total ثابت — لا يُعاد حسابه)
-  let failed = 0;
+  let failed = 0, updated = 0, fractional = false;
   for (const t of affected) {
     const newShares = +(+t.shares * factor).toFixed(6);
+    if (Math.abs(newShares - Math.round(newShares)) > 1e-9) fractional = true;
     const newPrice  = t.type === 'grant' ? 0 : +(+t.price / factor).toFixed(4);
     const { error } = await supabaseClient.from('transactions')
       .update({ shares: newShares, price: newPrice })
       .eq('id', t.id).eq('user_id', user.id);
-    if (error) failed++;
+    if (error) failed++; else updated++;
   }
 
   // عدّل السعر الحالي في المحفظة (السوق يعدّل السعر المعلن بنفس المعامل)
@@ -575,13 +586,25 @@ async function applyCorpAction() {
 
   // أعِد حساب الحيازة من المعاملات المعدَّلة (يضبط shares وWAC)
   await recomputeHoldingFromTx(user.id, ticker);
+  if (!failed) _unmarkDirtyTicker(user.id, ticker);
 
   if (btn) { btn.disabled = false; btn.textContent = 'تطبيق على كل المعاملات'; }
   document.getElementById('corp-modal').style.display = 'none';
-  showToast(
-    failed ? `اكتمل مع ${failed} خطأ — راجع السجل` : `تمت التجزئة على ${affected.length} معاملة ✓`,
-    failed ? 'warning' : 'success'
-  );
+  if (failed) {
+    // فشل جزئي: أرقام دقيقة + تحذير صريح — إعادة تشغيل التجزئة تضرب الصفوف الناجحة مرتين
+    showToast(
+      `⚠️ عُدِّل ${updated} من ${affected.length} صفاً وفشل ${failed}. ` +
+      `لا تُعِد تشغيل التجزئة — ستُضرب الصفوف الناجحة مرتين (ازدواج الضرب). ` +
+      `صحّح الصفوف الفاشلة يدوياً من السجل.`,
+      'error'
+    );
+  } else {
+    showToast(
+      `تمت التجزئة على ${affected.length} معاملة ✓` +
+      (fractional ? ' — ⚠️ نتجت كسور أسهم، عدّل يدوياً حسب التعويض النقدي' : ''),
+      fractional ? 'warning' : 'success'
+    );
+  }
   await loadTransactions();
   renderTable();
   renderTxStats();
@@ -614,7 +637,7 @@ function getSorted() {
   return [...base].sort((a, b) => {
     let av = a[sortField], bv = b[sortField];
     if (sortField === 'date') { av = new Date(av); bv = new Date(bv); }
-    else if (numFields.has(sortField)) { av = +av; bv = +bv; }
+    else if (numFields.has(sortField)) { av = Number(av) || 0; bv = Number(bv) || 0; }   // تطبيع القيم الفارغة/NaN
     else { av = String(av||'').toLowerCase(); bv = String(bv||'').toLowerCase(); }
     if (av < bv) return sortDir === 'asc' ? -1 : 1;
     if (av > bv) return sortDir === 'asc' ? 1 : -1;
@@ -638,8 +661,16 @@ function renderTxStats() {
 
   // حساب الربح/الخسارة الحقيقي بطريقة WAC شاملة العمولة والضريبة
   // نمشي على المعاملات ترتيباً تاريخياً ونتتبع التكلفة الكاملة لكل رمز
-  const sorted = [...transactions].sort((a, b) => new Date(a.date) - new Date(b.date));
+  // كسر تعادل نفس اليوم بـ created_at ثم id تصاعدياً — حتى يُحسب الشراء قبل البيع المسجَّل بعده
+  const sorted = [...transactions].sort((a, b) =>
+    (new Date(a.date) - new Date(b.date)) ||
+    String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+    String(a.id || '').localeCompare(String(b.id || ''))
+  );
   const costMap = {}; // ticker → { shares, totalCost (شاملة عمولة + ضريبة) }
+
+  // الإحصاءات المحققة تتطلب كامل السجل — نافذة مبتورة تعطي أرقاماً مضللة
+  const statsComplete = _txTotalCount <= TX_PAGE_LIMIT;
 
   let profitSells = 0, profitAmount = 0;
   let lossSells   = 0, lossAmount   = 0;
@@ -655,9 +686,11 @@ function renderTxStats() {
     } else if (t.type === 'grant') {
       m.shares += +t.shares; // منحة: تكلفة صفر
     } else if (t.type === 'sell') {
+      // نفس قصّ recomputeHoldingFromTx: لا تُحتسب تكلفة أسهم غير مملوكة عند بيع زائد
+      const sellShares      = Math.min(+t.shares, m.shares);
       // متوسط التكلفة الكاملة للسهم الواحد (شاملة العمولة والضريبة عند الشراء)
       const avgCostPerShare = m.shares > 0 ? m.totalCost / m.shares : 0;
-      const costOfSold      = avgCostPerShare * +t.shares;
+      const costOfSold      = avgCostPerShare * sellShares;
       // صافي عائد البيع (total البيع = أسهم × سعر − عمولة − ضريبة)
       const netProceeds     = +t.total;
       const pnl             = netProceeds - costOfSold;
@@ -666,8 +699,8 @@ function renderTxStats() {
       else          { lossSells++;    lossAmount   += Math.abs(pnl); }
 
       // L-2: deduct cost by share count (matches recomputeHoldingFromTx) not percentage
-      m.totalCost  = Math.max(0, m.totalCost - avgCostPerShare * +t.shares);
-      m.shares     = Math.max(0, m.shares - +t.shares);
+      m.totalCost  = Math.max(0, m.totalCost - avgCostPerShare * sellShares);
+      m.shares     = Math.max(0, m.shares - sellShares);
     }
   });
 
@@ -698,6 +731,7 @@ function renderTxStats() {
       <div class="tx-stat-lbl">منح أسهم</div>
     </div>` : ''}
     <div class="tx-stat-divider"></div>
+    ${statsComplete ? `
     <div class="tx-stat-item">
       <div class="tx-stat-val text-success">↑ ${profitSells}</div>
       <div class="tx-stat-lbl">صفقات رابحة</div>
@@ -708,7 +742,12 @@ function renderTxStats() {
       <div class="tx-stat-val text-danger">↓ ${lossSells}</div>
       <div class="tx-stat-lbl">صفقات خاسرة</div>
       <div class="tx-stat-sub text-danger">−${formatSAR(lossAmount)}</div>
-    </div>`;
+    </div>` : `
+    <div class="tx-stat-item">
+      <div class="tx-stat-val" style="color:var(--text-muted)">⚠️</div>
+      <div class="tx-stat-lbl">الربح/الخسارة المحققة</div>
+      <div class="tx-stat-sub">الإحصاءات تتطلب كامل السجل (${_txTotalCount} معاملة تتجاوز المحمّل ${TX_PAGE_LIMIT})</div>
+    </div>`}`;
 }
 
 // ── Render transaction log ────────────────────────────────────
@@ -718,7 +757,7 @@ function renderTable() {
   if (!tbody) return;
 
   if (!transactions.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="icon">💹</div><p>لا توجد معاملات بعد</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="icon">💹</div><p>لا توجد معاملات بعد</p></div></td></tr>`;
     enableInlineEditing(tbody, onTxSaved);
     return;
   }
@@ -770,6 +809,15 @@ async function onTxSaved(id, field, newVal) {
   if (!row) { await loadTransactions(); renderTable(); return; }
   // I-1: capture old ticker BEFORE mutation so we can recompute it if ticker changed
   const oldTicker = row.ticker;
+  // AUDIT-FIX: تحويل منحة→شراء/بيع بسعر 0 من القائمة المضمّنة يخلق معاملة بتكلفة صفر
+  // تُفسد WAC — أعد النوع كما كان وافرض التعديل من النافذة الكاملة (السعر والنوع معاً)
+  if (field === 'type' && newVal !== 'grant' && !(+row.price > 0)) {
+    await supabaseClient.from('transactions').update({ type: row.type }).eq('id', id);
+    showToast('أدخل سعر الشراء أولاً — عدّل السعر والنوع معاً من نافذة التعديل الكاملة', 'error');
+    renderTable();
+    openEditModal(id);
+    return;
+  }
   row[field] = newVal;
   if (['shares', 'price', 'type', 'ticker'].includes(field)) {
     const isGrant = row.type === 'grant';

@@ -45,6 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const remote = await loadUserSetting(SCH_KEY);
   store = remote || loadLocal();
   try { localStorage.setItem(userLsKey(SCH_KEY), JSON.stringify(store)); } catch {}
+  cleanupOrphanGrades();   // تنظيف درجات يتيمة خلّفها حذف المواد من المستوى الخاطئ سابقاً
   buildEmojiPicker();
   renderChildrenBar();
   if (store.children.length) selectChild(store.children[0].id);
@@ -92,6 +93,18 @@ function selectChild(id) {
   renderBehavior();
   renderHomework();
   renderExams();
+}
+
+// تنظيف الدرجات اليتيمة: مفاتيح مواد لم تعد موجودة في subjects (خلّفها خطأ الحذف
+// القديم من داخل كائنات الفصول). تنظيف في الذاكرة فقط — يُحفظ مع أول persist فعلي،
+// حتى لا ندهس السحابة في مسار التحميل عند فشل شبكة عابر.
+function cleanupOrphanGrades() {
+  (store.children || []).forEach(c => {
+    const valid = new Set((c.subjects || []).map(s => s.id));
+    Object.values(c.grades || {}).forEach(yr => {
+      Object.keys(yr).forEach(sid => { if (!valid.has(sid)) delete yr[sid]; });
+    });
+  });
 }
 
 function showNoChildren() {
@@ -180,8 +193,9 @@ function saveChild() {
   }
   persist();
   closeModal('child-modal');
-  renderChildrenBar();
-  renderProfile();
+  // selectChild يتكفل بشريط الأطفال والملف الشخصي وكل الجداول (أهداف/سنوات/درجات…)
+  if (activeChildId) selectChild(activeChildId);
+  else renderChildrenBar();
 }
 
 async function deleteCurrentChild() {
@@ -308,7 +322,10 @@ function inlineEditGoal(type, gid, field, span) {
   span.innerHTML = '';
   span.appendChild(inp);
   inp.focus(); inp.select();
+  let done = false;   // نفس نمط _doInlineEdit في utils.js — Escape لا يجب أن يحفظ عبر blur
   function commit() {
+    if (done) return;
+    done = true;
     let val = inp.value.trim();
     if (field === 'progress') val = Math.min(100, Math.max(0, parseInt(val)||0));
     g[field] = val;
@@ -318,7 +335,7 @@ function inlineEditGoal(type, gid, field, span) {
   inp.addEventListener('blur', commit);
   inp.addEventListener('keydown', e => {
     if (e.key === 'Enter')  { e.preventDefault(); inp.blur(); }
-    if (e.key === 'Escape') { renderGoals(type); }
+    if (e.key === 'Escape') { done = true; renderGoals(type); }
   });
 }
 
@@ -482,7 +499,7 @@ function buildYearSelect() {
   if (!c?.years.length) { sel.innerHTML = '<option value="">لا توجد سنوات</option>'; return; }
   const cur = sel.value;
   sel.innerHTML = c.years.map(y =>
-    `<option value="${y.id}" ${y.id===cur?'selected':''}>${y.label}${y.class?' — '+y.class:''}</option>`
+    `<option value="${y.id}" ${y.id===cur?'selected':''}>${esc(y.label)}${y.class?' — '+esc(y.class):''}</option>`
   ).join('');
   if (!sel.value && c.years.length) sel.value = c.years[c.years.length-1].id;
 }
@@ -535,8 +552,8 @@ async function deleteSubject(sid) {
   const s = c.subjects.find(x => x.id === sid);
   if (!await confirmAsync(`حذف مادة "${esc(s?.name)}"؟ ستُحذف درجاتها أيضاً.`)) return;
   c.subjects = c.subjects.filter(x => x.id !== sid);
-  // Remove from grades
-  Object.values(c.grades).forEach(yr => Object.values(yr).forEach(tr => delete tr[sid]));
+  // Remove from grades — البنية grades[yearId][subjectId][termId] فالحذف من مستوى السنة مباشرة
+  Object.values(c.grades || {}).forEach(yr => delete yr[sid]);
   persist();
   renderGrades();
 }
