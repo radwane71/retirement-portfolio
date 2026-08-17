@@ -9,13 +9,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="ثروة">
-  <meta name="theme-color" content="#6366f1">
+  <meta name="theme-color" content="#0d1117">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>نصائح مستثمر - ثروة</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260705">
+  <link rel="stylesheet" href="css/style.css?v=20260817">
   <style>
     /* ── نصائح مستثمر ── */
     .tips-intro {
@@ -251,6 +251,7 @@
         <div class="nav-group-body" id="grp-portfolio">
           <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
           <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="reconcile.html"     class="nav-link nav-sub" id="nav-reconcile">   <span class="icon">🧾</span><span>تسوية المعاملات</span></a>
           <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
           <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
           <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
@@ -300,7 +301,12 @@
           <span class="nav-group-chevron">▾</span>
         </button>
         <div class="nav-group-body" id="grp-learn">
-          <a href="invest-tips.html" class="nav-link nav-sub" id="nav-invest-tips"><span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="invest-tips.html"      class="nav-link nav-sub" id="nav-invest-tips">      <span class="icon">⚠️</span><span>نصائح مستثمر</span></a>
+          <a href="emergency-fund.html"   class="nav-link nav-sub" id="nav-emergency-fund">   <span class="icon">🛡️</span><span>صندوق الطوارئ</span></a>
+          <a href="avg-calculator.html"   class="nav-link nav-sub" id="nav-avg-calc">         <span class="icon">📊</span><span>متوسط سعر الشراء</span></a>
+          <a href="portfolio-rating.html" class="nav-link nav-sub" id="nav-portfolio-rating"> <span class="icon">🛡️</span><span>تقييم أمان المحفظة</span></a>
+          <a href="stock-valuation.html"  class="nav-link nav-sub" id="nav-stock-valuation">  <span class="icon">💹</span><span>القيمة العادلة للأسهم</span></a>
+          <a href="profit-taking.html"    class="nav-link nav-sub" id="nav-profit-taking">    <span class="icon">💸</span><span>متى أجني أرباحي؟</span></a>
         </div>
       </div>
       <a href="settings.html" class="nav-link" id="nav-settings"><span class="icon">⚙️</span><span>الإعدادات</span></a>
@@ -345,9 +351,9 @@
         <div class="rule-card">
           <h4>١. بناء المحفظة والتنويع</h4>
           <ul>
-            <li>لا تتجاوز حصة السهم الواحد <strong>6–8%</strong> من إجمالي محفظتك</li>
+            <li>لا تتجاوز حصة السهم الواحد <strong>7%</strong> من إجمالي محفظتك (<strong>12%</strong> للسهم القيادي Blue Chip)</li>
             <li>أكبر 5 أسهم لا تتجاوز مجتمعةً <strong>40%</strong></li>
-            <li>القطاع الواحد لا يتجاوز <strong>15–20%</strong></li>
+            <li>القطاع الواحد لا يتجاوز <strong>25%</strong></li>
             <li>احتفظ بـ <strong>5–10% كاش</strong> داخل المحفظة دائماً — هي ذخيرتك عند الأزمات</li>
           </ul>
         </div>
@@ -473,19 +479,19 @@
     <!-- الاستثمار السلبي -->
     <div class="card">
       <div class="colored-section green">
-        <h2>🗂️ الاستثمار السلبي — صناديق المؤشرات والـ ETF</h2>
-        <p style="color:var(--text-muted);margin-bottom:6px;">ليس كل مستثمر مضطر لاختيار الأسهم بنفسه. هناك بديل أبسط وأثبت إحصائياً.</p>
-        <p style="color:var(--text-muted);margin-bottom:14px;"><strong style="color:var(--text)">صندوق المؤشر (Index Fund / ETF):</strong> يتتبع مؤشراً كاملاً كـ S&P 500 — بدلاً من اختيار أسهم فردية.</p>
+        <h2>🗂️ التنويع القطاعي داخل السوق السعودي (تاسي)</h2>
+        <p style="color:var(--text-muted);margin-bottom:6px;">التنويع الحقيقي لا يعني بالضرورة الخروج من سوقك — يعني ألا تتركز محفظتك في قطاع واحد.</p>
+        <p style="color:var(--text-muted);margin-bottom:14px;"><strong style="color:var(--text)">تاسي يضم أكثر من 20 قطاعاً:</strong> بنوك، بتروكيماويات، إسمنت، ريتات (REITs)، اتصالات، رعاية صحية، مرافق، تجزئة وغيرها — وكل قطاع له دورته الاقتصادية الخاصة.</p>
         <table class="tips-table">
-          <thead><tr><th></th><th>الاستثمار النشط (أسهم فردية)</th><th>الاستثمار السلبي (ETF)</th></tr></thead>
+          <thead><tr><th>المبدأ</th><th>لماذا؟</th></tr></thead>
           <tbody>
-            <tr><td>الوقت المطلوب</td><td>عالٍ</td><td>منخفض جداً</td></tr>
-            <tr><td>الخبرة المطلوبة</td><td>عالية</td><td>منخفضة</td></tr>
-            <tr><td>الرسوم</td><td>أعلى</td><td>أقل بكثير</td></tr>
-            <tr><td>الأداء التاريخي</td><td>يتفوق على السوق نادراً</td><td>يطابق أداء السوق</td></tr>
+            <tr><td>القطاع الواحد ≤ 25%</td><td>حتى لا تُغرق المحفظة أزمةُ قطاع واحد</td></tr>
+            <tr><td>امزج قطاعات دفاعية ودورية</td><td>المرافق والرعاية الصحية تُثبّت الدخل، والبتروكيماويات والإسمنت تتحرك مع الدورة</td></tr>
+            <tr><td>الريتات مصدر توزيعات منتظم</td><td>لكن قيّمها بمقاييسها الصحيحة (FFO / AFFO) لا بأرباح EPS</td></tr>
+            <tr><td>راقب الارتباط بين قطاعاتك</td><td>قطاعان يتحركان معاً لا يضيفان تنويعاً حقيقياً</td></tr>
           </tbody>
         </table>
-        <div class="golden-rule"><strong>توصية للمبتدئ: ابدأ بـ ETF يتتبع مؤشراً عريضاً ريثما تبني خبرتك.</strong></div>
+        <div class="golden-rule"><strong>التنويع القطاعي المنضبط داخل تاسي — مع 18–25 سهماً موزونة — يحقق معظم فائدة التنويع المطلوبة.</strong></div>
       </div>
     </div>
 
@@ -552,9 +558,9 @@
       </div>
       <div class="golden-number-box">
         <h3>🎯 العدد الذهبي للأسهم</h3>
-        <div class="num">15 — 22</div>
-        <p>يصل التنويع الأمثل ذروته عند 15–22 سهماً متنوعاً.</p>
-        <p><strong>أقل من 15:</strong> مخاطر مرتفعة &nbsp;|&nbsp; <strong>أكثر من 22:</strong> إدارة معقدة وتكاليف إضافية</p>
+        <div class="num">18 — 25</div>
+        <p>يصل التنويع الأمثل ذروته عند 18–25 سهماً متنوعاً.</p>
+        <p><strong>أقل من 18:</strong> مخاطر مرتفعة &nbsp;|&nbsp; <strong>أكثر من 25:</strong> إدارة معقدة وتكاليف إضافية</p>
       </div>
       <h3 style="color:var(--text-muted);font-size:0.9rem;margin-bottom:8px;">📉 منحنى تقليل المخاطر بالتنويع</h3>
       <div class="chart-box"><canvas id="diversificationChart"></canvas></div>
@@ -585,11 +591,11 @@
 
   <div id="toast"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.9.1/chart.min.js"></script>
-  <script src="js/supabase.js?v=20260705"></script>
-  <script src="js/auth.js?v=20260705"></script>
-  <script src="js/utils.js?v=20260705"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="js/supabase.js?v=20260817"></script>
+  <script src="js/auth.js?v=20260817"></script>
+  <script src="js/utils.js?v=20260817"></script>
   <script>
     async function init() {
       const user = await requireAuth();

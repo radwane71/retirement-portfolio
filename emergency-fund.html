@@ -9,13 +9,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="ثروة">
-  <meta name="theme-color" content="#6366f1">
+  <meta name="theme-color" content="#0d1117">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>صندوق الطوارئ - ثروة</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260705">
+  <link rel="stylesheet" href="css/style.css?v=20260817">
   <style>
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .calc-input-group { margin-bottom: 16px; }
@@ -84,6 +84,7 @@
         <div class="nav-group-body" id="grp-portfolio">
           <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
           <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="reconcile.html"     class="nav-link nav-sub" id="nav-reconcile">   <span class="icon">🧾</span><span>تسوية المعاملات</span></a>
           <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
           <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
           <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
@@ -214,11 +215,11 @@
   </main>
 
   <div id="toast"></div>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="js/supabase.js?v=20260705"></script>
-  <script src="js/auth.js?v=20260705"></script>
-  <script src="js/utils.js?v=20260705"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
+  <script src="js/supabase.js?v=20260817"></script>
+  <script src="js/auth.js?v=20260817"></script>
+  <script src="js/utils.js?v=20260817"></script>
   <script>
     async function init() {
       const user = await requireAuth();
@@ -328,7 +329,8 @@
     }
 
     function exportToCSV() {
-      const expenses = {housing:parseFloat(document.getElementById('housing').value)||0,utilities:parseFloat(document.getElementById('utilities').value)||0,living:parseFloat(document.getElementById('living').value)||0,transport:parseFloat(document.getElementById('transport').value)||0,commitments:parseFloat(document.getElementById('commitments').value)||0,others:parseFloat(document.getElementById('others').value)||0};
+      // نفس قصّ السالب المطبَّق في الواجهة (Math.max) — حتى لا يخالف CSV ما يظهر على الشاشة
+      const expenses = {housing:Math.max(parseFloat(document.getElementById('housing').value)||0,0),utilities:Math.max(parseFloat(document.getElementById('utilities').value)||0,0),living:Math.max(parseFloat(document.getElementById('living').value)||0,0),transport:Math.max(parseFloat(document.getElementById('transport').value)||0,0),commitments:Math.max(parseFloat(document.getElementById('commitments').value)||0,0),others:Math.max(parseFloat(document.getElementById('others').value)||0,0)};
       const total    = Object.values(expenses).reduce((s,v)=>s+v,0);
       const period   = document.getElementById('coveragePeriod').value;
       const target   = total * parseInt(period);
@@ -338,10 +340,12 @@
       csv += `إجمالي شهري,${total},100%\nالهدف (${period} أشهر),${target},\n`;
       const blob = new Blob([csv],{type:'text/csv;charset=utf-8;'});
       const link = document.createElement('a');
-      link.href  = URL.createObjectURL(blob);
+      const url  = URL.createObjectURL(blob);
+      link.href  = url;
       link.download = 'emergency_fund.csv';
       link.style.display = 'none';
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
     }
 
     init();
