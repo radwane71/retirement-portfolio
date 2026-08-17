@@ -18,7 +18,19 @@ window.CARD_INFO = {
 
 function getStore() {
   try {
-    const raw = localStorage.getItem(userLsKey(SUKUK_KEY)) || localStorage.getItem(SUKUK_KEY);
+    const scopedKey = userLsKey(SUKUK_KEY);
+    let raw = localStorage.getItem(scopedKey);
+    if (raw == null && scopedKey !== SUKUK_KEY) {
+      // ترحيل لمرة واحدة من المفتاح القديم غير المعنون بالمستخدم
+      raw = localStorage.getItem(SUKUK_KEY);
+      if (raw != null) {
+        try {
+          JSON.parse(raw); // تأكد أنه صالح قبل الترحيل
+          localStorage.setItem(scopedKey, raw);
+          localStorage.removeItem(SUKUK_KEY);
+        } catch {}
+      }
+    }
     return JSON.parse(raw) || defaultStore();
   } catch { return defaultStore(); }
 }
@@ -97,12 +109,17 @@ async function init() {
 function renderDashboard() {
   const opps = store.opportunities;
 
-  const subscribedCount = opps.filter(o => o.status === 'مشترك').length;
-  const totalInvested   = opps.reduce((s, o) => s + (+o.amount || 0), 0);
-  const totalSukuk      = opps.reduce((s, o) => s + (+o.sukukCount || 0), 0);
+  // AUDIT-FIX: المجاميع على «مشترك» فقط — «مخطط له» ليس مالاً مستثمراً
+  // و«متعثر» لا يُحتسب عائده المتوقع. «مغلق» انتهى واسترُدّ فلا يدخل
+  // في المستثمر الحالي (توزيعاته المحصّلة تبقى في «محصّل» أدناه).
+  const active = opps.filter(o => o.status === 'مشترك');
+
+  const subscribedCount = active.length;
+  const totalInvested   = active.reduce((s, o) => s + (+o.amount || 0), 0);
+  const totalSukuk      = active.reduce((s, o) => s + (+o.sukukCount || 0), 0);
 
   let totalReturnSAR = 0, totalNetProfit = 0;
-  opps.forEach(o => {
+  active.forEach(o => {
     const c = calcOpp(o);
     totalReturnSAR += c.totalReturnSAR;
     totalNetProfit += c.netProfit;
@@ -112,7 +129,7 @@ function renderDashboard() {
     ? (totalNetProfit / totalInvested * 100)
     : 0;
 
-  // paid distributions
+  // paid distributions — نقد فعلي/مستحق: تبقى على كل الفرص بغض النظر عن الحالة
   const totalPaid = opps.reduce((s, o) =>
     s + (o.distributions || []).filter(d => d.status === 'تم السداد')
         .reduce((ss, d) => ss + (+d.amount || 0), 0), 0);
@@ -128,6 +145,27 @@ function renderDashboard() {
   set('dash-net',        formatSAR(totalNetProfit));
   set('dash-paid',       formatSAR(totalPaid));
   set('dash-unpaid',     formatSAR(totalUnpaid));
+
+  // بطاقة «مخطط له» — مبالغ مرصودة لم تُستثمر بعد (تُنشأ ديناميكياً عند الحاجة)
+  const planned      = opps.filter(o => o.status === 'مخطط له');
+  const plannedTotal = planned.reduce((s, o) => s + (+o.amount || 0), 0);
+  renderPlannedCard(planned.length, plannedTotal);
+}
+
+function renderPlannedCard(count, total) {
+  const dash = document.querySelector('.sukuk-dash');
+  if (!dash) return;
+  let card = document.getElementById('dash-planned-card');
+  if (!count) { if (card) card.remove(); return; }
+  if (!card) {
+    card = document.createElement('div');
+    card.id = 'dash-planned-card';
+    card.className = 'sk-card';
+    dash.appendChild(card);
+  }
+  card.innerHTML = `
+    <div class="sk-label" title="فرص بحالة «مخطط له» — مبالغ مرصودة لم تُستثمر بعد ولا تدخل في المجاميع">مخطط له (${count})</div>
+    <div class="sk-val" style="color:#3b82f6">${formatSAR(total)}</div>`;
 }
 
 function set(id, val) {
@@ -298,6 +336,11 @@ async function saveOpp() {
     showToast('يرجى تعبئة جميع الحقول المطلوبة', 'error');
     return;
   }
+  // AUDIT-FIX: منع القيم السالبة/الصفرية غير المنطقية
+  if (amount <= 0 || duration <= 0 || annual < 0) {
+    showToast('المبلغ والمدة يجب أن يكونا أكبر من صفر، والعائد لا يكون سالباً', 'error');
+    return;
+  }
 
   if (editOppId) {
     const o = store.opportunities.find(x => x.id === editOppId);
@@ -419,6 +462,7 @@ function saveDist() {
 
   if (editDistId) {
     const d = o.distributions.find(x => x.id === editDistId);
+    if (!d) { showToast('التوزيعة لم تعد موجودة', 'error'); return; }
     Object.assign(d, { month, year, amount, status });
     showToast('تم تحديث التوزيعة', 'success');
   } else {
@@ -510,9 +554,7 @@ function addStatus(type) {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function esc(str) {
-  return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// esc() المشتركة من utils.js (محمَّلة قبل هذا الملف) — أُزيلت النسخة المحلية الناقصة
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {

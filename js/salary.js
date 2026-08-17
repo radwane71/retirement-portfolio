@@ -35,19 +35,19 @@ const KNOWN_TYPE_MAP = {
   'cat_retirement': 'asset',   // محفظة التقاعد = أصل ✅
 };
 
+// تخمين ذكي لنوع الفئة من اسمها (يُستخدم في الترقية وفي استيراد CSV)
+function _guessCatType(name) {
+  const n = name || '';
+  if (/ادخار|طارئ|احتياط|مدخر/i.test(n))                        return 'savings';
+  if (/أصول|استثمار|تقاعد|محفظ|عقار|صكوك|سهم|ذهب/i.test(n)) return 'asset';
+  return 'expense';
+}
+
 function _migrateCategoryTypes() {
   let changed = false;
   store.categories.forEach(c => {
     if (c.type) return;   // مضبوط مسبقاً
-    if (KNOWN_TYPE_MAP[c.id]) {
-      c.type = KNOWN_TYPE_MAP[c.id];
-    } else {
-      // تخمين ذكي من الاسم
-      const n = c.name;
-      if (/ادخار|طارئ|احتياط|مدخر/i.test(n))                        c.type = 'savings';
-      else if (/أصول|استثمار|تقاعد|محفظ|عقار|صكوك|سهم|ذهب/i.test(n)) c.type = 'asset';
-      else                                                              c.type = 'expense';
-    }
+    c.type = KNOWN_TYPE_MAP[c.id] || _guessCatType(c.name);
     changed = true;
   });
   if (changed) saveStore(store);
@@ -56,7 +56,19 @@ function _migrateCategoryTypes() {
 function getStore() {
   // قراءة من cache المحلي — يُحدَّث عند init() من Supabase
   try {
-    const raw = localStorage.getItem(userLsKey(STORE_KEY)) || localStorage.getItem(STORE_KEY);
+    const scopedKey = userLsKey(STORE_KEY);
+    let raw = localStorage.getItem(scopedKey);
+    if (raw == null && scopedKey !== STORE_KEY) {
+      // ترحيل لمرة واحدة من المفتاح القديم غير المعنون بالمستخدم
+      raw = localStorage.getItem(STORE_KEY);
+      if (raw != null) {
+        try {
+          JSON.parse(raw); // تأكد أنه صالح قبل الترحيل
+          localStorage.setItem(scopedKey, raw);
+          localStorage.removeItem(STORE_KEY);
+        } catch {}
+      }
+    }
     return JSON.parse(raw) || defaultStore();
   } catch { return defaultStore(); }
 }
@@ -355,7 +367,8 @@ function startRenameCategory(catId, el) {
 async function confirmDeleteCategory(catId) {
   const cat = store.categories.find(c => c.id === catId);
   if (!cat) return;
-  if (!await confirmAsync(`⚠️ حذف فئة "${esc(cat.name)}"؟\nسيتم حذفها من جميع السجلات الشهرية.`)) return;
+  // AUDIT-FIX: confirmAsync تهرّب الرسالة داخلياً — تمرير الاسم الخام يمنع التهريب المزدوج
+  if (!await confirmAsync(`⚠️ حذف فئة "${cat.name}"؟\nسيتم حذفها من جميع السجلات الشهرية.`)) return;
   store.categories = store.categories.filter(c => c.id !== catId);
   store.entries.forEach(e => {
     e.allocations = (e.allocations || []).filter(a => a.catId !== catId);
@@ -717,7 +730,7 @@ function renderTable() {
 
   if (!entries.length) {
     document.getElementById('salary-tbody').innerHTML =
-      `<tr><td colspan="${4+store.categories.length+1}" class="empty-state">لا توجد سجلات</td></tr>`;
+      `<tr><td colspan="${store.categories.length + 6}" class="empty-state">لا توجد سجلات</td></tr>`;
     return;
   }
 
@@ -809,8 +822,9 @@ function buildAllocationsForm(existing) {
     el.textContent = 'المتبقي: ' + formatSAR(rem);
     el.className   = 'modal-remaining ' + (rem < 0 ? 'neg' : rem > 0 ? 'pos' : '');
   }
-  salaryInp.addEventListener('input', updateRemaining);
-  container.addEventListener('input', updateRemaining);
+  // AUDIT-FIX: oninput مباشر بدل addEventListener — يمنع تراكم المستمعين مع كل فتح للمودال
+  salaryInp.oninput  = updateRemaining;
+  container.oninput  = updateRemaining;
   updateRemaining();
 }
 
@@ -966,7 +980,11 @@ function parseAndImportCSV(text) {
     showToast('تعذّر العثور على أعمدة السنة / الشهر / الراتب', 'error'); return;
   }
 
-  const allColEnd = colRemaining > 0 ? colRemaining : header.length - 2;
+  // AUDIT-FIX: لا تفترض وجود عمودي «المتبقي/ملاحظات» — عند غيابهما كل الأعمدة
+  // المتبقية فئات (كان header.length - 2 يسقط آخر فئتين بصمت)
+  const allColEnd = colRemaining > colSalary ? colRemaining
+                  : colNotes     > colSalary ? colNotes
+                  : header.length;
   const allocCols = [];
   for (let c = colSalary + 1; c < allColEnd; c++) {
     let name = '';
@@ -979,7 +997,13 @@ function parseAndImportCSV(text) {
 
   allocCols.forEach(ac => {
     if (!store.categories.find(c => c.name === ac.name)) {
-      store.categories.push({ id: uid(), name: ac.name, color: CC[store.categories.length % CC.length] });
+      // AUDIT-FIX: تحديد النوع لحظة الاستيراد — وإلا يظهر مؤشر الادخار 0% حتى إعادة التحميل
+      store.categories.push({
+        id:    uid(),
+        name:  ac.name,
+        color: CC[store.categories.length % CC.length],
+        type:  _guessCatType(ac.name),
+      });
     }
   });
 
@@ -1054,9 +1078,7 @@ function exportCSV() {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-function esc(str) {
-  return String(str||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// esc() المشتركة من utils.js (محمَّلة قبل هذا الملف) — أُزيلت النسخة المحلية الناقصة
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeModal(); closeDeleteModal(); closeResetModal(); }

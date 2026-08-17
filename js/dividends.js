@@ -105,8 +105,12 @@ async function loadDividends() {
 }
 
 function renderAll() {
-  renderDivStats();
-  renderSummaries();
+  // AUDIT-FIX: _projectedAnnualIncome كانت تُحسب 3 مرات لكل رندر (الإحصائيات
+  // والملخص السنوي وملخص الأسهم) — تُحسب الآن مرة واحدة وتُمرَّر، وكذلك buildCostMaps.
+  const fwd  = _projectedAnnualIncome();
+  const maps = buildCostMaps();
+  renderDivStats(fwd);
+  renderSummaries(maps, fwd);
   renderTable();
   renderIncomeChart();
   renderDividendQuality();
@@ -196,7 +200,11 @@ function _dpsTrendAware(dpsSeries, freq) {
   const window = dpsSeries.slice(-freq);          // آخر دورة سنوية (بالترتيب الزمني)
   const medianOf = arr => {
     const s = arr.slice().sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
+    // AUDIT-FIX 2026-08: وسيط النافذة الزوجية = متوسط العنصرين الأوسطين
+    // (كان يأخذ الأعلى منهما فينحاز لأعلى) — يطابق dashboard.js
+    return s.length % 2 === 0
+      ? (s[s.length / 2 - 1] + s[s.length / 2]) / 2
+      : s[Math.floor(s.length / 2)];
   };
   // نحتاج دورة كاملة على الأقل (freq دفعات) لتأكيد الاتجاه، وإلا نرجع للوسيط
   if (freq >= 2 && window.length >= freq && n >= freq) {
@@ -242,7 +250,9 @@ function _projectedAnnualIncome() {
       }
       gaps.sort((a, b) => a - b);
       const medGap = gaps[Math.floor(gaps.length / 2)];
-      if (medGap <= 105)      { freq = 4; freqLabel = 'ربع سنوي'; }
+      // AUDIT-FIX 2026-08: فرع شهري (REITs الشهرية مثلاً) — كان الكشف يسقف عند 4 (يطابق dashboard.js)
+      if (medGap <= 45)       { freq = 12; freqLabel = 'شهري'; }
+      else if (medGap <= 105) { freq = 4; freqLabel = 'ربع سنوي'; }
       else if (medGap <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
     }
 
@@ -272,20 +282,35 @@ function _projectedAnnualIncome() {
       lastDivDate    = lastValidDate;
       sharesAtRefDiv = lastValidShares;
     } else {
-      // fallback: اشترى السهم بعد كل التوزيعات المسجّلة — نقدّر من آخر سنة
-      // مسجّلة ÷ الأسهم الحالية (H-9: لا الإجمالي الكلي الذي يضخّم DPS)
+      // fallback: اشترى السهم بعد كل التوزيعات المسجّلة — نقدّر من التوزيعات
+      // المسجّلة ÷ الأسهم الحالية (H-9: لا الإجمالي الكلي الذي يضخّم DPS)
+      // AUDIT-FIX: قسمة «مجموع آخر سنة ÷ freq» تفترض السنة مكتملة — سنة جزئية
+      // (السنة الجارية بدفعتين من 4 مثلاً) كانت تُقسم على freq كاملة فينخفض DPS.
+      // الحل: آخر سنة مكتملة (< السنة الجارية) إن وُجدت؛ وإلا نُسنّي الدفعات
+      // الجزئية بعددها الفعلي: DPS للفترة = المجموع ÷ الأسهم ÷ عدد الدفعات.
       const lastDiv  = tickerDivs[tickerDivs.length - 1];
       lastDivDate    = _divSortDate(lastDiv);
-      const lastYear = Math.max(...tickerDivs.map(d => +d.year || new Date(lastDivDate).getFullYear()));
-      const lastYearTotal = tickerDivs
-        .filter(d => (+d.year || new Date(_divSortDate(d)).getFullYear()) === lastYear)
-        .reduce((s, d) => s + +d.amount, 0);
-      // lastYearTotal مجموع سنة كاملة بالفعل → نقسمه على الدورية ليصبح DPS لكل
-      // فترة، وإلا فإن ضربه بـ freq في السطر الموحّد يضخّمه freq أضعاف.
-      // أما الدفعة المفردة فهي لفترة واحدة → تبقى كما هي لتُسنوى بالضرب بـ freq.
-      dps            = lastYearTotal > 0
-        ? lastYearTotal / +holding.shares / freq
-        : +lastDiv.amount / +holding.shares;
+      const curYear  = new Date().getFullYear();
+      const yearOf   = d => +d.year || new Date(_divSortDate(d)).getFullYear();
+      const completeYears = tickerDivs.map(yearOf).filter(y => y < curYear);
+      if (completeYears.length) {
+        const lastFullYear  = Math.max(...completeYears);
+        const fullYearTotal = tickerDivs
+          .filter(d => yearOf(d) === lastFullYear)
+          .reduce((s, d) => s + +d.amount, 0);
+        // مجموع سنة مكتملة ÷ الدورية = DPS لكل فترة (يُسنّى لاحقاً بالضرب بـ freq)
+        dps = fullYearTotal > 0
+          ? fullYearTotal / +holding.shares / freq
+          : +lastDiv.amount / +holding.shares;
+      } else {
+        // لا توجد سنة مكتملة — دفعات السنة الجارية الجزئية تُسنّى بعددها الفعلي
+        const lastYear     = Math.max(...tickerDivs.map(yearOf));
+        const partialDivs  = tickerDivs.filter(d => yearOf(d) === lastYear);
+        const partialTotal = partialDivs.reduce((s, d) => s + +d.amount, 0);
+        dps = partialTotal > 0 && partialDivs.length
+          ? partialTotal / +holding.shares / partialDivs.length
+          : +lastDiv.amount / +holding.shares;
+      }
       sharesAtRefDiv = +holding.shares;
       lastValidAmt   = +lastDiv.amount;
       usedFallback   = true;
@@ -307,7 +332,7 @@ function _projectedAnnualIncome() {
 }
 
 // ── شريط الإحصائيات الكلية ────────────────────────────────────
-function renderDivStats() {
+function renderDivStats(fwdPrecomputed) {
   const el = document.getElementById('div-stats');
   if (!el) return;
 
@@ -330,18 +355,21 @@ function renderDivStats() {
   const ttmYocCls = ttmYoc >= 5 ? 'text-success' : ttmYoc >= 3 ? 'text-accent' : 'text-muted';
 
   // Forward Projected — الأصح للمحافظ النامية: آخر دفعة لكل سهم × دوريتها × الأسهم الحالية
-  const fwd        = _projectedAnnualIncome();
+  const fwd        = fwdPrecomputed || _projectedAnnualIncome();
   const fwdYoc     = netCapital > 0 ? fwd.total / netCapital * 100 : 0;
   const fwdYocCls  = fwdYoc >= 5 ? 'text-success' : fwdYoc >= 3 ? 'text-accent' : 'text-muted';
 
   // ── شارة نضج: العائد التوزيعي مبكّر قبل اكتمال دورة سنة كاملة ──
-  const _txArr    = (typeof transactions !== 'undefined') ? transactions : [];
-  const _firstBuy = _txArr.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0];
+  // AUDIT-FIX: كان يفحص متغير transactions (معرَّف في transactions.js غير المحمّل هنا)
+  // فيرجع دائماً عمراً صفرياً — نشتق أول شراء من txBuyRows المتاحة فعلاً في الصفحة.
+  const _firstBuy = txBuyRows.filter(t => t.date).map(t => t.date).sort()[0];
   const _ageM     = (typeof portfolioAgeMonths === 'function') ? portfolioAgeMonths(_firstBuy) : 0;
   const _divCalYr = new Set(dividends.map(d => +d.year || new Date(d.date).getFullYear())).size;
+  // AUDIT-FIX: أرضية Math.max(1,…) كانت تجعل «لم تكتمل دورة سنوية» (divYears < 1)
+  // مستحيلة — الآن 0 قبل اكتمال 12 شهراً حتى تعمل شارة «مبكّر» في assessMetricMaturity.
   const _mDiv     = assessMetricMaturity('divYield', {
     ageMonths: _ageM,
-    divYears:  Math.min(_divCalYr, Math.max(1, Math.ceil(_ageM / 12))),
+    divYears:  Math.min(_divCalYr, _ageM >= 12 ? Math.ceil(_ageM / 12) : 0),
     divCount:  dividends.length,
   });
   const _dvBadge  = maturityBadge(_mDiv.level, _mDiv.reason);
@@ -653,14 +681,14 @@ function buildCostMaps() {
 // ══════════════════════════════════════════════════════════════
 // رسم الملخصات
 // ══════════════════════════════════════════════════════════════
-function renderSummaries() {
-  const maps = buildCostMaps();
-  renderYearlySummary(maps);
-  renderHoldingSummary(maps);
+function renderSummaries(maps, fwd) {
+  maps = maps || buildCostMaps();
+  renderYearlySummary(maps, fwd);
+  renderHoldingSummary(maps, fwd);
 }
 
 // ── اليمين: الإجمالي السنوي ───────────────────────────────────
-function renderYearlySummary({ yearPortfolio }) {
+function renderYearlySummary({ yearPortfolio }, fwdPrecomputed) {
   const yearMap = {};
   dividends.forEach(d => {
     yearMap[d.year] = (yearMap[d.year] || 0) + +d.amount;
@@ -681,7 +709,7 @@ function renderYearlySummary({ yearPortfolio }) {
   const daysInYear  = ((currentYear % 4 === 0 && currentYear % 100 !== 0) || currentYear % 400 === 0) ? 366 : 365;
 
   // Forward projected للسنة الجارية
-  const fwd = _projectedAnnualIncome();
+  const fwd = fwdPrecomputed || _projectedAnnualIncome();
   const fwdNetCap = (() => {
     const tickers = [...new Set([...txBuyRows.map(t => t.ticker), ...txSellRows.map(t => t.ticker)])];
     return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
@@ -792,7 +820,7 @@ function renderYearlySummary({ yearPortfolio }) {
 }
 
 // ── اليسار: لكل سهم مع فلتر السنة ───────────────────────────
-function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
+function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }, fwdPrecomputed) {
   // جمع الأرباح لكل سهم لكل سنة
   const holdMap = {};
   dividends.forEach(d => {
@@ -854,8 +882,11 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
   const today = new Date();
   const tickerConfidence = {};
   tickers.forEach(ticker => {
-    const tickerDivs = dividends.filter(d => d.ticker === ticker).sort((a,b) => a.date?.localeCompare(b.date));
-    const firstDate   = tickerDivs[0]?.date ? new Date(tickerDivs[0].date) : null;
+    // AUDIT-FIX: a.date?.localeCompare(b.date) يرجع undefined عند غياب date —
+    // نستخدم _divSortDate (يبني التاريخ من year/month عند الغياب) كمقارن صالح.
+    const tickerDivs = dividends.filter(d => d.ticker === ticker)
+      .sort((a, b) => _divSortDate(a).localeCompare(_divSortDate(b)));
+    const firstDate   = tickerDivs[0] ? parseDateLocal(_divSortDate(tickerDivs[0])) : null;
     const daysSince   = firstDate ? Math.floor((today - firstDate) / 86400000) : 0;
     const paymentCount = tickerDivs.length;
     const level = (daysSince >= 730 && paymentCount >= 3) ? 'full'
@@ -865,7 +896,7 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }) {
   });
 
   // Forward projected لكل سهم (للعمود الإضافي)
-  const fwdData = _projectedAnnualIncome();
+  const fwdData = fwdPrecomputed || _projectedAnnualIncome();
   const fwdMap  = {};
   fwdData.breakdown.forEach(b => { fwdMap[b.ticker] = b; });
 

@@ -52,12 +52,19 @@ async function loadEntries() {
   }));
 }
 
+// AUDIT-FIX: سنة القيد بـ parseDateLocal (من utils.js) بدل new Date —
+// تحليل UTC كان قد يُزحزح قيد 1 يناير/31 ديسمبر لسنة مجاورة حسب المنطقة الزمنية
+function _cfYear(dateStr) {
+  const d = parseDateLocal(dateStr);
+  return d ? d.getFullYear() : null;
+}
+
 function buildYearFilter() {
   // يشمل سنوات التدفقات النقدية + سنوات الأرباح الموزعة
   const years = [...new Set([
-    ...cfEntries.map(e => new Date(e.date).getFullYear()),
-    ...divEntries.map(e => new Date(e.date).getFullYear()).filter(Boolean),
-  ])].sort((a,b) => b-a);
+    ...cfEntries.map(e => _cfYear(e.date)),
+    ...divEntries.map(e => _cfYear(e.date)),
+  ].filter(Boolean))].sort((a,b) => b-a);
   const sel = document.getElementById('cf-year-filter');
   // keep first "كل السنوات" option
   sel.innerHTML = '<option value="">كل السنوات</option>' +
@@ -72,8 +79,8 @@ let divFiltered = [];
 
 function applyFilter() {
   const yr = document.getElementById('cf-year-filter')?.value;
-  cfFiltered  = yr ? cfEntries.filter(e => new Date(e.date).getFullYear() === +yr)  : [...cfEntries];
-  divFiltered = yr ? divEntries.filter(e => new Date(e.date).getFullYear() === +yr) : [...divEntries];
+  cfFiltered  = yr ? cfEntries.filter(e => _cfYear(e.date) === +yr)  : [...cfEntries];
+  divFiltered = yr ? divEntries.filter(e => _cfYear(e.date) === +yr) : [...divEntries];
 }
 
 function filterYear() {
@@ -88,9 +95,9 @@ function renderSummary() {
   const net       = totalDep - totalWith;
 
   const curYear   = new Date().getFullYear();
-  const yearDep   = cfEntries.filter(e => e.type === 'deposit'    && new Date(e.date).getFullYear() === curYear).reduce((s,e) => s + +e.amount, 0);
-  const yearWith  = cfEntries.filter(e => e.type === 'withdrawal' && new Date(e.date).getFullYear() === curYear).reduce((s,e) => s + +e.amount, 0);
-  const yearDiv   = divEntries.filter(e => new Date(e.date).getFullYear() === curYear).reduce((s,e) => s + +e.amount, 0);
+  const yearDep   = cfEntries.filter(e => e.type === 'deposit'    && _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
+  const yearWith  = cfEntries.filter(e => e.type === 'withdrawal' && _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
+  const yearDiv   = divEntries.filter(e => _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
   const yearNet   = yearDep - yearWith;
 
   const el = id => document.getElementById(id);
@@ -206,8 +213,9 @@ async function archiveEntry(id) {
 
 // ── تصدير CSV ─────────────────────────────────────────────────
 function exportCashflowsCSV() {
-  const manualData = cfFiltered.length ? cfFiltered : cfEntries;
-  const divData    = divFiltered.length ? divFiltered : divEntries;
+  // AUDIT-FIX: التصدير يحترم الفلتر دائماً — كان فراغ أحد الشقين يُصدّر الكل
+  const manualData = cfFiltered;
+  const divData    = divFiltered;
   const combined   = [...manualData, ...divData].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   if (!combined.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
   exportCSV(`تدفقات_نقدية_${todayISO()}.csv`,
