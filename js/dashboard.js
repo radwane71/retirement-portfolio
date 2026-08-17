@@ -288,7 +288,6 @@ function startPriceAutoRefresh() {
 // تعيد رسم قائمة جزئية مختلفة — القائمة الكاملة هنا واحدة للجميع) ──────
 function renderAllCards() {
   renderStats();
-  renderRebalancingAlerts();
   renderPortfolioHealthCard();
   renderDiversificationCard();
   renderCharts();
@@ -876,7 +875,6 @@ async function reloadHoldings() {
     return h;
   });
   _seedPriceTimestampsFromDB();   // AUDIT-FIX 2026-08: نفس بذر loadAllData بعد إعادة التحميل
-  renderRebalancingAlerts();
   renderPortfolioHealthCard(); renderDiversificationCard();
 }
 
@@ -1185,97 +1183,6 @@ function renderStats() {
   }
 
   renderInsights(s, totalValue, costBasis, pnl, pnlPct);
-}
-
-// ══════════════════════════════════════════════════════════════
-// ⚖️ بانر تنبيهات إعادة التوازن
-// يعرض الأسهم المنحرفة عن أوزانها المستهدفة بناءً على عتبات التنبيه
-// ══════════════════════════════════════════════════════════════
-function renderRebalancingAlerts() {
-  const el = document.getElementById('rebal-alerts-banner');
-  if (!el) return;
-
-  if (!holdings.length || !Object.keys(stockTargets).length) {
-    el.style.display = 'none';
-    return;
-  }
-
-  const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
-  if (!totalVal) { el.style.display = 'none'; return; }
-
-  const green  = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const yellow = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
-
-  // حساب الانحرافات لكل سهم له هدف
-  const deviations = [];
-  for (const [ticker, target] of Object.entries(stockTargets)) {
-    if (!target) continue;
-    const h = holdings.find(x => x.ticker === ticker);
-    const current = h ? (+h.shares * +h.current_price) / totalVal * 100 : 0;
-    const diff = current - target;
-    if (Math.abs(diff) > green) {
-      deviations.push({ ticker, name: h?.name || ticker, current, target, diff });
-    }
-  }
-
-  if (!deviations.length) { el.style.display = 'none'; return; }
-
-  const reds    = deviations.filter(d => Math.abs(d.diff) > yellow);
-  const yellows = deviations.filter(d => Math.abs(d.diff) > green && Math.abs(d.diff) <= yellow);
-
-  // ترتيب تنازلي بالانحراف المطلق
-  deviations.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
-  const top = deviations.slice(0, 4);
-
-  const bannerState = reds.length ? 'bad' : 'warn';
-  const bannerClr   = stateColorOf(bannerState);
-  const borderColor = tint(bannerClr, '59');
-  const bgColor     = tint(bannerClr, '0d');
-  const title       = reds.length
-    ? `⚖️ ${reds.length} سهم منحرف بشكل حاد عن الهدف (> ${yellow}%)`
-    : `⚠️ ${yellows.length} سهم خارج النطاق الأمثل (> ${green}%)`;
-
-  const chips = top.map(d => {
-    const isRed     = Math.abs(d.diff) > yellow;
-    const color     = stateColorOf(isRed ? 'bad' : 'warn');
-    const arrow     = d.diff > 0 ? '↑' : '↓';
-    const sign      = d.diff > 0 ? '+' : '';
-    const isUnder   = d.diff < 0; // ناقص الوزن → اقتراح شراء
-    const h         = holdings.find(x => x.ticker === d.ticker);
-    const curPrice  = h ? +h.current_price : null;
-    const zone      = stockZones[d.ticker];
-    const entryPx   = zone?.entry_price ?? null;
-    // تحذير: السهم ناقص الوزن لكن سعره فوق هدف الشراء
-    const aboveEntry = isUnder && entryPx != null && curPrice != null && curPrice > entryPx;
-    const warningTag = aboveEntry
-      ? `<span class="tag" data-state="bad" title="السعر الحالي ${curPrice} فوق هدف الشراء ${entryPx} — تحقق من القيمة العادلة قبل الشراء">⚠️ فوق الهدف</span>`
-      : '';
-    return `<span onclick="showStockAlertDetail('${esc(d.ticker)}')" title="اضغط لتفاصيل ${esc(d.ticker)}" style="
-      display:inline-flex;align-items:center;gap:4px;cursor:pointer;
-      background:${color}18;border:1px solid ${color}40;
-      border-radius:20px;padding:3px 10px;font-size:.78rem;font-weight:600;
-      color:${color};white-space:nowrap
-    ">${esc(d.ticker)} ${arrow}${sign}${d.diff.toFixed(1)}%
-      <span style="font-weight:400;color:var(--text-muted)">${d.current.toFixed(1)}%→${d.target}%</span>
-      ${warningTag}
-    </span>`;
-  }).join('');
-
-  const moreCount = deviations.length - top.length;
-
-  el.style.display = 'block';
-  el.style.marginBottom = '16px';
-  el.innerHTML = `
-    <div style="
-      border:1px solid ${borderColor};background:${bgColor};
-      border-radius:10px;padding:12px 16px;
-      display:flex;align-items:center;flex-wrap:wrap;gap:10px;
-    ">
-      <span style="font-weight:700;font-size:.88rem;flex-shrink:0">${title}</span>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;flex:1">${chips}</div>
-      ${moreCount > 0 ? `<span class="small text-muted" style="white-space:nowrap">+${moreCount} أخرى</span>` : ''}
-      <a href="targets.html" class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-right:auto">⚖️ إعادة التوازن →</a>
-    </div>`;
 }
 
 // ── نافذة تفاصيل السهم عند الضغط على تنبيه إعادة التوازن ──────────────

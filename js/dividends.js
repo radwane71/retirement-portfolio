@@ -503,28 +503,35 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
     : 0;
 
   // ── درجة الثقة (0–100) ───────────────────────────────────────────
-  const agePct  = months < 3  ? 0.05 : months < 6  ? 0.22 :
-                  months < 9  ? 0.35 : months < 12 ? 0.50 :
-                  months < 18 ? 0.67 : months < 24 ? 0.80 :
-                  months < 36 ? 0.90 : 1.00;
-  const divPct  = divYears === 0 ? 0.05 :
-                  divYears === 1 ? 0.48 :
-                  divYears === 2 ? 0.75 :
-                  divYears >= 3  ? 0.95 : 0.05;
-  const covPct  = fwdCoveredCount === 0       ? 0.10 :
-                  fwdCoveredCount < uniqueTickers * 0.5 ? 0.50 :
-                  fwdCoveredCount < uniqueTickers * 0.8 ? 0.75 : 0.95;
+  // AUDIT-FIX (2026-08): كانت الدرجة دوالَّ درجية (شرطية) فتتجمّد شهوراً ثم
+  // تقفز: 9-11 شهراً كلها 58%، و12-17 كلها 75%. بدت للمالك «معلّقة/معطّلة».
+  // الآن استيفاء خطّي بين نفس نقاط المعايرة السابقة — الأرقام عند النقاط
+  // المفصلية لم تتغيّر (9 شهر = 58% كما كانت)، لكنها تتحرّك كل شهر بينها.
+  const lerp = (x, pts) => {
+    if (x <= pts[0][0]) return pts[0][1];
+    const last = pts[pts.length - 1];
+    if (x >= last[0]) return last[1];
+    for (let i = 1; i < pts.length; i++) {
+      const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+      if (x <= x1) return y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
+    }
+    return last[1];
+  };
 
-  const score = Math.round(agePct * 45 + divPct * 35 + covPct * 20);
+  const agePct = lerp(cwMonths, [[0,.05],[3,.22],[6,.35],[9,.50],[12,.67],[18,.80],[24,.90],[36,1]]);
+  // دورات الأرباح كقيمة متصلة: عدد السنوات المسجَّلة مسقوفاً بعمر المحفظة
+  // الفعلي بالكسور — سنة جزئية تُحتسب جزئياً لا كاملة ولا مهملة.
+  const divCycles = Math.min(divYearsSet.size, calMonths / 12);
+  const divPct = lerp(divCycles, [[0,.05],[1,.48],[2,.75],[3,.95]]);
+  const covRatio = uniqueTickers > 0 ? fwdCoveredCount / uniqueTickers : 0;
+  const covPct = lerp(covRatio, [[0,.10],[.5,.50],[.8,.75],[1,.95]]);
 
-  // ── مستوى الثقة ──────────────────────────────────────────────────
-  let badgeColor, borderColor, bgColor;
-  if      (score < 30) { badgeColor='#f85149'; borderColor='rgba(248,81,73,.3)';  bgColor='rgba(248,81,73,.05)'; }
-  else if (score < 45) { badgeColor='#f85149'; borderColor='rgba(248,81,73,.2)';  bgColor='rgba(248,81,73,.04)'; }
-  else if (score < 60) { badgeColor='#f0b429'; borderColor='rgba(240,180,41,.3)'; bgColor='rgba(240,180,41,.05)'; }
-  else if (score < 75) { badgeColor='#f0b429'; borderColor='rgba(240,180,41,.2)'; bgColor='rgba(240,180,41,.04)'; }
-  else if (score < 87) { badgeColor='#3fb950'; borderColor='rgba(63,185,80,.3)';  bgColor='rgba(63,185,80,.05)'; }
-  else                 { badgeColor='#3b82f6'; borderColor='rgba(59,130,246,.3)'; bgColor='rgba(59,130,246,.05)'; }
+  const agePts = agePct * 45, divPts = divPct * 35, covPts = covPct * 20;
+  const score  = Math.round(agePts + divPts + covPts);
+
+  // ── مستوى الثقة ── (رموز التصميم بدل ألوان مكتوبة يدوياً)
+  const state = score < 45 ? 'bad' : score < 75 ? 'warn' : 'good';
+  const stVar = `var(--st-${state})`;
 
   // ── رسالة المستشار المالي ──────────────────────────────────────────
   const fmtM       = m => m < 12 ? `${Math.round(m)} شهر` : `${(m/12).toFixed(1)} سنة`;
@@ -561,32 +568,61 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
     advice = 'بياناتك من بين أفضل ما يمكن العمل به في الاستثمار الشخصي.';
   }
 
+  // ── تفكيك الدرجة: من أين جاء الرقم وما الذي يرفعه ──────────────────
+  // المالك رأى «58%» ثابتة شهوراً بلا تفسير. الشفافية تحلّ ذلك: كل محور
+  // يعرض نقاطه من سقفه، وما تبقّى فيه هو بالضبط ما يرفع الدرجة.
+  const axis = (name, pts, max, detail) => {
+    const pct = max > 0 ? pts / max * 100 : 0;
+    const st  = pct >= 75 ? 'good' : pct >= 45 ? 'warn' : 'bad';
+    return `<div class="meter" data-state="${st}">
+        <div class="meter-head">
+          <span class="k">${name} <span class="text-muted">${detail}</span></span>
+          <span class="v">${pts.toFixed(0)} / ${max}</span>
+        </div>
+        <div class="meter-wrap"><div class="meter-track">
+          <div class="meter-fill" style="width:${pct.toFixed(1)}%"></div>
+        </div></div>
+      </div>`;
+  };
+
+  // الرافعة الأكبر = المحور صاحب أكبر نقاط مفقودة
+  const gaps = [
+    { n: 'عمر رأس المال',   miss: 45 - agePts, how: cwMonths < 36 ? `يرتفع تلقائياً كل شهر حتى ٣ سنوات (الآن ${fmtM(cwMonths)})` : 'مكتمل' },
+    { n: 'سنوات الأرباح',   miss: 35 - divPts, how: divCycles < 3 ? `يرتفع مع كل دورة أرباح سنوية جديدة (الآن ${divCycles.toFixed(1)} دورة)` : 'مكتمل' },
+    { n: 'تغطية المتوقَّع', miss: 20 - covPts, how: covRatio < 1 ? `${uniqueTickers - fwdCoveredCount} سهم بلا دخل متوقَّع محسوب — سجّل توزيعاتها` : 'مكتمل' },
+  ].sort((a, b) => b.miss - a.miss);
+  const lever = gaps[0];
+
   el.innerHTML = `
-    <div style="
-      border:1px solid ${borderColor};
-      background:${bgColor};
-      border-radius:10px;
-      padding:12px 16px;
-    ">
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px">
+    <div class="note" data-state="${state}" style="flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%">
         <span style="font-weight:700;font-size:.9rem">${title}</span>
-        <span style="
-          background:${badgeColor};color:#fff;border-radius:20px;
-          padding:1px 9px;font-size:.72rem;font-weight:700;white-space:nowrap
-        ">ثقة البيانات ${score}%</span>
-        <span style="
-          background:var(--bg-2);border:1px solid var(--border);
-          border-radius:20px;padding:1px 9px;font-size:.70rem;color:var(--text-muted);white-space:nowrap
-        "
-        title="عمر رأس المال الفعلي (مرجَّح بالمعاملات) = ${months} شهر&#10;العمر التقويمي = ${calMonths} شهر&#10;الضخ التدريجي يقلّص عمر رأس المال الفعلي">
+        <span class="tag" data-state="${state}">ثقة البيانات ${score}%</span>
+        <span class="tag"
+          title="عمر رأس المال الفعلي (مرجَّح بالمعاملات) = ${months} شهر&#10;العمر التقويمي = ${calMonths} شهر&#10;الضخ التدريجي يقلّص عمر رأس المال الفعلي">
           ${cwDiff >= 2
             ? `رأس المال الفعلي: ${monthsText} | تقويمي: ${calText}`
             : `عمر المحفظة: ${monthsText}`}
           · ${divYears} سنة أرباح · ${uniqueTickers} موزِّع
         </span>
       </div>
-      <p style="font-size:.81rem;color:var(--text-2);margin:0 0 5px;line-height:1.6">${body}</p>
-      <p style="font-size:.79rem;color:${badgeColor};margin:0;font-weight:600">💡 ${advice}</p>
+      <p style="font-size:.81rem;color:var(--text-2);margin:0;line-height:1.6">${body}</p>
+
+      <details style="width:100%">
+        <summary style="cursor:pointer;font-size:.78rem;color:var(--text-2);font-weight:600">
+          مِمَّ تتكوّن هذه الدرجة؟ (اضغط للتفصيل)
+        </summary>
+        <div class="stack-2" style="margin-top:10px">
+          ${axis('عمر رأس المال', agePts, 45, `— ${fmtM(cwMonths)}`)}
+          ${axis('سنوات الأرباح', divPts, 35, `— ${divCycles.toFixed(1)} دورة`)}
+          ${axis('تغطية الدخل المتوقَّع', covPts, 20, `— ${fwdCoveredCount} من ${uniqueTickers} سهم`)}
+          <div style="font-size:.75rem;color:var(--text-2);line-height:1.6;margin-top:2px">
+            <b>أكبر رافعة:</b> ${esc(lever.n)} — ينقصه ${lever.miss.toFixed(0)} نقطة. ${esc(lever.how)}
+          </div>
+        </div>
+      </details>
+
+      <p style="font-size:.79rem;color:${stVar};margin:0;font-weight:600">💡 ${advice}</p>
     </div>`;
 }
 
