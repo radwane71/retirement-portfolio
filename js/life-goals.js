@@ -36,9 +36,17 @@ async function loadGoalsRemote() {
   if (goals.length) await saveUserSetting(GOALS_KEY, goals);
 }
 
+// سلسلة حفظ واحدة (queue): تضمن ترتيب الكتابات السحابية وتُظهر toast عند الفشل
+// بدل fire-and-forget الصامت الذي كان يبتلع أخطاء المزامنة
+let _cloudSaveQueue = Promise.resolve();
 function saveGoals(list) {
   try { localStorage.setItem(userLsKey(GOALS_KEY), JSON.stringify(list)); } catch {}
-  saveUserSetting(GOALS_KEY, list).catch(() => {});   // مزامنة سحابية عبر الأجهزة
+  const snapshot = list.slice();
+  _cloudSaveQueue = _cloudSaveQueue
+    .then(() => saveUserSetting(GOALS_KEY, snapshot))
+    .catch(() => {
+      showToast('⚠️ تعذّرت المزامنة السحابية — التغييرات محفوظة على هذا الجهاز فقط', 'error');
+    });
 }
 
 // ─── Init ──────────────────────────────────────────────────────────────────────
@@ -74,8 +82,11 @@ function buildAreaFilter() {
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function isOverdue(g) {
   if (!g.date || g.status === 'مكتمل' || g.status === 'ملغي') return false;
-  const d = new Date(g.date); d.setHours(0,0,0,0);
-  const t = new Date();      t.setHours(0,0,0,0);
+  // parseDateLocal (utils.js): منتصف الليل المحلي — new Date('YYYY-MM-DD') يفسَّر UTC
+  // فينزاح يوماً في المناطق الزمنية الموجبة (هدف موعده اليوم يظهر متأخراً)
+  const d = parseDateLocal(g.date);
+  if (!d) return false;
+  const t = new Date(); t.setHours(0,0,0,0);
   return d < t;
 }
 
@@ -149,7 +160,8 @@ function deadlineInfo(g) {
   if (!g.date) return null;
   if (g.status === 'مكتمل' || g.status === 'ملغي') return null;
   const today = new Date(); today.setHours(0,0,0,0);
-  const d = new Date(g.date); d.setHours(0,0,0,0);
+  const d = parseDateLocal(g.date);              // محلي — لا انزياح UTC
+  if (!d) return null;
   const days = Math.round((d - today) / 86400000);
   if (days < 0)  return { cls:'overdue', icon:'⚠️', txt:`متأخّر ${fmtDur(-days)}` };
   if (days === 0) return { cls:'soon', icon:'⏰', txt:'موعده اليوم' };
@@ -228,7 +240,13 @@ function toggleDone(id) {
   if (!g) return;
   if (g.status === 'مكتمل') {
     g.status = 'قيد التنفيذ';
+    // استرجاع نسبة التقدّم التي كانت قبل الإتمام (وإلا بقيت 100% زوراً)
+    if (g._prevProgress != null) {
+      g.progress = g._prevProgress;
+      delete g._prevProgress;
+    }
   } else {
+    g._prevProgress = Math.max(0, Math.min(100, +g.progress || 0));
     g.status = 'مكتمل';
     g.progress = 100;
   }

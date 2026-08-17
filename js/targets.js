@@ -34,6 +34,20 @@ window.CARD_INFO = {
   },
 };
 
+// ── معرّف DOM موحّد لحقل هدف السهم (تناظر كتابة/قراءة) ─────────
+// تُستخدم في التوليد (render) والقراءة (save/validate) معاً — أي محرف خاص
+// في الرمز يتحول لنفس الشكل في الطرفين بدل esc() عند الكتابة والخام عند القراءة
+function stInputId(ticker) {
+  return 'st-' + String(ticker).replace(/[^\w؀-ۿ-]/g, '_');
+}
+
+// ── معرّف DOM لحقل هدف القطاع — خريطة فهرس رقمي فريد (لا تصادم نصي) ──
+let _sectorIdMap = {};   // sector → index (تُبنى في renderSectorTargets)
+function secInputId(sector) {
+  const idx = _sectorIdMap[sector];
+  return idx == null ? null : 'sec-i-' + idx;
+}
+
 // ── حالة الترتيب لجدول الأسهم ──────────────────────────────────
 let _stSortField = '';    // الحقل المُرتَّب حالياً
 let _stSortDir   = 'asc';
@@ -55,7 +69,9 @@ async function loadAll() {
     supabaseClient.from('holdings').select('*'),
     supabaseClient.from('stock_targets').select('*'),
     supabaseClient.from('sector_targets').select('*'),
-    supabaseClient.from('portfolio_tasks').select('type,ticker,status,accumulate_at,trim_from,liquidate_above').eq('status','active'),
+    // الترتيب إجباري: منطق «أول مهمة نصادفها لكل رمز هي الأحدث» يفترض الأحدث أولاً،
+    // وبدون order يرجع Supabase ترتيباً غير مضمون
+    supabaseClient.from('portfolio_tasks').select('type,ticker,status,accumulate_at,trim_from,liquidate_above').eq('status','active').order('created_at', { ascending: false }),
   ]);
 
   userStocks = usRes.data || [];
@@ -111,6 +127,9 @@ async function loadAll() {
           marginText:     res.marginText || '',
           models:         Array.isArray(res.models) ? res.models : [],
           date:           e.date || '',
+          // e.id هو Date.now() وقت إنشاء التقييم — الطابع الزمني الوحيد القابل
+          // للقياس (حقل date نص هجري غير قابل للتحليل) — يُستخدم لشارة «قديم»
+          ts:             (Number.isFinite(+e.id) && +e.id > 0) ? +e.id : null,
           companyType:    e.inputs?.companyType || 'normal',
         };
       });
@@ -281,7 +300,9 @@ function taskBadgeHtml(ticker) {
   const type = taskMap[ticker];
   if (!type) return '<span class="small text-muted">—</span>';
   const b = TASK_BADGE[type] || {};
-  return `<span class="task-badge" style="${b.style||''}" title="مهمة فعّالة: ${b.label||type}">${b.icon} ${b.label||type}</span>`;
+  // نوع غير معروف (خارج TASK_BADGE) يأتي من DB — يُهرَّب قبل الحقن في HTML
+  const label = b.label || esc(type);
+  return `<span class="task-badge" style="${b.style||''}" title="مهمة فعّالة: ${label}">${b.icon || ''} ${label}</span>`;
 }
 
 // ── ترتيب جدول الأسهم ──────────────────────────────────────
@@ -348,9 +369,10 @@ function renderStockTargets() {
         case 'ticker':  av = a.ticker;  bv = b.ticker;  break;
         case 'name':    av = a.name;    bv = b.name;    break;
         case 'sector':  av = a.sector;  bv = b.sector;  break;
-        case 'entry':   av = +(taskZonesMap[a.ticker]?.accumulate_at||0);   bv = +(taskZonesMap[b.ticker]?.accumulate_at||0);   break;
+        // entry/exit: القيمة المدمجة نفسها التي يقرأها محرك إعادة التوازن (stockZones)
+        case 'entry':   av = +(aZone.entry_price||0);                       bv = +(bZone.entry_price||0);                       break;
         case 'trim':    av = +(taskZonesMap[a.ticker]?.trim_from||0);       bv = +(taskZonesMap[b.ticker]?.trim_from||0);       break;
-        case 'exit':    av = +(taskZonesMap[a.ticker]?.liquidate_above||0); bv = +(taskZonesMap[b.ticker]?.liquidate_above||0); break;
+        case 'exit':    av = +(aZone.exit_price||0);                        bv = +(bZone.exit_price||0);                        break;
         case 'target':  av = stockTargets[a.ticker]||0; bv = stockTargets[b.ticker]||0; break;
         case 'current': av = getStockWeight(a.ticker); bv = getStockWeight(b.ticker); break;
         case 'status': {
@@ -368,7 +390,7 @@ function renderStockTargets() {
   }
 
   if (!allStocks.length) {
-    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
       <div class="icon">📋</div>
       <p>لا توجد أسهم — أضف معاملات أو أضف أسهماً لـ<a href="userdb.html" style="color:var(--accent)">قاعدة بياناتك</a></p>
     </div></td></tr>`;
@@ -381,6 +403,7 @@ function renderStockTargets() {
   tbody.innerHTML = allStocks.map(s => {
     const target   = stockTargets[s.ticker] || 0;
     const tz       = taskZonesMap[s.ticker] || {};
+    const zone     = stockZones[s.ticker]   || {};   // المدمج: مهام + قيم DB القديمة
     const current  = getStockWeight(s.ticker);   // 0 للمخطط
     const al       = s.planned ? { cls: 'text-muted', icon: '📌', label: 'مخطط', rowCls: 'planned-row' }
                                 : alertStatus(current, target);
@@ -388,18 +411,24 @@ function renderStockTargets() {
     const barColor = al.cls === 'text-success' ? '#22c55e' : al.cls === 'text-accent' ? '#f0b429' : '#f85149';
 
     const fmtZone = v => v ? `<span class="num small">${formatSAR(v)}</span>` : `<span class="text-muted small">—</span>`;
+    // نعرض القيمة المدمجة نفسها التي يستخدمها محرك إعادة التوازن، مع وسم مصدرها:
+    // «مهمة» = من مهمة نشطة في صفحة التقييمات · «محفوظ» = قيمة سابقة في stock_targets
+    const srcTag = fromTask => `<span class="small text-muted" style="font-size:.6rem;opacity:.8"
+      title="${fromTask ? 'المصدر: مهمة نشطة في صفحة التقييمات' : 'المصدر: قيمة محفوظة سابقاً في أهداف الأسهم — لا مهمة نشطة'}">${fromTask ? 'مهمة' : 'محفوظ'}</span>`;
+    const zoneCell = (mergedVal, taskVal) =>
+      mergedVal ? `${fmtZone(mergedVal)} ${srcTag(!!taskVal)}` : fmtZone(mergedVal);
 
     return `<tr class="${al.rowCls || ''}">
       <td>${taskBadgeHtml(s.ticker)}</td>
       <td><strong class="text-accent">${esc(s.ticker)}</strong></td>
       <td>${esc(s.name)}</td>
       <td class="small text-muted">${esc(s.sector)}</td>
-      <td>${fmtZone(tz.accumulate_at)}</td>
+      <td>${zoneCell(zone.entry_price, tz.accumulate_at)}</td>
       <td style="color:var(--accent)">${fmtZone(tz.trim_from)}</td>
-      <td>${fmtZone(tz.liquidate_above)}</td>
+      <td>${zoneCell(zone.exit_price, tz.liquidate_above)}</td>
       <td>
         <input class="target-input" type="number" min="0" max="100" step="0.1"
-               id="st-${esc(s.ticker)}" value="${target || ''}" placeholder="0">
+               id="${stInputId(s.ticker)}" value="${target || ''}" placeholder="0">
         <span class="small text-muted"> %</span>
       </td>
       <td class="num bold ${al.cls}">${s.planned ? '<span class="small">مخطط</span>' : current.toFixed(2) + '%'}</td>
@@ -472,6 +501,11 @@ function renderSectorTargets() {
     return;
   }
 
+  // خريطة sector → فهرس رقمي فريد: التطبيع النصي القديم كان قابلاً للتصادم
+  // (قطاعان يختلفان بمحرف خاص فقط ينتجان نفس الـ id فيُقرأ هدف أحدهما للآخر)
+  _sectorIdMap = {};
+  sectors.forEach((sec, i) => { _sectorIdMap[sec] = i; });
+
   tbody.innerHTML = sectors.map(sec => {
     const target       = sectorTargets[sec] || 0;
     const current      = getSectorWeight(sec);
@@ -483,7 +517,7 @@ function renderSectorTargets() {
       <td><strong>${esc(sec)}</strong></td>
       <td>
         <input class="target-input" type="number" min="0" max="100" step="0.1"
-               id="sec-${esc(sec.replace(/[^a-zA-Z0-9؀-ۿ]/g,'_'))}" value="${target || ''}" placeholder="0">
+               id="${secInputId(sec)}" value="${target || ''}" placeholder="0">
         <span class="small text-muted"> %</span>
       </td>
       <td class="num bold ${al.cls}">${current.toFixed(2)}%</td>
@@ -535,7 +569,7 @@ function validateSectorConsistency() {
   ];
 
   allTickers.forEach(({ ticker, sector }) => {
-    const pct = +(document.getElementById('st-' + ticker)?.value || 0);
+    const pct = +(document.getElementById(stInputId(ticker))?.value || 0);
     sectorStockSum[sector] = (sectorStockSum[sector] || 0) + pct;
   });
 
@@ -580,7 +614,8 @@ async function saveAllTargets() {
     showToast(`⚠️ إجمالي الأهداف ${stockSum.toFixed(1)}% — تبقى ${(100-stockSum).toFixed(1)}% غير موزعة. تم الحفظ.`, 'warning');
   }
 
-  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { data: { user } = {} } = await supabaseClient.auth.getUser();
+  if (!user) { showToast('انتهت الجلسة — سجّل الدخول من جديد ثم أعد الحفظ', 'error'); return; }
 
   const holdingTickers = new Set(holdings.map(h => h.ticker));
   const allTickers = [
@@ -596,7 +631,7 @@ async function saveAllTargets() {
     return {
       user_id:     user.id,
       ticker,
-      target_pct:  +(document.getElementById('st-' + ticker)?.value || 0),
+      target_pct:  +(document.getElementById(stInputId(ticker))?.value || 0),
       entry_price: tz.accumulate_at   ?? existing.entry_price ?? null,
       exit_price:  tz.liquidate_above ?? existing.exit_price  ?? null,
     };
@@ -611,7 +646,7 @@ async function saveAllTargets() {
   await Promise.all([...holdingTickers].map(ticker => {
     const h = holdings.find(x => x.ticker === ticker);
     if (!h) return Promise.resolve();
-    const tw = +(document.getElementById('st-' + ticker)?.value || 0);
+    const tw = +(document.getElementById(stInputId(ticker))?.value || 0);
     return supabaseClient.from('holdings').update({ target_weight: tw }).eq('id', h.id);
   }));
 
@@ -631,17 +666,23 @@ async function saveSectorTargets() {
     showToast(`⚠️ إجمالي الأهداف ${secSum.toFixed(1)}% — تبقى ${(100-secSum).toFixed(1)}% غير موزعة. تم الحفظ.`, 'warning');
   }
 
-  const { data: { user } } = await supabaseClient.auth.getUser();
+  const { data: { user } = {} } = await supabaseClient.auth.getUser();
+  if (!user) { showToast('انتهت الجلسة — سجّل الدخول من جديد ثم أعد الحفظ', 'error'); return; }
   const sectorSet = new Set([
     ...holdings.map(h => (h.sector || '').trim() || 'غير مصنف'),
     ...Object.keys(sectorTargets)
   ]);
 
-  const rows = [...sectorSet].map(sec => ({
-    user_id:    user.id,
-    sector:     sec,
-    target_pct: +(document.getElementById('sec-' + sec.replace(/[^a-zA-Z0-9؀-ۿ]/g,'_'))?.value || 0)
-  }));
+  const rows = [...sectorSet].map(sec => {
+    // القراءة بنفس خريطة الفهرس المستخدمة في الرسم — لا تطبيع نصي قابل للتصادم.
+    // إن لم يكن القطاع مرسوماً (لا عنصر DOM) نحافظ على هدفه المحفوظ بدل تصفيره.
+    const el = secInputId(sec) ? document.getElementById(secInputId(sec)) : null;
+    return {
+      user_id:    user.id,
+      sector:     sec,
+      target_pct: el ? +(el.value || 0) : (sectorTargets[sec] || 0),
+    };
+  });
 
   const { error } = await supabaseClient.from('sector_targets')
     .upsert(rows, { onConflict: 'user_id,sector' });
@@ -657,26 +698,20 @@ function exportTargetsCSV() {
   const sectorRows = Object.entries(sectorTargets);
   if (!stockRows.length && !sectorRows.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
 
-  const BOM = '﻿';
-  const lines = [];
-  lines.push('== أهداف الأسهم ==');
-  lines.push(['الرمز', 'الاسم', 'الوزن المستهدف %', 'الوزن الحالي %'].join(','));
+  // exportCSV المشتركة من utils.js — تتكفّل بالتهريب (فواصل/اقتباسات في الأسماء) والـ BOM
+  const rows = [];
+  rows.push(['الرمز', 'الاسم', 'الوزن المستهدف %', 'الوزن الحالي %']);
   stockRows.forEach(([ticker, pct]) => {
     const h = holdings.find(x => x.ticker === ticker);
     const cur = totalValue > 0 && h ? (+h.shares * +h.current_price / totalValue * 100).toFixed(2) : '—';
-    lines.push([ticker, h?.name || '', pct, cur].join(','));
+    rows.push([ticker, h?.name || '', pct, cur]);
   });
-  lines.push('');
-  lines.push('== أهداف القطاعات ==');
-  lines.push(['القطاع', 'الوزن المستهدف %'].join(','));
-  sectorRows.forEach(([sector, pct]) => lines.push([sector, pct].join(',')));
+  rows.push([]);
+  rows.push(['== أهداف القطاعات ==']);
+  rows.push(['القطاع', 'الوزن المستهدف %']);
+  sectorRows.forEach(([sector, pct]) => rows.push([sector, pct]));
 
-  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = `أهداف_${todayISO()}.csv`;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
+  exportCSV(`أهداف_${todayISO()}.csv`, ['== أهداف الأسهم =='], rows);
   showToast(`✓ تم التصدير`, 'success');
 }
 
@@ -751,6 +786,7 @@ function valuationScore(ticker, price) {
     score: Math.max(0, Math.min(1, score)), label, reason, source,
     fairValueAvg: v?.fairValueAvg ?? null, range: v?.fairValueRange ?? null,
     marginText: v?.marginText || '', valDate: v?.date || '',
+    valTs: v?.ts ?? null,
   };
 }
 
@@ -779,7 +815,16 @@ function valScaleHtml(val) {
       <span>متضخم</span><span>تخفيف</span><span>تجميع</span>
     </div>
     <div class="small text-muted" style="line-height:1.5">${esc(val.reason)}</div>
-    ${val.range ? `<div class="small text-muted">عادلة: ${esc(val.range)}${val.valDate ? ` · ${esc(val.valDate)}` : ''}</div>` : ''}`;
+    ${val.range ? `<div class="small text-muted">عادلة: ${esc(val.range)}${val.valDate ? ` · ${esc(val.valDate)}` : ''}${_staleValBadge(val.valTs)}</div>` : ''}`;
+}
+
+// شارة «قديم» لتقييم تجاوز عمره 90 يوماً — قاعدة حداثة البيانات (§2 في CLAUDE.md).
+// العمر يُقاس من طابع إنشاء التقييم (id = Date.now()) لغياب تاريخ قابل للتحليل.
+function _staleValBadge(ts) {
+  if (!ts || (Date.now() - ts) <= 90 * 86400000) return '';
+  const days = Math.round((Date.now() - ts) / 86400000);
+  return ` <span style="background:rgba(248,81,73,0.15);color:#f85149;border-radius:4px;padding:0 5px;font-size:.62rem;font-weight:700"
+    title="عمر هذا التقييم ${days} يوماً — تجاوز حدّ الحداثة 90 يوماً (§2). أعد تقييم السهم في حاسبة القيمة العادلة">⚠️ قديم</span>`;
 }
 
 function runRebalancing() {
@@ -876,9 +921,19 @@ function runRebalancing() {
     const each = budget / pool.length;
     allocations = pool.map(c => ({ ...c, allocated: Math.min(each, c.maxAlloc) }));
   } else {
-    // أولوية للأعلى أولوية (فجوة × تقييم) فقط — مقيّدة بـ maxAlloc أيضاً
-    const top = candidates_[0];
-    allocations = [{ ...top, allocated: Math.min(budget, top.maxAlloc) }];
+    // الأولى بالأولوية (فجوة × تقييم) — مع تمرير الفائض (cascade): إذا قيّد
+    // maxAlloc المرشح الأول، ينتقل المتبقي للمرشح التالي حتى تُستهلك الميزانية
+    // أو ينفد المرشحون (بدل ترك الفائض نقداً بلا سبب)
+    allocations = [];
+    let remaining = budget;
+    for (const c of candidates_) {
+      if (remaining <= 0) break;
+      const amt = Math.min(remaining, c.maxAlloc);
+      if (amt > 0) {
+        allocations.push({ ...c, allocated: amt });
+        remaining -= amt;
+      }
+    }
   }
 
   // ── احسب عدد الأسهم القابل للشراء (تقريب للأسفل دائماً) ────

@@ -78,9 +78,9 @@ function addDcaPeriod(amount = 0, years = 5) {
   row.id = `dca-row-${id}`;
   row.innerHTML = `
     <span class="dca-label">فترة ${id}</span>
-    <input type="number" class="dca-amount" placeholder="المبلغ / شهر (ر.س)" value="${amount || ''}" min="0" step="100" oninput="updateDcaBar();runForecast()">
+    <input type="number" class="dca-amount" placeholder="المبلغ / شهر — 8000 مثلاً" value="${amount || ''}" min="0" step="100" oninput="debouncedDcaInput()">
     <span class="dca-label" style="min-width:auto">لمدة</span>
-    <input type="number" class="dca-years" placeholder="سنوات" value="${years || ''}" min="0.5" step="0.5" style="max-width:80px" oninput="updateDcaBar();runForecast()">
+    <input type="number" class="dca-years" placeholder="سنوات" value="${years || ''}" min="0.5" step="0.5" style="max-width:80px" oninput="debouncedDcaInput()">
     <span class="dca-label" style="min-width:auto">سنة</span>
     <button type="button" class="dca-rm-btn" onclick="removeDcaPeriod(${id})">×</button>`;
   container.appendChild(row);
@@ -134,6 +134,54 @@ function updateDcaBar() {
 }
 
 // المعالم تُبنى ديناميكياً كل سنة في renderMilestoneTable
+
+// ── قراءة معدل التضخم من الحقل (آمنة: 0% الصريح يبقى 0 ولا ينقلب 2.5%) ──
+function readInflationRate() {
+  const v = parseFloat(document.getElementById('inp-inflation-rate')?.value);
+  return Number.isFinite(v) ? v / 100 : 0.025;
+}
+
+// ── debounce لحقول الإدخال الحية (هدم/بناء الرسم عند كل حرف مكلف) ──
+let _forecastDebounceTimer = null;
+function debouncedRunForecast() {
+  clearTimeout(_forecastDebounceTimer);
+  _forecastDebounceTimer = setTimeout(runForecast, 200);
+}
+let _dcaDebounceTimer = null;
+function debouncedDcaInput() {
+  clearTimeout(_dcaDebounceTimer);
+  _dcaDebounceTimer = setTimeout(() => { updateDcaBar(); runForecast(); }, 200);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// درجة ثقة البيانات — الدالة الموحّدة الوحيدة (تُستدعى من loadHistoricalData
+// ومن renderDataConfidenceBanner معاً حتى يتطابق رقم البانر مع رقم المزج)
+// تُطبّق سقف دورات الأرباح: min(السنوات الخام, ceil(العمر التقويمي/12))
+// ══════════════════════════════════════════════════════════════════════
+function computeDataConfidence(cwMonths, calMonths, rawDivYears, holdingsCount) {
+  const maxCycles = Math.max(1, Math.ceil(calMonths / 12));
+  const divYears  = Math.min(rawDivYears, maxCycles);
+  const months    = cwMonths;
+
+  // العامل 1: عمر رأس المال الفعلي — لا التقويمي (وزن 45%)
+  const agePct = months < 3  ? 0.05 : months < 6  ? 0.20 :
+                 months < 9  ? 0.32 : months < 12 ? 0.45 :
+                 months < 18 ? 0.62 : months < 24 ? 0.76 :
+                 months < 36 ? 0.88 : 1.00;
+
+  // العامل 2: دورات الأرباح الفعلية المسقّفة بعمر المحفظة (وزن 35%)
+  const divPct = divYears === 0 ? 0.05 :
+                 divYears === 1 ? 0.45 :
+                 divYears === 2 ? 0.72 : 0.95;
+
+  // العامل 3: عدد الأسهم / التنويع (وزن 20%)
+  const holdPct = holdingsCount < 3  ? 0.40 :
+                  holdingsCount < 6  ? 0.65 :
+                  holdingsCount < 10 ? 0.82 : 0.95;
+
+  const score = Math.round(agePct * 45 + divPct * 35 + holdPct * 20);
+  return { score, agePct, divPct, holdPct, divYears };
+}
 
 // ── معيار تاسي طويل المدى (نمو سعري فقط) ──────────────────────────────
 // مشتق من أداء مؤشر تاسي الفعلي 2005-2024 (المصدر: Saudi Exchange / Wikipedia):
@@ -284,7 +332,9 @@ async function loadHistoricalData() {
     if (t.type === 'sell') xirrFlows.push({ date: parseDateLocal(t.date), amount: +(+t.total) });
   });
   divRows.forEach(d => {
-    const dDate = d.date ? parseDateLocal(d.date) : new Date(+d.year, 5, 1); // June local
+    // توزيعة بلا تاريخ: نفترض 1 يونيو من سنتها، مسقوفاً باليوم — لا تدفق مستقبلياً في XIRR
+    const assumed = new Date(+d.year, 5, 1); // June local
+    const dDate = d.date ? parseDateLocal(d.date) : (assumed > today ? today : assumed);
     xirrFlows.push({ date: dDate, amount: +d.amount });
   });
   if (currentValue > 0) xirrFlows.push({ date: new Date(), amount: currentValue });
@@ -307,7 +357,8 @@ async function loadHistoricalData() {
   // السنة (1 يونيو) كما في XIRR للاتساق.
   const ttmCutoff = new Date(today.getTime() - 365 * 86400000);
   const ttmDivTotal = divRows.reduce((s, d) => {
-    const dDate = d.date ? parseDateLocal(d.date) : new Date(+d.year, 5, 1);
+    const assumed = new Date(+d.year, 5, 1);
+    const dDate = d.date ? parseDateLocal(d.date) : (assumed > today ? today : assumed);
     return (dDate && dDate >= ttmCutoff && dDate <= today) ? s + +d.amount : s;
   }, 0);
 
@@ -343,9 +394,15 @@ async function loadHistoricalData() {
       : rawCapGrowth
   ));
 
-  // متوسط الإضافة الشهرية التاريخية
-  const totalDeposited    = cfRows.filter(e => e.type==='deposit').reduce((s,e) => s + +e.amount, 0);
-  const avgMonthlyDeposit = yearsActive > 0 ? totalDeposited / (yearsActive * 12) : 0;
+  // متوسط الإضافة الشهرية التاريخية — مقسوماً على العمر من أول *إيداع* لا أول شراء
+  // (أول شراء قد يسبق أول إيداع مسجَّل فيُخفَّض المتوسط زوراً)
+  const depositRows       = cfRows.filter(e => e.type==='deposit');
+  const totalDeposited    = depositRows.reduce((s,e) => s + +e.amount, 0);
+  const firstDepositStr   = depositRows.filter(e => e.date).map(e => e.date).sort()[0] || null;
+  const depositYears      = firstDepositStr
+    ? Math.max(0.5, (today - parseDateLocal(firstDepositStr)) / (365.25 * 86400000))
+    : yearsActive;
+  const avgMonthlyDeposit = depositYears > 0 ? totalDeposited / (depositYears * 12) : 0;
 
   // ══════════════════════════════════════════════════════════════════════
   // عمر رأس المال المرجَّح بالتدفقات (Capital-Weighted Age)
@@ -405,16 +462,17 @@ async function loadHistoricalData() {
   divRows.forEach(d => { divByYear[d.year] = (divByYear[d.year] || 0) + +d.amount; });
 
   // ══════════════════════════════════════════════════════════════════════
-  // درجة الثقة (نفس خوارزمية renderDataConfidenceBanner — نُعيد حسابها هنا
-  // لاستخدامها في المزج الواقعي للسيناريو المعتدل)
+  // درجة الثقة — الدالة الموحّدة computeDataConfidence (نفسها التي يستدعيها
+  // البانر) حتى يتطابق رقم البانر مع الرقم الداخل في المزج blendedCapGrowth
   // ══════════════════════════════════════════════════════════════════════
-  const _cwM  = Math.round(capitalWeightedMonths);
-  const _divY = [...new Set(divRows.map(d => d.year))].length;
-  const _agePct  = _cwM < 3 ? 0.05 : _cwM < 6 ? 0.20 : _cwM < 9 ? 0.32 : _cwM < 12 ? 0.45 :
-                   _cwM < 18 ? 0.62 : _cwM < 24 ? 0.76 : _cwM < 36 ? 0.88 : 1.00;
-  const _divPct  = _divY === 0 ? 0.05 : _divY === 1 ? 0.45 : _divY === 2 ? 0.72 : 0.95;
-  const _holdPct = hRows.length < 3 ? 0.40 : hRows.length < 6 ? 0.65 : hRows.length < 10 ? 0.82 : 0.95;
-  const confidenceScore = Math.round(_agePct * 45 + _divPct * 35 + _holdPct * 20);
+  const _rawDivY = [...new Set(divRows.map(d => d.year))].length;
+  const _conf = computeDataConfidence(
+    Math.round(capitalWeightedMonths),
+    Math.round(yearsActive * 12),
+    _rawDivY,
+    hRows.length
+  );
+  const confidenceScore = _conf.score;
 
   // ── المزج الواقعي للسيناريو المعتدل ────────────────────────────────
   // معيار السوق (تاسي الحديثة 2010-2024): نمو سعري ~4.4% سنوياً — MARKET_CAP_BENCHMARK
@@ -455,7 +513,7 @@ async function loadHistoricalData() {
     divByYear,
     holdingsCount: hRows.length,
     confidenceScore,
-    divYears: _divY,
+    divYears: _conf.divYears,
     fireGoal,
   };
 }
@@ -464,8 +522,8 @@ async function loadHistoricalData() {
 function applyFireGoal() {
   const fg = _hist?.fireGoal;
   if (!fg?.monthly || !fg?.target_year) return;
-  // رقم FIRE بقوة شراء اليوم — computeGoalYear يخصم الإسقاطات بالتضخم تلقائياً،
-  // فالهدف يبقى بريال اليوم (لا نُضخّمه هنا) ويُقاس الوصول بقوة الشراء الحقيقية.
+  // رقم FIRE بقوة شراء اليوم — عند تفعيل مفتاح التضخم يخصم computeGoalYear
+  // الإسقاطات بالتضخم، فالهدف يبقى بريال اليوم ويُقاس الوصول بقوة الشراء الحقيقية.
   const fireNumber = (fg.monthly * 12) / (fg.swr / 100);
   const goalInp = document.getElementById('inp-goal-amount');
   if (goalInp) { goalInp.value = Math.round(fireNumber); }
@@ -516,8 +574,9 @@ function projectScenario(scenario, params) {
   } = params;
 
   const monthlyCapRate = Math.pow(1 + scenario.capRate, 1/12) - 1;
-  // M-16: use compound formula instead of simple division — more accurate over long horizons
-  const monthlyDivRate = Math.pow(1 + scenario.divRate, 1/12) - 1;
+  // الدخل الشهري = العائد السنوي ÷ 12 — الدلالة المعتادة لدخل توزيعات سنوي،
+  // موحّدة مع مونتي كارلو (÷12) ومع توثيق تذييل جدول المعالم في forecast.html
+  const monthlyDivRate = scenario.divRate / 12;
   const totalMonths    = horizonYears * 12;
   const monthlyInfl    = Math.pow(1 + inflationRate, 1/12) - 1;
 
@@ -576,12 +635,13 @@ function projectScenario(scenario, params) {
 }
 
 // ── Goal year computation ──────────────────────────────────────────────
-// الهدف يُقاس دائماً بقوة شراء اليوم (الريال الحقيقي): نخصم القيمة الاسمية
-// المستقبلية بالتضخم قبل المقارنة — وإلا «يصل» النموذج للهدف اسمياً قبل سنوات
-// من وصولك إليه فعلياً بقوة الشراء (تفاؤل زائف). مستقل عن مفتاح عرض التضخم.
+// دلالة موحّدة مع مفتاح التضخم: عند تفعيله يمرّر المستدعي inflRate > 0 فيُقاس
+// الهدف بقوة شراء اليوم (خصم القيمة الاسمية بالتضخم قبل المقارنة)، وعند إطفائه
+// يمرّر 0 فيُقاس الهدف اسمياً — نفس المعنى في البطاقات الثلاث (الهدف/الخطة/مونتي كارلو).
+// يبدأ الفحص من اللقطة 0: لو الهدف متحقق اليوم يرجع 0 («متحقق الآن»).
 function computeGoalYear(snapshots, goalType, goalAmount, inflRate = 0) {
   if (!goalAmount || goalAmount <= 0) return null;
-  for (let i = 1; i < snapshots.length; i++) {
+  for (let i = 0; i < snapshots.length; i++) {
     const nominal = goalType === 'monthly_income'
       ? snapshots[i].monthlyIncome
       : snapshots[i].value;
@@ -602,7 +662,7 @@ function runForecast() {
   const horizonYears  = parseInt(document.getElementById('inp-horizon').value)           || 35;
   const reinvest      = document.getElementById('inp-reinvest').checked;
   const inflation     = document.getElementById('inp-inflation').checked;
-  const inflationRate = parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025;
+  const inflationRate = readInflationRate();
   const goalAmount    = parseFloat(document.getElementById('inp-goal-amount').value)    || 0;
 
   // بناء جدول DCA الشهري من الفترات المُدخَلة
@@ -645,6 +705,8 @@ function runForecast() {
   renderGoalPanel(horizonYears, goalAmount);
   renderScenarioDetail(horizonYears);
   updateChartSubtitle(params);
+  // بطاقات السيناريو تعرض معدّلات _scenarios التي أعيد بناؤها للتو — حدّثها معها
+  renderScenarioCards();
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -691,7 +753,7 @@ function runMonteCarlo() {
   const horizonYears = parseInt(document.getElementById('inp-horizon').value) || 35;
   const reinvest     = document.getElementById('inp-reinvest').checked;
   const adjustInfl   = document.getElementById('inp-inflation').checked;
-  const inflationRate = parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025;
+  const inflationRate = readInflationRate();
   const goalAmount   = parseFloat(document.getElementById('inp-goal-amount').value) || 0;
 
   const divYieldOverride = parseFloat(document.getElementById('inp-div-yield').value);
@@ -755,8 +817,9 @@ function _renderMonteCarlo(r) {
   box.style.display = 'block';
   const realTag = r.adjustInfl ? ' <span class="small text-muted">(بقوة شراء اليوم)</span>' : '';
 
-  // شريط المئينات: p10 → p90 مع علامة الوسيط والهدف
-  const lo = r.p5, hi = r.p90, span = Math.max(1, hi - lo);
+  // شريط المئينات: p10 → p90 (نفس مدى الصفوف المعروضة «أسوأ حظ»→«أحسن حظ»)
+  // مع علامة الوسيط والهدف على نفس المقياس
+  const lo = r.p10, hi = r.p90, span = Math.max(1, hi - lo);
   const posOf = v => Math.min(100, Math.max(0, (v - lo) / span * 100));
   const goalMarker = (r.goalAmount > 0 && _goalType === 'portfolio_value')
     ? `<div style="position:absolute;top:-4px;bottom:-4px;left:${posOf(r.goalAmount).toFixed(1)}%;width:2px;background:#ef4444" title="الهدف"></div>` : '';
@@ -784,7 +847,7 @@ function _renderMonteCarlo(r) {
         </div>
         <div style="flex:1;min-width:200px">
           <div style="font-weight:700;color:${col};margin-bottom:3px">${verdict}</div>
-          <div class="small text-muted">يعني: من كل 100 مستقبل محتمل جرّبناه، بلغت <b>${r.successPct.toFixed(0)}</b> منها هدفك (بقوة شراء اليوم)، والباقي ما وصل لأن السوق تعثّر في توقيت سيّئ.</div>
+          <div class="small text-muted">يعني: من كل 100 مستقبل محتمل جرّبناه، بلغت <b>${r.successPct.toFixed(0)}</b> منها هدفك${r.adjustInfl ? ' (بقوة شراء اليوم)' : ' (اسمياً)'}، والباقي ما وصل لأن السوق تعثّر في توقيت سيّئ.</div>
         </div>
       </div>`;
   }
@@ -828,7 +891,7 @@ function _renderMonteCarlo(r) {
     </div>
 
     <div style="margin-top:12px;padding:10px 13px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;line-height:1.8" class="small">
-      💵 <strong>دخلك الشهري المتوقّع من التوزيعات عند التقاعد:</strong><br>
+      💵 <strong>دخلك الشهري المتوقّع من التوزيعات عند التقاعد${realTag}:</strong><br>
       😟 لو حظّك سيّئ ≈ <b>${fmt(r.inc10)}</b> · 😐 الأكثر توقّعاً ≈ <b>${fmt(r.inc50)}</b> · 😄 لو حظّك ممتاز ≈ <b>${fmt(r.inc90)}</b> <span class="text-muted">(ريال/شهر)</span>
     </div>`;
 }
@@ -850,7 +913,7 @@ function _readPlanInputs() {
     horizonYears:   parseInt(document.getElementById('inp-horizon').value) || 35,
     reinvest:       document.getElementById('inp-reinvest').checked,
     adjustInflation:document.getElementById('inp-inflation').checked,
-    inflationRate:  parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025,
+    inflationRate:  readInflationRate(),
     goalAmount:     parseFloat(document.getElementById('inp-goal-amount').value) || 0,
     scenarioKey:    document.getElementById('plan-scenario').value || 'base',
     goalType:       _goalType,
@@ -881,7 +944,8 @@ function computeContributionPlan() {
   const scenario = _scenarios.find(s => s.key === inp.scenarioKey) || _scenarios[1];
 
   const years = inp.horizonYears;
-  const monthlyDivRate = Math.pow(1 + scenario.divRate, 1 / 12) - 1;
+  // موحّد على ÷12 (نفس دلالة projectScenario ومونتي كارلو)
+  const monthlyDivRate = scenario.divRate / 12;
 
   // الهدف الاسمي المستقبلي (نرفع هدف اليوم لقوّته الاسمية عند تفعيل التضخم)
   const inflMul = inp.adjustInflation ? Math.pow(1 + inp.inflationRate, years) : 1;
@@ -1143,10 +1207,11 @@ function renderHistSummary() {
   const cvInp = document.getElementById('inp-current-value');
   if (cvInp && !+cvInp.value) cvInp.value = Math.round(h.currentValue);
 
-  // تهيئة أول فترة DCA بمتوسط الإضافة التاريخية إذا لم يكن هناك فترات
+  // تهيئة أول فترة DCA بمتوسط الإضافة التاريخية إذا لم يكن هناك فترات.
+  // مستخدم بلا سجل إيداعات يبدأ من 0 (لا نزرع ضخاً افتراضياً لم يُقرّه —
+  // 8000×5 سنوات = 480 ألف ر.س تُضخّم الإسقاط زوراً) والـ placeholder يقترح مثالاً.
   if (document.querySelectorAll('.dca-period-row').length === 0) {
-    const defaultDca = h.avgMonthlyDeposit > 0 ? Math.round(h.avgMonthlyDeposit) : 8000;
-    addDcaPeriod(defaultDca, 5);
+    addDcaPeriod(h.avgMonthlyDeposit > 0 ? Math.round(h.avgMonthlyDeposit) : 0, 5);
   }
 
   const dyBadge = document.getElementById('div-yield-auto');
@@ -1175,8 +1240,8 @@ function renderFireBanner(h) {
   const fireNumber   = (fg.monthly * 12) / (fg.swr / 100);
   const yearsLeft    = fg.target_year - new Date().getFullYear();
   // الهدف المعدَّل بالتضخم: المصاريف الشهرية ستكون أعلى بعد yearsLeft سنة
-  // الصيغة الصحيحة: الهدف يرتفع مع كل سنة تأخير (تضخم 2.5% افتراضي)
-  const INFLATION_RATE = 0.025;
+  // الصيغة الصحيحة: الهدف يرتفع مع كل سنة تأخير — بمعدل حقل التضخم في الصفحة
+  const INFLATION_RATE = readInflationRate();
   const inflMonthly  = yearsLeft > 0 ? fg.monthly * Math.pow(1 + INFLATION_RATE, yearsLeft) : fg.monthly;
   const fireInflated = (inflMonthly * 12) / (fg.swr / 100);
   const showInfl     = yearsLeft > 0 && Math.abs(fireInflated - fireNumber) > 1000;
@@ -1239,32 +1304,13 @@ function renderDataConfidenceBanner(h) {
   // عمرها أقل من سنة. لذا نقيّد العدّاد بعمر المحفظة التقويمي حتى لا نعدّ
   // «دورة سنوية كاملة» لم تكتمل فعلياً — يمنع تضخيم الثقة والتناقض في العرض.
   const rawDivYears = Object.keys(h.divByYear || {}).length;
-  const maxCycles   = Math.max(1, Math.ceil(calMonths / 12));
-  const divYears    = Math.min(rawDivYears, maxCycles);
 
   // نستخدم العمر الفعلي (المرجَّح بالتدفقات) في حساب الثقة — أدق بكثير من التقويمي
   const months = cwMonths;
 
-  // ── حساب درجة الثقة (0–100) ─────────────────────────────────────────
-  // العامل 1: عمر رأس المال الفعلي — لا التقويمي (وزن 45%)
-  const agePct = months < 3  ? 0.05 : months < 6  ? 0.20 :
-                 months < 9  ? 0.32 : months < 12 ? 0.45 :
-                 months < 18 ? 0.62 : months < 24 ? 0.76 :
-                 months < 36 ? 0.88 : 1.00;
-
-  // العامل 2: دورات الأرباح الفعلية (وزن 35%)
-  // السبب: نمو رأس المال و divYield مبنيان على هذه الدورات
-  const divPct = divYears === 0 ? 0.05 :
-                 divYears === 1 ? 0.45 :
-                 divYears === 2 ? 0.72 :
-                 divYears >= 3  ? 0.95 : 0.05;
-
-  // العامل 3: عدد الأسهم / التنويع (وزن 20%)
-  const holdPct = h.holdingsCount < 3  ? 0.40 :
-                  h.holdingsCount < 6  ? 0.65 :
-                  h.holdingsCount < 10 ? 0.82 : 0.95;
-
-  const score = Math.round(agePct * 45 + divPct * 35 + holdPct * 20);
+  // ── حساب درجة الثقة (0–100) عبر الدالة الموحّدة نفسها المستخدمة في المزج ──
+  const { score, agePct, divPct, holdPct, divYears } =
+    computeDataConfidence(cwMonths, calMonths, rawDivYears, h.holdingsCount);
 
   // ── مستوى الثقة ──────────────────────────────────────────────────────
   let tier, badgeColor, borderColor, bgColor;
@@ -1599,13 +1645,15 @@ function renderChart(horizonYears, goalAmount = 0) {
     }
   }
 
-  // خط الهدف (للخط فقط) — يرتفع بالتضخم ليمثّل الريالات الاسمية اللازمة كل سنة
-  // لتعادل هدفك بقوة شراء اليوم، فيتقاطع مع منحنى السيناريو الاسمي عند سنة الوصول
-  // الحقيقية نفسها التي يحسبها computeGoalYear (تناسق بصري + رقمي).
+  // خط الهدف (للخط فقط) — دلالة موحّدة مع مفتاح التضخم:
+  // مفعّل  → الهدف بقوة شراء اليوم: يرتفع اسمياً بالتضخم ليتقاطع مع المنحنى الاسمي
+  //          عند سنة الوصول الحقيقية نفسها التي يحسبها computeGoalYear.
+  // مطفأ  → الهدف اسمي: خط أفقي ثابت بلا وسم «بقوة شراء اليوم».
   if (!isBar && goalAmount > 0 && _goalType === 'portfolio_value') {
-    const goalInfl = (parseFloat(document.getElementById('inp-inflation-rate')?.value) / 100) || 0.025;
+    const inflOn   = document.getElementById('inp-inflation')?.checked;
+    const goalInfl = inflOn ? readInflationRate() : 0;
     datasets.push({
-      label:           `🎯 الهدف: ${fmtShort(goalAmount)} (بقوة شراء اليوم)`,
+      label:           `🎯 الهدف: ${fmtShort(goalAmount)}${inflOn ? ' (بقوة شراء اليوم)' : ''}`,
       data:            Array.from({ length: horizonYears + 1 }, (_, y) => Math.round(goalAmount * Math.pow(1 + goalInfl, y))),
       borderColor:     '#ff6b6b',
       backgroundColor: 'transparent',
@@ -1804,8 +1852,10 @@ function renderGoalPanel(horizonYears, goalAmount) {
   card.style.display = 'block';
 
   const today    = new Date();
-  // الهدف مُدخَل بقوة شراء اليوم → نخصم الإسقاطات بالتضخم قبل قياس الوصول
-  const inflRate = (parseFloat(document.getElementById('inp-inflation-rate')?.value) / 100) || 0.025;
+  // دلالة موحّدة مع مفتاح التضخم: مفعّل → الهدف بقوة شراء اليوم (خصم بالتضخم)،
+  // مطفأ → الهدف اسمي (بلا خصم) — نفس معنى الخطة ومونتي كارلو.
+  const inflOn   = document.getElementById('inp-inflation')?.checked;
+  const inflRate = inflOn ? readInflationRate() : 0;
   const goalLabel = _goalType === 'monthly_income'
     ? `دخل شهري ${fmt(goalAmount)}`
     : `قيمة محفظة ${fmt(goalAmount)}`;
@@ -1820,7 +1870,8 @@ function renderGoalPanel(horizonYears, goalAmount) {
     const snap    = reached ? proj.data[goalYr] : proj.data[proj.data.length - 1];
 
     const whenStr  = reached
-      ? `${goalYr} سنة — عام ${today.getFullYear() + goalYr}`
+      ? (goalYr === 0 ? '✨ متحقق الآن — الهدف مبلوغ اليوم'
+                      : `${goalYr} سنة — عام ${today.getFullYear() + goalYr}`)
       : `لا تصل ضمن ${horizonYears} سنة`;
 
     return `<div class="goal-row ${reached ? 'goal-reached' : 'goal-missed'}">
@@ -1840,7 +1891,9 @@ function renderGoalPanel(horizonYears, goalAmount) {
   body.innerHTML = `
     <div class="goal-header-label">
       الهدف المحدد: <strong class="text-accent">${goalLabel}</strong>
-      <span class="small text-muted" style="font-weight:400">— مقيس بقوة شراء اليوم (مخصوم بتضخم ${pct(inflRate)})</span>
+      <span class="small text-muted" style="font-weight:400">${inflOn
+        ? `— مقيس بقوة شراء اليوم (مخصوم بتضخم ${pct(inflRate)})`
+        : '— مقيس اسمياً (مفتاح التضخم مطفأ)'}</span>
     </div>
     <div class="goal-rows">${rows}</div>`;
 }
@@ -1940,7 +1993,7 @@ function exportForecastCSV() {
   const horizonYears = parseInt(document.getElementById('inp-horizon').value)     || 35;
   const reinvest     = document.getElementById('inp-reinvest').checked;
   const inflation    = document.getElementById('inp-inflation').checked;
-  const inflRate     = parseFloat(document.getElementById('inp-inflation-rate').value) / 100 || 0.025;
+  const inflRate     = readInflationRate();
   const goalAmount   = parseFloat(document.getElementById('inp-goal-amount').value) || 0;
   const dcaPeriods   = getDcaPeriods();
   const occ          = scenarioOccurrenceProbs();
