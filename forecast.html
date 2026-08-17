@@ -497,6 +497,8 @@
       <div class="hist-summary" id="hist-summary">
         <div class="hist-item"><div class="h-val">—</div><div class="h-lbl">القيمة الحالية</div></div>
       </div>
+      <!-- الأساس (معيار تاسي) مقابل أداؤك — وسم تشخيصي صريح -->
+      <div id="growth-basis-note" style="margin-top:12px"></div>
     </div>
 
     <!-- ── مؤشر ثقة البيانات ── -->
@@ -518,11 +520,11 @@
       </div>
       <div id="scenario-prob-note" style="margin-top:10px"><!-- نسبة «أسوأ من المتحفظ» تُملأ ديناميكياً --></div>
       <p class="small" style="margin-top:10px;color:var(--text-2);line-height:1.7;border-right:3px solid var(--accent);background:var(--accent-dim);padding:8px 12px;border-radius:0 6px 6px 0">
-        ⚠️ <strong>كيف تقرأ الأرقام؟</strong> الرقم على كل كرت = كم مرة السوق سوّى هالشي فعلاً في الماضي. حسبناه من <strong>فترات طويلة</strong> (10 و15 و20 سنة) مو من سنة وحدة — لأنك تخطّط للتقاعد ومستقبلك بعيد. عوائد تاسي في السنة الوحدة «مجنونة» (تطلع +104% أو تنزل −57%)، فما تنفع تقيس عليها نتيجة عشرين سنة.
+        ⚠️ <strong>كيف تقرأ الأرقام؟</strong> الرقم على كل كرت = <strong>كم نافذة تاريخية من تاسي</strong> نمت بمعدّل مقارب لهذا السيناريو — عدد خام، لا «احتمال» ولا نسبة «من 10». حسبناه من <strong>فترات طويلة متداخلة</strong> (10 و15 و20 سنة) مو من سنة وحدة، لأنك تخطّط للتقاعد. عوائد تاسي في السنة الوحدة «مجنونة» (تطلع +104% أو تنزل −57%)، فما تنفع تقيس عليها نتيجة عشرين سنة.
         <br><br>
-        📉 <strong>معلومة مهمة من تاسي:</strong> أعلى ربح وصله السوق على أي فترة 10–20 سنة كان ≈<strong>9.8% بالسنة</strong>. و≈<strong>19%</strong> من الفترات نمت ببطء — بس مع الأرباح النقدية ظلّت في الموجب. الخسارة الحقيقية صارت في <strong>6% بس</strong> من الفترات وكانت شبه تعادل. (شلنا سيناريو «الاستثنائي» نهائياً لأن ربح 9.5%+ بالسنة لمدة 10–20 سنة ما صار ولا مرة في تاريخ تاسي). حتى «المتفائل» نادر — هذا واقع السوق، ومعناه <strong>مو</strong> إنك بتخسر.
+        📐 <strong>«المئين» على كل كرت</strong> يقول لك أين يقع معدّل السيناريو بين كل نوافذ تاسي — «المئين 60» يعني أن 60% من النوافذ نمت أبطأ منه. المئين يتحرك بسلاسة مع تغيّر محفظتك، بخلاف التصنيف بالنطاقات الذي يقفز من رقم لرقم بحركة سوقية صغيرة. وسقف سيناريو «المتفائل» مُعاير على <strong>أعلى نافذة حدثت فعلاً</strong> في تاريخ تاسي (تُحسب من البيانات، لا رقم مكتوب يدوياً).
         <br><br>
-        🫧 <strong>ملاحظة:</strong> شلنا فقاعة 2005–2006 من الحساب (السوق وقتها كان «منفوخ» بشكل غير طبيعي وانهار −52%)، بس خلّينا انهيار 2008 وكل النزولات الطبيعية الثانية محسوبة.
+        🫧 <strong>ملاحظة:</strong> شلنا فقاعة 2005–2006 من نوافذ هذه البطاقة (السوق وقتها كان «منفوخ» بشكل غير طبيعي وانهار −52%، والبدء منه يشوّه الإحصاء)، بس خلّينا انهيار 2008 وكل النزولات الطبيعية الثانية محسوبة. مونتي كارلو تعامل 2005 بشكل مختلف عمداً — الشرح داخل بطاقتها.
       </p>
     </div>
 
@@ -671,7 +673,7 @@
       <div id="saved-plan-view"></div>
     </div>
 
-    <!-- ── Monte Carlo — مخاطر تسلسل العوائد ── -->
+    <!-- ── Monte Carlo — مخاطر تسلسل العوائد + مرحلة السحب ── -->
     <div class="card" id="montecarlo-card">
       <div class="section-header">
         <span class="section-title">🎲 اختبار الحظّ — محاكاة مونتي كارلو <span class="eng-label">Monte Carlo</span></span>
@@ -679,12 +681,56 @@
       </div>
       <p class="small text-muted" style="margin:6px 0 12px;line-height:1.75">
         السيناريوهات فوق تفترض إن السوق يعطيك <b>نفس العائد كل سنة</b> — وهذا ما يصير أبداً.
-        هنا نجرّب مستقبلك <b>2000 مرة</b>، كل مرة بعوائد سوق مختلفة من تاريخ تاسي الحقيقي (فيه سنوات ممتازة
+        هنا نجرّب مستقبلك <b>10,000 مرة</b>، كل مرة بعوائد سوق مختلفة من تاريخ تاسي الحقيقي (فيه سنوات ممتازة
         وسنوات انهيار)، ونطلّع لك <b>نطاق كل الاحتمالات</b> — من أسوأ حظ إلى أحسنه — بدل رقم واحد وهمي.
-        اضغط الزر وبيظهر شرح كامل مبسّط للأرقام.
+        المحاكاة <b>مبذورة</b>: نفس المدخلات تعطي نفس الأرقام في كل تشغيل.
       </p>
+
+      <!-- ── مرحلة السحب: المقياس التقاعدي الحقيقي ── -->
+      <div class="note" data-state="warn" style="margin-bottom:10px">
+        <span class="ic">🏁</span>
+        <div>بدون تفعيل السحب، «نسبة النجاح» تقيس <b>هل بلغتَ الرقم في سنة التقاعد</b> فقط — لا <b>هل تدوم محفظتك</b>
+        بعده. خطر انهيار السوق قرب التقاعد (تتابع العوائد) لا يُختبَر إلا بالسحب الفعلي.</div>
+      </div>
+      <div class="inputs-panel" style="margin-bottom:12px">
+        <div class="inp-group" style="grid-column:1/-1">
+          <label class="toggle-wrap" style="font-size:.86rem;font-weight:700;color:var(--text)">
+            <input type="checkbox" id="inp-withdraw-enable" checked>
+            🏁 فعّل مرحلة السحب بعد التقاعد (يُحسب معها «نسبة بقاء المحفظة»)
+          </label>
+        </div>
+        <div class="inp-group">
+          <label>السحب يستمر حتى عام</label>
+          <input type="number" id="inp-withdraw-end-year" step="1" min="2030" max="2120" value="2065">
+          <span class="small text-muted" style="margin-top:3px">أفق المالك المعلن ≈ 2065</span>
+        </div>
+        <div class="inp-group">
+          <label>طريقة تحديد السحب</label>
+          <select id="inp-withdraw-mode">
+            <option value="rate" selected>نسبة سحب سنوية من المحفظة عند التقاعد</option>
+            <option value="amount">مبلغ شهري مستهدف (بقوة شراء اليوم)</option>
+          </select>
+        </div>
+        <div class="inp-group">
+          <label>نسبة السحب السنوية (%)</label>
+          <input type="number" id="inp-withdraw-rate" step="0.1" min="0" max="20" value="4">
+          <span class="small text-muted" style="margin-top:3px">تُستخدم في وضع «النسبة»</span>
+        </div>
+        <div class="inp-group">
+          <label>المبلغ الشهري المستهدف (ر.س)</label>
+          <input type="number" id="inp-withdraw-monthly" step="500" min="0" placeholder="مثال: 5,000">
+          <span class="small text-muted" style="margin-top:3px">تُستخدم في وضع «المبلغ» — بريال اليوم</span>
+        </div>
+        <div class="inp-group" style="justify-content:flex-end;padding-top:8px">
+          <label class="toggle-wrap">
+            <input type="checkbox" id="inp-withdraw-inflate" checked>
+            ارفع السحب بالتضخم كل سنة
+          </label>
+        </div>
+      </div>
+
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-        <button class="btn btn-primary btn-sm" onclick="runMonteCarlo()">▶ تشغيل المحاكاة (2000 مسار)</button>
+        <button class="btn btn-primary btn-sm" onclick="runMonteCarlo()">▶ تشغيل المحاكاة (10,000 مسار)</button>
         <span class="small text-muted" id="mc-status"></span>
       </div>
       <div id="mc-results" style="display:none"></div>
@@ -783,6 +829,6 @@
   <script src="js/supabase.js?v=20260817c"></script>
   <script src="js/auth.js?v=20260817c"></script>
   <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/forecast.js?v=20260817c"></script>
+  <script src="js/forecast.js?v=20260817d"></script>
 </body>
 </html>
