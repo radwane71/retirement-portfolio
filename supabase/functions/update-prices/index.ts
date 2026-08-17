@@ -2,6 +2,14 @@
 // Falls back to localhost for local dev; '*' is never used as a default
 const ALLOWED_ORIGIN = Deno.env.get('APP_ORIGIN') ?? 'http://localhost:8080'
 
+const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
+
+// ── مؤشر تاسي: رمزه على ياهو غير مؤكّد، لذا نجرّب المرشّحين بالترتيب ونتوقّف عند أول ──
+// رمز يرجع سلسلة صالحة. الرمز الناجح يُعاد في الرد حتى يعرفه العميل.
+const TASI_SYMBOLS = ['^TASI.SR', '^TASI', 'TASI.SR', '^TASI.SAU']
+const TASI_RANGES = new Set(['1y', '2y', '5y', '10y', 'max'])
+const TASI_DEFAULT_RANGE = '5y'
+
 Deno.serve(async (req) => {
   const cors = {
     'Access-Control-Allow-Origin': ALLOWED_ORIGIN,
@@ -27,7 +35,10 @@ Deno.serve(async (req) => {
 
     // ── رموز إضافية اختيارية (قائمة المراقبة مثلاً) — لا تُحدَّث في holdings ──
     // تُرسَل في جسم الطلب: { tickers: ["1234", "5678"] }
+    // وإضافة اختيارية: { tasiHistory: true, range: "5y" } لجلب تاريخ مؤشر تاسي
     let extraTickers: string[] = []
+    let wantTasi = false
+    let tasiRange = TASI_DEFAULT_RANGE
     try {
       const body = await req.json()
       if (Array.isArray(body?.tickers)) {
@@ -35,7 +46,101 @@ Deno.serve(async (req) => {
           .map((t: any) => String(t).trim().toUpperCase())
           .filter((t: string) => /^[A-Z0-9.]{1,12}$/.test(t))
       }
+      wantTasi = body?.tasiHistory === true
+      // الأمان: المدى لا يُمرَّر للرابط إلا بعد مطابقته لقائمة بيضاء (نفس نمط تصفية الرموز)
+      if (typeof body?.range === 'string' && TASI_RANGES.has(body.range)) tasiRange = body.range
     } catch (_) { /* لا جسم / ليس JSON — تجاهل */ }
+
+    // ── الحصول على cookie + crumb من Yahoo Finance (مرة واحدة لكل طلب) ──
+    // يُستخدَم لمسار الأسعار ولمسار تاريخ المؤشر معاً — لذلك مذكّر (memoized)
+    let authPromise: Promise<{ cookie: string; crumb: string }> | null = null
+    const getYahooAuth = (): Promise<{ cookie: string; crumb: string }> => {
+      return (authPromise ??= (async () => {
+        let cookie = ''
+        let crumb  = ''
+        try {
+          const cookieRes = await fetch('https://fc.yahoo.com', {
+            headers: { 'User-Agent': UA },
+            redirect: 'follow'
+          })
+          cookie = cookieRes.headers.get('set-cookie')?.split(';')[0] ?? ''
+          console.log('cookie:', cookie ? 'ok' : 'empty')
+
+          const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
+            headers: { 'User-Agent': UA, Cookie: cookie }
+          })
+          crumb = await crumbRes.text()
+          // M-5: don't log the actual crumb value — it's a session token
+          console.log('crumb:', crumb ? '[set]' : 'empty')
+        } catch (e) {
+          console.log('crumb fetch error:', String(e))
+        }
+        return { cookie, crumb }
+      })())
+    }
+
+    // ── جلب تاريخ مؤشر تاسي من نقطة نهاية الرسم البياني ──────────
+    // الرد: { symbol, points:[{date,value}], count } أو { error, tried }
+    const fetchTasiHistory = async (range: string) => {
+      const { cookie, crumb } = await getYahooAuth()
+      const tried: string[] = []
+      let lastErr = ''
+      for (const sym of TASI_SYMBOLS) {
+        tried.push(sym)
+        try {
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}`
+            + `?range=${range}&interval=1d${crumb ? `&crumb=${encodeURIComponent(crumb)}` : ''}`
+          const res = await fetch(url, {
+            headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) }
+          })
+          if (!res.ok) {
+            lastErr = `${sym}: HTTP ${res.status}`
+            console.log('tasi chart', sym, res.status)
+            continue
+          }
+          const result = (await res.json())?.chart?.result?.[0]
+          const stamps = result?.timestamp
+          const closes = result?.indicators?.quote?.[0]?.close
+          if (!Array.isArray(stamps) || !stamps.length || !Array.isArray(closes)) {
+            lastErr = `${sym}: لا توجد سلسلة زمنية`
+            continue
+          }
+
+          // خريطة بالتاريخ: تُسقط التكرار تلقائياً (آخر قيمة لليوم تفوز)
+          const byDate = new Map<string, number>()
+          for (let i = 0; i < stamps.length; i++) {
+            const t = stamps[i]
+            const c = closes[i]
+            // أيام العطل ترجع close = null → تُتجاهل، وكذلك أي قيمة غير منتهية أو ≤ 0
+            if (typeof t !== 'number' || !Number.isFinite(t)) continue
+            if (typeof c !== 'number' || !Number.isFinite(c) || c <= 0) continue
+            // الطابع بالثواني UTC؛ جلسة تاسي (UTC+3) تبدأ ~07:00 UTC فاليوم UTC = اليوم المحلي
+            const date = new Date(t * 1000).toISOString().slice(0, 10)
+            byDate.set(date, Math.round(c * 100) / 100)
+          }
+          if (!byDate.size) {
+            lastErr = `${sym}: لا توجد نقاط صالحة`
+            continue
+          }
+
+          const points = [...byDate.entries()]
+            .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))   // تصاعدي بالتاريخ
+            .map(([date, value]) => ({ date, value }))
+          console.log('tasi ok:', sym, points.length, 'points')
+          return { symbol: sym, points, count: points.length }
+        } catch (e) {
+          lastErr = `${sym}: ${String(e)}`
+          console.log('tasi chart error:', sym, String(e))
+        }
+      }
+      console.log('tasi failed after', tried.length, 'symbols')
+      return { error: lastErr || 'تعذّر جلب تاريخ مؤشر تاسي من ياهو', tried }
+    }
+
+    // نُطلقه الآن ليعمل بالتوازي مع جلب الحيازات والأسعار؛ .catch حارس ضد رفض غير معالَج
+    const tasiPromise = wantTasi
+      ? fetchTasiHistory(tasiRange).catch((e) => ({ error: String(e), tried: [...TASI_SYMBOLS] }))
+      : null
 
     // ── جلب أسهم المستخدم ────────────────────────────────────────
     const hRes    = await fetch(
@@ -60,34 +165,19 @@ Deno.serve(async (req) => {
     )
     const allTickerSet = new Set<string>([...heldTickers, ...extraTickers])
     if (!allTickerSet.size) {
+      // طلب تاريخ المؤشر وحده لا يُعتبر فشلاً: نرجع tasi بنجاح مع updated: 0
+      if (tasiPromise) {
+        return new Response(JSON.stringify({ updated: 0, prices: {}, failed: [], tasi: await tasiPromise }), {
+          headers: { ...cors, 'Content-Type': 'application/json' }
+        })
+      }
       return new Response(JSON.stringify({ updated: 0, prices: {}, failed: [], message: 'لا توجد أسهم' }), {
         headers: { ...cors, 'Content-Type': 'application/json' }
       })
     }
 
     const symbols = [...allTickerSet].map((t) => `${t}.SR`).join(',')
-    const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
-
-    // ── الحصول على cookie + crumb من Yahoo Finance ───────────────
-    let cookie = ''
-    let crumb  = ''
-    try {
-      const cookieRes = await fetch('https://fc.yahoo.com', {
-        headers: { 'User-Agent': UA },
-        redirect: 'follow'
-      })
-      cookie = cookieRes.headers.get('set-cookie')?.split(';')[0] ?? ''
-      console.log('cookie:', cookie ? 'ok' : 'empty')
-
-      const crumbRes = await fetch('https://query1.finance.yahoo.com/v1/test/getcrumb', {
-        headers: { 'User-Agent': UA, Cookie: cookie }
-      })
-      crumb = await crumbRes.text()
-      // M-5: don't log the actual crumb value — it's a session token
-      console.log('crumb:', crumb ? '[set]' : 'empty')
-    } catch(e) {
-      console.log('crumb fetch error:', String(e))
-    }
+    const { cookie, crumb } = await getYahooAuth()
 
     // ── جلب الأسعار ──────────────────────────────────────────────
     // AUDIT-FIX: crumb قد يحمل محارف خاصة تكسر الـ URL — يُرمَّز دائماً
@@ -100,7 +190,10 @@ Deno.serve(async (req) => {
     if (!yRes.ok) {
       const txt = await yRes.text()
       console.log('yahoo body:', txt.slice(0, 300))
-      return new Response(JSON.stringify({ updated: 0, message: `yahoo ${yRes.status}` }), {
+      return new Response(JSON.stringify({
+        updated: 0, message: `yahoo ${yRes.status}`,
+        ...(tasiPromise ? { tasi: await tasiPromise } : {})
+      }), {
         headers: { ...cors, 'Content-Type': 'application/json' }
       })
     }
@@ -146,7 +239,11 @@ Deno.serve(async (req) => {
     const failedTickers = [...allTickerSet].filter((t) => !(t in prices))
 
     console.log('updated:', updated, 'failed:', failedTickers.length)
-    return new Response(JSON.stringify({ updated, total: quotes.length, prices, failed: failedTickers }), {
+    return new Response(JSON.stringify({
+      updated, total: quotes.length, prices, failed: failedTickers,
+      // إضافة اختيارية: المفتاح لا يظهر إطلاقاً ما لم يُطلب tasiHistory
+      ...(tasiPromise ? { tasi: await tasiPromise } : {})
+    }), {
       headers: { ...cors, 'Content-Type': 'application/json' }
     })
   } catch (e) {
