@@ -58,15 +58,33 @@ function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
 // computeXIRR منقولة إلى utils.js — متاحة لجميع الصفحات
 
 // إجمالي الصكوك المشترَك بها (من التخزين المحلي لصفحة الصكوك)
+// AUDIT-FIX 2026-08: على جهاز جديد لا يوجد مفتاح LS — نحمّل من user_settings
+// (نفس مفتاح صفحة الصكوك) مرة واحدة ثم نعيد رسم الكروت المتأثرة.
+let _sukukFallbackTried = false;
 function getSukukActiveTotal() {
   try {
-    const raw = localStorage.getItem(userLsKey('sukuk_planner_v1')) || localStorage.getItem('sukuk_planner_v1');
-    if (!raw) return 0;
+    const raw = localStorage.getItem(userLsKey(SUKUK_PLANNER_KEY)) || localStorage.getItem(SUKUK_PLANNER_KEY);
+    if (!raw) { _ensureSukukFromSupabase(); return 0; }
     const data = JSON.parse(raw);
     return (data.opportunities || [])
       .filter(o => o.status === 'مشترك')
       .reduce((s, o) => s + (+o.amount || 0), 0);
   } catch (_) { return 0; }
+}
+
+async function _ensureSukukFromSupabase() {
+  if (_sukukFallbackTried) return;
+  _sukukFallbackTried = true;
+  try {
+    const remote = await loadUserSetting(SUKUK_PLANNER_KEY);
+    if (!remote) return;
+    localStorage.setItem(userLsKey(SUKUK_PLANNER_KEY), JSON.stringify(remote));
+    // أعِد رسم الكروت التي تعتمد على إجمالي الصكوك
+    renderStats();
+    renderRetirementCard();
+    renderPortfolioHealthCard();
+    renderAllocationChart();
+  } catch (_) {}
 }
 
 // ── تتبع قِدم الأسعار ─────────────────────────────────────────
@@ -91,6 +109,22 @@ function getPriceAgeDays(ticker) {
   return (Date.now() - new Date(ts).getTime()) / 86400000;
 }
 
+// AUDIT-FIX: seed _priceTimestamps from DB's price_updated_at so staleness check
+// survives localStorage clearing without showing all prices as stale
+// قاعدة البيانات هي المرجع للأسعار التلقائية: خذ الأحدث بين DB و localStorage
+// (كان الشرط القديم !_priceTimestamps يرفض تحديث ختم عالق قديم في localStorage
+//  فيظهر السعر الحديث مقترناً بختم قديم = «قديم» زوراً)
+// تُستدعى من loadAllData و reloadHoldings بعد تعبئة holdings.
+function _seedPriceTimestampsFromDB() {
+  holdings.forEach(h => {
+    if (!h.price_updated_at) return;
+    const dbTs    = new Date(h.price_updated_at).getTime();
+    const localTs = _priceTimestamps[h.ticker] ? new Date(_priceTimestamps[h.ticker]).getTime() : 0;
+    if (dbTs > localTs) _priceTimestamps[h.ticker] = h.price_updated_at;
+  });
+  _savePriceTimestamps();
+}
+
 // هل يوجد أي سهم في المحفظة سعره قديم أكثر من STALE_DAYS؟
 // السعر اليدوي (price_manual) يصونه المالك عمداً = لا يُعتبر قديماً أبداً.
 function hasStalePrice() {
@@ -103,9 +137,11 @@ function hasStalePrice() {
 
 // ── Auto Price Update (Supabase Edge Function) ────────────────
 let _priceRefreshTimer = null;
+let _lastPriceRefreshAt = 0;   // آخر استدعاء فعلي — يمنع التحديث المتكرر عند تبديل التبويبات
 
 async function refreshPrices(silent = false) {
   const btn = document.getElementById('refresh-prices-btn');
+  _lastPriceRefreshAt = Date.now();
   try {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التحديث...'; }
 
@@ -126,11 +162,9 @@ async function refreshPrices(silent = false) {
         _savePriceTimestamps();
       }
       // رسم فوري بالأسعار الجديدة + تحقق مناطق السعر
-      renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
-      renderPriceZonesCard(); renderBreakEvenCard();
+      renderAllCards();
       // تحقق تنبيهات مناطق الشراء/البيع بعد كل تحديث أسعار
       holdings.forEach(h => checkPriceZones(h.ticker, +h.current_price));
-      renderAllocationChart(); renderRetirementCard();
       // H-6: warn about tickers Yahoo didn't return (delisted / corporate action)
       if (json.failed?.length) {
         showToast(`⚠️ لم يُحدَّث سعر: ${json.failed.join(', ')}`, 'warning');
@@ -162,6 +196,21 @@ function startPriceAutoRefresh() {
   _priceRefreshTimer = setInterval(() => refreshPrices(true), 5 * 60 * 1000);
 }
 
+// ── إعادة رسم موحّدة لكل الكروت (AUDIT-FIX 2026-08: كانت كل نقطة تعديل
+// تعيد رسم قائمة جزئية مختلفة — القائمة الكاملة هنا واحدة للجميع) ──────
+function renderAllCards() {
+  renderStats();
+  renderRebalancingAlerts();
+  renderPortfolioHealthCard();
+  renderDiversificationCard();
+  renderCharts();
+  renderTable();
+  renderPriceZonesCard();
+  renderBreakEvenCard();
+  renderAllocationChart();
+  renderRetirementCard();
+}
+
 // ── Init ──────────────────────────────────────────────────────
 async function init() {
   const user = await requireAuth();
@@ -169,24 +218,22 @@ async function init() {
   setActiveNav('nav-dashboard');
   _loadPriceTimestamps();   // ← حمّل آخر تواريخ تحديث الأسعار
   await loadAllData();
-  renderStats();
-  renderRebalancingAlerts();
-  renderPortfolioHealthCard(); renderDiversificationCard();
-  renderCharts();
-  renderTable();
-  renderPriceZonesCard();
-  renderBreakEvenCard();
-  renderAllocationChart();
-  renderRetirementCard();
+  renderAllCards();
   applyReliabilityBadges();
   startPriceAutoRefresh();
 
   // أوقف العداد عند إخفاء الصفحة — استأنفه عند العودة
+  // AUDIT-FIX 2026-08: حد أدنى 60 ثانية بين استدعاءات refreshPrices عند تبديل التبويبات
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
       clearInterval(_priceRefreshTimer); _priceRefreshTimer = null;
     } else if (!_priceRefreshTimer) {
-      startPriceAutoRefresh();
+      if (Date.now() - _lastPriceRefreshAt >= 60 * 1000) {
+        startPriceAutoRefresh();
+      } else {
+        // استأنف الدورة فقط دون استدعاء فوري
+        _priceRefreshTimer = setInterval(() => refreshPrices(true), 5 * 60 * 1000);
+      }
     }
   });
 
@@ -213,12 +260,15 @@ async function _autoSnapshotPortfolio() {
 
     // هل يوجد snapshot تلقائي لهذا الشهر بالفعل؟
     // نفلتر بـ notes يبدأ بـ monthKey لتجنب عد اللقطات اليدوية
-    const { data: existing } = await supabaseClient
+    const { data: existing, error: exErr } = await supabaseClient
       .from('net_worth_snapshots')
       .select('id')
       .ilike('notes', `${monthKey}%`)
       .limit(1);
 
+    // AUDIT-FIX 2026-08: فشل الفحص = لا ندري إن كانت لقطة الشهر موجودة —
+    // نخرج مبكراً (fail-closed) بدل المخاطرة بإدراج لقطة مكررة
+    if (exErr) { console.warn('_autoSnapshotPortfolio check failed:', exErr); return; }
     if (existing?.length) return; // موجود — لا نكرر
 
     // احسب القيمة الكلية الحالية
@@ -258,7 +308,9 @@ async function loadAllData() {
     supabaseClient.from('transactions').select('type, total, shares, price, commission, vat, ticker, date').eq('is_archived', false),
     supabaseClient.from('dividends').select('amount, year, month, date, ticker').eq('is_archived', false),
     supabaseClient.from('cashflow_entries').select('type, amount, date').eq('is_archived', false),
-    supabaseClient.from('net_worth_snapshots').select('total_value, date').order('date', { ascending: false }).limit(1),
+    // AUDIT-FIX 2026-08: نجلب notes + نافذة أوسع لتفضيل أحدث لقطة يدوية (اللقطة
+    // التلقائية جزئية: أسهم+نقد+عقار فقط)، مع count حقيقي لعدد اللقطات
+    supabaseClient.from('net_worth_snapshots').select('total_value, date, notes', { count: 'exact' }).order('date', { ascending: false }).limit(24),
     supabaseClient.from('real_estate').select('current_value, status').eq('is_active', true),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     supabaseClient.from('sector_targets').select('sector, target_pct'),
@@ -293,25 +345,24 @@ async function loadAllData() {
   const _heldSet = new Set((rH.data || []).map(h => h.ticker));
   (rUserStocks?.data || []).forEach(u => { if (u.ticker && !_heldSet.has(u.ticker)) plannedTickers[u.ticker] = u.name || u.ticker; });
 
-  // AUDIT-FIX: seed _priceTimestamps from DB's price_updated_at so staleness check
-  // survives localStorage clearing without showing all prices as stale
-  // قاعدة البيانات هي المرجع للأسعار التلقائية: خذ الأحدث بين DB و localStorage
-  // (كان الشرط القديم !_priceTimestamps يرفض تحديث ختم عالق قديم في localStorage
-  //  فيظهر السعر الحديث مقترناً بختم قديم = «قديم» زوراً)
-  holdings.forEach(h => {
-    if (!h.price_updated_at) return;
-    const dbTs    = new Date(h.price_updated_at).getTime();
-    const localTs = _priceTimestamps[h.ticker] ? new Date(_priceTimestamps[h.ticker]).getTime() : 0;
-    if (dbTs > localTs) _priceTimestamps[h.ticker] = h.price_updated_at;
-  });
-  _savePriceTimestamps();
+  // AUDIT-FIX 2026-08: بذر الأختام صار دالة مشتركة تُستدعى أيضاً من reloadHoldings
+  _seedPriceTimestampsFromDB();
 
-  // نقد المحفظة — Supabase أولاً، localStorage كـ fallback
+  // نقد المحفظة — الأحدث بين Supabase و localStorage (نفس منطق أختام الأسعار)
+  // AUDIT-FIX 2026-08: كانت قيمة DB تدوس قيمة LS الأحدث (حُفظت محلياً وفشل upsert)
   // ملاحظة: maybeSingle() يُرجع { data: { amount, updated_at } | null }
   if (rCash?.data?.amount != null) {
-    portfolioCash = +rCash.data.amount;
-    cashUpdatedAt = rCash.data.updated_at || null;
-    _saveCashToLS(portfolioCash, cashUpdatedAt); // حدّث الـ cache
+    const lsCash = _readCashLS();
+    const dbTs = rCash.data.updated_at ? new Date(rCash.data.updated_at).getTime() : 0;
+    const lsTs = lsCash?.updated_at    ? new Date(lsCash.updated_at).getTime()    : 0;
+    if (lsCash && lsTs > dbTs) {
+      portfolioCash = +lsCash.amount || 0;
+      cashUpdatedAt = lsCash.updated_at;
+    } else {
+      portfolioCash = +rCash.data.amount;
+      cashUpdatedAt = rCash.data.updated_at || null;
+      _saveCashToLS(portfolioCash, cashUpdatedAt); // حدّث الـ cache
+    }
   } else {
     _loadCashFromLS(); // fallback للـ localStorage (أو قيمة صفر إن لم يوجد)
   }
@@ -340,6 +391,16 @@ async function loadAllData() {
   const nwRows   = rNw.data  || [];
   const reRows   = rRe.data  || [];
 
+  // AUDIT-FIX 2026-08: صافي الثروة المعروض = أحدث لقطة «يدوية» (notes لا تبدأ
+  // بـ auto) لأنها صافي ثروة كامل؛ اللقطة التلقائية جزئية (أسهم+نقد+عقار فقط)
+  // وتُعرض بوسمها فقط عند غياب أي لقطة يدوية.
+  const _nwManual = nwRows.find(r => !String(r.notes || '').startsWith('auto'));
+  const _nwPick   = _nwManual || nwRows[0] || null;
+  const _nwIsAuto = !!_nwPick && !_nwManual;
+  // عدد اللقطات الحقيقي (count من الاستعلام — كان يُبنى من نافذة limit فقط)
+  const _nwCount  = (results[4].status === 'fulfilled' && typeof results[4].value.count === 'number')
+    ? results[4].value.count : nwRows.length;
+
   // ── حسابات المعاملات ──────────────────────────────────────
   const totalBuys  = txRows.filter(t => t.type === 'buy').reduce((s, t) => s + +t.total, 0);
   const totalSells = txRows.filter(t => t.type === 'sell').reduce((s, t) => s + +t.total, 0);
@@ -363,7 +424,14 @@ async function loadAllData() {
   //   • t.total للبيع = القيمة − العمولة − الضريبة (صافي ما دخل جيبك)
   let realizedPnL = 0;
   {
-    const sortedTx = txRows.slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    // AUDIT-FIX 2026-08: السجلات بلا تاريخ توضع في نهاية الترتيب صراحة
+    // (كانت المقارنة NaN فتترك موضعها غير محدد)
+    const sortedTx = txRows.slice().sort((a, b) => {
+      if (!a.date && !b.date) return 0;
+      if (!a.date) return 1;
+      if (!b.date) return -1;
+      return new Date(a.date) - new Date(b.date);
+    });
     const costMap  = {}; // ticker → { shares, totalCost (شاملة عمولة + ضريبة) }
     sortedTx.forEach(t => {
       if (!costMap[t.ticker]) costMap[t.ticker] = { shares: 0, totalCost: 0 };
@@ -438,10 +506,12 @@ async function loadAllData() {
     : ttmDiv;
   // المقام للعائد المُسنوى: costBasis (WAC × الأسهم الحالية) هو الأدق لأنه يعكس رأس المال الفعلي المُنشغل
   // صافي التدفقات النقدية (شراء − بيع) قد يكون منخفضاً إذا ضُخّ معظم المال في نفس السنة
-  const denomAnn = costBasis > 0 ? costBasis : 1;
+  // AUDIT-FIX 2026-08: عند costBasis=0 كان المقام يُجبر على 1 فيظهر رقم بلا معنى —
+  // الآن null وتعرض الواجهة «—»
+  const denomAnn = costBasis;
 
   // الطرق الثلاث
-  const divYieldAnn    = denomAnn    > 0 ? annualizedYearDiv / denomAnn    * 100 : 0; // مُسنوى
+  const divYieldAnn    = denomAnn    > 0 ? annualizedYearDiv / denomAnn    * 100 : null; // مُسنوى
   const divYieldYOC    = costBasis   > 0 ? ttmDiv            / costBasis   * 100 : 0; // على التكلفة (آخر 12 شهر)
   // AUDIT-FIX (M2): use TTM over market value — consistent with YOC (both trailing-12m);
   // previously used annualized-YTD here while YOC used TTM, making the two tabs incomparable.
@@ -511,21 +581,39 @@ async function loadAllData() {
         }
         gaps.sort((a, b) => a - b);
         const medGap = gaps[Math.floor(gaps.length / 2)];
-        if (medGap <= 105)      freq = 4;
+        // AUDIT-FIX 2026-08: فرع شهري (REITs الشهرية مثلاً) — كان الكشف يسقف عند 4
+        if (medGap <= 45)       freq = 12;
+        else if (medGap <= 105) freq = 4;
         else if (medGap <= 210) freq = 2;
       }
 
       if (!dpsSeries.length) {
-        // اشترى السهم بعد كل توزيعاته المسجّلة — نقدّر من آخر سنة مسجّلة (لا الإجمالي
-        // الكلي الذي يضخّم بتراكم السنوات). مجموع السنة الكاملة يُقسَّم على الدورية
-        // ليصبح DPS لكل فترة، وإلا فإن الضرب بـ freq لاحقاً يضخّمه freq أضعاف.
-        const lastYear = Math.max(...tickerDivs.map(d => +d.year || new Date(divDate(d)).getFullYear()));
-        const lastYearTotal = tickerDivs
-          .filter(d => (+d.year || new Date(divDate(d)).getFullYear()) === lastYear)
-          .reduce((s, d) => s + +d.amount, 0);
-        const fb = lastYearTotal > 0
-          ? lastYearTotal / +h.shares / freq
-          : +tickerDivs[tickerDivs.length - 1].amount / +h.shares;
+        // اشترى السهم بعد كل توزيعاته المسجّلة — نقدّر من التوزيعات المسجّلة (لا
+        // الإجمالي الكلي الذي يضخّم بتراكم السنوات).
+        // AUDIT-FIX (يطابق dividends.js): قسمة «مجموع آخر سنة ÷ freq» تفترض السنة
+        // مكتملة — سنة جزئية كانت تُقسم على freq كاملة فينخفض DPS. الحل: آخر سنة
+        // مكتملة (< السنة الجارية) إن وُجدت؛ وإلا تُسنّى الدفعات الجزئية بعددها
+        // الفعلي: DPS للفترة = المجموع ÷ الأسهم ÷ عدد الدفعات.
+        const curYear = new Date().getFullYear();
+        const yearOf  = d => +d.year || new Date(divDate(d)).getFullYear();
+        const completeYears = tickerDivs.map(yearOf).filter(y => y < curYear);
+        let fb;
+        if (completeYears.length) {
+          const lastFullYear  = Math.max(...completeYears);
+          const fullYearTotal = tickerDivs
+            .filter(d => yearOf(d) === lastFullYear)
+            .reduce((s, d) => s + +d.amount, 0);
+          fb = fullYearTotal > 0
+            ? fullYearTotal / +h.shares / freq
+            : +tickerDivs[tickerDivs.length - 1].amount / +h.shares;
+        } else {
+          const lastYear     = Math.max(...tickerDivs.map(yearOf));
+          const partialDivs  = tickerDivs.filter(d => yearOf(d) === lastYear);
+          const partialTotal = partialDivs.reduce((s, d) => s + +d.amount, 0);
+          fb = partialTotal > 0 && partialDivs.length
+            ? partialTotal / +h.shares / partialDivs.length
+            : +tickerDivs[tickerDivs.length - 1].amount / +h.shares;
+        }
         if (fb < 0.0001) return;
         dpsSeries.push(fb);
       }
@@ -549,7 +637,12 @@ async function loadAllData() {
         dps = _window[_window.length - 1];
       } else {
         const recent = _window.slice().sort((a, b) => a - b);
-        dps = recent[Math.floor(recent.length / 2)];
+        // AUDIT-FIX 2026-08: وسيط النافذة الزوجية = متوسط العنصرين الأوسطين
+        // (كان يأخذ الأعلى منهما فينحاز لأعلى)
+        const _len = recent.length;
+        dps = _len % 2 === 0
+          ? (recent[_len / 2 - 1] + recent[_len / 2]) / 2
+          : recent[Math.floor(_len / 2)];
       }
       if (dps < 0.0001) return;
 
@@ -571,7 +664,12 @@ async function loadAllData() {
     // grant: total=0 — لا تدفّق نقدي
   });
   divRows.forEach(d => {
-    if (d.date) cashflows.push({ date: new Date(d.date), amount: +d.amount });
+    // AUDIT-FIX 2026-08: سجل بلا تاريخ يُحتسب بتاريخ مُركَّب من سنة/شهر (أول الشهر)
+    // بدل إسقاطه من XIRR — موحَّد مع منطق ttmDiv أعلاه
+    const dt = d.date
+      ? new Date(d.date)
+      : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null);
+    if (dt && !isNaN(dt)) cashflows.push({ date: dt, amount: +d.amount });
   });
   if (totalValue > 0) cashflows.push({ date: new Date(), amount: totalValue });
   const xirr = computeXIRR(cashflows);
@@ -605,9 +703,15 @@ async function loadAllData() {
 
   // ── نمو الدخل التوزيعي السنوي (CAGR) — على السنوات المكتملة فقط ──
   // إجمالي المستلم لكل سنة تقويمية كاملة (نستثني السنة الجارية الجزئية).
+  // AUDIT-FIX 2026-08: نستثني أيضاً سنة أول شراء — سنة جزئية (بدأت المحفظة في
+  // منتصفها) كانت تُحسب كسنة كاملة فيتضخّم معدل النمو زوراً.
+  const _firstBuyDate = txRows.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0] || null;
+  const _firstBuyYear = _firstBuyDate ? +String(_firstBuyDate).slice(0, 4) : null;
   const divByYear = {};
   divRows.forEach(d => { if (d.year) divByYear[d.year] = (divByYear[d.year] || 0) + +d.amount; });
-  const fullDivYears = Object.keys(divByYear).map(Number).filter(y => y < yr && divByYear[y] > 0).sort((a, b) => a - b);
+  const fullDivYears = Object.keys(divByYear).map(Number)
+    .filter(y => y < yr && y !== _firstBuyYear && divByYear[y] > 0)
+    .sort((a, b) => a - b);
   let divCagr = null, divCagrFirstY = null, divCagrLastY = null;
   if (fullDivYears.length >= 2) {
     divCagrFirstY = fullDivYears[0];
@@ -619,13 +723,13 @@ async function loadAllData() {
   }
 
   // ── سياق نضج البيانات — لتحديد المؤشرات المبكّرة على عمر المحفظة ──
-  const _firstBuyDate = txRows.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0] || null;
+  // (_firstBuyDate محسوب أعلاه قبل CAGR)
   const _mAgeMonths   = (typeof portfolioAgeMonths === 'function') ? portfolioAgeMonths(_firstBuyDate) : 0;
   const _divCalYears  = Object.keys(divByYear).filter(y => +divByYear[y] > 0).length;
   const _mDivYears    = Math.min(_divCalYears, Math.max(1, Math.ceil(_mAgeMonths / 12))); // مقيّد بعمر المحفظة
   const _maturityCtx  = {
     ageMonths:  _mAgeMonths,
-    snapshots:  nwRows.length,
+    snapshots:  _nwCount,   // AUDIT-FIX 2026-08: count حقيقي بدل طول نافذة limit
     divYears:   divRows.length ? _mDivYears : 0,
     divCount:   divRows.length,
     stockCount: holdings.length,
@@ -645,8 +749,9 @@ async function loadAllData() {
     fwdProjected, fwdByTicker, ttmDiv, xirr,
     annualizedYearDiv, daysElapsed, daysInYear, denomAnn,
     grantMap, totalGrantShares, totalGrantTickers,
-    latestNW:        nwRows[0] ? +nwRows[0].total_value : null,
-    latestNWDate:    nwRows[0] ? nwRows[0].date : null,
+    latestNW:        _nwPick ? +_nwPick.total_value : null,
+    latestNWDate:    _nwPick ? _nwPick.date : null,
+    latestNWIsAuto:  _nwIsAuto,   // لقطة تلقائية جزئية (أسهم+نقد+عقار) لا صافي ثروة كامل
     reTotal:         reRows.filter(p => p.status !== 'sold').reduce((s, p) => s + +p.current_value, 0),
     cashDeposited:   cfRows.filter(e => e.type === 'deposit'    && new Date(e.date).getFullYear() === yr).reduce((s,e) => s + +e.amount, 0),
     cashWithdrawn:   cfRows.filter(e => e.type === 'withdrawal' && new Date(e.date).getFullYear() === yr).reduce((s,e) => s + +e.amount, 0),
@@ -682,6 +787,7 @@ async function reloadHoldings() {
     if (stockTargets[h.ticker] !== undefined) h.target_weight = stockTargets[h.ticker];
     return h;
   });
+  _seedPriceTimestampsFromDB();   // AUDIT-FIX 2026-08: نفس بذر loadAllData بعد إعادة التحميل
   renderRebalancingAlerts();
   renderPortfolioHealthCard(); renderDiversificationCard();
 }
@@ -716,7 +822,8 @@ function switchYieldTab(tab) {
 
   if (tab === 'ann') {
     setText('yield-tab-label', 'العائد المُسنوى — السنة الجارية');
-    setText('stat-div-yield',  (s.divYieldAnn || 0).toFixed(2) + '%');
+    // AUDIT-FIX 2026-08: null = لا تكلفة محفظة (مقام صفر) → «—» بدل رقم مضلل
+    setText('stat-div-yield',  s.divYieldAnn != null ? s.divYieldAnn.toFixed(2) + '%' : '—');
     // AUDIT-FIX (2026-07): قبل يوم 180 الحساب فعلياً TTM (لا استقراء خطي) —
     // السطر التوضيحي يطابق المعادلة المستخدمة في الحالتين.
     const note = (s.daysElapsed || 0) >= 180
@@ -765,9 +872,11 @@ const _CARD_RELIABILITY = {
   // 🟢 حقائق من بياناتك
   'total-value': 'high', 'portfolio-cash': 'high', 'realestate': 'high', 'invested': 'high',
   'capital': 'high', 'pnl': 'high', 'realized': 'high', 'total-return': 'high', 'total-div': 'high', 'year-div': 'high',
-  'cashflow': 'high', 'composition': 'high', 'costs': 'high', 'fwd-income': 'high',
+  'cashflow': 'high', 'composition': 'high', 'costs': 'high',
   'total-assets': 'high', 'concentration': 'high', 'contribution': 'high',
   // 🟡 تعتمد افتراضات
+  // AUDIT-FIX 2026-08: fwd-income إسقاط مستقبلي (دورية مستنتجة + آخر دفعة) لا حقيقة مسجّلة
+  'fwd-income': 'medium',
   'networth': 'medium', 'div-yield': 'medium', 'xirr': 'medium', 'passive-cover': 'medium',
   'div-growth': 'medium', 'retirement': 'medium', 'breakeven': 'medium',
   // 🔵 إرشادي للتوجيه
@@ -844,8 +953,12 @@ function renderStats() {
     }
   }
 
+  // AUDIT-FIX 2026-08: تُفضَّل أحدث لقطة يدوية؛ إن لم توجد إلا التلقائية (الجزئية:
+  // أسهم+نقد+عقار فقط) تُعرض موسومة حتى لا تُقرأ كصافي ثروة كامل
   setText('stat-net-worth', s.latestNW != null ? formatSAR(s.latestNW) : '—');
-  setText('stat-nw-date',   s.latestNWDate ? formatDate(s.latestNWDate) : 'لا توجد لقطة');
+  setText('stat-nw-date',   s.latestNWDate
+    ? formatDate(s.latestNWDate) + (s.latestNWIsAuto ? ' (لقطة تلقائية جزئية)' : '')
+    : 'لا توجد لقطة');
 
   setText('stat-total-div',   formatSAR(s.totalDivAll || 0));
   setText('stat-year-div',    formatSAR(s.yearDiv     || 0));
@@ -903,7 +1016,9 @@ function renderStats() {
   const coverEl = g('stat-passive-cover');
   if (coverEl) {
     if (goal.monthly > 0) {
-      const monthlyIncome = fwdIncome / 12;
+      // AUDIT-FIX 2026-08: نفس fallback كرت الدخل (Forward ثم TTM) — كانت التغطية
+      // تظهر 0% رغم وجود دخل TTM فعلي عند غياب Forward
+      const monthlyIncome = (fwdIncome || ttmIncome) / 12;
       const coverPct = goal.monthly > 0 ? monthlyIncome / goal.monthly * 100 : 0;
       coverEl.textContent = coverPct.toFixed(1) + '%';
       coverEl.className = 'value num ' + (coverPct >= 100 ? 'text-success' : coverPct >= 25 ? 'text-accent' : 'text-muted');
@@ -1105,12 +1220,12 @@ function showStockAlertDetail(ticker) {
       </div>
     </div>`;
   document.body.appendChild(overlay);
-  const close = () => overlay.remove();
+  // AUDIT-FIX 2026-08: إزالة مستمع Escape في كل مسارات الإغلاق (كان يتسرب عند الإغلاق بالزر/النقر)
+  const escKey = e => { if (e.key === 'Escape') close(); };
+  const close = () => { document.removeEventListener('keydown', escKey); overlay.remove(); };
   overlay.querySelector('#sad-close').onclick = close;
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', function escKey(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escKey); }
-  });
+  document.addEventListener('keydown', escKey);
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1163,7 +1278,8 @@ function renderPortfolioHealthCard() {
   const top3Pct  = sorted.slice(0, 3).reduce((s, h) => s + h.w, 0);
 
   // ── 3. التوزيعات vs الهدف ──────────────────────────────────
-  const fwdMonthly    = (s.fwdProjected || 0) / 12;
+  // AUDIT-FIX 2026-08: fallback إلى TTM عند غياب Forward — يطابق كرت الدخل ونافذة ⓘ
+  const fwdMonthly    = (s.fwdProjected || s.ttmDiv || 0) / 12;
   const monthlyTarget = goal.monthly || 0;
 
   // ── 4. التوافق مع هدف الاستقلال المالي ──────────────────────
@@ -1847,12 +1963,12 @@ function showHealthInfo() {
       </div>
     </div>`;
   document.body.appendChild(overlay);
-  const close = () => overlay.remove();
+  // AUDIT-FIX 2026-08: إزالة مستمع Escape في كل مسارات الإغلاق
+  const escKey = e => { if (e.key === 'Escape') close(); };
+  const close = () => { document.removeEventListener('keydown', escKey); overlay.remove(); };
   overlay.querySelector('#hi-close').onclick = close;
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', function escKey(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', escKey); }
-  });
+  document.addEventListener('keydown', escKey);
 }
 
 // ── إعدادات هدف الاستقلال المالي — Supabase + localStorage cache ──
@@ -1914,7 +2030,9 @@ function editRetirementGoal() {
     </div>`;
   document.body.appendChild(overlay);
   overlay.querySelector('#rg-monthly').focus();
-  const cleanup = () => overlay.remove();
+  // AUDIT-FIX 2026-08: إزالة مستمع Escape في كل مسارات الإغلاق
+  const escKey = e => { if (e.key === 'Escape') cleanup(); };
+  const cleanup = () => { document.removeEventListener('keydown', escKey); overlay.remove(); };
   overlay.querySelector('#rg-cancel').onclick = cleanup;
   overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(); });
   overlay.querySelector('#rg-save').onclick = () => {
@@ -1928,9 +2046,7 @@ function editRetirementGoal() {
     renderPortfolioHealthCard(); renderDiversificationCard();
   };
   overlay.querySelector('#rg-save').addEventListener('keydown', e => { if (e.key === 'Enter') overlay.querySelector('#rg-save').click(); });
-  document.addEventListener('keydown', function escKey(e) {
-    if (e.key === 'Escape') { cleanup(); document.removeEventListener('keydown', escKey); }
-  });
+  document.addEventListener('keydown', escKey);
 }
 
 // ── Insights (الصف التحليلي الإضافي) ─────────────────────────
@@ -2214,6 +2330,10 @@ function _renderSectorBars(entries, total) {
   // جمع أهداف القطاعات — من sectorTargets المُحمَّل في loadAllData
   const hasSectorTargets = Object.keys(window._sectorTargetMap || {}).length > 0;
 
+  // AUDIT-FIX 2026-08: عتبات الانحراف من LS (نفس مفاتيح البانر) بدل 1/3 المثبّتة
+  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
+
   const bars = entries.map(([sec, val], i) => {
     const pct    = total > 0 ? (val / total * 100) : 0;
     const target = (window._sectorTargetMap || {})[sec] || 0;
@@ -2224,11 +2344,12 @@ function _renderSectorBars(entries, total) {
     let statusTip   = '';
     if (target > 0) {
       const diff = pct - target;
-      if (Math.abs(diff) <= 1)       { statusColor = '#3fb950'; statusTip = `✅ ضمن الهدف (${target}%)`; }
-      else if (diff > 1 && diff <= 3){ statusColor = '#f0b429'; statusTip = `⚠️ فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
-      else if (diff > 3)             { statusColor = '#f85149'; statusTip = `🔴 فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
-      else if (diff < -3)            { statusColor = '#f0b429'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`; }
-      else                           { statusColor = '#3fb950'; statusTip = `قريب من الهدف (${target}%)`; }
+      if (Math.abs(diff) <= gThr)            { statusColor = '#3fb950'; statusTip = `✅ ضمن الهدف (${target}%)`; }
+      else if (diff > gThr && diff <= yThr)  { statusColor = '#f0b429'; statusTip = `⚠️ فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
+      else if (diff > yThr)                  { statusColor = '#f85149'; statusTip = `🔴 فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
+      else if (diff < -yThr)                 { statusColor = '#f0b429'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`; }
+      // AUDIT-FIX 2026-08: فرع أصفر للنقص البسيط (بين −gThr و −yThr) — كان يُعرض أخضر
+      else                                   { statusColor = '#f0b429'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`; }
     }
 
     return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px" title="${statusTip}">
@@ -2261,6 +2382,9 @@ function _renderSectorBars(entries, total) {
 }
 
 function _renderSectorCards(entries, total) {
+  // AUDIT-FIX 2026-08: عتبات الانحراف من LS (نفس مفاتيح البانر) بدل 1/3 المثبّتة
+  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
+  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
   const cards = entries.map(([sec, val], i) => {
     const pct    = total > 0 ? (val / total * 100) : 0;
     const target = (window._sectorTargetMap || {})[sec] || 0;
@@ -2270,9 +2394,9 @@ function _renderSectorCards(entries, total) {
     // لون الحالة
     let stateColor = color, stateLabel = '';
     if (diff !== null) {
-      if (Math.abs(diff) <= 1)  { stateColor = '#3fb950'; stateLabel = '✅'; }
-      else if (diff > 1)        { stateColor = diff > 3 ? '#f85149' : '#f0b429'; stateLabel = `↑+${diff.toFixed(1)}%`; }
-      else                      { stateColor = '#f0b429'; stateLabel = `↓${diff.toFixed(1)}%`; }
+      if (Math.abs(diff) <= gThr)  { stateColor = '#3fb950'; stateLabel = '✅'; }
+      else if (diff > gThr)        { stateColor = diff > yThr ? '#f85149' : '#f0b429'; stateLabel = `↑+${diff.toFixed(1)}%`; }
+      else                         { stateColor = '#f0b429'; stateLabel = `↓${diff.toFixed(1)}%`; }
     }
 
     return `<div class="w-card" style="--card-accent:${stateColor}">
@@ -2741,17 +2865,17 @@ async function onHoldingSaved(id, field, val) {
     h.price_updated_at = nowISO;
     _priceTimestamps[h.ticker] = nowISO;
     _savePriceTimestamps();
-    await supabaseClient.from('holdings')
+    // AUDIT-FIX 2026-08: فحص خطأ التحديث — فشله الصامت كان يترك السعر اليدوي
+    // عرضة للدوس في refresh التالي دون علم المستخدم
+    const { error } = await supabaseClient.from('holdings')
       .update({ price_manual: true, price_updated_at: nowISO }).eq('id', id);
+    if (error) {
+      console.warn('price_manual update failed:', error);
+      showToast('⚠️ تعذّر حفظ علامة السعر اليدوي — قد يُستبدل بالتحديث التلقائي', 'warning');
+    }
     checkPriceZones(h.ticker, +val);
   }
-  renderStats();
-  renderCharts();
-  renderTable();
-  renderPriceZonesCard();
-  renderBreakEvenCard();
-  renderAllocationChart();
-  renderRetirementCard();
+  renderAllCards();
 }
 
 // إلغاء علامة «سعر يدوي» وإرجاع السهم للتحديث التلقائي (نقرة على ✋)
@@ -2789,7 +2913,8 @@ function showPriceZoneAlert({ ticker, label, color, price, zone, name }) {
 
   const icon = label === 'منطقة شراء' ? '🟢' : '🔴';
   const action = label === 'منطقة شراء' ? 'وصل الحد' : 'تجاوز الحد';
-  const msg = `${icon} <strong>${ticker}</strong>${name ? ` (${name})` : ''} — ${label}! السعر الحالي <strong>${price}</strong> ${action} ${zone}`;
+  // AUDIT-FIX 2026-08: showToast يعرض النص خاماً (textContent) — لا وسوم HTML هنا
+  const msg = `${icon} ${ticker}${name ? ` (${name})` : ''} — ${label}! السعر الحالي ${price} ${action} ${zone}`;
   const type = label === 'منطقة شراء' ? 'success' : 'error';
   showToast(msg, type);
 }
@@ -3273,6 +3398,8 @@ function renderRetirementCard() {
   // net worth separately for context.
   const investAssets = stocks + (portfolioCash || 0) + reTotal + sukuk;  // total incl. RE
   const fireBase     = stocks + (portfolioCash || 0) + sukuk;            // liquid / drawdownable
+  // AUDIT-FIX 2026-08: لا نعرض لقطة تلقائية (جزئية: أسهم+نقد+عقار) كصافي ثروة كامل
+  const nwIsAuto     = !!s.latestNWIsAuto && s.latestNW != null;
   const netWorth     = s.latestNW != null ? s.latestNW : investAssets;   // total NW (context only)
 
   if (!goal.monthly) {
@@ -3313,7 +3440,14 @@ function renderRetirementCard() {
       <div class="small text-muted" style="margin-top:2px">مصاريف ${formatSAR(annualExpenses)}/سنة ÷ ${goal.swr}%</div>
     </div>
     ${row('الأصول السائلة (للسحب)', formatSAR(fireBase), 'text-accent')}
-    ${reTotal > 0 ? row('صافي الثروة الكلي (مع العقار)', formatSAR(netWorth) + ' — غير مُحتسب', 'text-muted') : ''}
+    ${(() => {
+      // AUDIT-FIX 2026-08: لقطة تلقائية جزئية أقل من الأصول السائلة = مضللة → نخفي الصف؛
+      // وإن كانت أعلى نعرضها موسومة بأنها جزئية
+      if (reTotal <= 0) return '';
+      if (nwIsAuto && netWorth < fireBase) return '';
+      const lbl = nwIsAuto ? 'صافي الثروة الكلي (لقطة تلقائية جزئية)' : 'صافي الثروة الكلي (مع العقار)';
+      return row(lbl, formatSAR(netWorth) + ' — غير مُحتسب', 'text-muted');
+    })()}
     ${row('المتبقي للوصول للهدف', formatSAR(remaining), remaining > 0 ? 'text-danger' : 'text-success')}
     ${row('السحب الآمن الحالي', formatSAR(safeMonthly) + '/شهر', '')}
     ${row('تغطية مصاريفك الآن', (goal.monthly > 0 ? (safeMonthly / goal.monthly * 100).toFixed(1) : 0) + '%', safeMonthly >= goal.monthly ? 'text-success' : 'text-muted')}
@@ -3379,17 +3513,35 @@ async function saveHolding(e) {
     avg_price:     +g('h-avg-price').value || 0,
     current_price: +g('h-cur-price').value || 0,
     target_weight: +g('h-target-wt').value || 0,
-    // اختم وقت السعر حتى لا يظهر قديماً (دون فرض «يدوي» — يبقى تلقائياً)
-    price_updated_at: new Date().toISOString()
   };
+
+  // AUDIT-FIX 2026-08: الختم فقط عند تغيّر السعر فعلاً (كان يُختم مع أي تعديل اسم/قطاع
+  // فيبدو السعر القديم حديثاً)، وعند تغيّره يُطبَّق نفس مسار التعديل السطري:
+  // price_manual: true + ختم localStorage حتى لا يُداس خلال refresh الـ5 دقائق.
+  const prev = editingId ? holdings.find(x => x.id === editingId) : null;
+  const priceChanged = editingId
+    ? (prev ? Math.abs(+prev.current_price - payload.current_price) > 1e-9 : true)
+    : payload.current_price > 0;
+  let stampISO = null;
+  if (priceChanged) {
+    stampISO = new Date().toISOString();
+    payload.price_updated_at = stampISO;
+    payload.price_manual     = true;
+  }
+
   let error;
   if (editingId) ({ error } = await supabaseClient.from('holdings').update(payload).eq('id', editingId));
   else           ({ error } = await supabaseClient.from('holdings').insert([payload]));
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
+  if (stampISO) {
+    _priceTimestamps[payload.ticker] = stampISO;
+    _savePriceTimestamps();
+    checkPriceZones(payload.ticker, payload.current_price);
+  }
   showToast(editingId ? 'تم التحديث' : 'تمت الإضافة', 'success');
   closeModal();
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
+  renderAllCards();
 }
 
 // ── Sync holdings from transactions ──────────────────────────
@@ -3413,22 +3565,29 @@ async function syncHoldingsFromTx() {
   }
 
   // احسب الأسهم ومتوسط السعر لكل رمز
+  // AUDIT-FIX 2026-08: مطابق حرفياً لـ recomputeHoldingFromTx في transactions.js:
+  //  • تكلفة الشراء = t.total (شاملة العمولة + VAT) لا shares×price — كان الفرق
+  //    يُظهر انحرافات وهمية لكل الأسهم وقبولها يخفض التكلفة زوراً
+  //  • البيع يخصم الأسهم بمتوسط التكلفة وقتها (WAC زمني) مع قصّ البيع الزائد
   const map = {};
   txAll.forEach(tx => {
-    if (!map[tx.ticker]) map[tx.ticker] = { name: tx.name, buyShares: 0, buyCost: 0, sellShares: 0 };
+    if (!map[tx.ticker]) map[tx.ticker] = { name: tx.name, shares: 0, cost: 0 };
     const m = map[tx.ticker];
     if (tx.type === 'buy') {
-      m.buyShares += +tx.shares;
-      m.buyCost   += +tx.shares * +tx.price;
+      m.cost   += +tx.total;
+      m.shares += +tx.shares;
     } else if (tx.type === 'grant') {
-      m.buyShares += +tx.shares;
+      m.shares += +tx.shares;   // منحة: تكلفة = صفر
     } else if (tx.type === 'sell') {
-      m.sellShares += +tx.shares;
+      const sellShares = Math.min(+tx.shares, m.shares);
+      const avgCostPerShare = m.shares > 0 ? m.cost / m.shares : 0;
+      m.cost   = Math.max(0, m.cost - avgCostPerShare * sellShares);
+      m.shares -= sellShares;
     }
   });
   for (const [, m] of Object.entries(map)) {
-    m.shares   = m.buyShares - m.sellShares;
-    m.avgPrice = m.buyShares > 0 ? m.buyCost / m.buyShares : 0;
+    m.shares   = Math.max(0, +m.shares.toFixed(6));
+    m.avgPrice = m.shares > 0 ? m.cost / m.shares : 0;
   }
 
   // اجلب الـ holdings الحالية + user_stocks
@@ -3572,11 +3731,13 @@ async function confirmSync() {
       if (!existing.sector && sectorMap[ticker]) updatePayload.sector = sectorMap[ticker];
       await supabaseClient.from('holdings').update(updatePayload).eq('id', existing.id);
     } else {
+      // AUDIT-FIX 2026-08: سعر مبدئي = متوسط المعاملات بدل 0 (كان الصفر يُصفّر
+      // القيمة السوقية والأوزان حتى أول تحديث أسعار)
       await supabaseClient.from('holdings').insert([{
         user_id: userId, ticker, name: calc.name,
         sector: sectorMap[ticker] || '',
         shares: +calc.shares.toFixed(4), avg_price: txAvg,
-        current_price: 0, target_weight: 0
+        current_price: txAvg, target_weight: 0
       }]);
     }
     upserted++;
@@ -3589,7 +3750,7 @@ async function confirmSync() {
   const keptNote  = keptCount > 0 ? ` (محتفظ بـ ${keptCount} متوسط يدوي)` : '';
   showToast(`✓ تمت المزامنة — ${upserted} سهم${keptNote}`, 'success');
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
+  renderAllCards();
 }
 
 // ── Info Modal ────────────────────────────────────────────────
@@ -3672,13 +3833,14 @@ function showCardInfo(key) {
     'networth': {
       title: '🏦 صافي الثروة',
       body: `
-        <p>هذا الرقم مأخوذ من آخر "لقطة" سجّلتها يدوياً في صفحة <strong>صافي الثروة</strong>.</p>
+        <p>الرقم مأخوذ من أحدث لقطة <strong>يدوية</strong> سجّلتها في صفحة <strong>صافي الثروة</strong> (صافي ثروة كامل: أصول − التزامات). إن لم توجد لقطة يدوية، تُعرض أحدث لقطة تلقائية موسومة بـ«(لقطة تلقائية جزئية)» — وهي تشمل الأسهم والنقد والعقار فقط، بلا بقية الأصول أو الالتزامات.</p>
         <div class="info-math">
-          آخر لقطة مسجّلة: <strong>${s.latestNWDate ? formatDate(s.latestNWDate) : 'لا توجد'}</strong><br>
+          اللقطة المعروضة: <strong>${s.latestNWDate ? formatDate(s.latestNWDate) : 'لا توجد'}</strong>
+          ${s.latestNWIsAuto ? ' <span class="text-muted">(تلقائية جزئية — أسهم + نقد + عقار)</span>' : ''}<br>
           القيمة: <strong class="text-accent">${s.latestNW != null ? formatSAR(s.latestNW) : '—'}</strong>
         </div>
         <div class="info-formula">صافي الثروة = إجمالي الأصول − إجمالي الالتزامات</div>
-        <p class="info-note">⚠️ هذا الرقم لا يتحدث تلقائياً — اذهب لصفحة صافي الثروة وسجّل لقطة جديدة متى أردت.</p>`
+        <p class="info-note">⚠️ لتحديث الرقم الكامل سجّل لقطة يدوية جديدة من صفحة صافي الثروة — اللقطة التلقائية الشهرية لا تحل محلها.</p>`
     },
     'total-div': {
       title: '💰 إجمالي الأرباح الموزعة',
@@ -3753,7 +3915,7 @@ function showCardInfo(key) {
             وزن القطاع = <strong>قيمة أسهم القطاع ÷ إجمالي المحفظة × 100</strong>
           </div>
           <div class="info-math">
-            القطاع: <strong>${t.sec}</strong><br>
+            القطاع: <strong>${esc(t.sec)}</strong><br>
             قيمة أسهمه ≈ ${formatSAR(secVal)}<br>
             ÷ إجمالي المحفظة ${formatSAR(totalValue)}<br>
             = <strong class="text-accent">${t.pct.toFixed(1)}%</strong>
@@ -3773,7 +3935,7 @@ function showCardInfo(key) {
             وزن القطاع = <strong>قيمة أسهم القطاع ÷ إجمالي المحفظة × 100</strong>
           </div>
           <div class="info-math">
-            القطاع: <strong>${b.sec}</strong><br>
+            القطاع: <strong>${esc(b.sec)}</strong><br>
             قيمة أسهمه ≈ ${formatSAR(secVal)}<br>
             ÷ إجمالي المحفظة ${formatSAR(totalValue)}<br>
             = <strong class="text-danger">${b.pct.toFixed(1)}%</strong>
@@ -4079,14 +4241,19 @@ function showCardInfo(key) {
 // ── نقد المحفظة ───────────────────────────────────────────────
 const CASH_LS_KEY = () => userLsKey('portfolio_cash_v1');
 
-function _loadCashFromLS() {
+// قراءة خام لقيمة النقد من LS ({amount, updated_at} أو null) — للمقارنة الزمنية مع DB
+function _readCashLS() {
   try {
     const raw = localStorage.getItem(CASH_LS_KEY());
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    portfolioCash = +obj.amount || 0;
-    cashUpdatedAt = obj.updated_at || null;
-  } catch (_) {}
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) { return null; }
+}
+
+function _loadCashFromLS() {
+  const obj = _readCashLS();
+  if (!obj) return;
+  portfolioCash = +obj.amount || 0;
+  cashUpdatedAt = obj.updated_at || null;
 }
 
 function _saveCashToLS(amount, updatedAt) {
@@ -4127,14 +4294,19 @@ async function saveCash() {
   renderStats();
   showToast('تم حفظ النقد ✓', 'success');
 
-  // حاول الحفظ في Supabase بشكل صامت
+  // حاول الحفظ في Supabase — AUDIT-FIX 2026-08: تحذير عند الفشل بدل catch صامت
+  // (الـ LS يحمل القيمة الأحدث وستفوز عند التحميل التالي بالمقارنة الزمنية)
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
-    await supabaseClient.from('portfolio_cash').upsert(
+    const { error } = await supabaseClient.from('portfolio_cash').upsert(
       { user_id: user.id, amount: newVal, updated_at: now },
       { onConflict: 'user_id' }
     );
-  } catch (_) { /* الـ localStorage يكفي */ }
+    if (error) throw error;
+  } catch (e) {
+    console.warn('portfolio_cash upsert failed:', e);
+    showToast('⚠️ حُفظ النقد محلياً فقط — تعذّرت مزامنته مع قاعدة البيانات', 'warning');
+  }
 }
 
 async function deleteHolding(id) {
@@ -4143,7 +4315,7 @@ async function deleteHolding(id) {
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
   await reloadHoldings();
-  renderStats(); renderRebalancingAlerts(); renderPortfolioHealthCard(); renderDiversificationCard(); renderCharts(); renderTable();
+  renderAllCards();
 }
 
 // ── تصدير CSV ─────────────────────────────────────────────────
