@@ -197,20 +197,16 @@ async function executeErasure(requestId, userId) {
   // AUDIT-FIX: replaced blocking confirm() with confirmAsync() — mobile-safe and CSP-safe
   if (!await confirmAsync('⚠️ هذا الإجراء نهائي وغير قابل للتراجع. هل تريد حذف جميع بيانات هذا المستخدم؟')) return;
 
-  // AUDIT-FIX: was only deleting 8/16 tables — GDPR violation; now deletes all 16 user tables
-  // FK children first to avoid constraint violations
-  const tables = [
-    'review_log_attachments',   // FK → review_log
-    'review_log',
-    'holdings', 'transactions', 'dividends', 'cashflow_entries',
-    'net_worth_snapshots', 'nw_assets', 'nw_liabilities', 'real_estate',
-    'user_stocks', 'stock_targets', 'sector_targets', 'watchlist',
-    'portfolio_cash', 'portfolio_tasks',
-    'user_settings',   // AUDIT-FIX: synced user prefs (utils.js saveUserSetting) were left behind on erasure — GDPR completeness
-  ];
-  for (const tbl of tables) {
-    const { error } = await supabaseClient.from(tbl).delete().eq('user_id', userId);
-    if (error && error.code !== '42P01') console.warn(`erasure: ${tbl}`, error.message);
+  // AUDIT-FIX: الحذف من عميل المدير كان يُرشَّح بـ RLS إلى 0 صف بصمت ثم يُسجَّل
+  // «حذف كلي» كاذباً — الحذف الفعلي الآن عبر دالة erase_user (SECURITY DEFINER
+  // تتحقق من public.is_admin() وتحذف كل الجداول + صف auth.users)
+  const { error } = await supabaseClient.rpc('erase_user', { target: userId });
+  if (error) {
+    const notDeployed = error.code === 'PGRST202' || /could not find the function/i.test(error.message || '');
+    showToast(notDeployed
+      ? 'دالة erase_user غير موجودة — طبّق migration الحذف (supabase/migrations/2026-08-16_audit_fixes.sql) أولاً'
+      : 'فشل الحذف: ' + error.message, 'error');
+    return;   // لا يُعلَّم الطلب executed عند الفشل
   }
 
   // تحديث حالة الطلب

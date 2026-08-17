@@ -32,6 +32,28 @@ const BATCH_SIZES = {
 };
 const DEFAULT_BATCH = 500;
 
+// ══════════════════════════════════════════════════════════════
+// جلب كل صفوف جدول على دفعات 1000 صف — .limit العالي لا يتجاوز
+// حد PostgREST الخادمي (1000 افتراضياً) فتُقتطع النسخة بصمت.
+// customize: دالة اختيارية تضيف فلاتر/ترتيباً على الاستعلام.
+// الجداول غير الموجودة (42P01) تُرجع [] بهدوء (جداول اختيارية).
+// ══════════════════════════════════════════════════════════════
+async function fetchAllRows(table, customize) {
+  const PAGE = 1000;
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    let q = supabaseClient.from(table).select('*');
+    if (customize) q = customize(q);
+    const { data, error } = await q.range(from, from + PAGE - 1);
+    if (error) {
+      if (error.code === '42P01') return rows;
+      throw new Error(`خطأ في جدول ${table}: ${error.message}`);
+    }
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) return rows;
+  }
+}
+
 // مفاتيح localStorage المشمولة في النسخة الاحتياطية — 100% من تفضيلات المستخدم
 const LS_KEYS = [
   'tharwa-theme',
@@ -60,6 +82,7 @@ async function init() {
   if (!user) return;
   setActiveNav('nav-settings');
   loadAlertThresholds();
+  refreshEmergencySection();
 }
 
 // ── عتبات ألوان التنبيهات ─────────────────────────────────────
@@ -116,21 +139,8 @@ async function exportBackup() {
     const { data: { user: exportUser } } = await supabaseClient.auth.getUser();
     for (const table of TABLES) {
       setStatus('export-status', 'info', `جارٍ تصدير: ${table}…`);
-      // نُضيف user_id filter صراحةً + limit عالٍ لتجاوز حد Supabase الافتراضي (1000)
-      const { data, error } = await supabaseClient
-        .from(table)
-        .select('*')
-        .eq('user_id', exportUser.id)
-        .limit(100000);
-      if (error) {
-        // بعض الجداول قد لا تكون موجودة (اختيارية) — تجاهل بهدوء
-        if (error.code === '42P01') {
-          backup[table] = [];
-          continue;
-        }
-        throw new Error(`خطأ في جدول ${table}: ${error.message}`);
-      }
-      backup[table] = data || [];
+      // نُضيف user_id filter صراحةً + ترقيم صفحات 1000/دفعة (fetchAllRows) — يضمن نسخة كاملة
+      backup[table] = await fetchAllRows(table, q => q.eq('user_id', exportUser.id));
     }
 
     // ── إعدادات localStorage (theme, zoom, portfolio_cash) ────
@@ -268,6 +278,9 @@ async function restoreBackup(input) {
   btn.textContent = 'جارٍ الاستعادة…';
   setStatus('restore-status', 'info', 'يتم حذف البيانات الحالية…');
 
+  // مُعرَّف قبل try حتى يبقى مقروءاً في catch عند أي فشل
+  let emergencySaved = false;
+
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
 
@@ -278,10 +291,10 @@ async function restoreBackup(input) {
     const EMERGENCY_TABLES = TABLES.filter(t => t !== 'review_log_attachments');
     const emergencyBackup = { version: 'emergency', backed_up_at: new Date().toISOString() };
     for (const table of EMERGENCY_TABLES) {
-      const { data } = await supabaseClient.from(table).select('*').eq('user_id', user.id);
-      emergencyBackup[table] = data || [];
+      // ترقيم صفحات كامل — النسخة الطارئة احترازية فلا نوقف الاستعادة عند فشل جدول
+      try { emergencyBackup[table] = await fetchAllRows(table, q => q.eq('user_id', user.id)); }
+      catch (_) { emergencyBackup[table] = []; }
     }
-    let emergencySaved = false;
     try {
       localStorage.setItem('tharwa_emergency_backup', JSON.stringify(emergencyBackup));
       emergencySaved = true;
@@ -289,6 +302,34 @@ async function restoreBackup(input) {
       // localStorage ممتلئة — نُنبّه المستخدم ولا نكذب عليه لاحقاً
       setStatus('restore-status', 'warning',
         '⚠️ تعذّر حفظ النسخة الطارئة (localStorage ممتلئة) — سنتابع الاستعادة لكن لا توجد حماية عند الفشل');
+    }
+
+    // ── 0.5 فحص قابلية الإدراج قبل أي حذف ────────────────────
+    // نُدرج الصف الأول من كل جدول فعلياً ثم نحذفه فوراً. لو الملف بمخطط قديم
+    // (عمود لم يعد موجوداً) نوقف الاستعادة كلها قبل حذف أي بيانات —
+    // dryRunRestore السطحي لا يلتقط هذا فيفشل الإدراج بعد الحذف.
+    // تعارض القيود مع البيانات الحالية (فريد 23505 / FK 23503) = المخطط متوافق → نجاح.
+    setStatus('restore-status', 'info', 'يتم فحص توافق النسخة مع قاعدة البيانات…');
+    for (const table of TABLES) {
+      const rows = backup[table];
+      if (!rows?.length) continue;
+      const probe = mapRow(table, rows[0], user.id);
+      if (!probe) continue;
+      delete probe.id;   // id يُولَّد تلقائياً للفحص حتى لا يصطدم بصف قائم
+      const { data: probeIns, error: probeErr } = await supabaseClient
+        .from(table).insert(probe).select();
+      if (probeErr) {
+        if (probeErr.code === '23505' || probeErr.code === '23503') continue;
+        if (probeErr.code === '42P01') continue;   // جدول اختياري غير موجود
+        throw new Error(`النسخة غير متوافقة مع جدول ${table} — أُوقفت الاستعادة قبل حذف أي بيانات: ${probeErr.message}`);
+      }
+      // حذف الصف التجريبي فوراً بمعرّفه
+      const ins = probeIns?.[0];
+      if (ins?.id != null) {
+        await supabaseClient.from(table).delete().eq('id', ins.id);
+      } else if (table === 'user_settings' && probe.key) {
+        await supabaseClient.from(table).delete().eq('user_id', user.id).eq('key', probe.key);
+      }
     }
 
     // ── 1. حذف كل البيانات الحالية ───────────────────────────
@@ -376,9 +417,106 @@ async function restoreBackup(input) {
       : '⚠️ لم تُحفظ نسخة طارئة (localStorage ممتلئة) — تحقق من بياناتك يدوياً.';
     setStatus('restore-status', 'error', '✗ ' + err.message + '\n\n' + emergencyMsg);
     showToast(emergencySaved ? 'فشلت الاستعادة — نسخة طارئة محفوظة' : 'فشلت الاستعادة — لا توجد نسخة طارئة', 'error');
+    refreshEmergencySection();   // إظهار قسم الاستعادة الطارئة فوراً
   } finally {
     btn.disabled = false;
     btn.textContent = 'استعادة من نسخة احتياطية';
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// النسخة الطارئة — استعادة ما حُفظ في localStorage قبل استعادة فاشلة
+// ══════════════════════════════════════════════════════════════
+function getEmergencyBackup() {
+  try {
+    const raw = localStorage.getItem('tharwa_emergency_backup');
+    if (!raw) return null;
+    const b = JSON.parse(raw);
+    return (b && b.version === 'emergency') ? b : null;
+  } catch { return null; }
+}
+
+// يُظهر/يُخفي قسم النسخة الطارئة في settings.html حسب وجودها
+function refreshEmergencySection() {
+  const sec = document.getElementById('emergency-section');
+  if (!sec) return;
+  const b = getEmergencyBackup();
+  if (!b) { sec.style.display = 'none'; return; }
+  sec.style.display = 'block';
+  const el = document.getElementById('emergency-date');
+  if (el) el.textContent = b.backed_up_at ? new Date(b.backed_up_at).toLocaleString('ar-SA') : 'غير معروف';
+}
+
+async function restoreEmergencyBackup() {
+  const b = getEmergencyBackup();
+  if (!b) {
+    showToast('لا توجد نسخة طارئة محفوظة في هذا المتصفح', 'error');
+    refreshEmergencySection();
+    return;
+  }
+
+  const when = b.backed_up_at ? new Date(b.backed_up_at).toLocaleString('ar-SA') : 'غير معروف';
+  const totalRows = TABLES.reduce((s, t) => s + (Array.isArray(b[t]) ? b[t].length : 0), 0);
+  const confirmed = await confirmAsync(
+    `استعادة النسخة الطارئة\n\n` +
+    `• تاريخ الحفظ: ${when}\n` +
+    `• إجمالي السجلات: ${totalRows}\n\n` +
+    `⚠️ تحذير: سيتم حذف البيانات الحالية واستبدالها بمحتوى النسخة الطارئة.\n` +
+    `(مرفقات دفتر المراجعة غير مشمولة بالنسخة الطارئة)\n\n` +
+    `هل أنت متأكد؟`
+  );
+  if (!confirmed) { setStatus('emergency-status', 'info', 'تم الإلغاء'); return; }
+
+  const btn = document.getElementById('btn-emergency-restore');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الاستعادة…'; }
+  setStatus('emergency-status', 'info', 'يتم حذف البيانات الحالية…');
+
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
+
+    // نفس مسار الاستعادة العادية: FK children أولاً ثم إدراج بترتيب TABLES و mapRow
+    const FK_CHILDREN_FIRST_EMG = [
+      'review_log_attachments',
+      ...TABLES.filter(t => t !== 'review_log_attachments'),
+    ];
+    for (const table of FK_CHILDREN_FIRST_EMG) {
+      const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+      if (error && error.code !== '42P01') {
+        throw new Error(`خطأ في حذف ${table}: ${error.message}`);
+      }
+    }
+
+    setStatus('emergency-status', 'info', 'يتم إدراج بيانات النسخة الطارئة…');
+    let inserted = 0;
+    for (const table of TABLES) {
+      const rows = b[table];
+      if (!Array.isArray(rows) || !rows.length) continue;
+
+      const clean = rows.map(row => mapRow(table, row, user.id)).filter(Boolean);
+      if (!clean.length) continue;
+
+      const batchSize = BATCH_SIZES[table] || DEFAULT_BATCH;
+      for (let i = 0; i < clean.length; i += batchSize) {
+        const batch = clean.slice(i, i + batchSize);
+        setStatus('emergency-status', 'info',
+          `يتم إدراج ${table}… (${Math.min(i + batchSize, clean.length)}/${clean.length})`);
+        const { error } = await supabaseClient.from(table).insert(batch);
+        if (error) throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
+        inserted += batch.length;
+      }
+    }
+
+    // نجحت الاستعادة — النسخة الطارئة استُهلكت (البيانات صارت في القاعدة)
+    localStorage.removeItem('tharwa_emergency_backup');
+    refreshEmergencySection();
+    setStatus('emergency-status', 'success', `✓ تمت استعادة النسخة الطارئة — ${inserted} سجل`);
+    showToast('تمت استعادة النسخة الطارئة ✓', 'success');
+  } catch (err) {
+    setStatus('emergency-status', 'error', '✗ ' + err.message);
+    showToast('فشلت استعادة النسخة الطارئة: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🛟 استعادة النسخة الطارئة'; }
   }
 }
 
@@ -488,6 +626,12 @@ async function deleteAccount() {
 
   const emailInput = document.getElementById('del-email-confirm')?.value?.trim();
   const { data: { user } } = await supabaseClient.auth.getUser();
+  // حارس الجلسة المنتهية — getUser قد يرجع null فينهار user.email
+  if (!user) {
+    showToast('انتهت جلستك — أعد تسجيل الدخول', 'error');
+    setStatus('del-account-status', 'error', '✗ انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
+    return;
+  }
   if (emailInput !== user.email) {
     showToast('البريد الإلكتروني غير مطابق', 'error');
     setStatus('del-account-status', 'error', '✗ البريد الإلكتروني الذي أدخلته لا يطابق حسابك');
@@ -505,7 +649,11 @@ async function deleteAccount() {
       ...TABLES.filter(t => t !== 'review_log_attachments'),
     ];
     for (const table of FK_ORDER_FOR_DELETE) {
-      await supabaseClient.from(table).delete().eq('user_id', user.id);
+      // أي فشل حذف يوقف العملية قبل استدعاء RPC — لا حذف حساب فوق بيانات متبقية
+      const { error: delErr } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+      if (delErr && delErr.code !== '42P01') {
+        throw new Error(`خطأ في مسح ${table}: ${delErr.message}`);
+      }
     }
     // مسح جميع مفاتيح localStorage (شامل: خام + مؤطَّر + غير مُسجَّل)
     clearAllAppLocalStorage();
@@ -536,13 +684,9 @@ async function exportMonthlyReviewMD() {
     const { data: { user } } = await supabaseClient.auth.getUser();
 
     // ── جلب كل الجداول ─────────────────────────────────────
-    const fetchTable = async (table, order) => {
-      const q = supabaseClient.from(table).select('*');
-      if (order) q.order(order, { ascending: true });
-      const { data, error } = await q;
-      if (error && error.code !== '42P01') throw new Error(table + ': ' + error.message);
-      return data || [];
-    };
+    // ترقيم صفحات 1000/دفعة (fetchAllRows) — بلا حد يقتطع الجداول الكبيرة بصمت
+    const fetchTable = (table, order) =>
+      fetchAllRows(table, q => order ? q.order(order, { ascending: true }) : q);
 
     setStatus('md-export-status', 'info', 'جارٍ تحميل البيانات…');
     const [holdings, transactions, dividends, cashflows, snapshots,

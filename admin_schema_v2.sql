@@ -14,9 +14,10 @@ ALTER TABLE site_config ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "config_admin"  ON site_config;
 DROP POLICY IF EXISTS "config_read"   ON site_config;
 
--- المدير يقرأ ويكتب
+-- المدير يقرأ ويكتب — public.is_admin() تقرأ من app_metadata
+-- (معرّفة في admin_schema.sql / admin_rls_app_metadata_fix.sql)
 CREATE POLICY "config_admin" ON site_config
-  FOR ALL USING (((auth.jwt() ->> 'is_admin')::boolean = true));
+  FOR ALL USING (public.is_admin());
 
 -- جميع المستخدمين يقرؤون (لفحص وضع الصيانة)
 CREATE POLICY "config_read" ON site_config
