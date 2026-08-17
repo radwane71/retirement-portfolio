@@ -163,18 +163,19 @@
       <div class="stat-card">
         <button class="info-btn" onclick="showCardInfo('capital')">ⓘ</button>
         <div class="label">📊 التكلفة مقابل القيمة السوقية</div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin:6px 0 2px">
-          <span class="small text-muted">التكلفة (WAC)</span>
-          <span class="num small bold" id="ins-cost-basis">—</span>
+        <div class="kvs mb-2">
+          <div class="kv"><span>التكلفة (WAC)</span><b id="ins-cost-basis">—</b></div>
+          <div class="kv"><span>القيمة السوقية</span><b id="ins-market-value">—</b></div>
         </div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px">
-          <span class="small text-muted">القيمة السوقية</span>
-          <span class="num small bold text-accent" id="ins-market-value">—</span>
+        <div class="meter" id="ins-mkt-meter">
+          <div class="meter-head"><span class="k">القيمة السوقية ÷ التكلفة</span><span class="v" id="ins-mkt-ratio">—</span></div>
+          <div class="meter-wrap">
+            <div class="meter-track"><div class="meter-fill" id="ins-mkt-bar-fill" style="width:0%"></div></div>
+            <div class="meter-mark" style="left:50%"></div>
+          </div>
+          <div class="meter-foot">المسار ٠–٢٠٠٪ · العلامة = التعادل مع التكلفة (١٠٠٪)</div>
         </div>
-        <div class="progress-bar">
-          <div class="progress-fill" id="ins-mkt-bar-fill" style="width:0%"></div>
-        </div>
-        <div class="mt-1 small" id="ins-mkt-pnl">—</div>
+        <div class="mt-2" id="ins-mkt-pnl">—</div>
       </div>
 
       <div class="stat-card">
@@ -249,6 +250,7 @@
         <div class="label">🛡️ تغطية الدخل السلبي للمصاريف</div>
         <div class="value num" id="stat-passive-cover">—</div>
         <div class="sub" id="stat-passive-cover-sub">انقر على هدف التقاعد لإدخال مصاريفك</div>
+        <div class="mt-2" id="stat-passive-cover-tag"></div>
       </div>
 
     </div>
@@ -272,9 +274,13 @@
         <div class="label">صافي التدفق النقدي هذا العام <span class="eng-label">Net Cash Flow</span></div>
         <div class="value num" id="stat-cash-actual">—</div>
         <div class="sub" id="stat-cash-sub">—</div>
-        <div class="progress-bar mt-2">
-          <div class="progress-fill" id="stat-cash-fill" style="width:0%"></div>
+        <div class="meter mt-2" id="stat-cash-meter">
+          <div class="meter-head"><span class="k">نصيب الإيداعات من حركة النقد</span><span class="v" id="stat-cash-ratio">—</span></div>
+          <div class="meter-wrap">
+            <div class="meter-track"><div class="meter-fill" id="stat-cash-fill" style="width:0%"></div></div>
+          </div>
         </div>
+        <div class="mt-2" id="stat-cash-tag"></div>
       </div>
 
       <div class="stat-card">
@@ -309,6 +315,7 @@
         <div class="value num" id="stat-concentration">—</div>
         <div class="sub bold" id="stat-concentration-name">—</div>
         <div class="small text-muted mt-1" id="stat-concentration-sub">—</div>
+        <div class="mt-2" id="stat-concentration-tag"></div>
       </div>
 
       <div class="stat-card">
@@ -333,6 +340,7 @@
         <div class="value num text-accent" id="ins-top-sector-pct">—</div>
         <div class="sub bold" id="ins-top-sector-name">—</div>
         <div class="small text-muted mt-1" id="ins-top-sector-sub">—</div>
+        <div class="mt-2" id="ins-top-sector-tag"></div>
       </div>
 
       <div class="stat-card">
@@ -341,6 +349,7 @@
         <div class="value num text-danger" id="ins-bot-sector-pct">—</div>
         <div class="sub bold" id="ins-bot-sector-name">—</div>
         <div class="small text-muted mt-1" id="ins-bot-sector-sub">—</div>
+        <div class="mt-2" id="ins-bot-sector-tag"></div>
       </div>
 
       <div class="stat-card">
@@ -434,11 +443,11 @@
             <button class="chart-mode-btn"         onclick="setWeightMode('table')"  id="wm-table">جدول</button>
           </div>
         </div>
-        <div id="weight-legend" style="display:flex;gap:10px;align-items:center;font-size:0.78rem;color:var(--text-muted);flex-wrap:wrap;padding:0 4px 8px">
-          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(63,185,80,0.85);display:inline-block"></span>ضمن الهدف</span>
-          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(239,68,68,0.85);display:inline-block"></span>زيادة</span>
-          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(99,179,237,0.85);display:inline-block"></span>نقص</span>
-          <span style="display:flex;align-items:center;gap:4px"><span style="width:10px;height:10px;border-radius:2px;background:rgba(240,180,41,0.85);display:inline-block"></span>بدون هدف</span>
+        <div id="weight-legend" class="flex gap-2 mb-2" style="flex-wrap:wrap">
+          <span class="tag" data-state="good">✅ ضمن الهدف</span>
+          <span class="tag" data-state="bad">🔴 زيادة</span>
+          <span class="tag">🔵 نقص</span>
+          <span class="tag">⚪ بدون هدف</span>
         </div>
         <div id="weightChart-container" class="chart-container" style="height:460px;overflow-y:auto">
           <canvas id="weightChart"></canvas>

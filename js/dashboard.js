@@ -5,13 +5,99 @@ let trimZonesMap = {};   // ticker → trim_from (من portfolio_tasks)
 let stockTaskMap = {};   // ticker → نوع المهمة اليدوية الفعّالة (من portfolio_tasks)
 let plannedTickers = {}; // ticker → name  (أسهم user_stocks المخطط لها وغير المملوكة)
 // مهام الأسهم اليدوية — نفس تعريف targets.js
+// state: يُترجَم إلى data-state على .tag (اللون من رموز التصميم، والأيقونة تحمل المعنى معه)
 const STOCK_TASK_META = {
-  liquidation:  { label: 'تصفية',  icon: '🔴', color: '#f85149', desc: 'بيع المركز بالكامل والخروج منه.' },
-  reduction:    { label: 'تخفيف',  icon: '⚖️', color: '#f0b429', desc: 'تقليل حجم المركز تدريجياً.' },
-  monitoring:   { label: 'مراقبة', icon: '👁️', color: '#8b949e', desc: 'متابعة دون إجراء حالياً.' },
-  accumulation: { label: 'تجميع',  icon: '🟢', color: '#3fb950', desc: 'زيادة المركز عند الفرص.' },
-  hold:         { label: 'احتفاظ', icon: '🔵', color: '#3b82f6', desc: 'الاحتفاظ بالمركز كما هو.' },
+  liquidation:  { label: 'تصفية',  icon: '🔴', state: 'bad',  desc: 'بيع المركز بالكامل والخروج منه.' },
+  reduction:    { label: 'تخفيف',  icon: '⚖️', state: 'warn', desc: 'تقليل حجم المركز تدريجياً.' },
+  monitoring:   { label: 'مراقبة', icon: '👁️', state: '',     desc: 'متابعة دون إجراء حالياً.' },
+  accumulation: { label: 'تجميع',  icon: '🟢', state: 'good', desc: 'زيادة المركز عند الفرص.' },
+  hold:         { label: 'احتفاظ', icon: '🔵', state: '',     desc: 'الاحتفاظ بالمركز كما هو.' },
 };
+
+// ══════════════════════════════════════════════════════════════
+// جسر رموز التصميم — Design-token bridge
+// كل لون في هذا الملف يُقرأ من متغيّرات CSS في css/style.css.
+// لا لون مكتوب يدوياً هنا: تغيير الثيم (داكن/فاتح) يسري تلقائياً.
+// ══════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون سلسلة بيانات بالترتيب الثابت (1..6) — لا تُدوَّر عشوائياً
+function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// شفافية على رمز تصميم: #rrggbb + قناة ألفا سِتّ‌عشرية (لا لون جديد يُخترع)
+function tint(color, aa) {
+  const c = String(color || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(c) ? c + aa : c;
+}
+// ثيم Chart.js المشتق من رموز التصميم (يتحدّث مع الوضع الفاتح)
+function chartTheme() {
+  return {
+    text:    cssVar('--text'),
+    muted:   cssVar('--text-2'),
+    surface: cssVar('--bg-2'),
+    border:  cssVar('--border'),
+    grid:    tint(cssVar('--border'), 'aa'),
+    accent:  cssVar('--accent'),
+    font:    'Tajawal',
+  };
+}
+// إعدادات tooltip موحّدة لكل مخططات اللوحة
+function chartTooltipStyle() {
+  const t = chartTheme();
+  return {
+    backgroundColor: t.surface, titleColor: t.text, bodyColor: t.muted,
+    borderColor: t.border, borderWidth: 1,
+    titleFont: { family: t.font }, bodyFont: { family: t.font },
+  };
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// صف وزن في قائمة (.brow)
+function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
+  const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
+  const dColor = diffState ? stateColorOf(diffState) : cssVar('--text-2');
+  return `<div class="brow"${title ? ` title="${title}"` : ''}>
+      <div class="br-k"><span class="dot" style="background:${color}"></span><span>${name}</span>${sub ? `<span class="small text-muted num">${sub}</span>` : ''}</div>
+      <div class="br-track"><div class="br-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="br-v">${valueTxt}${diffTxt ? `<span class="d" style="color:${dColor}">${diffTxt}</span>` : ''}</div>
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
 let sectorChart = null;
 let _sectorMode = 'donut'; // 'donut' | 'bars' | 'cards'
 let weightChart = null;
@@ -45,6 +131,8 @@ function hSortArrow(field) {
 
 const g = id => document.getElementById(id);
 const setText = (id, v) => { const el = g(id); if (el) el.textContent = v; };
+// للمكوّنات المولَّدة داخلياً فقط (tagHtml/meterHtml) — لا نصوص مستخدم غير مهرَّبة
+const setHtml = (id, v) => { const el = g(id); if (el) el.innerHTML = v; };
 
 // Returns all td attributes for an editable cell
 function ed(table, rowId, field, type, raw, extraCls = '', selectKey = '') {
@@ -969,8 +1057,17 @@ function renderStats() {
   const cashEl = g('stat-cash-actual');
   if (cashEl) { cashEl.textContent = formatSAR(cashNet, true); cashEl.className = 'value num ' + (cashNet >= 0 ? 'text-success' : 'text-danger'); }
   setText('stat-cash-sub', `إيداع ${formatSAR(s.cashDeposited||0)} / سحب ${formatSAR(s.cashWithdrawn||0)}`);
+  // نصيب الإيداعات من إجمالي الحركة (إيداع + سحب) — 100% = لا سحوبات هذا العام
+  const cashMoved = (s.cashDeposited || 0) + (s.cashWithdrawn || 0);
+  const cashRatio = cashMoved > 0 ? (s.cashDeposited || 0) / cashMoved * 100 : 0;
   const fill = g('stat-cash-fill');
-  if (fill) { fill.style.width = s.cashDeposited > 0 ? '100%' : '0%'; fill.style.background = 'var(--accent)'; }
+  if (fill) fill.style.width = cashRatio.toFixed(1) + '%';
+  const cashMeter = g('stat-cash-meter');
+  if (cashMeter) cashMeter.dataset.state = cashNet >= 0 ? 'good' : 'bad';
+  setText('stat-cash-ratio', cashMoved > 0 ? cashRatio.toFixed(0) + '%' : '—');
+  const cashTag = g('stat-cash-tag');
+  if (cashTag) cashTag.innerHTML = tagHtml(cashNet >= 0 ? '✅' : '⚠️',
+    cashNet >= 0 ? 'تدفق داخل صافٍ' : 'تدفق خارج صافٍ', cashNet >= 0 ? 'good' : 'bad');
 
   // ── صف 5: الأداء السنوي والدخل ────────────────────────────
   const xirrEl = g('stat-xirr');
@@ -1023,10 +1120,15 @@ function renderStats() {
       coverEl.textContent = coverPct.toFixed(1) + '%';
       coverEl.className = 'value num ' + (coverPct >= 100 ? 'text-success' : coverPct >= 25 ? 'text-accent' : 'text-muted');
       setText('stat-passive-cover-sub', `دخل ${formatSAR(monthlyIncome)}/شهر مقابل مصاريف ${formatSAR(goal.monthly)}`);
+      setHtml('stat-passive-cover-tag', coverPct >= 100
+        ? tagHtml('✅', 'الدخل يغطّي المصاريف', 'good')
+        : coverPct >= 25 ? tagHtml('⏳', 'تغطية جزئية', 'warn')
+        : tagHtml('🔴', 'تغطية ضعيفة', 'bad'));
     } else {
       coverEl.textContent = '—';
       coverEl.className = 'value num text-muted';
       setText('stat-passive-cover-sub', 'أدخل مصاريفك في بطاقة هدف التقاعد');
+      setHtml('stat-passive-cover-tag', '');
     }
   }
 
@@ -1041,11 +1143,16 @@ function renderStats() {
       const nm = s.largestHolding.name ? `${s.largestHolding.ticker} — ${s.largestHolding.name}` : s.largestHolding.ticker;
       setText('stat-concentration-name', 'أكبر مركز: ' + nm);
       setText('stat-concentration-sub', `أكبر 5 مراكز: ${s.top5Pct.toFixed(1)}% من قيمة الأسهم`);
+      setHtml('stat-concentration-tag', s.largestPosPct >= 25
+        ? tagHtml('🔴', 'تركيز خطر', 'bad')
+        : s.largestPosPct >= 15 ? tagHtml('⚠️', 'تركيز مرتفع', 'warn')
+        : tagHtml('✅', 'تركيز صحي', 'good'));
     } else {
       concEl.textContent = '—';
       concEl.className = 'value num text-muted';
       setText('stat-concentration-name', 'لا توجد حيازات');
       setText('stat-concentration-sub', '');
+      setHtml('stat-concentration-tag', '');
     }
   }
 
@@ -1120,16 +1227,17 @@ function renderRebalancingAlerts() {
   deviations.sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
   const top = deviations.slice(0, 4);
 
-  const borderColor = reds.length    ? 'rgba(248,81,73,.35)'  : 'rgba(240,180,41,.35)';
-  const bgColor     = reds.length    ? 'rgba(248,81,73,.05)'  : 'rgba(240,180,41,.05)';
-  const badgeColor  = reds.length    ? '#f85149'              : '#f0b429';
+  const bannerState = reds.length ? 'bad' : 'warn';
+  const bannerClr   = stateColorOf(bannerState);
+  const borderColor = tint(bannerClr, '59');
+  const bgColor     = tint(bannerClr, '0d');
   const title       = reds.length
     ? `⚖️ ${reds.length} سهم منحرف بشكل حاد عن الهدف (> ${yellow}%)`
     : `⚠️ ${yellows.length} سهم خارج النطاق الأمثل (> ${green}%)`;
 
   const chips = top.map(d => {
     const isRed     = Math.abs(d.diff) > yellow;
-    const color     = isRed ? '#f85149' : '#f0b429';
+    const color     = stateColorOf(isRed ? 'bad' : 'warn');
     const arrow     = d.diff > 0 ? '↑' : '↓';
     const sign      = d.diff > 0 ? '+' : '';
     const isUnder   = d.diff < 0; // ناقص الوزن → اقتراح شراء
@@ -1140,7 +1248,7 @@ function renderRebalancingAlerts() {
     // تحذير: السهم ناقص الوزن لكن سعره فوق هدف الشراء
     const aboveEntry = isUnder && entryPx != null && curPrice != null && curPrice > entryPx;
     const warningTag = aboveEntry
-      ? `<span title="السعر الحالي ${curPrice} فوق هدف الشراء ${entryPx} — تحقق من القيمة العادلة قبل الشراء" style="font-size:.7rem;background:rgba(248,81,73,.15);color:#f85149;border-radius:4px;padding:1px 5px;margin-right:2px">⚠️ فوق الهدف</span>`
+      ? `<span class="tag" data-state="bad" title="السعر الحالي ${curPrice} فوق هدف الشراء ${entryPx} — تحقق من القيمة العادلة قبل الشراء">⚠️ فوق الهدف</span>`
       : '';
     return `<span onclick="showStockAlertDetail('${esc(d.ticker)}')" title="اضغط لتفاصيل ${esc(d.ticker)}" style="
       display:inline-flex;align-items:center;gap:4px;cursor:pointer;
@@ -1179,18 +1287,18 @@ function showStockAlertDetail(ticker) {
   const totalVal   = holdings.reduce((s, x) => s + +x.shares * +x.current_price, 0);
   const current    = (h && totalVal > 0) ? (+h.shares * +h.current_price) / totalVal * 100 : 0; // النسبة الحالية
   const diff       = current - target;
-  const diffColor  = Math.abs(diff) < 0.01 ? 'var(--text-muted)' : diff > 0 ? '#f85149' : '#f0b429';
+  const diffColor  = Math.abs(diff) < 0.01 ? cssVar('--text-2') : stateColorOf(diff > 0 ? 'bad' : 'warn');
   const taskType   = stockTaskMap[ticker];
   const task       = taskType ? STOCK_TASK_META[taskType] : null;
 
   const statusHtml = isPlanned
-    ? `<span style="color:#a371f7">📌 مخطط له (غير مملوك بعد)</span>`
-    : `<span style="color:#3fb950">✅ ضمن المحفظة حالياً</span>`;
+    ? tagHtml('📌', 'مخطط له (غير مملوك بعد)', '')
+    : tagHtml('✅', 'ضمن المحفظة حالياً', 'good');
 
   const taskHtml = task
-    ? `<span style="display:inline-flex;align-items:center;gap:5px;background:${task.color}1f;color:${task.color};border-radius:20px;padding:3px 11px;font-weight:700;font-size:.82rem">${task.icon} ${task.label}</span>
-       <div style="font-size:.76rem;color:var(--text-muted);margin-top:5px">${task.desc}</div>`
-    : `<span style="color:var(--text-muted)">— لا توجد مهمة يدوية فعّالة لهذا السهم</span>`;
+    ? `${tagHtml(task.icon, task.label, task.state)}
+       <div class="small text-muted mt-1">${task.desc}</div>`
+    : `<span class="text-muted">— لا توجد مهمة يدوية فعّالة لهذا السهم</span>`;
 
   const row = (label, valHtml) => `
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:9px 0;border-bottom:1px solid var(--border)">
@@ -1199,24 +1307,23 @@ function showStockAlertDetail(ticker) {
     </div>`;
 
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:14px;max-width:420px;width:100%;padding:20px;box-shadow:0 8px 32px rgba(0,0,0,.5);direction:rtl">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-        <span style="font-weight:700;font-size:1.05rem">${esc(name)}</span>
-        <span style="font-family:monospace;font-size:.85rem;color:var(--text-muted)">${esc(ticker)}</span>
+    <div class="modal-card stack">
+      <div class="card-head">
+        <span class="ttl">${esc(name)} <span class="sub num">${esc(ticker)}</span></span>
+        <div class="acts">${statusHtml}</div>
       </div>
-      <div style="margin-bottom:12px">${statusHtml}</div>
       ${row('النسبة الحالية في المحفظة', isPlanned ? '<span class="text-muted">—</span>' : `${current.toFixed(2)}%`)}
       ${row('الهدف المخطط له', target ? `${target}%` : '<span class="text-muted">غير محدد</span>')}
       ${row('الفارق عن الهدف', target ? `<span style="color:${diffColor}">${diff > 0 ? '+' : ''}${diff.toFixed(2)}%</span>` : '<span class="text-muted">—</span>')}
-      <div style="padding:11px 0 0">
-        <div class="small" style="color:var(--text-muted);margin-bottom:6px">المهمة اليدوية (من مهامي)</div>
+      <div>
+        <div class="small text-muted mb-2">المهمة اليدوية (من مهامي)</div>
         ${taskHtml}
       </div>
-      <div style="display:flex;justify-content:space-between;gap:8px;margin-top:18px">
+      <div class="flex-between gap-2">
         <a href="targets.html" class="btn btn-secondary btn-sm">⚖️ صفحة الأهداف والمهام</a>
-        <button id="sad-close" class="btn btn-secondary btn-sm" style="min-width:72px">إغلاق</button>
+        <button id="sad-close" class="btn btn-secondary btn-sm">إغلاق</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -1478,8 +1585,9 @@ function renderPortfolioHealthCard() {
   // ══════════════════════════════════════════════════════════
   // دوال مساعدة للرسم
   // ══════════════════════════════════════════════════════════
-  const CLR = { green:'#3fb950', yellow:'#f0b429', red:'#f85149', gray:'#8b949e' };
-  const TIP_CLR = { red:'#f85149', yellow:'#f0b429', blue:'#58a6ff', green:'#3fb950' };
+  // الألوان من رموز التصميم — الحُكم يُرافقه دائماً نص (verdict) لا لون وحده
+  const CLR = { green: stateColorOf('good'), yellow: stateColorOf('warn'), red: stateColorOf('bad'), gray: cssVar('--text-2') };
+  const TIP_CLR = { red: CLR.red, yellow: CLR.yellow, blue: seriesColor(1), green: CLR.green };
 
   // ── النسب المئوية للأبعاد القابلة للقياس (للأشرطة) ──
   const cProgress = monthlyTarget > 0 ? Math.min(fwdMonthly / monthlyTarget * 100, 100) : null;
@@ -1513,7 +1621,7 @@ function renderPortfolioHealthCard() {
 
   const tipHtml = shownTips.map(t => `
     <div style="display:flex;gap:8px;margin-bottom:7px;align-items:flex-start">
-      <span style="flex-shrink:0;width:7px;height:7px;border-radius:50%;background:${TIP_CLR[t.lvl]||'#8b949e'};margin-top:5px"></span>
+      <span class="dot" style="background:${TIP_CLR[t.lvl] || CLR.gray}"></span>
       <span style="font-size:.82rem;color:var(--text-2);line-height:1.6">${t.txt}</span>
     </div>`).join('');
 
@@ -1572,14 +1680,15 @@ function renderPortfolioHealthCard() {
 //   • Domian et al. (2007): 20 سهماً ≈ 95% مُزالة، و+80 سهماً تُزيل 4% فقط
 //   • مراجعة Zaimovic et al. (2021, 150 دراسة): العدد أكبر اليوم، وأقل في
 //     الأسواق الناشئة، والتنويع لا يُزيل مخاطر الذيل (الانهيارات)
+// state: يُترجَم إلى لون حالة من رموز التصميم، ودائماً مصحوباً بالنص (txt)
 function _divRiskRemoved(effN) {
-  if (effN < 5)  return { pct: 60, txt: '< ٦٠٪',            clr: '#f85149' };
-  if (effN < 8)  return { pct: 75, txt: '~٧٥٪',             clr: '#f0b429' };
-  if (effN < 11) return { pct: 80, txt: '~٨٠٪',             clr: '#f0b429' };
-  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             clr: '#84cc16' };
-  if (effN < 21) return { pct: 95, txt: '~٩٥٪',             clr: '#3fb950' };
-  if (effN < 31) return { pct: 97, txt: '~٩٦–٩٧٪',          clr: '#3fb950' };
-  return            { pct: 98, txt: '~٩٨٪ (منفعة هامشية)', clr: '#3b82f6' };
+  if (effN < 5)  return { pct: 60, txt: '< ٦٠٪',            state: 'bad'  };
+  if (effN < 8)  return { pct: 75, txt: '~٧٥٪',             state: 'warn' };
+  if (effN < 11) return { pct: 80, txt: '~٨٠٪',             state: 'warn' };
+  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             state: 'warn' };
+  if (effN < 21) return { pct: 95, txt: '~٩٥٪',             state: 'good' };
+  if (effN < 31) return { pct: 97, txt: '~٩٦–٩٧٪',          state: 'good' };
+  return            { pct: 98, txt: '~٩٨٪ (منفعة هامشية)', state: 'good' };
 }
 
 // ── مقياس التنويع (HHI gauge) ─────────────────────────────────
@@ -1599,9 +1708,14 @@ function renderDiversificationCard() {
   })));
   const {
     n, hhi, effectiveN, sectorCount, secHHI,
-    top1Pct, top1Name, gaugePos, zoneLabel, zoneColor,
+    top1Pct, top1Name, gaugePos, zoneLabel,
     corrWarn, corrMsg,
   } = div;
+
+  // حالة المنطقة من رموز التصميم (لا نستعمل zoneColor الخام من utils.js)
+  const zoneState = gaugePos < 40 ? 'bad' : gaugePos < 60 ? 'warn' : 'good';
+  const zoneIcon  = gaugePos < 40 ? '🔴' : gaugePos < 60 ? '⚠️' : '✅';
+  const zoneClr   = stateColorOf(zoneState);
 
   // تحديد نص النصيحة حسب المنطقة
   let advice;
@@ -1619,17 +1733,15 @@ function renderDiversificationCard() {
   }
 
   // تنبيه منفصل لتعقيد الإدارة (Diworsification) — ليس منطقة خطر على المقياس
-  const diworseNote = n > 30 ? `
-    <div style="background:rgba(245,158,11,0.08);border-right:3px solid #f59e0b;border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.80rem;color:var(--text);line-height:1.65;margin-top:10px;direction:rtl">
-      💡 <strong>ملاحظة الإدارة:</strong> ${n} سهماً — عدد كبير يرفع تعقيد المتابعة (Lynch: diworsification). تأكد أن كل مركز مدروس وتعرفه جيداً.
-    </div>` : '';
+  const diworseNote = n > 30
+    ? noteHtml('💡', `<strong>ملاحظة الإدارة:</strong> ${n} سهماً — عدد كبير يرفع تعقيد المتابعة (Lynch: diworsification). تأكد أن كل مركز مدروس وتعرفه جيداً.`, 'warn')
+    : '';
 
   // تنبيه الارتباط بالوكالة — تنويع اسمي لا فعلي (قطاع مهيمن بأسهم مترابطة)
-  const corrNote = corrWarn ? `
-    <div style="background:rgba(239,68,68,0.08);border-right:3px solid #ef4444;border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.80rem;color:var(--text);line-height:1.65;margin-top:10px;direction:rtl">
-      ⚠️ <strong>تنويع اسمي لا فعلي:</strong> ${esc(corrMsg)}
-      <div style="font-size:0.72rem;color:var(--text-muted);margin-top:5px">المؤشر يقيس تركيز الأوزان لا ترابط الأسهم — القطاع الواحد يتحرك ككتلة واحدة عند الصدمات.</div>
-    </div>` : '';
+  const corrNote = corrWarn
+    ? noteHtml('⚠️', `<strong>تنويع اسمي لا فعلي:</strong> ${esc(corrMsg)}
+        <div class="small text-muted mt-1">المؤشر يقيس تركيز الأوزان لا ترابط الأسهم — القطاع الواحد يتحرك ككتلة واحدة عند الصدمات.</div>`, 'bad')
+    : '';
 
   // ── حلقة التقدّم نحو نطاق Evans & Archer (15 سهماً متوازناً) ──
   const targetN     = 15;
@@ -1640,120 +1752,97 @@ function renderDiversificationCard() {
     ? 'بلغت نطاق التنويع الموصى به ✓'
     : `${progressPct.toFixed(0)}% من نطاق التنويع الموصى به (${targetN} سهماً)`;
 
-  // ── شريطا توازن التوزيع — أعلى = أكثر توازناً = أفضل (عكس التركّز) ──
+  // ── مقياسا توازن التوزيع — أعلى = أكثر توازناً = أفضل (عكس التركّز) ──
   // توازن = كم هي متقاربة أوزان المراكز؛ 100% = أوزان متساوية تماماً.
-  const balColor   = v => v >= 70 ? '#3fb950' : v >= 50 ? '#f0b429' : '#f85149';
+  const balState   = v => v >= 70 ? 'good' : v >= 50 ? 'warn' : 'bad';
+  const balIcon    = v => v >= 70 ? '✅' : v >= 50 ? '⚠️' : '🔴';
   const balStocks  = Math.round(effectiveN / n * 100);
   const effSectors = secHHI > 0 ? 1 / secHHI : sectorCount;
   const balSectors = Math.round(Math.min(1, effSectors / sectorCount) * 100);
   const hhiPct     = hhi * 100, secPct = secHHI * 100;
   const ev         = _divRiskRemoved(effectiveN);   // تقدير المخاطر المُزالة (أبحاث)
+  const _mDiv      = assessMetricMaturity('diversification', { stockCount: n });
 
-  el.innerHTML = `
-    <div class="section-header" style="margin-bottom:14px">
-      <span class="section-title">🧩 مقياس التنويع <span class="eng-label">Diversification</span></span>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn-secondary btn-sm" onclick="showDiversificationAnalysis()" style="font-size:0.74rem;padding:3px 10px">📋 تحليل مفصّل</button>
-        <button class="info-btn" onclick="showCardInfo('diversification')">ⓘ</button>
-      </div>
-    </div>
+  el.innerHTML = cardHead(
+      '🧩 مقياس التنويع', 'Diversification',
+      `<button class="btn btn-secondary btn-sm" onclick="showDiversificationAnalysis()">📋 تحليل مفصّل</button>
+       <button class="info-btn" onclick="showCardInfo('diversification')">ⓘ</button>`
+    ) + `
+    <div class="stack-4">
 
-    <!-- حلقة التقدّم + الحُكم -->
-    <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:16px">
-      <div style="position:relative;width:108px;height:108px;flex-shrink:0">
-        <svg viewBox="0 0 120 120" width="108" height="108">
-          <circle cx="60" cy="60" r="50" fill="none" stroke="var(--bg-3)" stroke-width="11"/>
-          <circle cx="60" cy="60" r="50" fill="none" stroke="${zoneColor}" stroke-width="11" stroke-linecap="round"
-            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${dashoff.toFixed(1)}" transform="rotate(-90 60 60)"/>
-        </svg>
-        <div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center">
-          <div style="font-size:1.7rem;font-weight:700;color:var(--text);line-height:1">${effectiveN}</div>
-          <div style="font-size:0.66rem;color:var(--text-muted)">عدد فعّال</div>
+      <!-- الحلقة + الحُكم -->
+      <div class="flex gap-4" style="align-items:center;flex-wrap:wrap">
+        <div class="gauge" style="width:108px;height:108px">
+          <svg viewBox="0 0 120 120" width="108" height="108">
+            <circle class="ring-bg" cx="60" cy="60" r="50" fill="none" stroke-width="11"/>
+            <circle cx="60" cy="60" r="50" fill="none" stroke="${zoneClr}" stroke-width="11" stroke-linecap="round"
+              stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${dashoff.toFixed(1)}" transform="rotate(-90 60 60)"/>
+          </svg>
+          <div class="gauge-mid">
+            <div class="g-v">${effectiveN}</div>
+            <div class="g-l">عدد فعّال</div>
+          </div>
         </div>
-      </div>
-      <div style="flex:1;min-width:180px">
-        <div style="font-size:0.98rem;font-weight:700;color:${zoneColor};margin-bottom:3px">${zoneLabel}${(() => { const _m = assessMetricMaturity('diversification', { stockCount: n }); return maturityBadge(_m.level, _m.reason); })()}</div>
-        <div style="font-size:0.76rem;color:var(--text-muted);margin-bottom:6px">${progressTxt}</div>
-        <div style="font-size:0.74rem;color:var(--text-2);line-height:1.55;margin-bottom:9px">
-          تملك ${n} سهماً، لكن بسبب تفاوت أوزانها فإن تنوّعها يعادل
-          <b style="color:var(--text)">${effectiveN}</b> سهماً متساوي الوزن.
-          كلما اقترب الرقمان كان توزيعك أكثر توازناً.
+        <div class="stack-2" style="flex:1;min-width:200px">
+          <div class="flex gap-2" style="align-items:center;flex-wrap:wrap">
+            ${tagHtml(zoneIcon, zoneLabel, zoneState)}${maturityBadge(_mDiv.level, _mDiv.reason)}
+          </div>
+          <div class="hero-cap">${progressTxt}</div>
+          <div class="small text-muted">
+            تملك ${n} سهماً، لكن بسبب تفاوت أوزانها فإن تنوّعها يعادل
+            <b class="num">${effectiveN}</b> سهماً متساوي الوزن.
+            كلما اقترب الرقمان كان توزيعك أكثر توازناً.
+          </div>
+          <div class="flex gap-2" style="flex-wrap:wrap">
+            <span class="tag">📊 ${n} سهم</span>
+            <span class="tag">🗂️ ${sectorCount} قطاع</span>
+            <span class="tag">🎯 أكبر ${top1Pct.toFixed(1)}% (${esc(top1Name)})</span>
+          </div>
         </div>
-        <div style="display:flex;gap:7px;flex-wrap:wrap">
-          <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">${n} سهم</span>
-          <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">${sectorCount} قطاع</span>
-          <span style="font-size:0.72rem;background:var(--bg-2);border:1px solid var(--border);border-radius:7px;padding:3px 9px">أكبر ${top1Pct.toFixed(1)}% (${esc(top1Name)})</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- شريطا توازن التوزيع (أطول = أكثر توازناً = أفضل) -->
-    <div style="display:flex;flex-direction:column;gap:11px;margin-bottom:14px">
-      <div>
-        <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
-          <span style="color:var(--text-muted)">توازن توزيع الأسهم</span>
-          <span style="font-weight:700;color:${balColor(balStocks)}">${balStocks}%</span>
-        </div>
-        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden;direction:ltr">
-          <div style="height:100%;width:${balStocks}%;background:${balColor(balStocks)};border-radius:99px"></div>
-        </div>
-      </div>
-      <div>
-        <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
-          <span style="color:var(--text-muted)">توازن توزيع القطاعات</span>
-          <span style="font-weight:700;color:${balColor(balSectors)}">${balSectors}%</span>
-        </div>
-        <div style="height:7px;background:var(--bg-3);border-radius:99px;overflow:hidden;direction:ltr">
-          <div style="height:100%;width:${balSectors}%;background:${balColor(balSectors)};border-radius:99px"></div>
-        </div>
-      </div>
-      <div style="font-size:0.68rem;color:var(--text-muted);text-align:center;line-height:1.6">
-        الشريط الأطول = توزيع أكثر توازناً (لا مركز يطغى). 🟢 جيد ≥٧٠٪ · 🟡 متوسط · 🔴 ضعيف
-        <br>مقياس HHI الخام: أسهم ${hhiPct.toFixed(1)}% · قطاعات ${secPct.toFixed(1)}%
-      </div>
-    </div>
-
-    <!-- لوحة الأدلّة العلمية -->
-    <div style="background:var(--bg-3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;direction:rtl">
-      <div style="display:flex;align-items:center;gap:6px;font-size:.78rem;font-weight:700;margin-bottom:9px">
-        📚 وفق الأبحاث <span style="font-weight:400;color:var(--text-muted);font-size:.7rem">(مراجعة Zaimovic et al. 2021 — 150 دراسة)</span>
       </div>
 
-      <!-- مقياس مرجعي بعلامة موضعك -->
-      <div style="direction:ltr;position:relative;margin:0 4px 6px">
-        <div style="display:flex;height:8px;border-radius:5px;overflow:hidden">
-          <div style="flex:0 0 16%;background:#f85149" title="< 8 فعّال"></div>
-          <div style="flex:0 0 16%;background:#f0b429"></div>
-          <div style="flex:0 0 22%;background:#84cc16"></div>
-          <div style="flex:0 0 24%;background:#3fb950"></div>
-          <div style="flex:0 0 22%;background:#3b82f6"></div>
-        </div>
-        <div style="position:absolute;top:-4px;left:${Math.min(100, Math.max(0, effectiveN / 30 * 100)).toFixed(0)}%;transform:translateX(-50%)">
-          <div style="width:2px;height:16px;background:var(--text);margin:0 auto"></div>
-          <div style="font-size:.62rem;font-weight:700;white-space:nowrap;margin-top:1px">أنت ${effectiveN}</div>
-        </div>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--text-muted);direction:ltr;margin:0 4px 10px">
-        <span>5</span><span>8–10</span><span>15</span><span>20</span><span>30+</span>
+      <!-- مقياسا توازن التوزيع (أطول = أكثر توازناً = أفضل) -->
+      <div class="stack">
+        ${meterHtml({
+          label: 'توازن توزيع الأسهم',
+          valueTxt: `${balIcon(balStocks)} ${balStocks}%`,
+          pct: balStocks, state: balState(balStocks), markPct: 70,
+        })}
+        ${meterHtml({
+          label: 'توازن توزيع القطاعات',
+          valueTxt: `${balIcon(balSectors)} ${balSectors}%`,
+          pct: balSectors, state: balState(balSectors), markPct: 70,
+          foot: `العلامة = عتبة الجودة ٧٠٪. مقياس HHI الخام: أسهم ${hhiPct.toFixed(1)}% · قطاعات ${secPct.toFixed(1)}%`,
+        })}
       </div>
 
-      <div style="font-size:.78rem;color:var(--text-2);line-height:1.7">
-        عند <b style="color:var(--text)">${effectiveN}</b> سهماً فعّالاً، أُزيل تقديراً
-        <b style="color:${ev.clr}">${ev.txt}</b> من المخاطر القابلة للتنويع.
-        ${effectiveN < 20
-          ? `الوصول إلى ~٢٠ يرفعها إلى ~٩٥٪ <span style="color:var(--text-muted)">(Domian 2007)</span>؛ بعدها المنفعة هامشية (+٨٠ سهماً = +٤٪ فقط).`
-          : `أنت في منطقة المنفعة الهامشية — زيادة العدد بعد ~٢٠ لا تُضيف تنويعاً يُذكر <span style="color:var(--text-muted)">(Domian 2007)</span>.`}
-        <br>🌍 <b>سوقك ناشئ (تاسي):</b> الأبحاث تُظهر أن الأسواق الناشئة تحتاج عدداً
-        <b>أقل</b> للتنويع الأمثل من المتطورة، لكنها أعلى تذبذباً ومخاطر ذيل —
-        والتنويع <b>لا يحمي من الانهيارات</b> (الارتباطات ترتفع وقت الأزمات).
+      <!-- لوحة الأدلّة العلمية -->
+      <div class="stack">
+        ${meterHtml({
+          label: '📚 موضعك على مرجع الأبحاث (٠–٣٠ سهماً فعّالاً)',
+          valueTxt: `${effectiveN} سهم فعّال`,
+          pct: Math.min(100, effectiveN / 30 * 100),
+          state: zoneState, markPct: 50,
+          foot: 'العلامة = ١٥ سهماً فعّالاً (Evans & Archer). المحطات: ٥ · ٨–١٠ · ١٥ · ٢٠ · ٣٠+',
+        })}
+        ${noteHtml('📚', `
+          <b>وفق الأبحاث</b> <span class="text-muted">(مراجعة Zaimovic et al. 2021 — 150 دراسة)</span><br>
+          عند <b class="num">${effectiveN}</b> سهماً فعّالاً، أُزيل تقديراً
+          ${tagHtml(ev.state === 'good' ? '✅' : ev.state === 'warn' ? '⚠️' : '🔴', ev.txt, ev.state)}
+          من المخاطر القابلة للتنويع.
+          ${effectiveN < 20
+            ? ` الوصول إلى ~٢٠ يرفعها إلى ~٩٥٪ <span class="text-muted">(Domian 2007)</span>؛ بعدها المنفعة هامشية (+٨٠ سهماً = +٤٪ فقط).`
+            : ` أنت في منطقة المنفعة الهامشية — زيادة العدد بعد ~٢٠ لا تُضيف تنويعاً يُذكر <span class="text-muted">(Domian 2007)</span>.`}
+          <br>🌍 <b>سوقك ناشئ (تاسي):</b> الأبحاث تُظهر أن الأسواق الناشئة تحتاج عدداً
+          <b>أقل</b> للتنويع الأمثل من المتطورة، لكنها أعلى تذبذباً ومخاطر ذيل —
+          والتنويع <b>لا يحمي من الانهيارات</b> (الارتباطات ترتفع وقت الأزمات).`)}
       </div>
-    </div>
 
-    <!-- النصيحة -->
-    <div style="background:${zoneColor}18;border-right:3px solid ${zoneColor};border-radius:0 8px 8px 0;padding:10px 12px;font-size:0.82rem;color:var(--text);line-height:1.65;direction:rtl">${advice}</div>
-
-    ${corrNote}
-    ${diworseNote}`;
+      <!-- النصيحة -->
+      ${noteHtml(zoneIcon, advice, zoneState)}
+      ${corrNote}
+      ${diworseNote}
+    </div>`;
 }
 
 // ── تحليل التنويع المفصّل (popup شخصي) ──────────────────────────
@@ -1870,40 +1959,36 @@ function showDiversificationAnalysis() {
       <div style="flex:1">
         <div style="font-weight:600;font-size:0.85rem;color:var(--text)">${c.label}</div>
         <div style="font-size:0.80rem;margin-top:3px">
-          <span style="color:${c.ok ? 'var(--success)' : '#ef4444'}">الآن: ${c.current}</span>
+          <span style="color:${stateColorOf(c.ok ? 'good' : 'bad')}">الآن: ${c.current}</span>
           &nbsp;·&nbsp;
-          <span style="color:var(--text-muted)">الهدف: ${c.target}</span>
+          <span class="text-muted">الهدف: ${c.target}</span>
         </div>
-        ${c.action ? `<div style="font-size:0.78rem;color:var(--text-2);margin-top:5px;padding:6px 10px;background:rgba(239,68,68,.08);border-radius:6px;line-height:1.6">👉 ${c.action}</div>` : ''}
+        ${c.action ? `<div class="mt-1">${noteHtml('👉', c.action, 'bad')}</div>` : ''}
       </div>
     </div>`).join('');
 
-  const summaryColor = allPass ? '#10b981' : passCount >= 4 ? '#22c55e' : passCount >= 2 ? '#f97316' : '#ef4444';
+  const summaryState = allPass ? 'good' : passCount >= 4 ? 'good' : passCount >= 2 ? 'warn' : 'bad';
+  const summaryIcon  = allPass ? '🏆' : passCount >= 4 ? '✅' : passCount >= 2 ? '⚠️' : '🔴';
   const summaryText  = allPass
-    ? '🏆 محفظتك تستوفي جميع معايير "تنوع ممتاز"!'
+    ? 'محفظتك تستوفي جميع معايير "تنوع ممتاز"!'
     : `اجتزت ${passCount} من ${checks.length} معايير — ${checks.length - passCount} ${checks.length - passCount === 1 ? 'معيار ناقص' : 'معايير ناقصة'}`;
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   overlay.innerHTML = `
-    <div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:520px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)">
-      <div style="padding:16px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg);z-index:1">
-        <span style="font-weight:700;font-size:.95rem">📋 تحليل التنويع — ماذا تحتاج للوصول لـ "تنوع ممتاز"؟</span>
-        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text-muted);padding:0 4px">✕</button>
-      </div>
+    <div class="modal-card">
+      ${cardHead('📋 تحليل التنويع', 'ماذا تحتاج للوصول لـ «تنوع ممتاز»؟',
+        `<button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>`)}
 
-      <div style="padding:14px 18px">
+      <div class="stack-4">
         <!-- ملخص -->
-        <div style="background:${summaryColor}18;border:1px solid ${summaryColor}40;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:0.85rem;font-weight:600;color:${summaryColor};text-align:center">
-          ${summaryText}
-        </div>
+        ${noteHtml(summaryIcon, `<b>${summaryText}</b>`, summaryState)}
 
         <!-- قائمة التحقق -->
-        <div style="direction:rtl">${rowsHtml}</div>
+        <div>${rowsHtml}</div>
 
         <!-- ملاحظة -->
-        <div style="margin-top:14px;font-size:0.72rem;color:var(--text-muted);line-height:1.8;direction:rtl">
+        <div class="small text-muted">
           <b>الأدلّة العلمية (مراجعة Zaimovic et al. 2021 — 150 دراسة 1952–2021):</b><br>
           • لا يوجد «عدد مثالي» واحد — يعتمد على السوق والمستثمر وقياس المخاطر ودرجة تحمّلك.<br>
           • ١٠ أسهم تبقي ~٢٥٪ من المخاطر الفردية (Alexeev & Tapon 2014)؛ ٢٠ سهماً ≈ ٩٥٪ مُزالة، و+٨٠ سهماً تُزيل ٤٪ فقط (Domian et al. 2007).<br>
@@ -1951,15 +2036,15 @@ function showHealthInfo() {
     ['&nbsp;&nbsp;Beta، Sharpe Ratio، Volatility — تحتاج أسعار إغلاق تاريخية يومية', false],
   ];
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.className = 'modal-overlay';
   const content = lines.map(([l, bold]) =>
-    `<p style="margin:0 0 6px;font-size:${bold?'.88':'0.8'}rem;${bold?'font-weight:700;color:var(--text-1)':'color:var(--text-2)'}">${l}</p>`
+    bold ? `<p class="bold mb-2">${l}</p>` : `<p class="small text-muted mb-2">${l}</p>`
   ).join('');
   overlay.innerHTML = `
-    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:480px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-height:85vh;display:flex;flex-direction:column">
-      <div style="overflow-y:auto;flex:1">${content}</div>
-      <div style="display:flex;justify-content:flex-end;margin-top:16px">
-        <button id="hi-close" class="btn btn-secondary" style="min-width:80px">إغلاق</button>
+    <div class="modal-card">
+      <div>${content}</div>
+      <div class="flex-end mt-4">
+        <button id="hi-close" class="btn btn-secondary">إغلاق</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -2007,25 +2092,25 @@ function editRetirementGoal() {
   const cur = getRetirementGoal();
   // S-3: replace prompt() with DOM modal — prompt() is blocked in some CSP/iframe contexts
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:440px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
-      <h3 style="margin:0 0 18px;font-size:1rem;color:var(--text-1,#e6edf3)">🎯 هدف التقاعد</h3>
-      <label style="display:block;margin-bottom:12px;font-size:.85rem;color:var(--text-2)">
-        المصاريف الشهرية المتوقعة بعد التقاعد (ر.س)
-        <input id="rg-monthly" type="number" min="0" step="500" class="input" style="display:block;width:100%;margin-top:5px" value="${esc(cur.monthly || '')}">
-      </label>
-      <label style="display:block;margin-bottom:12px;font-size:.85rem;color:var(--text-2)">
-        نسبة السحب الآمنة السنوية % (الافتراضي 4% — قاعدة 25 ضعف)
-        <input id="rg-swr" type="number" min="1" max="10" step="0.5" class="input" style="display:block;width:100%;margin-top:5px" value="${esc(cur.swr || 4)}">
-      </label>
-      <label style="display:block;margin-bottom:20px;font-size:.85rem;color:var(--text-2)">
-        سنة التقاعد المستهدفة (مثال: 2043 — اتركها فارغة إن لم تحددها)
-        <input id="rg-year" type="number" min="2024" max="2100" step="1" class="input" style="display:block;width:100%;margin-top:5px" value="${esc(cur.target_year || '')}">
-      </label>
-      <div style="display:flex;justify-content:flex-end;gap:10px">
-        <button id="rg-cancel" class="btn btn-secondary" style="min-width:80px">إلغاء</button>
-        <button id="rg-save"   class="btn btn-primary"   style="min-width:80px">حفظ</button>
+    <div class="modal-card stack">
+      ${cardHead('🎯 هدف التقاعد', '', '')}
+      <div class="form-group">
+        <label for="rg-monthly">المصاريف الشهرية المتوقعة بعد التقاعد (ر.س)</label>
+        <input id="rg-monthly" type="number" min="0" step="500" class="input full-width" value="${esc(cur.monthly || '')}">
+      </div>
+      <div class="form-group">
+        <label for="rg-swr">نسبة السحب الآمنة السنوية % (الافتراضي 4% — قاعدة 25 ضعف)</label>
+        <input id="rg-swr" type="number" min="1" max="10" step="0.5" class="input full-width" value="${esc(cur.swr || 4)}">
+      </div>
+      <div class="form-group">
+        <label for="rg-year">سنة التقاعد المستهدفة (مثال: 2043 — اتركها فارغة إن لم تحددها)</label>
+        <input id="rg-year" type="number" min="2024" max="2100" step="1" class="input full-width" value="${esc(cur.target_year || '')}">
+      </div>
+      <div class="flex-end gap-3 mt-4">
+        <button id="rg-cancel" class="btn btn-secondary">إلغاء</button>
+        <button id="rg-save"   class="btn btn-primary">حفظ</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);
@@ -2083,6 +2168,10 @@ function renderInsights(s, totalValue, costBasis, pnl, pnlPct) {
     setText('ins-top-sector-sub', topTarget
       ? `هدفه ${topTarget.toFixed(1)}% | فارق ${topDiff >= 0 ? '+' : ''}${topDiff.toFixed(1)}%`
       : 'لا يوجد هدف محدد');
+    setHtml('ins-top-sector-tag', !topTarget ? tagHtml('⚪', 'بدون هدف', '')
+      : Math.abs(topDiff) <= 1 ? tagHtml('✅', 'ضمن الهدف', 'good')
+      : topDiff > 0 ? tagHtml('🔴', `فوق الهدف +${topDiff.toFixed(1)}%`, 'bad')
+      : tagHtml('🔻', `تحت الهدف ${topDiff.toFixed(1)}%`, 'warn'));
   }
 
   // ── بطاقة 3: أقل قطاع وزناً ──────────────────────────────
@@ -2098,6 +2187,10 @@ function renderInsights(s, totalValue, costBasis, pnl, pnlPct) {
     setText('ins-bot-sector-sub', botTarget
       ? `هدفه ${botTarget.toFixed(1)}% | فارق ${botDiff >= 0 ? '+' : ''}${botDiff.toFixed(1)}%`
       : 'لا يوجد هدف محدد');
+    setHtml('ins-bot-sector-tag', !botTarget ? tagHtml('⚪', 'بدون هدف', '')
+      : Math.abs(botDiff) <= 1 ? tagHtml('✅', 'ضمن الهدف', 'good')
+      : botDiff > 0 ? tagHtml('🔴', `فوق الهدف +${botDiff.toFixed(1)}%`, 'bad')
+      : tagHtml('🔻', `تحت الهدف ${botDiff.toFixed(1)}%`, 'warn'));
   }
 
   // ── بطاقة 4: التكاليف التراكمية ──────────────────────────
@@ -2109,16 +2202,18 @@ function renderInsights(s, totalValue, costBasis, pnl, pnlPct) {
   setText('ins-cost-basis',   formatSAR(costBasis));
   setText('ins-market-value', formatSAR(totalValue));
   // شريط التقدم: نسبة القيمة السوقية من التكلفة
+  // المسار يمتد ٠–٢٠٠٪ من التكلفة، فتقع علامة التعادل (١٠٠٪) في منتصفه
   const mktPct = costBasis > 0 ? Math.min(totalValue / costBasis * 100, 200) : 0;
   const mktFill = g('ins-mkt-bar-fill');
-  if (mktFill) {
-    mktFill.style.width = Math.min(mktPct, 100) + '%';
-    mktFill.style.background = pnl >= 0 ? 'var(--success)' : 'var(--danger)';
-  }
+  if (mktFill) mktFill.style.width = Math.min(mktPct / 2, 100) + '%';
+  const mktMeter = g('ins-mkt-meter');
+  if (mktMeter) mktMeter.dataset.state = pnl >= 0 ? 'good' : 'bad';
+  setText('ins-mkt-ratio', costBasis > 0 ? mktPct.toFixed(1) + '%' : '—');
   const mktPnlEl = g('ins-mkt-pnl');
   if (mktPnlEl) {
-    mktPnlEl.textContent = (pnl >= 0 ? '+' : '') + formatSAR(pnl, true) + '  (' + (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%)';
-    mktPnlEl.className   = 'small ' + (pnl >= 0 ? 'text-success' : 'text-danger');
+    mktPnlEl.innerHTML = tagHtml(pnl >= 0 ? '✅' : '❌',
+      `${formatSAR(pnl, true)} (${pnl >= 0 ? '+' : ''}${pnlPct.toFixed(2)}%)`,
+      pnl >= 0 ? 'good' : 'bad');
   }
 
   // ── بطاقة 6: ر/خ محقق من البيع ───────────────────────────
@@ -2240,34 +2335,19 @@ function renderIncomeBySector() {
     return;
   }
 
-  // أشرطة
+  // أشرطة — صفوف .brow موحّدة مع بقية اللوحة
   const maxInc = entries[0][1];
   el.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:10px;padding:4px 0">
-      ${entries.map(([sec, inc]) => {
-        const pct      = totalIncome > 0 ? inc / totalIncome * 100 : 0;
-        const barWidth = maxInc  > 0 ? inc / maxInc * 100 : 0;
-        const color    = CHART_COLORS[entries.findIndex(e => e[0] === sec) % CHART_COLORS.length];
-        return `<div style="display:flex;align-items:center;gap:10px">
-          <div style="width:90px;font-size:0.78rem;color:var(--text);text-align:right;flex-shrink:0;
-            overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(sec)}">${esc(sec)}</div>
-          <div style="flex:1;height:20px;background:var(--bg-3);border-radius:4px;overflow:hidden">
-            <div style="width:${barWidth}%;height:100%;background:${color};border-radius:4px;
-              transition:width .3s ease"></div>
-          </div>
-          <div style="width:56px;font-size:0.78rem;font-weight:700;color:var(--text);text-align:left">
-            ${pct.toFixed(1)}%</div>
-          <div style="width:90px;font-size:0.73rem;color:var(--text-muted);text-align:left">
-            ${formatSAR(inc)}</div>
-        </div>`;
-      }).join('')}
+    <div>
+      ${entries.map(([sec, inc], i) => browHtml({
+        name: esc(sec), sub: formatSAR(inc), color: seriesColor(i),
+        pct: maxInc > 0 ? inc / maxInc * 100 : 0,
+        valueTxt: `${(totalIncome > 0 ? inc / totalIncome * 100 : 0).toFixed(1)}%`,
+        title: `${esc(sec)} — ${formatSAR(inc)}`,
+      })).join('')}
     </div>
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--border);
-      display:flex;justify-content:space-between;font-size:0.8rem">
-      <span class="text-muted">الدخل السنوي المتوقع الكلي:</span>
-      <span class="num bold text-success">${formatSAR(totalIncome)}</span>
-    </div>
-    <p class="small text-muted" style="margin-top:6px">
+    ${kvsHtml([['الدخل السنوي المتوقع الكلي', formatSAR(totalIncome)]])}
+    <p class="small text-muted mt-2">
       مبني على Forward Projected Income — اضغط "جدول" لرؤية الفرق بين نسبة الدخل ونسبة الوزن لكل قطاع.
     </p>
   `;
@@ -2311,16 +2391,16 @@ function renderSectorChart() {
   const sCtx = g('sectorChart')?.getContext('2d');
   if (!sCtx) return;
   const sLabels = entries.map(([k]) => k), sData = entries.map(([, v]) => v);
-  const _light = document.body.classList.contains('light-mode');
+  const th = chartTheme();
   sectorChart = new Chart(sCtx, {
     type: 'doughnut',
-    data: { labels: sLabels, datasets: [{ data: sData, backgroundColor: CHART_COLORS, borderColor: _light ? '#dde1e8' : '#1c2128', borderWidth: 2, hoverOffset: 6 }] },
+    data: { labels: sLabels, datasets: [{ data: sData, backgroundColor: entries.map((_, i) => seriesColor(i)), borderColor: th.surface, borderWidth: 2, hoverOffset: 6 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: _light ? '#52606d' : '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 10, usePointStyle: true } },
-        tooltip: { backgroundColor: _light ? '#eaecf1' : '#1c2128', titleColor: _light ? '#1a1d24' : '#e6edf3', bodyColor: _light ? '#52606d' : '#8b949e', borderColor: _light ? '#bcc2cc' : '#30363d', borderWidth: 1, titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' },
-          callbacks: { label: c => { const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : 0; return ' ' + formatSAR(c.parsed) + '  (' + pct + '%)'; } } }
+        legend: { position: 'bottom', labels: { color: th.muted, font: { family: th.font, size: 11 }, padding: 10, usePointStyle: true } },
+        tooltip: Object.assign(chartTooltipStyle(), {
+          callbacks: { label: c => { const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : 0; return ' ' + formatSAR(c.parsed) + '  (' + pct + '%)'; } } })
       }
     }
   });
@@ -2337,48 +2417,36 @@ function _renderSectorBars(entries, total) {
   const bars = entries.map(([sec, val], i) => {
     const pct    = total > 0 ? (val / total * 100) : 0;
     const target = (window._sectorTargetMap || {})[sec] || 0;
-    const color  = CHART_COLORS[i % CHART_COLORS.length];
+    const color  = seriesColor(i);
 
-    // تحديد لون حالة الانحراف
-    let statusColor = color;
-    let statusTip   = '';
+    // حالة الانحراف — لون + أيقونة + نص (اللون وحده لا يحمل المعنى)
+    let barColor = color, statusTip = '', diffTxt = '', diffState = '';
     if (target > 0) {
       const diff = pct - target;
-      if (Math.abs(diff) <= gThr)            { statusColor = '#3fb950'; statusTip = `✅ ضمن الهدف (${target}%)`; }
-      else if (diff > gThr && diff <= yThr)  { statusColor = '#f0b429'; statusTip = `⚠️ فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
-      else if (diff > yThr)                  { statusColor = '#f85149'; statusTip = `🔴 فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; }
-      else if (diff < -yThr)                 { statusColor = '#f0b429'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`; }
+      if (Math.abs(diff) <= gThr)            { diffState = 'good'; statusTip = `✅ ضمن الهدف (${target}%)`;                       diffTxt = '✅'; }
+      else if (diff > gThr && diff <= yThr)  { diffState = 'warn'; statusTip = `⚠️ فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; diffTxt = `⚠️+${diff.toFixed(1)}`; }
+      else if (diff > yThr)                  { diffState = 'bad';  statusTip = `🔴 فوق الهدف (${target}%) بـ +${diff.toFixed(1)}%`; diffTxt = `🔴+${diff.toFixed(1)}`; }
+      else if (diff < -yThr)                 { diffState = 'warn'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`;  diffTxt = `🔻${diff.toFixed(1)}`; }
       // AUDIT-FIX 2026-08: فرع أصفر للنقص البسيط (بين −gThr و −yThr) — كان يُعرض أخضر
-      else                                   { statusColor = '#f0b429'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`; }
+      else                                   { diffState = 'warn'; statusTip = `🟡 تحت الهدف (${target}%) بـ ${diff.toFixed(1)}%`;  diffTxt = `🔻${diff.toFixed(1)}`; }
+      barColor = stateColorOf(diffState);
     }
 
-    return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px" title="${statusTip}">
-      <div style="width:90px;font-size:0.82rem;color:var(--text);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${esc(sec)}">${esc(sec)}</div>
-      <div style="flex:1;position:relative">
-        <!-- شريط الهدف (خط عمودي) -->
-        ${target > 0 ? `<div style="position:absolute;top:-2px;bottom:-2px;left:${Math.min(target,100)}%;width:2px;background:rgba(255,255,255,0.35);border-radius:1px;z-index:2" title="الهدف: ${target}%"></div>` : ''}
-        <!-- شريط الواقع -->
-        <div style="height:18px;background:rgba(255,255,255,0.06);border-radius:4px;overflow:visible">
-          <div style="height:100%;width:${Math.min(pct,100).toFixed(1)}%;background:${statusColor};border-radius:4px;min-width:2px;transition:width .3s"></div>
-        </div>
-      </div>
-      <div style="width:44px;font-size:0.82rem;font-weight:600;color:${statusColor};text-align:left">${pct.toFixed(1)}%</div>
-      ${target > 0
-        ? `<div style="width:38px;font-size:0.75rem;color:var(--text-muted);text-align:left" title="الهدف">${target}%🎯</div>`
-        : `<div style="width:38px"></div>`}
-      <div style="width:84px;font-size:0.78rem;color:var(--text-2);text-align:left">${formatSAR(val)}</div>
-    </div>`;
+    return browHtml({
+      name: esc(sec), sub: formatSAR(val), color: barColor, pct: Math.min(pct, 100),
+      valueTxt: `${pct.toFixed(1)}%`, diffTxt, diffState,
+      title: `${esc(sec)} — ${formatSAR(val)}${target > 0 ? ` · ${statusTip}` : ''}`,
+    });
   }).join('');
 
   const legend = hasSectorTargets
-    ? `<div style="display:flex;gap:16px;font-size:.72rem;color:var(--text-muted);padding:0 4px 8px;flex-wrap:wrap">
-        <span>🎯 = الوزن المستهدف (الخط الأبيض)</span>
-        <span style="color:#3fb950">● ضمن الهدف</span>
-        <span style="color:#f0b429">● انحراف بسيط</span>
-        <span style="color:#f85149">● انحراف حاد</span>
+    ? `<div class="flex gap-3 mb-2" style="flex-wrap:wrap">
+        ${tagHtml('✅', 'ضمن الهدف', 'good')}
+        ${tagHtml('⚠️', 'انحراف بسيط', 'warn')}
+        ${tagHtml('🔴', 'انحراف حاد', 'bad')}
        </div>` : '';
 
-  return `<div style="padding:8px 4px">${legend}${bars}</div>`;
+  return `<div class="stack-2">${legend}<div>${bars}</div></div>`;
 }
 
 function _renderSectorCards(entries, total) {
@@ -2389,36 +2457,54 @@ function _renderSectorCards(entries, total) {
     const pct    = total > 0 ? (val / total * 100) : 0;
     const target = (window._sectorTargetMap || {})[sec] || 0;
     const diff   = target > 0 ? pct - target : null;
-    const color  = CHART_COLORS[i % CHART_COLORS.length];
+    const color  = seriesColor(i);
 
-    // لون الحالة
-    let stateColor = color, stateLabel = '';
+    // الحالة: لون + أيقونة + نص معاً
+    let barColor = color, state = '', stateIcon = '', stateLabel = '';
     if (diff !== null) {
-      if (Math.abs(diff) <= gThr)  { stateColor = '#3fb950'; stateLabel = '✅'; }
-      else if (diff > gThr)        { stateColor = diff > yThr ? '#f85149' : '#f0b429'; stateLabel = `↑+${diff.toFixed(1)}%`; }
-      else                         { stateColor = '#f0b429'; stateLabel = `↓${diff.toFixed(1)}%`; }
+      if (Math.abs(diff) <= gThr)  { state = 'good'; stateIcon = '✅'; stateLabel = 'ضمن الهدف'; }
+      else if (diff > gThr)        { state = diff > yThr ? 'bad' : 'warn'; stateIcon = diff > yThr ? '🔴' : '⚠️'; stateLabel = `فوق +${diff.toFixed(1)}%`; }
+      else                         { state = 'warn'; stateIcon = '🔻'; stateLabel = `تحت ${diff.toFixed(1)}%`; }
+      barColor = stateColorOf(state);
     }
 
-    return `<div class="w-card" style="--card-accent:${stateColor}">
+    return `<div class="w-card" style="--card-accent:${barColor}">
       <div class="w-card-header">
-        <span class="w-card-ticker" style="color:${stateColor};font-size:0.8rem">${esc(sec)}</span>
-        <span class="w-card-pct" style="color:${stateColor}">${pct.toFixed(1)}%</span>
+        <span class="w-card-ticker">${esc(sec)}</span>
+        <span class="w-card-pct">${pct.toFixed(1)}%</span>
       </div>
-      <div class="w-card-bar-wrap" style="margin:6px 0;position:relative">
-        <div class="w-card-bar-track">
-          <div class="w-card-bar-fill" style="width:${Math.min(pct,100).toFixed(1)}%;background:${stateColor}"></div>
-        </div>
-        ${target > 0 ? `<div style="position:absolute;top:0;bottom:0;left:${Math.min(target,100)}%;width:2px;background:rgba(255,255,255,0.4);border-radius:1px" title="الهدف ${target}%"></div>` : ''}
-      </div>
-      <div style="display:flex;justify-content:space-between;align-items:baseline">
-        <div style="font-size:0.78rem;color:var(--text-2)">${formatSAR(val)}</div>
-        ${target > 0
-          ? `<div style="font-size:0.72rem;color:${stateColor};font-weight:600">${stateLabel} <span style="color:var(--text-muted);font-weight:400">🎯${target}%</span></div>`
-          : ''}
-      </div>
+      ${meterHtml({
+        label: formatSAR(val),
+        valueTxt: target > 0 ? `🎯 ${target}%` : '—',
+        pct: Math.min(pct, 100), state, fillColor: state ? '' : color,
+        markPct: target > 0 ? Math.min(target, 100) : null,
+      })}
+      ${diff !== null ? `<div class="mt-2">${tagHtml(stateIcon, stateLabel, state)}</div>` : ''}
     </div>`;
   }).join('');
-  return `<div class="w-cards-grid" style="padding:8px 0">${cards}</div>`;
+  return `<div class="w-cards-grid">${cards}</div>`;
+}
+
+// ── حالة وزن السهم مقابل هدفه: مفتاح واحد للّون والأيقونة والنص ──
+// 'none' بلا هدف · 'over' زيادة · 'under' نقص · 'ok' ضمن الهدف
+function weightStateOf(cur, tgt) {
+  if (!tgt)          return 'none';
+  if (cur > tgt + 1) return 'over';
+  if (cur < tgt - 1) return 'under';
+  return 'ok';
+}
+const WEIGHT_STATE_META = {
+  none:  { icon: '⚪', label: 'بدون هدف' },
+  over:  { icon: '🔴', label: 'زيادة عن الهدف' },
+  under: { icon: '🔵', label: 'نقص عن الهدف' },
+  ok:    { icon: '✅', label: 'ضمن الهدف' },
+};
+function weightStateColor(st) {
+  // النقص أزرق معلوماتي لا «سيّئ»؛ وبلا هدف ذهبي محايد
+  return st === 'ok' ? stateColorOf('good')
+    : st === 'over'  ? stateColorOf('bad')
+    : st === 'under' ? seriesColor(1)          // --series-2 (أزرق)
+    : seriesColor(0);                          // --series-1 (ذهبي)
 }
 
 // ── Weight chart: mode switcher ───────────────────────────────
@@ -2444,10 +2530,7 @@ function renderWeightChart() {
   const wTarget  = wSorted.map(h => +(+h.target_weight || 0));
   const wColors  = wSorted.map((h, i) => {
     const cur = wCurrent[i], tgt = wTarget[i];
-    if (!tgt)           return 'rgba(240,180,41,0.85)';
-    if (cur > tgt + 1)  return 'rgba(239,68,68,0.85)';
-    if (cur < tgt - 1)  return 'rgba(99,179,237,0.85)';
-    return 'rgba(63,185,80,0.85)';
+    return weightStateColor(weightStateOf(cur, tgt));
   });
 
   const chartCont = document.getElementById('weightChart-container');
@@ -2506,7 +2589,7 @@ function _renderWeightDonuts(wSorted, wCurrent, wTarget) {
 
   // لون ثابت لكل سهم عبر المخططَين (حسب ترتيب الوزن الحالي)
   const colorOf = {};
-  wSorted.forEach((h, i) => { colorOf[h.ticker] = CHART_COLORS[i % CHART_COLORS.length]; });
+  wSorted.forEach((h, i) => { colorOf[h.ticker] = seriesColor(i); });
 
   // بيانات الحالي — كل الأسهم التي لها وزن
   const curRows = wSorted
@@ -2519,22 +2602,19 @@ function _renderWeightDonuts(wSorted, wCurrent, wTarget) {
     .filter(r => r.val > 0)
     .sort((a, b) => b.val - a.val);
 
+  const th = chartTheme();
   altArea.innerHTML = `
-    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:16px;padding:4px 0">
+    <div class="charts-grid">
       <div>
-        <div style="text-align:center;font-size:0.85rem;color:var(--text);font-weight:600;margin-bottom:6px">
-          الوزن الحالي
-        </div>
-        <div class="chart-container" style="height:340px"><canvas id="weightDonutCur"></canvas></div>
+        ${cardHead('الوزن الحالي', '', '')}
+        <div class="chart-container"><canvas id="weightDonutCur"></canvas></div>
       </div>
       <div>
-        <div style="text-align:center;font-size:0.85rem;color:var(--text);font-weight:600;margin-bottom:6px">
-          الوزن المستهدف
-        </div>
-        <div class="chart-container" style="height:340px">
+        ${cardHead('الوزن المستهدف', '', '')}
+        <div class="chart-container">
           ${tgtRows.length
             ? '<canvas id="weightDonutTgt"></canvas>'
-            : '<div class="empty-state" style="padding:40px 12px"><div class="icon">⚖️</div><p>لم تُحدَّد أوزان مستهدفة بعد — أضفها من صفحة الأهداف</p></div>'}
+            : '<div class="empty-state"><div class="icon">⚖️</div><p>لم تُحدَّد أوزان مستهدفة بعد — أضفها من صفحة الأهداف</p></div>'}
         </div>
       </div>
     </div>`;
@@ -2549,23 +2629,20 @@ function _renderWeightDonuts(wSorted, wCurrent, wTarget) {
         labels: rows.map(r => r.ticker),
         datasets: [{
           data: rows.map(r => r.val),
-          backgroundColor: rows.map(r => colorOf[r.ticker] || '#8b949e'),
-          borderColor: '#1c2128', borderWidth: 2, hoverOffset: 6
+          backgroundColor: rows.map(r => colorOf[r.ticker] || th.muted),
+          borderColor: th.surface, borderWidth: 2, hoverOffset: 6
         }]
       },
       options: {
         responsive: true, maintainAspectRatio: false, cutout: '55%',
         plugins: {
-          legend: { position: 'bottom', labels: { color: '#8b949e', font: { family: 'Tajawal', size: 10 }, padding: 8, usePointStyle: true, boxWidth: 8 } },
-          tooltip: {
-            backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#c9d1d9',
-            borderColor: '#30363d', borderWidth: 1,
-            titleFont: { family: 'Tajawal', size: 13, weight: 'bold' }, bodyFont: { family: 'Tajawal', size: 12 },
+          legend: { position: 'bottom', labels: { color: th.muted, font: { family: th.font, size: 10 }, padding: 8, usePointStyle: true, boxWidth: 8 } },
+          tooltip: Object.assign(chartTooltipStyle(), {
             callbacks: {
               title: items => { const r = rows[items[0].dataIndex]; return r.ticker + (r.name && r.name !== r.ticker ? ' — ' + r.name : ''); },
               label: c => { const pct = tot > 0 ? (c.parsed / tot * 100).toFixed(1) : 0; return ' ' + c.parsed.toFixed(2) + '%  (' + pct + '% من المعروض)'; }
             }
-          }
+          })
         }
       }
     });
@@ -2577,13 +2654,15 @@ function _renderWeightDonuts(wSorted, wCurrent, wTarget) {
 
 function _renderBarsChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
   const wLabels = wSorted.map(h => h.ticker);
+  const th = chartTheme();
+  const tgtFill = tint(th.muted, '33'), tgtLine = tint(th.muted, '99');
   weightChart = new Chart(wCtx, {
     type: 'bar',
     data: {
       labels: wLabels,
       datasets: [
-        { label: 'الوزن الحالي %', data: wCurrent, backgroundColor: wColors, borderColor: wColors.map(c => c.replace('0.85','1')), borderWidth: 1, borderRadius: 3, barPercentage: 0.75, categoryPercentage: 0.65 },
-        { label: 'الهدف %',        data: wTarget,  backgroundColor: 'rgba(255,255,255,0.12)', borderColor: 'rgba(255,255,255,0.45)', borderWidth: 1.5, borderRadius: 3, barPercentage: 0.75, categoryPercentage: 0.65 }
+        { label: 'الوزن الحالي %', data: wCurrent, backgroundColor: wColors.map(c => tint(c, 'd9')), borderColor: wColors, borderWidth: 1, borderRadius: 3, barPercentage: 0.75, categoryPercentage: 0.65 },
+        { label: 'الهدف %',        data: wTarget,  backgroundColor: tgtFill, borderColor: tgtLine, borderWidth: 1.5, borderRadius: 3, barPercentage: 0.75, categoryPercentage: 0.65 }
       ]
     },
     options: {
@@ -2591,21 +2670,15 @@ function _renderBarsChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
       plugins: {
         legend: {
           labels: {
-            color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 14, usePointStyle: true,
-            generateLabels: () => [
-              { text: 'ضمن الهدف',      fillStyle: 'rgba(63,185,80,0.85)',   strokeStyle: 'rgba(63,185,80,1)',      lineWidth: 1, pointStyle: 'rect', fontColor: '#c9d1d9' },
-              { text: 'زيادة عن الهدف', fillStyle: 'rgba(239,68,68,0.85)',   strokeStyle: 'rgba(239,68,68,1)',      lineWidth: 1, pointStyle: 'rect', fontColor: '#c9d1d9' },
-              { text: 'نقص عن الهدف',   fillStyle: 'rgba(99,179,237,0.85)',  strokeStyle: 'rgba(99,179,237,1)',     lineWidth: 1, pointStyle: 'rect', fontColor: '#c9d1d9' },
-              { text: 'بدون هدف',       fillStyle: 'rgba(240,180,41,0.85)',  strokeStyle: 'rgba(240,180,41,1)',     lineWidth: 1, pointStyle: 'rect', fontColor: '#c9d1d9' },
-              { text: 'الهدف المحدد',   fillStyle: 'rgba(255,255,255,0.12)', strokeStyle: 'rgba(255,255,255,0.45)', lineWidth: 1.5, pointStyle: 'rect', fontColor: '#c9d1d9' }
-            ]
+            color: th.muted, font: { family: th.font, size: 11 }, padding: 14, usePointStyle: true,
+            generateLabels: () => ['ok', 'over', 'under', 'none'].map(st => {
+              const c = weightStateColor(st), m = WEIGHT_STATE_META[st];
+              return { text: `${m.icon} ${m.label}`, fillStyle: tint(c, 'd9'), strokeStyle: c, lineWidth: 1, pointStyle: 'rect', fontColor: th.text };
+            }).concat([{ text: '🎯 الهدف المحدد', fillStyle: tgtFill, strokeStyle: tgtLine, lineWidth: 1.5, pointStyle: 'rect', fontColor: th.text }])
           }
         },
-        tooltip: {
-          backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#c9d1d9',
-          borderColor: '#30363d', borderWidth: 1, padding: 12,
-          titleFont: { family: 'Tajawal', size: 13, weight: 'bold' },
-          bodyFont:  { family: 'Tajawal', size: 12 },
+        tooltip: Object.assign(chartTooltipStyle(), {
+          padding: 12,
           callbacks: {
             title: items => { const h = wSorted[items[0].dataIndex]; return h.ticker + (h.name ? ' — ' + h.name : ''); },
             label: item => {
@@ -2618,13 +2691,13 @@ function _renderBarsChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
               }
               return [' الهدف: ' + (tgt || '—') + '%'];
             },
-            labelColor: item => { const c = wColors[item.dataIndex]; return { borderColor: c.replace('0.85','1'), backgroundColor: c }; }
+            labelColor: item => { const c = wColors[item.dataIndex]; return { borderColor: c, backgroundColor: tint(c, 'd9') }; }
           }
-        }
+        })
       },
       scales: {
-        x: { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, callback: v => v + '%' }, grid: { color: 'rgba(48,54,61,0.5)' } },
-        y: { ticks: { color: '#c9d1d9', font: { family: 'Tajawal', size: 10 }, autoSkip: false, callback: (_, i) => wSorted[i]?.ticker || '' }, grid: { color: 'rgba(48,54,61,0.3)' } }
+        x: { ticks: { color: th.muted, font: { family: th.font, size: 11 }, callback: v => v + '%' }, grid: { color: th.grid } },
+        y: { ticks: { color: th.text, font: { family: th.font, size: 10 }, autoSkip: false, callback: (_, i) => wSorted[i]?.ticker || '' }, grid: { color: th.grid } }
       }
     }
   });
@@ -2640,13 +2713,8 @@ function _renderGapChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
   const allRows = [...withTarget, ...noTarget];
   const labels  = allRows.map(x => x.h.ticker);
   const gaps    = allRows.map(x => x.tgt > 0 ? +(x.cur - x.tgt).toFixed(2) : null);
-  const colors  = allRows.map(x => {
-    if (!x.tgt) return 'rgba(240,180,41,0.7)';
-    const d = x.cur - x.tgt;
-    if (d > 1)  return 'rgba(239,68,68,0.85)';
-    if (d < -1) return 'rgba(99,179,237,0.85)';
-    return 'rgba(63,185,80,0.85)';
-  });
+  const colors  = allRows.map(x => weightStateColor(weightStateOf(x.cur, x.tgt)));
+  const th = chartTheme();
 
   weightChart = new Chart(wCtx, {
     type: 'bar',
@@ -2655,8 +2723,8 @@ function _renderGapChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
       datasets: [{
         label: 'الفارق عن الهدف %',
         data: gaps,
-        backgroundColor: colors,
-        borderColor: colors.map(c => c.replace('0.85','1').replace('0.7','1')),
+        backgroundColor: colors.map(c => tint(c, 'd9')),
+        borderColor: colors,
         borderWidth: 1, borderRadius: 3, barPercentage: 0.7, categoryPercentage: 0.7
       }]
     },
@@ -2664,11 +2732,8 @@ function _renderGapChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: {
-          backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#c9d1d9',
-          borderColor: '#30363d', borderWidth: 1, padding: 12,
-          titleFont: { family: 'Tajawal', size: 13, weight: 'bold' },
-          bodyFont:  { family: 'Tajawal', size: 12 },
+        tooltip: Object.assign(chartTooltipStyle(), {
+          padding: 12,
           callbacks: {
             title: items => { const r = allRows[items[0].dataIndex]; return r.h.ticker + (r.h.name ? ' — ' + r.h.name : ''); },
             label: item => {
@@ -2682,73 +2747,60 @@ function _renderGapChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
               ];
             }
           }
-        },
+        }),
         annotation: {}
       },
       scales: {
         x: {
-          ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, callback: v => (v >= 0 ? '+' : '') + v + '%' },
-          grid:  { color: ctx => ctx.tick.value === 0 ? 'rgba(255,255,255,0.3)' : 'rgba(48,54,61,0.4)' }
+          ticks: { color: th.muted, font: { family: th.font, size: 11 }, callback: v => (v >= 0 ? '+' : '') + v + '%' },
+          grid:  { color: ctx => ctx.tick.value === 0 ? tint(th.text, '66') : th.grid }
         },
-        y: { ticks: { color: '#c9d1d9', font: { family: 'Tajawal', size: 10 }, autoSkip: false }, grid: { color: 'rgba(48,54,61,0.3)' } }
+        y: { ticks: { color: th.text, font: { family: th.font, size: 10 }, autoSkip: false }, grid: { color: th.grid } }
       }
     }
   });
 }
 
 function _renderWeightCards(wSorted, wCurrent, wTarget, wColors) {
-  const colorMap = { 'rgba(63,185,80,0.85)': '#3fb950', 'rgba(239,68,68,0.85)': '#ef4444', 'rgba(99,179,237,0.85)': '#63b3ed', 'rgba(240,180,41,0.85)': '#f0b429' };
   const cards = wSorted.map((h, i) => {
-    const cur = wCurrent[i], tgt = wTarget[i], clr = colorMap[wColors[i]] || '#8b949e';
+    const cur = wCurrent[i], tgt = wTarget[i];
+    const st  = weightStateOf(cur, tgt), meta = WEIGHT_STATE_META[st], clr = wColors[i];
     const diff = tgt ? (cur - tgt) : null;
-    const diffTxt = diff !== null ? (diff >= 0 ? '+' : '') + diff.toFixed(1) + '%' : '—';
-    const diffCls = diff === null ? 'text-muted' : diff > 1 ? 'text-danger' : diff < -1 ? '' : 'text-success';
-    const diffClsStyle = diff === null ? 'color:#8b949e' : diff > 1 ? 'color:#ef4444' : diff < -1 ? 'color:#63b3ed' : 'color:#3fb950';
+    const diffTxt = diff !== null ? (diff >= 0 ? '+' : '') + diff.toFixed(1) + '%' : '';
     return `<div class="w-card" style="--card-accent:${clr}">
       <div class="w-card-header">
-        <span class="w-card-ticker" style="color:${clr}">${esc(h.ticker)}</span>
+        <span class="w-card-ticker">${esc(h.ticker)}</span>
         <span class="w-card-pct">${cur}%</span>
       </div>
       <div class="w-card-name">${esc(h.name || '')}</div>
-      <div class="w-card-bar-wrap"><div class="w-card-bar-track"><div class="w-card-bar-fill" style="width:${Math.min(cur*3,100)}%;background:${clr}"></div>${tgt ? `<div class="w-card-bar-target" style="left:${Math.min(tgt*3,100)}%"></div>` : ''}</div></div>
-      <div class="w-card-footer">
-        <span style="font-size:0.72rem;color:#8b949e">هدف: ${tgt ? tgt + '%' : '—'}</span>
-        <span style="font-size:0.75rem;font-weight:600;${diffClsStyle}">${diffTxt}</span>
-      </div>
+      ${meterHtml({
+        label: `هدف: ${tgt ? tgt + '%' : '—'}`,
+        valueTxt: `${meta.icon} ${diffTxt || meta.label}`,
+        pct: Math.min(cur * 3, 100), fillColor: clr,
+        markPct: tgt ? Math.min(tgt * 3, 100) : null,
+      })}
     </div>`;
   }).join('');
   return `<div class="w-cards-grid">${cards}</div>`;
 }
 
 function _renderWeightTable(wSorted, wCurrent, wTarget, wColors) {
-  const colorMap = { 'rgba(63,185,80,0.85)': '#3fb950', 'rgba(239,68,68,0.85)': '#ef4444', 'rgba(99,179,237,0.85)': '#63b3ed', 'rgba(240,180,41,0.85)': '#f0b429' };
   const rows = wSorted.map((h, i) => {
-    const cur = wCurrent[i], tgt = wTarget[i], clr = colorMap[wColors[i]] || '#8b949e';
+    const cur = wCurrent[i], tgt = wTarget[i];
+    const st  = weightStateOf(cur, tgt), meta = WEIGHT_STATE_META[st], clr = wColors[i];
     const diff = tgt ? (cur - tgt) : null;
     const diffTxt  = diff !== null ? (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%' : '—';
-    const diffStyle = diff === null ? 'color:#8b949e' : diff > 1 ? 'color:#ef4444' : diff < -1 ? 'color:#63b3ed' : 'color:#3fb950';
-    const statusTxt = !tgt ? 'بدون هدف' : diff > 1 ? 'زيادة' : diff < -1 ? 'نقص' : 'ضمن الهدف';
-    const barW = Math.min(cur * 4, 100);
-    const tgtW = tgt ? Math.min(tgt * 4, 100) : 0;
     return `<tr>
-      <td><strong style="color:${clr}">${esc(h.ticker)}</strong></td>
-      <td style="color:#c9d1d9;font-size:0.85rem">${esc(h.name || '—')}</td>
-      <td>
-        <div style="display:flex;align-items:center;gap:6px">
-          <div style="flex:1;height:6px;background:rgba(255,255,255,0.08);border-radius:3px;position:relative;min-width:60px">
-            <div style="height:100%;width:${barW}%;background:${clr};border-radius:3px"></div>
-            ${tgt ? `<div style="position:absolute;top:-2px;left:${tgtW}%;width:2px;height:10px;background:rgba(255,255,255,0.5);border-radius:1px"></div>` : ''}
-          </div>
-          <span style="font-size:0.82rem;color:#e6edf3;min-width:38px;text-align:right">${cur}%</span>
-        </div>
-      </td>
-      <td style="color:#8b949e;font-size:0.82rem;text-align:center">${tgt ? tgt + '%' : '—'}</td>
-      <td style="${diffStyle};font-size:0.82rem;font-weight:600;text-align:center">${diffTxt}</td>
-      <td style="${diffStyle};font-size:0.78rem;text-align:center">${statusTxt}</td>
+      <td><strong class="num" style="color:${clr}">${esc(h.ticker)}</strong></td>
+      <td class="small">${esc(h.name || '—')}</td>
+      <td>${browHtml({ name: '', color: clr, pct: Math.min(cur * 4, 100), valueTxt: `${cur}%` })}</td>
+      <td class="small text-muted num">${tgt ? tgt + '%' : '—'}</td>
+      <td class="small num bold" style="color:${clr}">${diffTxt}</td>
+      <td class="small">${meta.icon} ${meta.label}</td>
     </tr>`;
   }).join('');
-  return `<div style="overflow-x:auto;padding:4px 0">
-    <table class="data-table" style="width:100%">
+  return `<div class="table-wrapper">
+    <table class="data-table full-width">
       <thead><tr><th>الرمز</th><th>الاسم</th><th>الوزن الحالي</th><th>الهدف</th><th>الفارق</th><th>الحالة</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
@@ -2821,7 +2873,7 @@ function renderTable() {
       // سعر يدوي — انقر ✋ لإرجاع السهم للتحديث التلقائي
       staleBadge = `<span title="سعر يدوي (مستثنى من التحديث التلقائي) — انقر لإرجاعه تلقائياً"
         onclick="event.stopPropagation(); unmarkManualPrice('${esc(h.id)}')"
-        style="color:var(--warning,#f0ad4e);font-size:0.7rem;margin-right:4px;cursor:pointer">✋</span>`;
+        style="color:var(--st-warn);font-size:0.7rem;margin-right:4px;cursor:pointer">✋</span>`;
     } else if (ageDays === null) {
       staleBadge = `<span title="السعر لم يُحدَّث بعد — انقر 🔄 لتحديث الأسعار"
         style="color:var(--text-muted);font-size:0.7rem;margin-right:4px;cursor:help">⏰?</span>`;
@@ -2898,14 +2950,15 @@ function checkPriceZones(ticker, price) {
   const h = holdings.find(x => x.ticker === ticker);
   const name = h?.name || '';
   const alerts = [];
+  // اللون يُستمد من نوع الـtoast (success/error) لا من قيمة مكتوبة هنا
   if (zone.entry_price != null && price <= zone.entry_price)
-    alerts.push({ ticker, name, type: 'entry', label: 'منطقة شراء', color: '#22c55e', price, zone: zone.entry_price });
+    alerts.push({ ticker, name, type: 'entry', label: 'منطقة شراء', price, zone: zone.entry_price });
   if (zone.exit_price != null && price >= zone.exit_price)
-    alerts.push({ ticker, name, type: 'exit', label: 'منطقة بيع', color: '#f85149', price, zone: zone.exit_price });
+    alerts.push({ ticker, name, type: 'exit', label: 'منطقة بيع', price, zone: zone.exit_price });
   alerts.forEach(a => showPriceZoneAlert(a));
 }
 
-function showPriceZoneAlert({ ticker, label, color, price, zone, name }) {
+function showPriceZoneAlert({ ticker, label, price, zone, name }) {
   // منع تكرار نفس الإشعار
   const dedupKey = 'pz-shown-' + ticker + '-' + label;
   if (sessionStorage.getItem(dedupKey)) return;
@@ -2919,6 +2972,27 @@ function showPriceZoneAlert({ ticker, label, color, price, zone, name }) {
   showToast(msg, type);
 }
 
+// سكة المناطق لسهم واحد — نفس منطق priceRulerHtml في decision-engine.js:
+// نطاق lo/hi يضم كل النقاط + السعر، بهامش 15% من المدى، وتسميات بصفّين متبادلين.
+function _zoneRailHtml(pts, price) {
+  if (!pts.length || !(price > 0)) return '';
+  const vals = pts.map(p => p.v).concat([price]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = hi - lo;
+  const pad  = span > 0 ? span * 0.15 : Math.max(hi * 0.08, 0.5);
+  lo -= pad; hi += pad;
+  const pos = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100));
+
+  const sorted = [...pts].sort((a, b) => a.v - b.v);
+  const marks  = sorted.map((p, i) => `
+      <span class="zrail-tick" data-k="${p.k}" style="left:${pos(p.v).toFixed(1)}%"></span>
+      <span class="zrail-lbl" data-row="${i % 2}" style="left:${pos(p.v).toFixed(1)}%">${p.lbl}<b>${formatNum(p.v)}</b></span>`).join('');
+
+  return `<div class="zrail"><div class="zrail-track">${marks}
+      <span class="zrail-now" style="left:${pos(price).toFixed(1)}%"><b>${formatNum(price)}</b><i>السعر الآن</i></span>
+    </div></div>`;
+}
+
 function renderPriceZonesCard() {
   const el = document.getElementById('price-zones-card-body');
   if (!el) return;
@@ -2929,55 +3003,57 @@ function renderPriceZonesCard() {
     const trimFrom = trimZonesMap[h.ticker] ?? null;
     if (zone.entry_price == null && zone.exit_price == null && trimFrom == null) return;
     const price = +h.current_price;
-    let entryStatus = '', trimStatus = '', exitStatus = '';
-    if (zone.entry_price != null) {
-      if (price <= zone.entry_price) {
-        const currentW = totalValue > 0 ? (+h.shares * price) / totalValue * 100 : 0;
-        const targetW  = stockTargets[h.ticker] || 0;
-        const isFull   = targetW > 0 && currentW >= targetW * 0.95;
-        const fullBadge = isFull
-          ? ` <span style="background:rgba(240,180,41,0.18);color:#f0b429;border-radius:4px;padding:1px 6px;font-size:0.72rem;font-weight:700">⚠️ الهدف مكتمل</span>`
-          : '';
-        entryStatus = `<span style="color:#22c55e;font-weight:bold">🟢 في منطقة شراء — السعر ${price} وصل الحد ${zone.entry_price}</span>${fullBadge}`;
-      } else
-        entryStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.entry_price}</span>`;
+
+    // نقاط السكة (نفس المصادر والشروط السابقة — لا تغيير في الحساب)
+    const pts = [];
+    if (zone.entry_price != null) pts.push({ v: +zone.entry_price, lbl: 'تجميع', k: 'buy'  });
+    if (trimFrom       != null)   pts.push({ v: +trimFrom,         lbl: 'تخفيف', k: 'trim' });
+    if (zone.exit_price != null)  pts.push({ v: +zone.exit_price,  lbl: 'تصفية', k: 'exit' });
+
+    // الوسوم: أي منطقة فعّالة الآن (نفس شروط الجدول السابق)
+    const tags = [];
+    let urgency = 0;   // للفرز: تصفية > تخفيف > تجميع > محايد
+    if (zone.entry_price != null && price <= zone.entry_price) {
+      urgency = Math.max(urgency, 2);
+      tags.push(tagHtml('🟢', `في منطقة تجميع — السعر ${formatNum(price)} ≤ ${formatNum(zone.entry_price)}`, 'good'));
+      const currentW = totalValue > 0 ? (+h.shares * price) / totalValue * 100 : 0;
+      const targetW  = stockTargets[h.ticker] || 0;
+      if (targetW > 0 && currentW >= targetW * 0.95)
+        tags.push(tagHtml('⚠️', 'الهدف مكتمل', 'warn'));
     }
-    if (trimFrom != null) {
-      if (price >= trimFrom)
-        trimStatus = `<span style="color:#f0b429;font-weight:bold">⚖️ في منطقة تخفيف — السعر ${price} تجاوز الحد ${trimFrom}</span>`;
-      else
-        trimStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${trimFrom}</span>`;
+    if (trimFrom != null && price >= trimFrom) {
+      urgency = Math.max(urgency, 3);
+      tags.push(tagHtml('⚖️', `في منطقة تخفيف — السعر ${formatNum(price)} ≥ ${formatNum(trimFrom)}`, 'warn'));
     }
-    if (zone.exit_price != null) {
-      if (price >= zone.exit_price)
-        exitStatus = `<span style="color:#f85149;font-weight:bold">🔴 في منطقة بيع — السعر ${price} تجاوز الحد ${zone.exit_price}</span>`;
-      else
-        exitStatus = `<span class="text-muted">لم يصل — السعر ${price} / الحد ${zone.exit_price}</span>`;
+    if (zone.exit_price != null && price >= zone.exit_price) {
+      urgency = Math.max(urgency, 4);
+      tags.push(tagHtml('🔴', `في منطقة تصفية — السعر ${formatNum(price)} ≥ ${formatNum(zone.exit_price)}`, 'bad'));
     }
-    rows.push({ ticker: h.ticker, name: h.name, entryStatus, trimStatus, exitStatus, zone, trimFrom, price });
+    if (!tags.length) tags.push(tagHtml('⚪', 'خارج كل المناطق — لا إجراء', ''));
+
+    rows.push({ ticker: h.ticker, name: h.name, pts, price, tags: tags.join(''), urgency });
   });
 
   if (!rows.length) {
-    el.innerHTML = `<div class="text-muted small" style="text-align:center;padding:12px">
-      لا توجد مناطق سعرية مُعرَّفة — أضفها من <a href="tasks.html" style="color:var(--accent)">التقييمات العادلة</a>
+    el.innerHTML = `<div class="empty-state">
+      <div class="icon">🎯</div>
+      <p>لا توجد مناطق سعرية مُعرَّفة — أضفها من <a href="tasks.html" class="text-accent">التقييمات العادلة</a></p>
     </div>`;
     return;
   }
 
-  el.innerHTML = `<table style="width:100%;font-size:0.82rem;border-collapse:collapse">
-    <thead><tr style="color:var(--text-muted);border-bottom:1px solid var(--border)">
-      <th style="text-align:right;padding:4px 6px">السهم</th>
-      <th style="text-align:right;padding:4px 6px">منطقة الشراء ≤</th>
-      <th style="text-align:right;padding:4px 6px">التخفيف ≥</th>
-      <th style="text-align:right;padding:4px 6px">منطقة البيع ≥</th>
-    </tr></thead>
-    <tbody>${rows.map(r => `<tr style="border-bottom:1px solid var(--border)">
-      <td style="padding:4px 6px"><strong class="text-accent">${esc(r.ticker)}</strong>${r.name ? `<br><span class="text-muted" style="font-size:0.75rem">${esc(r.name)}</span>` : ''}</td>
-      <td style="padding:4px 6px">${r.zone.entry_price != null ? r.entryStatus || '—' : '<span class="text-muted">—</span>'}</td>
-      <td style="padding:4px 6px">${r.trimFrom != null ? r.trimStatus || '—' : '<span class="text-muted">—</span>'}</td>
-      <td style="padding:4px 6px">${r.zone.exit_price  != null ? r.exitStatus  || '—' : '<span class="text-muted">—</span>'}</td>
-    </tr>`).join('')}</tbody>
-  </table>`;
+  // فرز عرضي فقط: الأسهم داخل منطقة فعّالة أولاً (الأشد أولاً)، ثم الباقي
+  rows.sort((a, b) => b.urgency - a.urgency);
+
+  el.innerHTML = `<div class="stack-4">${rows.map(r => `
+    <div>
+      ${cardHead(
+        `<strong class="text-accent num">${esc(r.ticker)}</strong>`,
+        esc(r.name || ''),
+        r.tags
+      )}
+      ${_zoneRailHtml(r.pts, r.price)}
+    </div>`).join('')}</div>`;
 }
 
 // ── Break-Even Card ───────────────────────────────────────────
@@ -3039,19 +3115,13 @@ function renderBreakEvenCard() {
   const gapToBreakEven = netCapital - totalReturns; // سالب = تجاوزت نقطة التعادل
 
   // ── بناء الكرت ──────────────────────────────────────────
-  const pnlColor  = trueNetPnL >= 0 ? 'var(--success)' : 'var(--danger)';
+  const pnlState  = trueNetPnL >= 0 ? 'good' : 'bad';
   const pnlIcon   = trueNetPnL >= 0 ? '✅' : '❌';
-  const barColor  = isBreakEven ? '#22c55e' : (breProgress > 75 ? '#f0b429' : '#f85149');
-  const barWidth  = Math.min(breProgress, 100);
+  const barState  = isBreakEven ? 'good' : (breProgress > 75 ? 'warn' : 'bad');
+  const barIcon   = isBreakEven ? '✅' : (breProgress > 75 ? '⚠️' : '🔴');
 
-  const row = (label, val, cls = '', sub = '') => `
-    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--border)">
-      <span class="small" style="color:var(--text-muted)">${label}</span>
-      <div style="text-align:left">
-        <span class="num bold ${cls}" style="font-size:0.95rem">${val}</span>
-        ${sub ? `<span class="small text-muted" style="margin-right:6px">${sub}</span>` : ''}
-      </div>
-    </div>`;
+  const row = (label, val, sub = '') =>
+    [`${label}${sub ? ` <span class="text-muted">${sub}</span>` : ''}`, val];
 
   // ── شريط التقدم المشترك ──────────────────────────────────
   // breProgress = نسبة استرداد رأس المال. 100% = نقطة التعادل بالضبط.
@@ -3063,52 +3133,38 @@ function renderBreakEvenCard() {
   const recoveredCaption = (isBreakEven
     ? `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>+${aboveBE.toFixed(1)}% ربح</b> فوق نقطة التعادل`
     : `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>${aboveBE.toFixed(1)}% تحت نقطة التعادل</b>`) + _beBadge;
-  const progressBar = `
-    <div style="margin-bottom:18px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span class="small text-muted">استرداد رأس المال</span>
-        <span class="small bold" style="color:${barColor}">${recoveredPct.toFixed(1)}%</span>
-      </div>
-      <div style="background:var(--bg-3);border-radius:99px;height:10px;overflow:hidden">
-        <div style="height:100%;border-radius:99px;background:${barColor};width:${barWidth}%;transition:width 0.4s ease"></div>
-      </div>
-      <div style="display:flex;justify-content:space-between;margin-top:4px">
-        <span class="small text-muted">0%</span>
-        <span class="small" style="color:var(--accent);font-weight:600">↑ نقطة التعادل = 100%</span>
-        ${isBreakEven
-          ? '<span class="small text-success font-bold">✅ تجاوزتها</span>'
-          : `<span class="small text-muted">متبقي ${formatSAR(gapToBreakEven)}</span>`}
-      </div>
-      <div class="small text-muted" style="margin-top:6px;text-align:center;line-height:1.5">${recoveredCaption}</div>
+  // الرقم القائد: نسبة استرداد رأس المال — 100% = نقطة التعادل بالضبط
+  const heroBlock = `
+    <div>
+      <div class="hero-num">${recoveredPct.toFixed(1)}<span class="unit">%</span></div>
+      <div class="hero-cap">استرداد رأس المال · نقطة التعادل = 100%${_beBadge}</div>
+    </div>
+    <div class="flex gap-2" style="flex-wrap:wrap">
+      ${tagHtml(barIcon, isBreakEven ? 'تجاوزت نقطة التعادل' : `متبقٍ ${formatSAR(gapToBreakEven)}`, barState)}
+      ${tagHtml(pnlIcon, `${trueNetPnL >= 0 ? 'ربح' : 'خسارة'} ${formatSAR(Math.abs(trueNetPnL))} (${Math.abs(totalReturnPct).toFixed(2)}%)`, pnlState)}
     </div>`;
 
-  // ── الصافي الكبير المشترك ─────────────────────────────────
-  const bigNumber = `
-    <div style="text-align:center;padding:14px;background:var(--bg-3);border-radius:var(--radius);margin-bottom:16px;border:1px solid ${pnlColor}33">
-      <div class="small text-muted" style="margin-bottom:4px">صافي الربح / الخسارة الحقيقي</div>
-      <div style="font-size:1.7rem;font-weight:700;color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))}</div>
-      <div class="small" style="color:${pnlColor};margin-top:2px">${trueNetPnL >= 0 ? 'ربح' : 'خسارة'} ${Math.abs(totalReturnPct).toFixed(2)}% على رأس المال</div>
-    </div>`;
+  // المسار يمتد من ٠٪ إلى ٢٠٠٪ من رأس المال، فتقع علامة التعادل (١٠٠٪) في منتصفه
+  const progressBar = meterHtml({
+    label: 'استرداد رأس المال — العلامة = نقطة التعادل (١٠٠٪)',
+    valueTxt: `${recoveredPct.toFixed(1)}%`,
+    pct: recoveredPct / 2, state: barState, markPct: 50,
+    foot: recoveredCaption,
+  });
 
   // ════════════════════════════════════════
   // وضع 1: ملخص — الأرقام الرئيسية فقط
   // ════════════════════════════════════════
   if (breakevenMode === 'summary') {
-    const statItem = (label, val, cls = '') => `
-      <div style="text-align:center;padding:10px 8px;background:var(--bg-3);border-radius:var(--radius)">
-        <div class="num bold ${cls}" style="font-size:1rem">${val}</div>
-        <div class="small text-muted" style="margin-top:2px;font-size:0.72rem">${label}</div>
-      </div>`;
-    const summaryStats = [
-      statItem('القيمة السوقية', formatSAR(currentValue), 'text-accent'),
-      statItem('الأرباح الموزعة', formatSAR(totalDivAll), 'text-success'),
-      statItem('رأس المال المنشغل', formatSAR(netCapital)),
-    ].filter(Boolean);
-    const cols = summaryStats.length === 4 ? 2 : 3;
-    el.innerHTML = progressBar + bigNumber + `
-      <div style="display:grid;grid-template-columns:repeat(${cols},1fr);gap:8px">
-        ${summaryStats.join('')}
-      </div>`;
+    el.innerHTML = `<div class="stack-4">
+      ${heroBlock}
+      ${progressBar}
+      ${kvsHtml([
+        ['القيمة السوقية',     formatSAR(currentValue)],
+        ['الأرباح الموزعة',    formatSAR(totalDivAll)],
+        ['رأس المال المنشغل',  formatSAR(netCapital)],
+      ])}
+    </div>`;
     return;
   }
 
@@ -3116,75 +3172,71 @@ function renderBreakEvenCard() {
   // وضع 2: تفصيل — كل الحسابات
   // ════════════════════════════════════════
   if (breakevenMode === 'detail') {
-    el.innerHTML = progressBar + bigNumber + `
-      <div style="margin-bottom:8px">
-        <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">التكلفة</div>
-        ${row('رأس المال المنشغل الصافي (مشتريات − مبيعات)', formatSAR(netCapital), 'text-danger')}
+    el.innerHTML = `<div class="stack-4">
+      ${heroBlock}
+      ${progressBar}
+      <div class="stack-2">
+        <div class="small bold text-muted">التكلفة</div>
+        ${kvsHtml([row('رأس المال المنشغل الصافي (مشتريات − مبيعات)', formatSAR(netCapital))])}
       </div>
-      <div style="margin-bottom:8px;margin-top:12px">
-        <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">العوائد</div>
-        ${row('قيمة المحفظة الحالية', formatSAR(currentValue), '', grantValueNow > 0 ? `(يشمل منحة ${s.totalGrantShares || 0} سهم)` : '')}
-        ${row('إجمالي الأرباح الموزعة (كل الأوقات)', formatSAR(totalDivAll), 'text-success')}
-        ${row('إجمالي العوائد', formatSAR(totalReturns), trueNetPnL >= 0 ? 'text-success' : '')}
+      <div class="stack-2">
+        <div class="small bold text-muted">العوائد</div>
+        ${kvsHtml([
+          row('قيمة المحفظة الحالية', formatSAR(currentValue), grantValueNow > 0 ? `(يشمل منحة ${s.totalGrantShares || 0} سهم)` : ''),
+          row('إجمالي الأرباح الموزعة (كل الأوقات)', formatSAR(totalDivAll)),
+          row('إجمالي العوائد', formatSAR(totalReturns)),
+        ])}
       </div>
-      <div style="margin-top:12px">
-        <div class="small bold" style="color:var(--text-muted);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.05em">تحليل الأداء</div>
-        ${row('ر/خ غير محقق (تغير السعر فقط)', formatSAR(unrealizedPnL), unrealizedPnL >= 0 ? 'text-success' : 'text-danger')}
-        ${row('ر/خ محقق من المبيعات', formatSAR(realizedPnL), realizedPnL >= 0 ? 'text-success' : 'text-danger')}
-        ${row('مساهمة الأرباح الموزعة', formatSAR(totalDivAll), 'text-success')}
-      </div>`;
+      <div class="stack-2">
+        <div class="small bold text-muted">تحليل الأداء</div>
+        ${kvsHtml([
+          row('ر/خ غير محقق (تغير السعر فقط)', `${unrealizedPnL >= 0 ? '✅' : '❌'} ${formatSAR(unrealizedPnL)}`),
+          row('ر/خ محقق من المبيعات', `${realizedPnL >= 0 ? '✅' : '❌'} ${formatSAR(realizedPnL)}`),
+          row('مساهمة الأرباح الموزعة', formatSAR(totalDivAll)),
+        ])}
+      </div>
+    </div>`;
     return;
   }
 
   // ════════════════════════════════════════
-  // وضع 3: مساهمة — أشرطة أفقية
+  // وضع 3: مساهمة — مقاييس أفقية
   // ════════════════════════════════════════
   if (breakevenMode === 'bars') {
     // كل مكوّن كنسبة من رأس المال المنشغل
-    const pct = v => netCapital > 0 ? Math.max(0, v / netCapital * 100) : 0;
     const components = [
-      { label: 'ر/خ ورقي (القيمة السوقية)', value: unrealizedPnL, color: unrealizedPnL >= 0 ? '#3b82f6' : '#f85149', base: pct(currentValue) },
-      { label: 'ر/خ محقق من المبيعات',      value: realizedPnL,  color: realizedPnL  >= 0 ? '#22c55e' : '#f85149', base: pct(realizedPnL) },
-      { label: 'أرباح موزعة مستلمة',        value: totalDivAll,  color: '#3fb950',                                   base: pct(totalDivAll) },
-    ].filter(Boolean);
+      { label: 'ر/خ ورقي (القيمة السوقية)', value: unrealizedPnL, color: seriesColor(1) },
+      { label: 'ر/خ محقق من المبيعات',      value: realizedPnL,   color: seriesColor(2) },
+      { label: 'أرباح موزعة مستلمة',        value: totalDivAll,   color: seriesColor(5) },
+    ];
 
     const totalComponents = components.reduce((s, c) => s + Math.max(0, c.value), 0);
     const componentBars = components.map(c => {
       const widthPct = totalComponents > 0 ? Math.max(0, c.value) / totalComponents * 100 : 0;
       const absPct   = netCapital > 0 ? (Math.abs(c.value) / netCapital * 100).toFixed(1) : '0.0';
-      const valColor = c.value >= 0 ? c.color : '#f85149';
-      return `
-        <div style="margin-bottom:14px">
-          <div style="display:flex;justify-content:space-between;margin-bottom:4px">
-            <span class="small" style="color:var(--text-2)">${c.label}</span>
-            <span class="small bold" style="color:${valColor}">${c.value >= 0 ? '+' : ''}${formatSAR(c.value)} (${absPct}%)</span>
-          </div>
-          <div style="background:var(--bg-3);border-radius:6px;height:22px;overflow:hidden;position:relative">
-            <div style="height:100%;width:${widthPct.toFixed(1)}%;background:${c.color}33;border-radius:6px;
-                        border-right:3px solid ${c.color};transition:width .4s ease;position:relative;min-width:${c.value > 0 ? '3px' : '0'}"></div>
-          </div>
-        </div>`;
+      const neg      = c.value < 0;
+      return meterHtml({
+        label: `${neg ? '❌' : '✅'} ${c.label}`,
+        valueTxt: `${c.value >= 0 ? '+' : ''}${formatSAR(c.value)} (${absPct}%)`,
+        pct: widthPct,
+        state: neg ? 'bad' : '',
+        fillColor: neg ? '' : c.color,
+      });
     }).join('');
 
-    el.innerHTML = progressBar + `
-      <div style="margin-bottom:16px">
-        <div class="small bold" style="color:var(--text-muted);margin-bottom:12px;text-transform:uppercase;letter-spacing:0.05em">
-          مساهمة كل مكوّن في إجمالي العوائد (${formatSAR(totalReturns)})
-        </div>
+    el.innerHTML = `<div class="stack-4">
+      ${heroBlock}
+      ${progressBar}
+      <div class="stack">
+        <div class="small bold text-muted">مساهمة كل مكوّن في إجمالي العوائد (${formatSAR(totalReturns)})</div>
         ${componentBars}
-        <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px;display:flex;justify-content:space-between">
-          <span class="small text-muted">رأس المال المنشغل</span>
-          <span class="num bold">${formatSAR(netCapital)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:4px 0">
-          <span class="small text-muted">إجمالي العوائد</span>
-          <span class="num bold ${trueNetPnL >= 0 ? 'text-success' : 'text-danger'}">${formatSAR(totalReturns)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;padding:4px 0">
-          <span class="small bold">صافي الربح / الخسارة</span>
-          <span class="num bold" style="color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))} (${Math.abs(totalReturnPct).toFixed(2)}%)</span>
-        </div>
-      </div>`;
+      </div>
+      ${kvsHtml([
+        ['رأس المال المنشغل', formatSAR(netCapital)],
+        ['إجمالي العوائد',    formatSAR(totalReturns)],
+        ['صافي الربح / الخسارة', `${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))} (${Math.abs(totalReturnPct).toFixed(2)}%)`],
+      ])}
+    </div>`;
     return;
   }
 
@@ -3194,36 +3246,22 @@ function renderBreakEvenCard() {
   if (breakevenMode === 'chart') {
     if (beChart) { beChart.destroy(); beChart = null; }
 
-    el.innerHTML = `
-      <div style="margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-          <span class="small text-muted">استرداد رأس المال (التعادل = 100%)</span>
-          <span class="small bold" style="color:${barColor}">${breProgress.toFixed(1)}% ${isBreakEven ? '✅' : ''}</span>
-        </div>
-        <div style="background:var(--bg-3);border-radius:99px;height:8px;overflow:hidden">
-          <div style="height:100%;border-radius:99px;background:${barColor};width:${barWidth}%;transition:width .4s"></div>
-        </div>
-      </div>
+    const beSeries = { cap: stateColorOf('bad'), mkt: seriesColor(1), div: seriesColor(2) };
 
-      <!-- صافي الربح مضغوط -->
-      <div style="display:flex;justify-content:space-between;align-items:center;
-                  padding:10px 14px;background:var(--bg-3);border-radius:var(--radius);
-                  margin-bottom:14px;border:1px solid ${pnlColor}33">
-        <span class="small text-muted">صافي الربح / الخسارة</span>
-        <span class="num bold" style="color:${pnlColor}">${pnlIcon} ${formatSAR(Math.abs(trueNetPnL))} · ${Math.abs(totalReturnPct).toFixed(2)}%</span>
-      </div>
+    el.innerHTML = `<div class="stack-4">
+      ${heroBlock}
+      ${progressBar}
 
       <!-- Canvas للمخطط -->
-      <div style="position:relative;height:180px;margin-bottom:10px">
-        <canvas id="be-chart-canvas"></canvas>
-      </div>
+      <div class="chart-container"><canvas id="be-chart-canvas"></canvas></div>
 
-      <!-- مفتاح الألوان -->
-      <div style="display:flex;flex-wrap:wrap;gap:10px;justify-content:center;margin-top:6px">
-        <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(248,81,73,.7);display:inline-block"></span>رأس المال</span>
-        <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(59,130,246,.7);display:inline-block"></span>قيمة المحفظة</span>
-        <span class="small" style="display:flex;align-items:center;gap:4px"><span style="width:12px;height:12px;border-radius:3px;background:rgba(63,185,80,.7);display:inline-block"></span>أرباح موزعة</span>
-      </div>`;
+      <!-- وسيلة إيضاح -->
+      <div class="flex-center gap-3" style="flex-wrap:wrap">
+        <span class="small"><span class="dot" style="background:${beSeries.cap}"></span> رأس المال</span>
+        <span class="small"><span class="dot" style="background:${beSeries.mkt}"></span> قيمة المحفظة</span>
+        <span class="small"><span class="dot" style="background:${beSeries.div}"></span> أرباح موزعة</span>
+      </div>
+    </div>`;
 
     // نبني المخطط بعد أن يُدرَج الـ canvas في DOM
     requestAnimationFrame(() => {
@@ -3233,6 +3271,7 @@ function renderBreakEvenCard() {
       // بيانات المخطط: شريطان أفقيان متراكمان
       // 1. رأس المال (شريط واحد أحمر)
       // 2. العوائد مكدّسة: قيمة المحفظة + أرباح + نقد
+      const th = chartTheme();
       beChart = new Chart(canvas, {
         type: 'bar',
         data: {
@@ -3241,24 +3280,24 @@ function renderBreakEvenCard() {
             {
               label: 'رأس المال',
               data: [netCapital, 0],
-              backgroundColor: 'rgba(248,81,73,.7)',
-              borderColor: '#f85149',
+              backgroundColor: tint(beSeries.cap, 'b3'),
+              borderColor: beSeries.cap,
               borderWidth: 1,
               borderRadius: 4,
             },
             {
               label: 'قيمة المحفظة',
               data: [0, currentValue],
-              backgroundColor: 'rgba(59,130,246,.7)',
-              borderColor: '#3b82f6',
+              backgroundColor: tint(beSeries.mkt, 'b3'),
+              borderColor: beSeries.mkt,
               borderWidth: 1,
               borderRadius: 0,
             },
             {
               label: 'أرباح موزعة',
               data: [0, totalDivAll],
-              backgroundColor: 'rgba(63,185,80,.7)',
-              borderColor: '#3fb950',
+              backgroundColor: tint(beSeries.div, 'b3'),
+              borderColor: beSeries.div,
               borderWidth: 1,
               borderRadius: 0,
             },
@@ -3270,7 +3309,7 @@ function renderBreakEvenCard() {
           maintainAspectRatio: false,
           plugins: {
             legend: { display: false },
-            tooltip: {
+            tooltip: Object.assign(chartTooltipStyle(), {
               rtl: true,
               callbacks: {
                 label: ctx => `  ${ctx.dataset.label}: ${formatSAR(ctx.raw)}`,
@@ -3281,17 +3320,17 @@ function renderBreakEvenCard() {
                   return [];
                 },
               },
-            },
+            }),
           },
           scales: {
             x: {
               stacked: true,
-              ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+'K' : v },
-              grid: { color: 'rgba(48,54,61,.5)' },
+              ticks: { color: th.muted, font: { family: th.font, size: 11 }, callback: v => v >= 1000 ? (v/1000).toFixed(0)+'K' : v },
+              grid: { color: th.grid },
             },
             y: {
               stacked: true,
-              ticks: { color: '#c9d1d9', font: { family: 'Tajawal', size: 12 } },
+              ticks: { color: th.text, font: { family: th.font, size: 12 } },
               grid: { display: false },
             },
           },
@@ -3310,13 +3349,13 @@ function renderBreakEvenCard() {
         const bot    = yScale.bottom;
         ctx2.save();
         ctx2.setLineDash([6, 4]);
-        ctx2.strokeStyle = '#f0b429';
+        ctx2.strokeStyle = th.accent;
         ctx2.lineWidth   = 1.5;
         ctx2.beginPath();
         ctx2.moveTo(xPx, top - 4);
         ctx2.lineTo(xPx, bot + 4);
         ctx2.stroke();
-        ctx2.fillStyle = '#f0b429';
+        ctx2.fillStyle = th.accent;
         ctx2.font      = '11px Tajawal';
         ctx2.fillText('نقطة التعادل', xPx + 4, top + 12);
         ctx2.restore();
@@ -3331,11 +3370,12 @@ function renderBreakEvenCard() {
 function _allocParts() {
   const s = window._ds || {};
   const stocks = holdings.reduce((a, h) => a + +h.shares * +h.current_price, 0);
+  // سلسلة ألوان ثابتة لكل فئة أصل (لا تدوير: نفس الفئة = نفس اللون دائماً)
   const parts = [
-    { label: 'أسهم',   value: stocks,             color: '#3b82f6' },
-    { label: 'نقد',     value: portfolioCash || 0, color: '#22c55e' },
-    { label: 'عقارات', value: s.reTotal || 0,     color: '#f0b429' },
-    { label: 'صكوك',   value: getSukukActiveTotal(), color: '#a855f7' }
+    { label: 'أسهم',   value: stocks,                color: seriesColor(1) },
+    { label: 'نقد',    value: portfolioCash || 0,    color: seriesColor(2) },
+    { label: 'عقارات', value: s.reTotal || 0,        color: seriesColor(0) },
+    { label: 'صكوك',   value: getSukukActiveTotal(), color: seriesColor(3) }
   ].filter(p => p.value > 0);
   const total = parts.reduce((a, p) => a + p.value, 0);
   return { parts, total };
@@ -3349,7 +3389,7 @@ function renderAllocationChart() {
   if (!total) {
     if (allocChart) { allocChart.destroy(); allocChart = null; }
     if (cont) cont.style.display = 'none';
-    if (leg)  leg.innerHTML = '<div class="text-muted small" style="text-align:center;padding:12px">لا توجد أصول مسجّلة بعد</div>';
+    if (leg)  leg.innerHTML = '<div class="empty-state"><div class="icon">🍰</div><p>لا توجد أصول مسجّلة بعد</p></div>';
     return;
   }
   if (cont) cont.style.display = '';
@@ -3357,28 +3397,29 @@ function renderAllocationChart() {
   const ctx = g('allocChart')?.getContext('2d');
   if (!ctx) return;
   if (allocChart) allocChart.destroy();
+  const th = chartTheme();
   allocChart = new Chart(ctx, {
     type: 'doughnut',
-    data: { labels: parts.map(p => p.label), datasets: [{ data: parts.map(p => p.value), backgroundColor: parts.map(p => p.color), borderColor: '#1c2128', borderWidth: 2, hoverOffset: 6 }] },
+    data: { labels: parts.map(p => p.label), datasets: [{ data: parts.map(p => p.value), backgroundColor: parts.map(p => p.color), borderColor: th.surface, borderWidth: 2, hoverOffset: 6 }] },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 10, usePointStyle: true } },
-        tooltip: { backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#8b949e', borderColor: '#30363d', borderWidth: 1, titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' },
-          callbacks: { label: c => { const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : 0; return ' ' + formatSAR(c.parsed) + '  (' + pct + '%)'; } } }
+        legend: { position: 'bottom', labels: { color: th.muted, font: { family: th.font, size: 11 }, padding: 10, usePointStyle: true } },
+        tooltip: Object.assign(chartTooltipStyle(), {
+          callbacks: { label: c => { const pct = total > 0 ? (c.parsed / total * 100).toFixed(1) : 0; return ' ' + formatSAR(c.parsed) + '  (' + pct + '%)'; } } })
       }
     }
   });
 
+  // وسيلة إيضاح مباشرة تحت المخطط — المخطط الدائري وحده لا يُقرأ بدقة
   if (leg) {
-    leg.innerHTML = parts.map(p => {
-      const pct = (p.value / total * 100).toFixed(1);
-      return `<div style="display:flex;justify-content:space-between;align-items:center;font-size:0.82rem;padding:3px 0">
-        <span style="display:flex;align-items:center;gap:6px"><span style="width:10px;height:10px;border-radius:2px;background:${p.color};display:inline-block"></span>${p.label}</span>
-        <span class="num"><strong>${pct}%</strong> <span class="text-muted">${formatSAR(p.value)}</span></span>
-      </div>`;
-    }).join('') + `<div style="display:flex;justify-content:space-between;border-top:1px solid var(--border);margin-top:6px;padding-top:6px;font-size:0.85rem">
-        <span class="text-muted">الإجمالي</span><span class="num bold text-accent">${formatSAR(total)}</span></div>`;
+    leg.innerHTML = parts.map(p => browHtml({
+      name: p.label, color: p.color,
+      pct: p.value / total * 100,
+      valueTxt: `${(p.value / total * 100).toFixed(1)}%`,
+      sub: formatSAR(p.value),
+      title: `${p.label} — ${formatSAR(p.value)}`,
+    })).join('') + kvsHtml([['الإجمالي', formatSAR(total)]]);
   }
 }
 
@@ -3403,9 +3444,10 @@ function renderRetirementCard() {
   const netWorth     = s.latestNW != null ? s.latestNW : investAssets;   // total NW (context only)
 
   if (!goal.monthly) {
-    el.innerHTML = `<div style="text-align:center;padding:18px 8px">
-      <p class="text-muted small" style="margin-bottom:14px">أدخل مصاريفك الشهرية المتوقعة بعد التقاعد لحساب رقم الاستقلال المالي (قاعدة الـ4%).</p>
-      <button class="btn btn-primary btn-sm" onclick="editRetirementGoal()">＋ إدخال المصاريف الشهرية</button>
+    el.innerHTML = `<div class="empty-state">
+      <div class="icon">🎯</div>
+      <p>أدخل مصاريفك الشهرية المتوقعة بعد التقاعد لحساب رقم الاستقلال المالي (قاعدة الـ4%).</p>
+      <button class="btn btn-primary btn-sm mt-2" onclick="editRetirementGoal()">＋ إدخال المصاريف الشهرية</button>
     </div>`;
     return;
   }
@@ -3416,64 +3458,65 @@ function renderRetirementCard() {
   const remaining = Math.max(0, fireNumber - fireBase);
   const safeAnnualWithdrawal = fireBase * (goal.swr / 100);
   const safeMonthly = safeAnnualWithdrawal / 12;
-  const barColor = progress >= 100 ? '#22c55e' : progress >= 50 ? '#f0b429' : '#3b82f6';
+  const progState = progress >= 100 ? 'good' : progress >= 50 ? 'warn' : '';
+  const progIcon  = progress >= 100 ? '✅' : progress >= 50 ? '⚠️' : '🔵';
+  const coverPct  = goal.monthly > 0 ? (safeMonthly / goal.monthly * 100) : 0;
+  const covered   = safeMonthly >= goal.monthly;
 
-  const row = (label, val, cls = '') => `
-    <div style="display:flex;justify-content:space-between;align-items:baseline;padding:6px 0;border-bottom:1px solid var(--border)">
-      <span class="small" style="color:var(--text-muted)">${label}</span>
-      <span class="num bold ${cls}" style="font-size:0.9rem">${val}</span>
-    </div>`;
+  // صف صافي الثروة — يظهر بنفس الشروط السابقة تماماً
+  const nwRow = (() => {
+    // AUDIT-FIX 2026-08: لقطة تلقائية جزئية أقل من الأصول السائلة = مضللة → نخفي الصف؛
+    // وإن كانت أعلى نعرضها موسومة بأنها جزئية
+    if (reTotal <= 0) return null;
+    if (nwIsAuto && netWorth < fireBase) return null;
+    const lbl = nwIsAuto ? 'صافي الثروة الكلي (لقطة تلقائية جزئية)' : 'صافي الثروة الكلي (مع العقار)';
+    return [lbl, `${formatSAR(netWorth)} — غير مُحتسب`];
+  })();
 
-  el.innerHTML = `
-    <div style="margin-bottom:16px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <span class="small text-muted">التقدم نحو الاستقلال المالي</span>
-        <span class="small bold" style="color:${barColor}">${progress.toFixed(1)}%</span>
-      </div>
-      <div style="background:var(--bg-3);border-radius:99px;height:10px;overflow:hidden">
-        <div style="height:100%;border-radius:99px;background:${barColor};width:${progress}%;transition:width 0.4s ease"></div>
-      </div>
+  // مقارنة قاعدة 4% (Trinity) — تظهر فقط عند اختلاف نسبة السحب
+  const trinity = goal.swr !== 4 ? (() => {
+    const fire4 = annualExpenses / 0.04;
+    const prog4 = Math.min(fireBase / fire4 * 100, 100);
+    const rem4  = Math.max(0, fire4 - fireBase);
+    return noteHtml('📐', `<b>مقارنة بقاعدة 4% (Trinity Study)</b>` + kvsHtml([
+      ['رقم FIRE عند 4%', formatSAR(fire4)],
+      ['نسبة الإنجاز',    `${prog4.toFixed(1)}%`],
+      ['المتبقي',         formatSAR(rem4)],
+    ]), 'warn');
+  })() : '';
+
+  el.innerHTML = `<div class="stack-4">
+    <div>
+      <div class="hero-num">${progress.toFixed(1)}<span class="unit">%</span></div>
+      <div class="hero-cap">التقدم نحو الاستقلال المالي · الهدف ${formatSAR(fireNumber)}</div>
     </div>
-    <div style="text-align:center;padding:12px;background:var(--bg-3);border-radius:var(--radius);margin-bottom:14px">
-      <div class="small text-muted" style="margin-bottom:2px">رقم الاستقلال المالي المستهدف</div>
-      <div style="font-size:1.5rem;font-weight:700;color:var(--accent)">${formatSAR(fireNumber)}</div>
-      <div class="small text-muted" style="margin-top:2px">مصاريف ${formatSAR(annualExpenses)}/سنة ÷ ${goal.swr}%</div>
+
+    <div class="flex gap-2" style="flex-wrap:wrap">
+      ${tagHtml(progIcon, progress >= 100 ? 'بلغت رقم الاستقلال المالي' : `متبقٍ ${formatSAR(remaining)}`, progState)}
+      ${tagHtml(covered ? '✅' : '⏳', `تغطية المصاريف ${coverPct.toFixed(1)}%`, covered ? 'good' : '')}
     </div>
-    ${row('الأصول السائلة (للسحب)', formatSAR(fireBase), 'text-accent')}
-    ${(() => {
-      // AUDIT-FIX 2026-08: لقطة تلقائية جزئية أقل من الأصول السائلة = مضللة → نخفي الصف؛
-      // وإن كانت أعلى نعرضها موسومة بأنها جزئية
-      if (reTotal <= 0) return '';
-      if (nwIsAuto && netWorth < fireBase) return '';
-      const lbl = nwIsAuto ? 'صافي الثروة الكلي (لقطة تلقائية جزئية)' : 'صافي الثروة الكلي (مع العقار)';
-      return row(lbl, formatSAR(netWorth) + ' — غير مُحتسب', 'text-muted');
-    })()}
-    ${row('المتبقي للوصول للهدف', formatSAR(remaining), remaining > 0 ? 'text-danger' : 'text-success')}
-    ${row('السحب الآمن الحالي', formatSAR(safeMonthly) + '/شهر', '')}
-    ${row('تغطية مصاريفك الآن', (goal.monthly > 0 ? (safeMonthly / goal.monthly * 100).toFixed(1) : 0) + '%', safeMonthly >= goal.monthly ? 'text-success' : 'text-muted')}
-    ${goal.swr !== 4 ? (() => {
-      const fire4 = annualExpenses / 0.04;
-      const prog4 = Math.min(fireBase / fire4 * 100, 100);
-      const rem4  = Math.max(0, fire4 - fireBase);
-      return `<div style="margin-top:10px;padding:10px 12px;background:rgba(240,180,41,.06);border:1px solid rgba(240,180,41,.2);border-radius:8px">
-        <div class="small" style="color:var(--warning,#f0b429);font-weight:600;margin-bottom:6px">📐 مقارنة بقاعدة 4% (Trinity Study)</div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
-          <span class="small text-muted">رقم FIRE عند 4%</span>
-          <span class="num bold small">${formatSAR(fire4)}</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
-          <span class="small text-muted">نسبة الإنجاز</span>
-          <span class="num small" style="color:${prog4>=100?'var(--success)':prog4>=50?'var(--warning)':'var(--accent)'}">${prog4.toFixed(1)}%</span>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:baseline;padding:3px 0">
-          <span class="small text-muted">المتبقي</span>
-          <span class="num small ${rem4>0?'text-danger':'text-success'}">${formatSAR(rem4)}</span>
-        </div>
-      </div>`;
-    })() : ''}
-    <div style="text-align:center;margin-top:12px">
+
+    ${meterHtml({
+      label: 'الأصول السائلة مقابل رقم الاستقلال المالي',
+      valueTxt: `${progress.toFixed(1)}%`,
+      pct: progress, state: progState, markPct: 100,
+      foot: `رقم الاستقلال = مصاريف ${formatSAR(annualExpenses)}/سنة ÷ ${goal.swr}% = ${formatSAR(fireNumber)}`,
+    })}
+
+    ${kvsHtml([
+      ['الأصول السائلة (للسحب)', formatSAR(fireBase)],
+      nwRow,
+      ['المتبقي للوصول للهدف',   formatSAR(remaining)],
+      ['السحب الآمن الحالي',     `${formatSAR(safeMonthly)}/شهر`],
+      ['تغطية مصاريفك الآن',     `${covered ? '✅' : '⏳'} ${coverPct.toFixed(1)}%`],
+    ])}
+
+    ${trinity}
+
+    <div class="flex-center">
       <button class="btn btn-secondary btn-sm" onclick="editRetirementGoal()">تعديل المصاريف / نسبة السحب</button>
-    </div>`;
+    </div>
+  </div>`;
 }
 
 // ── Modal ─────────────────────────────────────────────────────
@@ -4196,11 +4239,11 @@ function showCardInfo(key) {
           </div>
           <p><strong>مناطق المقياس — مُعايَرة للمستثمر الفردي (مرجع: Evans & Archer 1968 + DOJ):</strong></p>
           <ul style="font-size:0.82rem;line-height:2;padding-right:16px">
-            <li><span style="color:#ef4444">●</span> <strong>مركّز جداً</strong>: HHI > 25% (N_eff < 4) — خطر مرتفع جداً</li>
-            <li><span style="color:#f97316">●</span> <strong>تركيز ملحوظ</strong>: HHI 14–25% (N_eff 4–7) — حماية جزئية</li>
-            <li><span style="color:#84cc16">●</span> <strong>تنوع معقول</strong>: HHI 10–14% (N_eff 7–10) — مقبول</li>
-            <li><span style="color:#22c55e">●</span> <strong>تنوع جيد</strong>: HHI 6.7–10% (N_eff 10–15) — جيد للمحفظة الفردية</li>
-            <li><span style="color:#10b981">●</span> <strong>تنوع ممتاز</strong>: HHI < 6.7% (N_eff ≥ 15) — يُزيل ~90% من المخاطر القابلة للتنويع</li>
+            <li>🔴 <strong>مركّز جداً</strong>: HHI > 25% (N_eff < 4) — خطر مرتفع جداً</li>
+            <li>🔴 <strong>تركيز ملحوظ</strong>: HHI 14–25% (N_eff 4–7) — حماية جزئية</li>
+            <li>⚠️ <strong>تنوع معقول</strong>: HHI 10–14% (N_eff 7–10) — مقبول</li>
+            <li>✅ <strong>تنوع جيد</strong>: HHI 6.7–10% (N_eff 10–15) — جيد للمحفظة الفردية</li>
+            <li>✅ <strong>تنوع ممتاز</strong>: HHI < 6.7% (N_eff ≥ 15) — يُزيل ~90% من المخاطر القابلة للتنويع</li>
           </ul>
           <p><strong>دور القطاعات:</strong> تنوع القطاعات يُخفّض الدرجة بنسبة تصل لـ 30% إذا تركّزت الأسهم في قطاع واحد (الدرجة الكاملة عند ~6 قطاعات فعّالة — نطاق واقعي للفرد) — لأن الارتباط داخل القطاع الواحد يُلغي فائدة التعدد.</p>
           <p><strong>📚 ماذا تقول الأبحاث (مراجعة Zaimovic et al. 2021 — 150 دراسة):</strong></p>

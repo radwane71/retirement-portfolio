@@ -23,6 +23,41 @@
   --text-muted: #8b949e;
   --primary: #6366f1;
   --warning: #f0b429;
+
+  /* ══ سلسلة ألوان البيانات ══
+     مفصولة عمداً عن لون الواجهة (--accent): الذهبي الساطع يصلح لزرّ لا لمساحة
+     مملوءة. هذه الستة مُتحقَّق منها آلياً (نطاق اللمعان + أرضية التشبّع + فصل
+     عمى الألوان + التباين) على السطحين الداكن #1c2128 والفاتح #ffffff.
+     تُسنَد بالترتيب الثابت ولا تُدوَّر: السلسلة السابعة تُدمج في «أخرى». */
+  --series-1: #bd8612;  /* ذهبي  */
+  --series-2: #4287f5;  /* أزرق  */
+  --series-3: #28a745;  /* أخضر  */
+  --series-4: #9d5bd2;  /* بنفسجي */
+  --series-5: #e5484d;  /* أحمر  */
+  --series-6: #0d92ad;  /* سماوي */
+
+  /* ══ ألوان الحالة ══ محجوزة للحالة فقط، ولا تُستعمل كسلسلة بيانات.
+     تُرافَق دائماً بأيقونة ونص — اللون وحده لا يكفي (فصل الأخضر/الذهبي
+     عند عمى الألوان الأحمر ضعيف: ΔE 13). */
+  --st-good: #28a745;  --st-good-dim: rgba(40,167,69,.13);
+  --st-warn: #bd8612;  --st-warn-dim: rgba(189,134,18,.15);
+  --st-bad:  #e5484d;  --st-bad-dim:  rgba(229,72,77,.13);
+
+  /* ══ سلّم المسافات ══ إيقاع رأسي واحد بدل أرقام مخترعة لكل بطاقة */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;
+  --sp-4: 16px; --sp-5: 24px; --sp-6: 32px;
+
+  /* ══ الارتفاع ══ */
+  --elev-1: 0 1px 2px rgba(0,0,0,.28);
+  --elev-2: 0 6px 20px rgba(0,0,0,.34);
+}
+
+body.light-mode {
+  --st-good-dim: rgba(40,167,69,.10);
+  --st-warn-dim: rgba(189,134,18,.12);
+  --st-bad-dim:  rgba(229,72,77,.10);
+  --elev-1: 0 1px 2px rgba(16,24,40,.06);
+  --elev-2: 0 6px 20px rgba(16,24,40,.10);
 }
 
 /* font-size على html فقط — حتى تعمل أداة تكبير الخط (تعديل html.style.fontSize)
@@ -358,19 +393,21 @@ body {
 
 .stat-card:hover { border-color: var(--accent); }
 
+/* العربية خط متصل: letter-spacing يفصل وصلات الحروف فيشوّه الكلمة،
+   و text-transform:uppercase بلا أثر على العربية أصلاً — أُزيلا. */
 .stat-card .label {
   font-size: 0.75rem;
   color: var(--text-2);
   margin-bottom: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .stat-card .value {
   font-size: 1.55rem;
   font-weight: 700;
   line-height: 1.2;
+  font-variant-numeric: tabular-nums; /* أرقام ثابتة العرض فلا تهتزّ عند التحديث */
+  font-feature-settings: "tnum" 1;
 }
 
 .stat-card .sub {
@@ -1660,7 +1697,7 @@ body.light-mode .sidebar.mobile-open {
 .snap-kv { display:flex; justify-content:space-between; align-items:center; font-size:0.85rem; padding:4px 0; border-bottom:1px solid rgba(48,54,61,0.4); }
 .snap-kv:last-child { border-bottom:none; }
 .snap-kv-total { border-top:2px solid var(--border); margin-top:4px; padding-top:8px; }
-.snap-section-title { font-size:0.78rem; font-weight:700; color:var(--text-2); margin:10px 0 4px; text-transform:uppercase; letter-spacing:.04em; }
+.snap-section-title { font-size:0.78rem; font-weight:700; color:var(--text-2); margin:10px 0 4px; }
 
 /* ── Chart mode buttons (shared) ── */
 .chart-mode-btns { display:flex; gap:6px; flex-wrap:wrap; }
@@ -1825,4 +1862,147 @@ textarea::placeholder {
   .matrix-grid { grid-template-columns: 1fr 1fr !important; }
   .operation-row { grid-template-columns: 1fr !important; gap: 8px !important; }
   .remove-btn { width: 100% !important; height: auto !important; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   نظام مكوّنات اللوحة  —  Dashboard Component System
+   الغرض: بديل موحَّد للأنماط السطرية المخترعة لكل بطاقة على حدة.
+   كل مكوّن يعمل في الوضعين الداكن والفاتح ويحترم اتجاه RTL.
+   قاعدة ثابتة: اللون وحده لا يحمل معنى — كل حالة معها أيقونة أو نص.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── رأس البطاقة الموحَّد ─────────────────────────────────────────── */
+.card-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: var(--sp-3); flex-wrap: wrap;
+  padding-bottom: var(--sp-3); margin-bottom: var(--sp-4);
+  border-bottom: 1px solid var(--border);
+}
+.card-head .ttl { font-size: .95rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: var(--sp-2); }
+.card-head .sub { font-size: .74rem; color: var(--text-2); font-weight: 400; }
+.card-head .acts { display: flex; align-items: center; gap: var(--sp-2); margin-inline-start: auto; }
+
+/* ── الرقم البطل: رقم واحد يقود البطاقة ─────────────────────────── */
+.hero-num {
+  font-size: 2.1rem; font-weight: 700; line-height: 1.05; color: var(--text);
+  font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1;
+}
+.hero-num .unit { font-size: .9rem; font-weight: 600; color: var(--text-2); margin-inline-start: 4px; }
+.hero-cap { font-size: .75rem; color: var(--text-2); margin-top: var(--sp-1); }
+
+/* ── وسم الحالة: أيقونة + نص، لا لون وحده ───────────────────────── */
+.tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .73rem; font-weight: 600; line-height: 1.4;
+  padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--text-2);
+  background: color-mix(in srgb, var(--text-2) 10%, transparent);
+  white-space: nowrap;
+}
+.tag[data-state="good"] { color: var(--st-good); background: var(--st-good-dim); border-color: color-mix(in srgb, var(--st-good) 34%, transparent); }
+.tag[data-state="warn"] { color: var(--st-warn); background: var(--st-warn-dim); border-color: color-mix(in srgb, var(--st-warn) 34%, transparent); }
+.tag[data-state="bad"]  { color: var(--st-bad);  background: var(--st-bad-dim);  border-color: color-mix(in srgb, var(--st-bad)  34%, transparent); }
+
+/* ── نقطة السلسلة: تحمل هوية اللون بجانب النص لا داخله ──────────── */
+.dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; display: inline-block; }
+
+/* ── المقياس: شريط تقدّم بعلامة هدف اختيارية ────────────────────── */
+.meter { display: flex; flex-direction: column; gap: 5px; }
+.meter-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); font-size: .77rem; }
+.meter-head .k { color: var(--text-2); }
+.meter-head .v { font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+/* مسار محايد مشتق من لون النص: يبقى مرئياً في الوضعين — الوضع الفاتح
+   يجعل --bg-2 أبيض نقي مطابقاً لخلفية البطاقة فيختفي المسار الفارغ. */
+.meter-track {
+  position: relative; height: 8px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-2) 20%, transparent);
+  overflow: hidden; direction: ltr;
+}
+.meter-fill { height: 100%; border-radius: 999px; background: var(--series-2); transition: width .45s cubic-bezier(.4,0,.2,1); }
+.meter[data-state="good"] .meter-fill { background: var(--st-good); }
+.meter[data-state="warn"] .meter-fill { background: var(--st-warn); }
+.meter[data-state="bad"]  .meter-fill { background: var(--st-bad); }
+/* علامة الهدف: خط رأسي فوق المسار — تُوضع بـ inset-inline-start أو left */
+.meter-wrap { position: relative; }
+.meter-mark {
+  position: absolute; top: -3px; width: 2px; height: 14px;
+  background: var(--text); opacity: .55; border-radius: 1px; margin-left: -1px;
+}
+.meter-foot { font-size: .72rem; color: var(--text-2); }
+
+/* ── صفّ الشريط: قائمة أوزان (تخصيص/قطاعات) ──────────────────────── */
+.brow { display: grid; grid-template-columns: minmax(88px,auto) 1fr minmax(58px,auto); align-items: center; gap: var(--sp-3); padding: 7px 0; }
+.brow + .brow { border-top: 1px solid color-mix(in srgb, var(--border) 55%, transparent); }
+.brow .br-k { display: flex; align-items: center; gap: 7px; font-size: .8rem; color: var(--text); min-width: 0; }
+.brow .br-k span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brow .br-track { position: relative; height: 8px; border-radius: 999px; background: color-mix(in srgb, var(--text-2) 20%, transparent); overflow: hidden; direction: ltr; }
+.brow .br-fill { height: 100%; border-radius: 999px; }
+.brow .br-v { font-size: .8rem; font-weight: 700; color: var(--text); text-align: end; font-variant-numeric: tabular-nums; }
+.brow .br-v .d { font-size: .7rem; font-weight: 600; margin-inline-start: 5px; }
+
+/* ── سكة المناطق: موقع السعر بين مناطق القرار ────────────────────
+   direction:ltr كي تتصاعد الأرقام يساراً←يميناً مثل خط الأعداد. */
+.zrail { direction: ltr; padding: 30px 10px 46px; }
+.zrail-track {
+  position: relative; height: 8px; border-radius: 999px;
+  background: linear-gradient(90deg,
+    color-mix(in srgb, var(--st-good) 48%, transparent),
+    color-mix(in srgb, var(--text-2)  26%, transparent),
+    color-mix(in srgb, var(--st-warn) 48%, transparent),
+    color-mix(in srgb, var(--st-bad)  52%, transparent));
+}
+.zrail-tick { position: absolute; top: -5px; width: 2px; height: 18px; margin-left: -1px; border-radius: 1px; background: var(--text-2); }
+.zrail-tick[data-k="buy"]  { background: var(--st-good); }
+.zrail-tick[data-k="fair"] { background: var(--series-2); }
+.zrail-tick[data-k="trim"] { background: var(--st-warn); }
+.zrail-tick[data-k="exit"] { background: var(--st-bad); }
+.zrail-lbl { position: absolute; transform: translateX(-50%); font-size: .65rem; color: var(--text-2); text-align: center; white-space: nowrap; line-height: 1.35; }
+.zrail-lbl[data-row="0"] { top: 17px; }
+.zrail-lbl[data-row="1"] { top: 41px; }
+.zrail-lbl b { display: block; color: var(--text); font-size: .71rem; font-variant-numeric: tabular-nums; }
+.zrail-now { position: absolute; top: -32px; transform: translateX(-50%); text-align: center; white-space: nowrap; }
+.zrail-now b { display: block; background: var(--accent); color: #0d1117; border-radius: 6px; padding: 2px 8px; font-size: .78rem; font-variant-numeric: tabular-nums; }
+.zrail-now i { font-size: .61rem; color: var(--text-2); font-style: normal; }
+.zrail-now::after { content: ""; display: block; width: 2px; height: 11px; background: var(--accent); margin: 2px auto 0; }
+
+/* ── الحلقة: مقياس دائري لرقم واحد ──────────────────────────────── */
+.gauge { position: relative; flex-shrink: 0; }
+.gauge svg { display: block; }
+.gauge .ring-bg { stroke: color-mix(in srgb, var(--text-2) 22%, transparent); }
+.gauge-mid { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; }
+.gauge-mid .g-v { font-size: 1.7rem; font-weight: 700; color: var(--text); line-height: 1; font-variant-numeric: tabular-nums; }
+.gauge-mid .g-l { font-size: .66rem; color: var(--text-2); margin-top: 2px; }
+
+/* ── لوحة مفاتيح/قيم مضغوطة ─────────────────────────────────────── */
+.kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2) var(--sp-4); }
+.kvs .kv { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); font-size: .79rem; padding: 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }
+.kvs .kv > span { color: var(--text-2); }
+.kvs .kv > b { color: var(--text); font-variant-numeric: tabular-nums; text-align: end; }
+
+/* ── ملاحظة جانبية (تنبيه داخل بطاقة) ───────────────────────────── */
+.note {
+  display: flex; gap: var(--sp-2); align-items: flex-start;
+  border-inline-start: 3px solid var(--text-2);
+  background: var(--bg-2); border-radius: 0 var(--radius) var(--radius) 0;
+  padding: 10px 12px; font-size: .79rem; line-height: 1.65; color: var(--text);
+}
+.note[data-state="good"] { border-inline-start-color: var(--st-good); background: var(--st-good-dim); }
+.note[data-state="warn"] { border-inline-start-color: var(--st-warn); background: var(--st-warn-dim); }
+.note[data-state="bad"]  { border-inline-start-color: var(--st-bad);  background: var(--st-bad-dim); }
+.note .ic { flex-shrink: 0; line-height: 1.5; }
+
+/* ── إيقاع رأسي موحّد داخل البطاقات ──────────────────────────────── */
+.stack   > * + * { margin-top: var(--sp-3); }
+.stack-2 > * + * { margin-top: var(--sp-2); }
+.stack-4 > * + * { margin-top: var(--sp-4); }
+
+/* ── عمق خفيف بدل الحد المسطّح ───────────────────────────────────── */
+.card, .stat-card { box-shadow: var(--elev-1); }
+.stat-card { transition: border-color .18s, box-shadow .18s, transform .18s; }
+.stat-card:hover { box-shadow: var(--elev-2); transform: translateY(-1px); }
+
+@media (max-width: 560px) {
+  .brow { grid-template-columns: 1fr auto; row-gap: 6px; }
+  .brow .br-track { grid-column: 1 / -1; }
+  .zrail { padding: 30px 4px 46px; }
 }
