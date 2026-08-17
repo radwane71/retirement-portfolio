@@ -613,6 +613,7 @@ async function loadAllData() {
   // AUDIT-FIX (2026-07): نبني أيضاً fwdByTicker (دخل متوقع لكل رمز) ليستخدمه
   // كرت «الدخل حسب القطاع» بتوزيعات فعلية بدل التوزيع بنسبة القيمة السوقية.
   const fwdByTicker = {};
+  let _fwdStale = [];          // الأسهم المستبعَدة لانقطاع التوزيع (تُعرض في شرح الكرت)
   const fwdProjected = (() => {
     const divDate = d => {
       if (d.date) return d.date;
@@ -642,7 +643,14 @@ async function loadAllData() {
       return Math.max(0, s);
     };
 
+    // تاريخ سجل التوزيع بالمللي ثانية (منتصف الليل محلياً) — يطابق dividends.js
+    const tsOf = ds => {
+      const p = (typeof parseDateLocal === 'function') ? parseDateLocal(ds) : null;
+      return p ? p.getTime() : new Date(ds).getTime();
+    };
+
     let total = 0;
+    const staleList = [];
     holdings.forEach(h => {
       if (+h.shares <= 0) return;
       const tickerDivs = divRows
@@ -651,10 +659,16 @@ async function loadAllData() {
       if (!tickerDivs.length) return;
 
       // بناء سلسلة الـ DPS لكل دفعة (المبلغ ÷ الأسهم وقت الدفعة) بالترتيب الزمني
+      // نحتفظ بالتاريخ مع كل نقطة — لازم لنافذة الاثني عشر شهراً
       const dpsSeries = [];
+      let lastValidDate = null;
       for (let i = 0; i < tickerDivs.length; i++) {
-        const sh = sharesAt(h.ticker, divDate(tickerDivs[i]));
-        if (sh >= 0.001) dpsSeries.push(+tickerDivs[i].amount / sh);
+        const dt = divDate(tickerDivs[i]);
+        const sh = sharesAt(h.ticker, dt);
+        if (sh >= 0.001) {
+          dpsSeries.push({ dps: +tickerDivs[i].amount / sh, date: dt });
+          lastValidDate = dt;
+        }
       }
       // L-3: use median inter-dividend gap for frequency — robust to skipped dividends
       // (يُحسب قبل الاحتياطي لأن الاحتياطي يحتاجه لتفادي مضاعفة الدخل)
@@ -674,69 +688,80 @@ async function loadAllData() {
         else if (medGap <= 210) freq = 2;
       }
 
-      if (!dpsSeries.length) {
+      // DPS السنوي المتوقع = مجموع DPS آخر 12 شهراً (قرار المالك 2026-08).
+      // كان: دفعة واحدة (وسيط أو آخر دفعة) × الدورية — وهو يفترض تساوي الدفعات،
+      // فيضخّم النمط السعودي الشائع (مرحلي صغير + ختامي كبير) حتى +129%، ويتذبذب
+      // ±20% لنفس السهم حسب شهر فتح الصفحة رغم ثبات سياسة الشركة. مجموع الاثني
+      // عشر شهراً يعطي الرقم نفسه في كل الحالات بلا فروع اتجاه.
+      // احتياطي للموزّع السنوي الذي دفعته الأخيرة تجاوزت 12 شهراً ولمّا يُعدّ منقطعاً:
+      // مجموع آخر دورة كاملة (آخر freq دفعة).
+      // ⚠️ هذا المنطق مطابق حرفياً لـ _projectedAnnualIncome في js/dividends.js —
+      // أي تعديل هنا يجب أن يُطبَّق هناك (وإلا اختلف رقم اللوحة عن صفحة الأرباح).
+      let dps, lastDivDate;
+      if (dpsSeries.length) {
+        const cutoff = Date.now() - 365 * 86400000;
+        const ttmDps = dpsSeries
+          .filter(p => tsOf(p.date) >= cutoff)
+          .reduce((s, p) => s + p.dps, 0);
+        if (ttmDps > 0) {
+          dps = ttmDps / freq;              // يُضرب بـ freq لاحقاً → المجموع كما هو
+        } else {
+          dps = dpsSeries.slice(-freq).reduce((s, p) => s + p.dps, 0) / freq;
+        }
+        lastDivDate = lastValidDate;
+      } else {
         // اشترى السهم بعد كل توزيعاته المسجّلة — نقدّر من التوزيعات المسجّلة (لا
         // الإجمالي الكلي الذي يضخّم بتراكم السنوات).
         // AUDIT-FIX (يطابق dividends.js): قسمة «مجموع آخر سنة ÷ freq» تفترض السنة
         // مكتملة — سنة جزئية كانت تُقسم على freq كاملة فينخفض DPS. الحل: آخر سنة
         // مكتملة (< السنة الجارية) إن وُجدت؛ وإلا تُسنّى الدفعات الجزئية بعددها
         // الفعلي: DPS للفترة = المجموع ÷ الأسهم ÷ عدد الدفعات.
+        const lastDiv = tickerDivs[tickerDivs.length - 1];
+        lastDivDate   = divDate(lastDiv);
         const curYear = new Date().getFullYear();
         const yearOf  = d => +d.year || new Date(divDate(d)).getFullYear();
         const completeYears = tickerDivs.map(yearOf).filter(y => y < curYear);
-        let fb;
         if (completeYears.length) {
           const lastFullYear  = Math.max(...completeYears);
           const fullYearTotal = tickerDivs
             .filter(d => yearOf(d) === lastFullYear)
             .reduce((s, d) => s + +d.amount, 0);
-          fb = fullYearTotal > 0
+          dps = fullYearTotal > 0
             ? fullYearTotal / +h.shares / freq
-            : +tickerDivs[tickerDivs.length - 1].amount / +h.shares;
+            : +lastDiv.amount / +h.shares;
         } else {
           const lastYear     = Math.max(...tickerDivs.map(yearOf));
           const partialDivs  = tickerDivs.filter(d => yearOf(d) === lastYear);
           const partialTotal = partialDivs.reduce((s, d) => s + +d.amount, 0);
-          fb = partialTotal > 0 && partialDivs.length
+          dps = partialTotal > 0 && partialDivs.length
             ? partialTotal / +h.shares / partialDivs.length
-            : +tickerDivs[tickerDivs.length - 1].amount / +h.shares;
+            : +lastDiv.amount / +h.shares;
         }
-        if (fb < 0.0001) return;
-        dpsSeries.push(fb);
       }
-
-      // AUDIT-FIX (M1): forward DPS = MEDIAN of the last `freq` per-share payments, not the single
-      // latest one. A special / irregular final dividend (e.g. quarterly 1,1,1,5) would otherwise
-      // inflate the forward run-rate to 5×4=20 vs the true ~4. The median ignores such outliers.
-      // 2026-07: استثناء الأسهم النامية — لو آخر دورة سنوية تصاعدية بانتظام (كل دفعة ≥ سابقتها
-      // ضمن تسامح 1%، وآخرها أعلى من أولها بـ3%+) فالوسيط يتخلّف عن واقع سهم يرفع توزيعه بثبات
-      // (راجحي/STC) → نستخدم آخر دفعة معلنة. غير ذلك يبقى الوسيط. (يطابق dividends.js _dpsTrendAware)
-      const _window = dpsSeries.slice(-freq);
-      let dps;
-      let _rising = freq >= 2 && _window.length >= freq;
-      if (_rising) {
-        for (let i = 1; i < _window.length; i++) {
-          if (_window[i] < _window[i - 1] * 0.99) { _rising = false; break; }
-        }
-        _rising = _rising && _window[_window.length - 1] > _window[0] * 1.03;
-      }
-      if (_rising) {
-        dps = _window[_window.length - 1];
-      } else {
-        const recent = _window.slice().sort((a, b) => a - b);
-        // AUDIT-FIX 2026-08: وسيط النافذة الزوجية = متوسط العنصرين الأوسطين
-        // (كان يأخذ الأعلى منهما فينحاز لأعلى)
-        const _len = recent.length;
-        dps = _len % 2 === 0
-          ? (recent[_len / 2 - 1] + recent[_len / 2]) / 2
-          : recent[Math.floor(_len / 2)];
-      }
-      if (dps < 0.0001) return;
+      if (!(dps > 0)) return;
 
       const projected = dps * freq * +h.shares;
+
+      // AUDIT-FIX (2026-08): «الدخل المتوقع» كان يُسقط دخلاً كاملاً لسهم توقّف عن
+      // التوزيع منذ سنوات. سهم قطع توزيعه = «فشل بوابة الاستدامة» في الدستور
+      // (§4 الفلتر 1) فلا يجوز بناء دخل تقاعدي متوقَّع عليه. القاعدة: تجاوز 1.75
+      // ضعف دورته المعتادة بلا توزيع = فوّت دورة كاملة مع مهلة → يُستبعد من
+      // المجموع ويُعلَن صراحةً (§8: لا إسقاط صامت).
+      const daysSinceDiv = lastDivDate
+        ? Math.floor((Date.now() - tsOf(lastDivDate)) / 86400000)
+        : null;
+      const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+      const isStale    = daysSinceDiv != null && daysSinceDiv > staleAfter;
+
+      if (isStale) {
+        staleList.push({ ticker: h.ticker, name: h.name || h.ticker, projected, daysSinceDiv, lastDivDate });
+        return;                       // لا يدخل fwdByTicker ولا المجموع
+      }
+
       fwdByTicker[h.ticker] = projected;
       total += projected;
     });
+    _fwdStale = staleList;
     return total;
   })();
   const divYieldFwd = costBasis > 0 ? fwdProjected / costBasis * 100 : 0;
@@ -833,7 +858,7 @@ async function loadAllData() {
     totalDivAll,     yearDiv,
     divYieldYear,    divYieldAll,
     divYieldAnn, divYieldYOC, divYieldMarket, divYieldFwd,
-    fwdProjected, fwdByTicker, ttmDiv, xirr,
+    fwdProjected, fwdByTicker, fwdStale: _fwdStale, ttmDiv, xirr,
     annualizedYearDiv, daysElapsed, daysInYear, denomAnn,
     grantMap, totalGrantShares, totalGrantTickers,
     latestNW:        _nwPick ? +_nwPick.total_value : null,
@@ -4031,21 +4056,29 @@ function showCardInfo(key) {
     'fwd-income': {
       title: '💵 الدخل التوزيعي المتوقع',
       body: (() => {
-        // AUDIT-FIX (2026-07): الشرح يطابق الحساب الفعلي — الكرت يعرض Forward
-        // (وسيط DPS × الدورية × أسهمك الحالية) ويرجع لـ TTM فقط عند تعذّره.
+        // AUDIT-FIX (2026-08): الشرح يطابق الحساب الفعلي — DPS السنوي = مجموع
+        // توزيعات آخر 12 شهراً لكل سهم واحد (لا وسيط دفعة × الدورية)، موحَّد مع
+        // _projectedAnnualIncome في صفحة الأرباح.
         const usingFwd = (s.fwdProjected || 0) > 0;
         const val = usingFwd ? s.fwdProjected : (s.ttmDiv || 0);
+        const stale = s.fwdStale || [];
+        const staleNote = stale.length
+          ? noteHtml('⚠️', `<strong>مستبعَد من الدخل المتوقع (${stale.length}):</strong> ${
+              stale.map(x => `${esc(x.ticker)} — بلا توزيع منذ ${Math.round(x.daysSinceDiv/30)} شهراً`).join(' · ')
+            }<br><span class="small">انقطاع التوزيع = فشل بوابة الاستدامة (الدستور §4 الفلتر 1)؛ لا يُبنى عليه دخل تقاعدي متوقَّع.</span>`, 'warn')
+          : '';
         return `
         <p>${usingFwd
-          ? 'تقدير دخلك السنوي القادم بطريقة <strong>Forward</strong>: لكل سهم تملكه، وسيط آخر دفعات (لكل سهم واحد) × عدد مرات التوزيع سنوياً × أسهمك الحالية — نفس منهج ياهو فاينانس، والأدق للمحافظ النامية.'
+          ? 'تقدير دخلك السنوي القادم بطريقة <strong>Forward</strong>: لكل سهم تملكه، <strong>مجموع التوزيعات لكل سهم واحد خلال آخر 12 شهراً</strong> × أسهمك الحالية. جمع الاثني عشر شهراً لا يفترض تساوي الدفعات، فلا يضخّم النمط السعودي (مرحلي صغير + ختامي كبير) ولا يتذبذب حسب شهر فتح الصفحة.'
           : 'لا تتوفر بيانات كافية لطريقة Forward — نعرض ما استلمته فعلاً في آخر 12 شهراً (TTM).'}</p>
-        <div class="info-formula"><strong>${usingFwd ? 'Σ (وسيط DPS × الدورية × الأسهم الحالية) لكل رمز' : 'مجموع التوزيعات خلال آخر 365 يوماً'}</strong></div>
+        <div class="info-formula"><strong>${usingFwd ? 'Σ (مجموع DPS آخر 365 يوماً × الأسهم الحالية) لكل رمز' : 'مجموع التوزيعات خلال آخر 365 يوماً'}</strong></div>
         <div class="info-math">
           الدخل السنوي المتوقع = <strong class="text-success">${formatSAR(val)}</strong><br>
           ≈ ${formatSAR(val/12)} شهرياً<br>
           <span class="text-muted small">للمقارنة: TTM المستلم فعلاً = ${formatSAR(s.ttmDiv||0)}</span>
         </div>
-        <p class="info-note">💡 مؤشر تقديري — يفترض استمرار الشركات على آخر سياسة توزيع معروفة.</p>`;
+        ${staleNote}
+        <p class="info-note">💡 مؤشر تقديري — يفترض استمرار الشركات على آخر سياسة توزيع معروفة. موزّع سنوي تأخّرت دفعته يُقدَّر بمجموع آخر دورة كاملة.</p>`;
       })()
     },
     'passive-cover': {

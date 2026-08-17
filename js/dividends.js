@@ -1395,7 +1395,7 @@ function renderDividendQuality() {
     byTickerYear[t][y] = (byTickerYear[t][y] || 0) + +d.amount;
   });
 
-  // ── بناء 2: DPS (توزيع للسهم الواحد) — للحسابات الجودة ──────────────────
+  // ── بناء 2: سلسلة DPS مؤرّخة — أساس نوافذ الاثني عشر شهراً ──────────────
   // المشكلة الأساسية: المبلغ الإجمالي يتأثر بحجم مركزك (شراء/بيع جزئي).
   // مثال: بعت 400 سهم من 1500 في فبراير → توزيع مايو أقل بالمبلغ
   //        رغم أن الشركة دفعت نفس DPS — الكود يحسبها "تراجع" خطأً.
@@ -1403,27 +1403,37 @@ function renderDividendQuality() {
   // الحل: DPS = مبلغ التوزيع ÷ الأسهم المملوكة وقت التوزيع
   //   ✓ يعكس قرار الشركة الفعلي — لا حجم محفظتك
   //   ✓ محصّن ضد البيع الجزئي والشراء الإضافي
-  //   ✓ يتيح مقارنة عادلة بين سنوات مختلفة حتى لو تغير المركز
-  const byTickerYearDPS = {};  // ticker → { year → إجمالي DPS للسنة }
-  const dpsNormalized   = {};  // ticker → هل تتوفر بيانات المعاملات؟
+  //
+  // AUDIT-FIX (2026-08) — إعادة بناء جذرية: كانت الدرجات مجمّعة على **السنة
+  // التقويمية**، فكانت كل الأسهم تُعطى 51/100 بالضبط ولا تتحرك حتى يناير 2027:
+  //   • النمو مقفل خلف سنتين تقويميتين مكتملتين → null
+  //   • الثبات مقفل خلف ثلاث سنوات مكتملة → null
+  //   • الاستمرارية = 35 × انتظام × نضج، مبنية على **أرقام السنوات فقط** ولا
+  //     تلمس مبلغ التوزيع إطلاقاً → سهم ضاعف توزيعه وسهم قطعه 80% متساويان.
+  // البديل: نوافذ 12 شهراً متحرّكة مرساتها **آخر توزيعة** (لا رأس السنة)،
+  // والاستمرارية تقيس الدفع الفعلي والمبلغ (Dividend Streak تُصفَّر عند القطع).
+  const dpsSeriesByTicker = {};  // ticker → [{ t, dps }] — DPS مُطبَّع، تصاعدياً
+  const rawSeriesByTicker = {};  // ticker → [{ t, dps }] — مبالغ خام (احتياطي)
+  const dpsNormalized     = {};  // ticker → هل تتوفر بيانات المعاملات؟
 
   dividends.forEach(d => {
     const t = d.ticker;
-    const y = +d.year;
-    if (!t || !y) return;
+    if (!t) return;
+    const divDate = _divSortDate(d);              // تاريخ التوزيع
+    const dt      = parseDateLocal(divDate) || new Date(divDate);
+    if (!dt || isNaN(dt)) return;
+    const ms = dt.getTime();
 
-    const divDate     = _divSortDate(d);          // تاريخ التوزيع
+    (rawSeriesByTicker[t] = rawSeriesByTicker[t] || []).push({ t: ms, dps: +d.amount });
+
     const sharesAtDiv = _sharesAtDate(t, divDate); // أسهمك وقت التوزيع
-
-    if (sharesAtDiv < 0.001) return; // لا أسهم مسجّلة وقت التوزيع — تجاهل
-
-    const dps = +d.amount / sharesAtDiv; // الريال لكل سهم
-    if (!byTickerYearDPS[t]) byTickerYearDPS[t] = {};
-    byTickerYearDPS[t][y] = (byTickerYearDPS[t][y] || 0) + dps;
+    if (sharesAtDiv < 0.001) return;               // لا أسهم مسجّلة وقتها
+    (dpsSeriesByTicker[t] = dpsSeriesByTicker[t] || []).push({ t: ms, dps: +d.amount / sharesAtDiv });
     dpsNormalized[t] = true;
   });
+  Object.values(dpsSeriesByTicker).forEach(a => a.sort((x, y) => x.t - y.t));
+  Object.values(rawSeriesByTicker).forEach(a => a.sort((x, y) => x.t - y.t));
 
-  const currentYear = new Date().getFullYear();
   const tickers = Object.keys(byTickerYear).filter(t => {
     const yrs = Object.keys(byTickerYear[t]).length;
     return yrs >= 1;
@@ -1439,69 +1449,123 @@ function renderDividendQuality() {
     // ── اختيار المصدر للحسابات ──────────────────────────────────────
     // الأولوية: DPS المُعدَّل (يُزيل تأثير تغير المركز)
     // الاحتياطي: المبالغ الخام (إذا لم تُسجَّل معاملات للرمز)
-    const isDPS   = !!dpsNormalized[ticker];
-    const yearMap = isDPS ? byTickerYearDPS[ticker] : byTickerYear[ticker];
-
-    const years    = Object.keys(yearMap).map(Number).sort((a,b) => a - b);
-    const amounts  = years.map(y => yearMap[y]); // DPS أو مبلغ خام
-    const n        = years.length;
+    const isDPS  = !!dpsNormalized[ticker];
+    const series = (isDPS ? dpsSeriesByTicker[ticker] : rawSeriesByTicker[ticker]) || [];
 
     // المبلغ الفعلي المستلم (للعرض — دائماً من الخام بغض النظر عن المصدر)
     const rawYearMap = byTickerYear[ticker];
-    const rawYears   = Object.keys(rawYearMap || {}).map(Number).sort((a,b) => a - b);
+    const rawYears   = Object.keys(rawYearMap || {}).map(Number).sort((a, b) => a - b);
     const lastRawAmt = rawYears.length ? (rawYearMap[rawYears[rawYears.length - 1]] || 0) : 0;
 
-    // السنوات التقويمية المكتملة (انتهت فعلاً) مقابل السنة الجارية الجزئية.
-    // مقارنة سنة جارية ناقصة — أو سنة الدخول الجزئية — تُنتج نمواً/تذبذباً وهمياً
-    // لمحفظة عمرها أشهر، لذا نقيس النمو والثبات على السنوات المكتملة فقط.
-    const completeYears    = years.filter(y => y < currentYear);
-    const nComplete        = completeYears.length;
-    const hasCurrentPartial = years.includes(currentYear);
+    const h    = holdings.find(x => x.ticker === ticker);
+    const name = h?.name || dividends.find(d => d.ticker === ticker)?.name || ticker;
+    const base = {
+      ticker, name, isDPS, inPortfolio: !!h,
+      lastAmount: lastRawAmt,
+      firstYear: rawYears[0], lastYear: rawYears[rawYears.length - 1],
+    };
 
-    // ── 1. الاستمرارية (0–35 نقطة) — تتناسب مع السجل الفعلي ────
-    // عاملان: انتظام (لا فجوات بين السنوات) × نضج (يحتاج ~3 سنوات للدرجة الكاملة).
-    // هكذا لا يأخذ سهم عمره أشهر 35/35 كاملة بل درجة تعكس قِصَر سجله.
-    const minYear = years[0], maxYear = years[n - 1];
-    const expectedYears = maxYear - minYear + 1;
-    const regularity    = expectedYears > 0 ? n / expectedYears : 1;     // يعاقب الفجوات
-    const trackYears    = nComplete + (hasCurrentPartial ? 0.5 : 0);      // الجارية تُحسب نصفاً
-    const maturity      = Math.min(1, trackYears / 3);                    // 3 سنوات = درجة كاملة
-    const continuityScore = Math.round(35 * regularity * maturity);
-
-    // ── 2. نمو التوزيعات (0–35 نقطة) — فقط بين سنتين مكتملتين ───
-    // null = لا تكفي البيانات بعد (لا نختلق رقماً افتراضياً)
-    let growthScore = null;
-    let cagr3 = null, cagr5 = null;
-
-    if (nComplete >= 2) {
-      const calcCagr = (from, to) => {
-        if (!yearMap[from] || !yearMap[to] || yearMap[from] <= 0) return null;
-        const periods = to - from;
-        if (periods <= 0) return null;
-        return (Math.pow(yearMap[to] / yearMap[from], 1 / periods) - 1) * 100;
-      };
-
-      const cFrom = completeYears[0], cTo = completeYears[nComplete - 1];
-      cagr3 = calcCagr(Math.max(cFrom, cTo - 3), cTo);
-      cagr5 = calcCagr(cFrom, cTo);
-
-      const cagr = cagr3 ?? cagr5 ?? 0;
-      growthScore = Math.round(Math.min(35, Math.max(0, (cagr + 10) / 18 * 35)));
+    if (!series.length) {
+      return { ...base, nWindows: 0, nFull: 0, freq: 1, expectedPerWindow: 1,
+        yoy: null, cagrWin: null, cv: null, broken: false, worstDrop: 0,
+        continuityScore: 0, growthScore: null, volatilityScore: null,
+        totalScore: 0, provisional: true, trend: 'new' };
     }
 
-    // ── 3. انخفاض التذبذب (0–30 نقطة) — يحتاج 3 سنوات مكتملة على الأقل ──
-    // null = غير مقيس بعد (لا قيمة افتراضية مموَّهة)
-    // AUDIT-FIX (2026-07): على السنوات التقويمية المكتملة فقط — السنة الجارية
-    // الجزئية كانت تدخل الحساب فتظهر كتذبذب وهمي يخفض الدرجة (النمو والاتجاه
-    // كانا يستثنيانها أصلاً؛ الآن الثبات متسق معهما).
-    let volatilityScore = null;
-    if (nComplete >= 3) {
-      const cAmounts = completeYears.map(y => yearMap[y]);
-      const mean     = cAmounts.reduce((s, v) => s + v, 0) / nComplete;
-      const variance = cAmounts.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / nComplete;
-      const cv       = mean > 0 ? Math.sqrt(variance) / mean : 1;
+    const DAY = 86400000;
+
+    // ── الدورية من وسيط الفجوات بين الدفعات ─────────────────────────
+    // round(365 ÷ وسيط الفجوة) بدل تصنيف بمجالات ثابتة — يلتقط أيضاً الموزّع
+    // ثلاث مرات سنوياً (شائع سعودياً) الذي كانت المجالات تسحقه إلى «ربعي».
+    let freq = 1, medGap = 365;
+    if (series.length >= 2) {
+      const gaps = [];
+      for (let i = 1; i < series.length; i++) gaps.push(Math.floor((series[i].t - series[i - 1].t) / DAY));
+      gaps.sort((a, b) => a - b);
+      medGap = Math.max(1, gaps[Math.floor(gaps.length / 2)]);
+      freq   = Math.max(1, Math.min(12, Math.round(365 / medGap)));
+    }
+    const expectedPerWindow = freq;
+
+    // ── نوافذ 12 شهراً متحرّكة من آخر توزيعة للخلف ───────────────────
+    // W0 = آخر دورة سنوية كاملة حتى آخر توزيعة، W1 = التي قبلها… المرساة هي
+    // آخر توزيعة لا رأس السنة، فلا تنتظر الدرجة يناير القادم لتتحرك.
+    //
+    // ⚠️ قرار منهجي: النافذة تُبنى بعدّ **الدفعات** (كل freq دفعة = نافذة) لا
+    // بحدّ صلب عند 365 يوماً، ثم يُتحقَّق من امتدادها الزمني. السبب رياضي:
+    // موزّع ربعي بفجوة 90–91 يوماً تسع نافذة الـ365 يوماً خمساً من دفعاته
+    // (4×91 = 364 < 365) فتلتقط النافذة التالية ثلاثاً فقط → نمو وهمي ‎±25%‎
+    // على سهم لم يغيّر توزيعه. عدّ الدفعات يلغي هذا الانزياح تماماً، والتحقق
+    // من الامتداد الزمني يبقي كشف الدفعة المفقودة قائماً.
+    const anchor = series[series.length - 1].t;
+    const windows = [];
+    for (let end = series.length; end > 0; end -= expectedPerWindow) {
+      const start = Math.max(0, end - expectedPerWindow);
+      const pts   = series.slice(start, end);
+      // بداية الفترة التي تغطيها النافذة = الدفعة السابقة لها (أو دورة واحدة قبلها)
+      const prevT = start > 0 ? series[start - 1].t : pts[0].t - medGap * DAY;
+      const spanDays = Math.round((pts[pts.length - 1].t - prevT) / DAY);
+      windows.push({
+        idx: windows.length,
+        sum:   pts.reduce((s, p) => s + p.dps, 0),
+        count: pts.length,
+        spanDays,
+        // امتداد يتجاوز السنة بمقدار دورة كاملة تقريباً = دفعة فُوِّتت داخل النافذة
+        gap: spanDays > 365 + medGap * 0.75,
+      });
+    }
+    const nWindows = windows.length;
+
+    // نافذة «مكتملة» = دفعاتها = المتوقَّع ولا فجوة فيها. نافذة الدخول الجزئية
+    // (سهم ربعي اشتُري في سبتمبر → دفعة واحدة بدل أربع) تُستبعد من النمو
+    // والثبات، وإلا قُرئت نمواً ‎+300%‎ وتذبذباً عالياً رغم أن الشركة لم تغيّر
+    // توزيعها إطلاقاً. تبقى محسوبة في الاستمرارية (نضج السجل).
+    const fullWins = windows.filter(w => w.count >= expectedPerWindow && !w.gap && w.sum > 0); // [0] = الأحدث
+    const nFull    = fullWins.length;
+
+    // ── 1. نمو التوزيعات (0–35) — متاح من نافذتين مكتملتين (~24 شهراً) ──
+    let growthScore = null, yoy = null, cagrWin = null;
+    if (nFull >= 2) {
+      yoy = (fullWins[0].sum / fullWins[1].sum - 1) * 100;
+      const periods = fullWins[nFull - 1].idx - fullWins[0].idx;   // المسافة بالنوافذ
+      if (periods > 0 && fullWins[nFull - 1].sum > 0) {
+        cagrWin = (Math.pow(fullWins[0].sum / fullWins[nFull - 1].sum, 1 / periods) - 1) * 100;
+      }
+      const g = (nFull >= 3 && cagrWin != null) ? cagrWin : yoy;
+      growthScore = Math.round(Math.min(35, Math.max(0, (g + 10) / 18 * 35)));
+    }
+
+    // ── 2. الثبات (0–30) — معامل الاختلاف، متاح من ثلاث نوافذ مكتملة ──
+    let volatilityScore = null, cv = null;
+    if (nFull >= 3) {
+      const vals = fullWins.map(w => w.sum);
+      const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+      const varc = vals.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / vals.length;
+      cv = mean > 0 ? Math.sqrt(varc) / mean : 1;
       volatilityScore = Math.round(Math.max(0, (1 - cv) * 30));
     }
+
+    // ── 3. الاستمرارية (0–35) — الدفع الفعلي والمبلغ، لا أرقام السنوات ──
+    // (أ) انتظام: كم نافذة استوفت دفعاتها المتوقَّعة بلا فجوة؟ النافذة الأقدم
+    //     هي نافذة الدخول بالضرورة (تحوي أول توزيعة مسجّلة) فلا تُعاقَب على نقصها.
+    const assessed   = nWindows >= 2 ? windows.slice(0, nWindows - 1) : windows;
+    const regularity = assessed.length
+      ? assessed.filter(w => w.count >= expectedPerWindow && !w.gap).length / assessed.length : 0;
+    // (ب) نضج: ثلاث نوافذ = درجة كاملة
+    const maturity = Math.min(1, nWindows / 3);
+    // (ج) عامل القطع — هنا يدخل **المبلغ**: أشد هبوط في DPS بين نافذتين
+    //     مكتملتين متتاليتين. قطع 80% يهوي بالعامل إلى ~0.30، قطع 50% إلى ~0.59.
+    let worstDrop = 0;
+    for (let i = 0; i + 1 < nFull; i++) {
+      const ow = fullWins[i + 1].sum;
+      if (ow > 0) worstDrop = Math.max(worstDrop, 1 - fullWins[i].sum / ow);
+    }
+    const cutFactor = worstDrop <= 0.10 ? 1 : Math.max(0.15, Math.pow(1 - worstDrop, 0.75));
+    // (د) انقطاع فعلي: تجاوز 1.75 ضعف الدورة بلا توزيع = Streak مُصفَّر
+    //     (نفس عتبة استبعاد الدخل المتوقع — الدستور §4 الفلتر 1)
+    const daysSinceLast = Math.floor((Date.now() - anchor) / DAY);
+    const broken = daysSinceLast > (365 / Math.max(1, freq)) * 1.75;
+    const continuityScore = Math.round(35 * regularity * maturity * cutFactor * (broken ? 0.15 : 1));
 
     // ── الدرجة الكلية: تُطبَّع على المحاور المتاحة فقط (من 100) ──
     // إذا لم يتوفر النمو/الثبات بعد، لا نحشو أصفاراً ولا ثوابت — بل نقسم
@@ -1512,31 +1576,21 @@ function renderDividendQuality() {
     const totalScore  = Math.round(sumAvail / maxAvail * 100);
     const provisional = (growthScore == null || volatilityScore == null);
 
-    // الاتجاه: فقط عند توفر سنتين مكتملتين (وإلا «جديد» — لا نحكم بعد)
+    // الاتجاه: من آخر نافذتين مكتملتين (وإلا «جديد» — لا نحكم بعد)
     let trend = 'new';
-    if (nComplete >= 2) {
-      const cAmounts = completeYears.map(y => yearMap[y]);
-      const last = cAmounts[nComplete - 1];
-      const prev = cAmounts[nComplete - 2];
+    if (nFull >= 2) {
+      const last = fullWins[0].sum, prev = fullWins[1].sum;
       if      (last > prev * 1.02) trend = 'up';
       else if (last < prev * 0.98) trend = 'down';
       else                         trend = 'neutral';
     }
 
-    const h = holdings.find(x => x.ticker === ticker);
     return {
-      ticker,
-      name:            h?.name || dividends.find(d => d.ticker === ticker)?.name || ticker,
-      years:           n,
-      firstYear:       years[0],
-      lastYear:        years[n - 1],
-      lastAmount:      lastRawAmt,   // المبلغ الفعلي المستلم (ليس DPS)
-      isDPS,                          // هل الدرجة محسوبة من DPS؟
-      cagr3, cagr5,
+      ...base,
+      nWindows, nFull, freq, expectedPerWindow,
+      yoy, cagrWin, cv, worstDrop, broken, daysSinceLast,
       continuityScore, growthScore, volatilityScore,
-      totalScore, provisional,
-      trend,
-      inPortfolio:     !!h,
+      totalScore, provisional, trend,
     };
   }).sort((a, b) => b.totalScore - a.totalScore);
 
@@ -1551,7 +1605,7 @@ function renderDividendQuality() {
   const trendEl = t =>
     t === 'up'   ? '<span style="color:var(--success)">↑ نامٍ</span>' :
     t === 'down' ? '<span style="color:var(--danger)">↓ تراجع</span>' :
-    t === 'new'  ? '<span style="color:var(--text-muted)" title="يحتاج سنتين مكتملتين للحكم على الاتجاه">🆕 جديد</span>' :
+    t === 'new'  ? '<span style="color:var(--text-muted)" title="يحتاج نافذتي 12 شهراً مكتملتين للحكم على الاتجاه">🆕 جديد</span>' :
                    '<span style="color:var(--text-muted)">← ثابت</span>';
   const cagrFmt = v =>
     v == null ? '<span class="text-muted">—</span>' :
@@ -1582,11 +1636,11 @@ function renderDividendQuality() {
             <th>الرمز</th>
             <th>الاسم</th>
             <th>الدرجة / 100</th>
-            <th>الاستمرارية<br><span class="small text-muted">/35</span></th>
+            <th>الاستمرارية<br><span class="small text-muted">/35 — دفع فعلي + مبلغ</span></th>
             <th>نمو التوزيع<br><span class="small text-muted">/35 — بـ DPS</span></th>
             <th>ثبات التوزيع<br><span class="small text-muted">/30 — بـ DPS</span></th>
-            <th>سنوات<br>التوزيع</th>
-            <th>نمو سنوي<br><span class="small text-muted">CAGR DPS — سنوات مكتملة</span></th>
+            <th>نوافذ 12 شهراً<br><span class="small text-muted">مكتملة / الكل</span></th>
+            <th>نمو سنوي<br><span class="small text-muted">DPS — نافذة مقابل نافذة</span></th>
             <th>آخر توزيع<br><span class="small text-muted">المبلغ الفعلي</span></th>
             <th>الاتجاه</th>
           </tr>
@@ -1616,11 +1670,12 @@ function renderDividendQuality() {
                   </div>
                 </div>
               </td>
-              <td style="text-align:center">${scoreBadge(s.continuityScore, 'انتظام ونضج سجل التوزيع')}</td>
-              <td style="text-align:center">${scoreBadge(s.growthScore, 'نمو التوزيعات سنة على سنة', 'يحتاج سنتين تقويميتين مكتملتين لقياس النمو')}</td>
-              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض التذبذب بين السنوات', 'يحتاج 3 سنوات تقويمية مكتملة لقياس الثبات')}</td>
-              <td class="num">${s.years} <span class="small text-muted">(${s.firstYear}–${s.lastYear})</span></td>
-              <td>${cagrFmt(s.cagr3)}</td>
+              <td style="text-align:center">${scoreBadge(s.continuityScore, `انتظام الدفع الفعلي × نضج السجل × عامل القطع${s.worstDrop > 0.10 ? ` — أشد هبوط ${(s.worstDrop*100).toFixed(0)}%` : ''}${s.broken ? ' — ⛔ انقطاع: التوزيع متوقف' : ''}`)}</td>
+              <td style="text-align:center">${scoreBadge(s.growthScore, 'نمو DPS بين نوافذ الاثني عشر شهراً', 'يحتاج نافذة أخرى — النمو متاح من نافذتين مكتملتين (~24 شهراً من التوزيعات)')}</td>
+              <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض تذبذب DPS بين النوافذ (CV)', 'يحتاج نافذة أخرى — الثبات متاح من ثلاث نوافذ مكتملة')}</td>
+              <td class="num" title="النافذة = 12 شهراً من آخر توزيعة للخلف. «مكتملة» = دفعاتها ≥ ${s.expectedPerWindow} (المتوقَّع من دوريتها)">${s.nFull}/${s.nWindows}
+                <span class="small text-muted">(${s.firstYear}–${s.lastYear})</span></td>
+              <td title="${s.nFull >= 3 ? 'CAGR عبر النوافذ المكتملة' : s.nFull >= 2 ? 'نافذة مقابل النافذة السابقة' : ''}">${cagrFmt(s.nFull >= 3 ? s.cagrWin : s.yoy)}</td>
               <td class="num">${formatSAR(s.lastAmount)}</td>
               <td>${trendEl(s.trend)}</td>
             </tr>`;
@@ -1629,9 +1684,10 @@ function renderDividendQuality() {
       </table>
     </div>
     <p class="small text-muted" style="margin-top:10px;padding:0 4px">
-      * الدرجات مبنية على بياناتك المُسجّلة فقط — كلما أضفت سنوات أكثر زادت دقة التقييم.<br>
-      <strong>«—»</strong> = المحور لم يُقَس بعد (النمو يحتاج سنتين تقويميتين مكتملتين، الثبات يحتاج 3 سنوات) — لا نعرض رقماً مختلقاً.
+      * الدرجات مبنية على <strong>نوافذ 12 شهراً متحرّكة</strong> مرساتها آخر توزيعة (لا السنة التقويمية) — فتتحرك الدرجة فور اكتمال نافذة، بلا انتظار رأس السنة.<br>
+      <strong>«—»</strong> = المحور لم يُقَس بعد (<em>يحتاج نافذة أخرى</em>: النمو من نافذتين مكتملتين، الثبات من ثلاث) — لا نعرض رقماً مختلقاً.
       <strong>«مبدئي»</strong> = الدرجة مطبَّعة على المحاور المتاحة فقط حتى ينضج السجل.<br>
+      نافذة عدد دفعاتها أقل من المتوقَّع (نافذة الدخول مثلاً) تُستبعد من النمو والثبات حتى لا تُقرأ نمواً وهمياً.<br>
       <span style="color:#58a6ff">DPS ✓</span> = الدرجة محسوبة من التوزيع للسهم الواحد (يُزيل تأثير شراء/بيع جزئي) |
       آخر توزيع = المبلغ الفعلي المُستلَم (ليس DPS)
     </p>
@@ -1643,21 +1699,36 @@ function showDivQualityInfo() {
   const lines = [
     '🏆 درجة جودة التوزيعات',
     '',
+    '🪟 الأساس: نوافذ 12 شهراً متحرّكة',
+    'تُقسَّم توزيعات السهم إلى نوافذ 365 يوماً متتالية،',
+    'مرساتها آخر توزيعة وتمتد للخلف — لا السنة التقويمية.',
+    'W0 = آخر 12 شهراً · W1 = الاثنا عشر التي قبلها · وهكذا.',
+    'السبب: التجميع على السنة التقويمية كان يجمّد كل الدرجات',
+    'حتى يناير القادم مهما تغيّرت توزيعات الشركات فعلياً.',
+    'نافذة عدد دفعاتها أقل من المتوقَّع من دوريتها (نافذة الدخول',
+    'مثلاً: سهم ربعي اشتُري في سبتمبر) تُستبعد من النمو والثبات،',
+    'وإلا قُرئت نمواً +300% وتذبذباً عالياً بلا سبب حقيقي.',
+    '',
     'الدرجة من 100 مقسّمة على 3 محاور:',
     '',
     '📅 الاستمرارية (35 نقطة)',
-    'انتظام التوزيع (بلا سنوات قطع) × نضج السجل.',
-    'سهم عمره أشهر لا يأخذ الدرجة كاملة — يحتاج ~3 سنوات.',
+    '= 35 × انتظام × نضج × عامل القطع.',
+    'انتظام = نسبة النوافذ التي استوفت دفعاتها المتوقَّعة فعلاً.',
+    'نضج = ثلاث نوافذ تعطي الدرجة الكاملة.',
+    'عامل القطع = يخصم بحسب أشد هبوط في DPS بين نافذتين',
+    'متتاليتين — هنا يدخل المبلغ لا رقم السنة فقط.',
+    'وإذا توقّف التوزيع (تجاوز 1.75 ضعف الدورة) تُصفَّر تقريباً',
+    '(منهج Dividend Streak: القطع يُصفّر السلسلة).',
     '',
     '📈 نمو التوزيعات (35 نقطة)',
-    'معدل نمو DPS السنوي (CAGR) بين سنتين تقويميتين مكتملتين.',
-    'لا يُحسب من السنة الجارية الجزئية (يمنع نمواً وهمياً).',
+    'نمو DPS بين W0 و W1 — متاح من نافذتين مكتملتين (~24 شهراً).',
+    'عند ثلاث نوافذ فأكثر يُستخدم CAGR عبرها.',
     '',
     '📊 ثبات التوزيعات (30 نقطة)',
-    'معامل الاختلاف (CV) على السنوات المكتملة — يحتاج 3 سنوات مكتملة.',
+    'معامل الاختلاف (CV) على النوافذ المكتملة — متاح من ثلاث نوافذ.',
     '',
-    'إذا لم يتوفر محور بعد يظهر «—» ولا يُحشى برقم،',
-    'وتُطبَّع الدرجة على المحاور المتاحة وتُؤشَّر «مبدئي».',
+    'إذا لم يتوفر محور بعد يظهر «—» («يحتاج نافذة أخرى») ولا يُحشى',
+    'برقم، وتُطبَّع الدرجة على المحاور المتاحة وتُؤشَّر «مبدئي».',
     '',
     '📐 تصحيح DPS (مهم):',
     'الحسابات تعتمد على التوزيع للسهم الواحد (DPS) لا المبلغ الإجمالي.',
