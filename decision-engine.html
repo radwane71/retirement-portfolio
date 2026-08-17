@@ -104,6 +104,65 @@
     .de-d-kvs { display:grid; grid-template-columns:1fr 1fr; gap:7px 12px; margin-top:6px; }
     @media (max-width:560px){ .de-d-kvs, .de-card-kvs { grid-template-columns:1fr; } }
 
+    /* ── التقرير التنفيذي للسهم: الخلاصة فوق ── */
+    .de-hero { background:var(--bg-2); border:1px solid var(--border); border-inline-start:4px solid var(--accent);
+               border-radius:12px; padding:14px 16px; margin-bottom:12px; }
+    .de-hero-qty { font-size:1.05rem; font-weight:700; margin-top:8px; line-height:1.7; }
+    .de-hero-qty b { color:var(--accent); font-size:1.3rem; }
+    .de-hero-amt { font-size:.88rem; color:var(--text-muted); font-weight:600; }
+    .de-hero-to { font-size:.82rem; color:var(--text-muted); margin-top:3px; font-weight:400; }
+
+    .de-tiles { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:4px; }
+    .de-tile { background:var(--bg-2); border:1px solid var(--border); border-radius:10px; padding:9px 11px; }
+    .de-tile-l { font-size:.71rem; color:var(--text-muted); }
+    .de-tile-v { font-size:1.02rem; font-weight:700; margin:2px 0; }
+    .de-tile-s { font-size:.69rem; color:var(--text-muted); line-height:1.45; }
+    .de-tone-g { border-color:rgba(16,185,129,.45); }  .de-tone-g .de-tile-v { color:#10b981; }
+    .de-tone-y { border-color:rgba(245,158,11,.45); }  .de-tone-y .de-tile-v { color:#f59e0b; }
+    .de-tone-r { border-color:rgba(239,68,68,.5); }    .de-tone-r .de-tile-v { color:#ef4444; }
+
+    /* مسطرة السعر — ltr كي تتصاعد الأرقام يساراً←يميناً كخط الأعداد */
+    .de-ruler { direction:ltr; padding:30px 12px 48px; }
+    .de-ruler-track { position:relative; height:8px; border-radius:5px;
+      background:linear-gradient(90deg,rgba(16,185,129,.5),rgba(148,163,184,.3),rgba(245,158,11,.5),rgba(239,68,68,.55)); }
+    .de-rk { position:absolute; top:-5px; width:2px; height:18px; margin-left:-1px; background:var(--text-muted); }
+    .de-rk-buy{background:#10b981} .de-rk-fair{background:#3b82f6}
+    .de-rk-trim{background:#f59e0b} .de-rk-exit{background:#ef4444}
+    .de-rl { position:absolute; transform:translateX(-50%); font-size:.65rem; color:var(--text-muted);
+             text-align:center; white-space:nowrap; line-height:1.35; }
+    .de-rl-hi { top:17px; } .de-rl-lo { top:41px; } /* تبديل الارتفاع يمنع تداخل التسميات المتقاربة */
+    .de-rl b { color:var(--text); font-size:.71rem; }
+    .de-rp { position:absolute; top:-32px; transform:translateX(-50%); text-align:center; white-space:nowrap; }
+    .de-rp b { display:block; background:var(--accent); color:#0d1117; border-radius:6px; padding:2px 8px; font-size:.78rem; }
+    .de-rp i { font-size:.61rem; color:var(--text-muted); font-style:normal; }
+    .de-rp::after { content:''; display:block; width:2px; height:11px; background:var(--accent); margin:2px auto 0; }
+
+    .de-chips { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; }
+    .de-chip { background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:7px 8px; text-align:center; }
+    .de-chip-l { font-size:.67rem; color:var(--text-muted); }
+    .de-chip-v { font-size:.73rem; font-weight:600; margin-top:2px; line-height:1.4; }
+
+    .de-why { margin:0; padding-inline-start:20px; font-size:.83rem; line-height:1.75; }
+    .de-why li { margin-bottom:4px; }
+
+    .de-split { text-align:center; font-size:.77rem; color:var(--text-muted);
+                margin:20px 0 2px; border-top:1px dashed var(--border); padding-top:11px; }
+
+    .de-tl-wrap { overflow-x:auto; }
+    .de-tl { width:100%; border-collapse:collapse; font-size:.78rem; }
+    .de-tl th, .de-tl td { padding:6px 8px; border-bottom:1px solid var(--border); text-align:center; white-space:nowrap; }
+    .de-tl th { color:var(--text-muted); font-weight:600; font-size:.71rem; }
+    .de-tl tbody tr:first-child { background:rgba(240,180,41,.08); } /* الأحدث */
+
+    .de-rev { background:var(--bg-2); border:1px solid var(--border); border-radius:9px; padding:8px 10px; margin-bottom:6px; }
+    .de-rev-d { font-size:.71rem; color:var(--text-muted); }
+    .de-rev-n { font-size:.8rem; line-height:1.6; margin-top:2px; white-space:pre-wrap; }
+
+    @media (max-width:640px){
+      .de-tiles { grid-template-columns:repeat(2,1fr); }
+      .de-chips { grid-template-columns:repeat(2,1fr); }
+    }
+
     .de-card-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
     .de-card-grid .full { grid-column:1 / -1; }
     .de-card-meta { background:var(--bg-2); border:1px solid var(--border); border-radius:10px;
@@ -350,7 +409,7 @@
 
   <!-- ── البطاقة التفصيلية (قراءة فقط — كل شيء) ── -->
   <div class="modal-overlay" id="de-detail-modal" style="display:none">
-    <div class="modal" style="max-width:680px">
+    <div class="modal" style="max-width:860px">
       <div class="modal-header">
         <span class="modal-title" id="de-detail-title">تفاصيل السهم</span>
         <button class="modal-close" onclick="closeDetailCard()">✕</button>

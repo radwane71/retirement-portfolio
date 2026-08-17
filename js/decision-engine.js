@@ -48,8 +48,12 @@ let taskConflicts = {}; // ticker → عدد المهام النشطة (>1 = ت�
 let divByTicker = {};  // ticker → [{ amount, date }] من سجل الأرباح الفعلي
 let txByTicker  = {};  // ticker → [{ type, shares, date }] مرتّبة — لاستخراج DPS
 let valByTicker = {};  // ticker → آخر تقييم من حاسبة القيمة العادلة {fair, ts, date, inputs}
+let valHistByTicker = {}; // ticker → كل التقييمات (الأحدث أولاً) — الدستور §4 الفلتر 2: «انظر لكل مكون وكل مؤشر على مر الزمان وتطوره»
+let reviewByTicker = {};  // ticker → [{ review_date, notes }] من دفتر المراجعة (الأحدث أولاً)
+let incomeGoalMonthly = 0; // هدف الدخل الشهري (§1) — لقياس مساهمة كل سهم
 const ENGINE_VAL_KEY = 'valuation_history_v1';
 const VAL_STALE_DAYS = 180; // آخر تقييم أقدم من 6 أشهر = قديم
+const REVIEW_CYCLE_DAYS = 180; // الدورة الروتينية (الدستور §5) — كل 6 أشهر
 let engineCfg    = {}; // ticker → مدخلات المحرّك اليدوية (استدامة/قيادي/نوع/عادلة يدوية)
 let _results     = []; // مخرجات التقييم لكل سهم (للتصدير)
 
@@ -525,8 +529,8 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx] = await Promise.all([
-    supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight').order('ticker'),
+  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev] = await Promise.all([
+    supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight, price_updated_at, price_manual').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
     supabaseClient.from('portfolio_tasks')
@@ -535,6 +539,8 @@ async function loadAll() {
     supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
     loadUserSetting(ENGINE_VAL_KEY),
     supabaseClient.from('transactions').select('ticker, type, shares, date, total, price').eq('is_archived', false),
+    // دفتر المراجعة — لعرض آخر مراجعة لكل سهم داخل التقرير وحساب استحقاق الدورة (§5)
+    supabaseClient.from('review_log').select('ticker, review_date, notes').order('review_date', { ascending: false }),
   ]);
 
   // AUDIT-FIX (2026-08): افحص خطأ كل استعلام قبل أي معالجة — أي فشل يوقف كل شيء
@@ -571,7 +577,26 @@ async function loadAll() {
 
   // آخر تقييم لكل رمز من حاسبة القيمة العادلة (السجل مرتّب بالأحدث أولاً) + التقييم السابق مباشرة
   // لتطبيق «قاعدة التثبيت» (الدستور §4 الفلتر 2): القيمة العادلة ترتفع فقط لو الأرباح/FCF/التوزيع ارتفعوا فعلاً.
+  // دفتر المراجعة لكل رمز (الأحدث أولاً) — خطأ التحميل لا يوقف المحرّك، القسم يُخفى فقط
+  reviewByTicker = {};
+  if (!rRev.error) {
+    (rRev.data || []).forEach(e => {
+      const tk = (e.ticker || '').trim().toUpperCase();
+      if (!tk || !e.review_date) return;
+      (reviewByTicker[tk] = reviewByTicker[tk] || []).push({ date: e.review_date, notes: e.notes || '' });
+    });
+  }
+
+  // هدف الدخل الشهري (§1) — من إعدادات المالك، وإلا هدف الدستور 5,000 ر.س
+  incomeGoalMonthly = 5000;
+  try {
+    const raw = localStorage.getItem(userLsKey(RET_GOAL_LS_KEY)) || localStorage.getItem(RET_GOAL_LS_KEY);
+    const g = raw ? JSON.parse(raw) : null;
+    if (g && +g.monthly > 0) incomeGoalMonthly = +g.monthly;
+  } catch (_) { /* القيمة الافتراضية من الدستور تبقى */ }
+
   valByTicker = {};
+  valHistByTicker = {};
   const prevValByTicker = {};
   (Array.isArray(rVal) ? rVal : []).forEach(entry => {
     const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
@@ -588,7 +613,9 @@ async function loadAll() {
         ? { avg: avgNum, min: parsedRange?.min ?? avgNum, max: parsedRange?.max ?? avgNum }
         : parsedRange,
       inputs: entry.inputs || {},
+      results: entry.results || {},
     };
+    (valHistByTicker[tk] = valHistByTicker[tk] || []).push(rec); // السجل الكامل لتتبّع التطور (§4)
     if (!valByTicker[tk]) valByTicker[tk] = rec;          // أول ظهور = الأحدث
     else if (!prevValByTicker[tk]) prevValByTicker[tk] = rec; // ثاني ظهور = التقييم السابق مباشرة
   });
@@ -931,6 +958,324 @@ function sectorPctOf(sector, totalValue) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// 📋 وحدات التقرير التنفيذي للسهم الواحد
+// المبدأ: أول شاشة تجيب على أربعة أسئلة — ماذا أفعل؟ كم بالضبط؟ لماذا؟
+// وما أثره على المحفظة؟ وما تحتها إثبات وتفصيل. كل رقم من بيانات المالك،
+// وأي نقص يُعلَن صراحةً ولا يُقدَّر بصمت (الدستور §8).
+// ══════════════════════════════════════════════════════════════════════
+const _sgn = n => (n >= 0 ? '+' : '−') + formatNum(Math.abs(n));
+
+// ── ① كمية الإجراء بالضبط: كم سهماً وكم ريالاً ──────────────────────
+// بيع S سهماً يُنقص قيمة المركز والمحفظة معاً، فالوزن الجديد = (V−S·p)/(T−S·p).
+// نحلّها لـ S: S = (V − c·T) / (p·(1−c)) حيث c = الوزن المستهدف.
+// وإن أُعيد استثمار الحصيلة داخل المحفظة يبقى المجموع ثابتاً: S = (V − c·T)/p.
+function actionPlanOf(r, totalValue) {
+  const p = r.price, V = r.value, T = totalValue;
+  if (!(p > 0) || !(T > 0)) return null;
+
+  if (r.action === 'exit') {
+    return { verb: 'بيع كامل', shares: r.shares, amount: V, cash: V, toWeight: 0 };
+  }
+  if (r.action === 'trim') {
+    const cutTo = r.cutToWeight;
+    if (cutTo == null || cutTo < 0 || cutTo >= 100) return null;
+    const c = cutTo / 100;
+    const exitCash = (V - c * T) / (p * (1 - c)); // الحصيلة تخرج نقداً
+    const reinvest = (V - c * T) / p;             // الحصيلة تُعاد داخل المحفظة
+    if (!(exitCash > 0)) return null;
+    // تقريب لأعلى: التخفيف يجب أن يهبط بالوزن إلى الهدف أو دونه — التقريب لأسفل
+    // كان يُبقي الوزن فوق السقف (كسر مستمرّ للفلتر 4 رغم تنفيذ التوصية).
+    const sh = Math.min(r.shares, Math.ceil(exitCash));
+    if (sh < 1) return null;
+    return { verb: 'بيع', shares: sh, amount: sh * p, cash: sh * p, toWeight: cutTo,
+             altShares: Math.max(0, Math.min(r.shares, Math.ceil(reinvest))) };
+  }
+  if (r.action === 'add' && r.targetWeight != null) {
+    const c = r.targetWeight / 100;
+    if (!(c > 0) || c >= 1) return null;
+    const need = (c * T - V) / (p * (1 - c));     // ضخّ مال جديد للمحفظة
+    if (!(need > 0)) return null;
+    const sh = Math.floor(need);                  // لأسفل: لا نتجاوز الهدف بالشراء
+    if (sh < 1) return null;
+    return { verb: 'شراء', shares: sh, amount: sh * p, cash: -sh * p, toWeight: r.targetWeight };
+  }
+  return null;
+}
+
+// ── ② بطاقات المؤشرات الستة ─────────────────────────────────────────
+function _tile(label, value, sub, tone) {
+  return `<div class="de-tile de-tone-${tone || 'n'}">
+    <div class="de-tile-l">${label}</div>
+    <div class="de-tile-v">${value}</div>
+    ${sub ? `<div class="de-tile-s">${sub}</div>` : ''}</div>`;
+}
+
+function kpiTilesHtml(r, fin) {
+  const t = [];
+  t.push(_tile('السعر الحالي', formatNum(r.price), 'ر.س للسهم', 'n'));
+
+  if (r.fairValue != null) {
+    const m = (r.fairValue - r.price) / r.fairValue * 100;
+    t.push(_tile('القيمة العادلة', formatNum(r.fairValue),
+      m >= 0 ? `هامش أمان ${formatNum(m)}%` : `أعلى من العادلة ${formatNum(Math.abs(m))}%`,
+      m >= 10 ? 'g' : m <= -10 ? 'r' : 'y'));
+  } else {
+    t.push(_tile('القيمة العادلة', '—', 'لا تقييم محفوظ', 'n'));
+  }
+
+  const wTone = r.overCap ? 'r' : r.devBand === 'red' ? 'r' : r.devBand === 'yellow' ? 'y' : 'g';
+  t.push(_tile('وزنه في المحفظة', formatNum(r.weight) + '%',
+    `السقف ${formatNum(r.cap)}%${r.blueChip ? ' (قيادي)' : ''}` +
+    (r.hasTarget ? ` · هدفك ${formatNum(r.targetWeight)}%` : ' · بلا هدف مسجّل'), wTone));
+
+  t.push(_tile('عائدك الفعلي (سنوي)',
+    fin.xirr != null ? _sgn(fin.xirr) + '%' : '—',
+    fin.xirr != null ? 'XIRR — معدَّل بالزمن' : 'تدفقات غير كافية',
+    fin.xirr == null ? 'n' : fin.xirr >= 0 ? 'g' : 'r'));
+
+  t.push(_tile('دخل آخر 12 شهراً', formatNum(fin.ttmDiv) + ' ر.س',
+    fin.costBasis > 0 ? `${formatNum(fin.fwdYoc)}% على تكلفتك` : 'بلا تكلفة مسجّلة',
+    fin.ttmDiv > 0 ? 'g' : 'n'));
+
+  const net = fin.unreal + fin.realized + fin.divTotal;
+  t.push(_tile('صافي ربحك الكلي', _sgn(net) + ' ر.س',
+    'ورقي + محقق + توزيعات', net >= 0 ? 'g' : 'r'));
+
+  return `<div class="de-tiles">${t.join('')}</div>`;
+}
+
+// ── ③ مسطرة السعر: أين يقع السعر بين مناطق قرارك والقيمة العادلة ────
+function priceRulerHtml(r) {
+  const z = r.zones || {};
+  const pts = [];
+  if (z.accumulate)    pts.push({ v: +z.accumulate, lbl: 'تجميع',  cls: 'buy'  });
+  if (r.fairValue)     pts.push({ v: +r.fairValue,  lbl: 'عادلة',  cls: 'fair' });
+  if (z.trimFrom)      pts.push({ v: +z.trimFrom,   lbl: 'تخفيف',  cls: 'trim' });
+  if (z.liquidate)     pts.push({ v: +z.liquidate,  lbl: 'تصفية',  cls: 'exit' });
+  if (!pts.length || !(r.price > 0)) return '';
+
+  const vals = pts.map(x => x.v).concat([r.price]);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = hi - lo;
+  const pad = span > 0 ? span * 0.15 : Math.max(hi * 0.08, 0.5);
+  lo -= pad; hi += pad;
+  const pos = v => Math.max(0, Math.min(100, (v - lo) / (hi - lo) * 100));
+
+  pts.sort((a, b) => a.v - b.v);
+  const ticks = pts.map((p, i) => `
+    <span class="de-rk de-rk-${p.cls}" style="left:${pos(p.v).toFixed(1)}%"></span>
+    <span class="de-rl de-rl-${i % 2 ? 'lo' : 'hi'}" style="left:${pos(p.v).toFixed(1)}%">
+      ${p.lbl}<br><b>${formatNum(p.v)}</b></span>`).join('');
+
+  return `<div class="de-ruler">
+    <div class="de-ruler-track">
+      ${ticks}
+      <span class="de-rp" style="left:${pos(r.price).toFixed(1)}%">
+        <b>${formatNum(r.price)}</b><i>السعر الآن</i></span>
+    </div>
+  </div>`;
+}
+
+// ── ④ شرائح الصحة الخمس: حالة السهم في نظرة واحدة ───────────────────
+function _chip(label, state, txt) {
+  const ic = { g: '✅', y: '⚠️', r: '🔴', n: '⚪' }[state] || '⚪';
+  return `<div class="de-chip de-tone-${state}"><div class="de-chip-l">${label}</div>
+    <div class="de-chip-v">${ic} ${txt}</div></div>`;
+}
+
+function healthChipsHtml(r, fin) {
+  const c = [];
+  const susMap = { pass: ['g', 'سليمة'], watch: ['y', 'تحت المراقبة'], fail: ['r', 'متدهورة'], unknown: ['n', 'غير متوفرة'] };
+  const [ss, st] = susMap[r.sustain.status] || ['n', 'غير متوفرة'];
+  c.push(_chip('الاستدامة', ss, st));
+
+  if (r.fairValue != null) {
+    const m = (r.fairValue - r.price) / r.fairValue * 100;
+    c.push(_chip('التقييم', m >= 10 ? 'g' : m <= -10 ? 'r' : 'y',
+      m >= 10 ? 'تحت العادلة' : m <= -10 ? 'مبالغ فيه' : 'قرب العادلة'));
+  } else c.push(_chip('التقييم', 'n', 'لم يُحسب'));
+
+  c.push(_chip('الوزن', r.overCap ? 'r' : r.devBand === 'red' ? 'r' : r.devBand === 'yellow' ? 'y' : 'g',
+    r.overCap ? 'كسر السقف' : r.devBand === 'red' ? 'بعيد عن هدفك'
+      : r.devBand === 'yellow' ? 'انحراف بسيط' : 'ضمن النطاق'));
+
+  c.push(_chip('الدخل', fin.ttmDiv > 0 ? 'g' : 'n',
+    fin.ttmDiv > 0 ? `${formatNum(fin.fwdYoc)}% على التكلفة` : 'لا توزيعات (12 شهراً)'));
+
+  c.push(_chip('أداؤك', fin.xirr == null ? 'n' : fin.xirr >= 0 ? 'g' : 'r',
+    fin.xirr == null ? 'غير كافٍ' : `${_sgn(fin.xirr)}% سنوياً`));
+
+  return `<div class="de-chips">${c.join('')}</div>`;
+}
+
+// ── ⑤ أثر التنفيذ على المحفظة ───────────────────────────────────────
+function impactHtml(r, fin, plan, totalValue) {
+  if (!plan || !(plan.shares > 0)) return '';
+  const selling = plan.verb !== 'شراء';
+  const dSh = selling ? -plan.shares : plan.shares;
+
+  const newShares = r.shares + dSh;
+  const newVal    = newShares * r.price;
+  const newTotal  = totalValue + dSh * r.price; // نقد يخرج/يدخل المحفظة
+  const newWeight = newTotal > 0 ? newVal / newTotal * 100 : 0;
+
+  // أثر الدخل: نصيب السهم من التوزيع خلال آخر 12 شهراً مضروباً بفارق الأسهم
+  const dpsTTM = r.shares > 0 ? fin.ttmDiv / r.shares : 0;
+  const dIncome = dpsTTM * dSh;
+
+  const secVal   = holdings.filter(h => (h.sector || '').trim() === (r.sector || '').trim())
+                           .reduce((s, h) => s + +h.shares * +h.current_price, 0);
+  const newSecPct = newTotal > 0 ? (secVal + dSh * r.price) / newTotal * 100 : 0;
+
+  const rows = [
+    ['عدد الأسهم', `${formatNum(r.shares)} → <b>${formatNum(newShares)}</b>`],
+    ['وزنه في المحفظة', `${formatNum(r.weight)}% → <b>${formatNum(newWeight)}%</b>`],
+    ['وزن قطاعه', `${formatNum(sectorPctOf(r.sector, totalValue))}% → <b>${formatNum(newSecPct)}%</b>` +
+      (newSecPct > CAPS.sector + SECTOR_BUFFER ? ' <span style="color:#ef4444">(فوق سقف القطاع)</span>' : '')],
+    [selling ? 'نقد يتحرّر' : 'نقد مطلوب', `<b>${formatNum(Math.abs(plan.amount))} ر.س</b>`],
+    ['الدخل السنوي من السهم', dpsTTM > 0
+      ? `${formatNum(fin.ttmDiv)} → <b>${formatNum(fin.ttmDiv + dIncome)} ر.س</b> (${_sgn(dIncome)})`
+      : '<span class="text-muted">لا توزيعات مسجّلة لقياس الأثر</span>'],
+  ];
+
+  return `<h4 class="de-d-h">لو نفّذت هذا الإجراء — ماذا يتغيّر؟</h4>
+    <div class="de-d-kvs">${rows.map(([k, v]) =>
+      `<div class="de-kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>
+    ${plan.altShares != null && plan.altShares !== plan.shares ? `<div class="small text-muted" style="margin-top:6px">
+      الرقم أعلاه يفترض خروج الحصيلة نقداً. لو أعدت استثمارها داخل المحفظة فوراً فالمطلوب
+      <b>${formatNum(plan.altShares)}</b> سهماً (لأن مجموع المحفظة يبقى ثابتاً).</div>` : ''}`;
+}
+
+// ── ⑥ تطور التقييمات عبر الزمن (الدستور §4 الفلتر 2) ────────────────
+// «انظر لكل مكون وكل مؤشر على مر الزمان وتطوره» — كل تقييماتك للسهم في جدول
+// واحد مع اتجاه كل مؤشر، لتُحكم قاعدة التثبيت بعينك لا بالثقة.
+function valuationTimelineHtml(ticker) {
+  const hist = valHistByTicker[ticker] || [];
+  if (!hist.length) {
+    return `<h4 class="de-d-h">تطوّر تقييماتك لهذا السهم</h4>
+      <div class="small text-muted">لا يوجد أي تقييم محفوظ. احسبه في صفحة «القيمة العادلة للأسهم» ليدخل الفلتر 2.</div>`;
+  }
+  const E = escapeHtmlSafe;
+  const isReit = (hist[0].inputs || {}).companyType === 'reit';
+  const earnKey = isReit ? 'ffo' : 'eps';
+  const earnLbl = isReit ? 'FFO' : 'EPS';
+
+  const rowOf = (rec) => {
+    const i = rec.inputs || {};
+    return {
+      date: rec.date || '—',
+      fair: rec.fair ? rec.fair.avg : null,
+      earn: numOf(i[earnKey]),
+      div:  numOf(i.dividends ?? i.bankDps),
+      fcf:  numOf(i.fcf),
+      growth: numOf(i.growth5yr),
+      type: i.companyType || 'عادية',
+    };
+  };
+  const rows = hist.map(rowOf);
+
+  // سهم الاتجاه مقارنةً بالتقييم الأقدم مباشرة (السجل مرتّب: الأحدث أولاً)
+  const arrow = (cur, prev) => {
+    if (cur == null || prev == null) return '';
+    if (cur > prev * 1.005) return ' <span style="color:#10b981">▲</span>';
+    if (cur < prev * 0.995) return ' <span style="color:#ef4444">▼</span>';
+    return ' <span class="text-muted">=</span>';
+  };
+  const cell = (v, prev, suf = '') =>
+    v == null ? '<span class="text-muted">—</span>' : formatNum(v) + suf + arrow(v, prev);
+
+  const body = rows.map((row, i) => {
+    const p = rows[i + 1] || {};
+    return `<tr>
+      <td style="white-space:nowrap">${E(row.date)}</td>
+      <td><b>${row.fair == null ? '—' : formatNum(row.fair)}</b>${arrow(row.fair, p.fair)}</td>
+      <td>${cell(row.earn, p.earn)}</td>
+      <td>${cell(row.div, p.div)}</td>
+      <td>${cell(row.fcf, p.fcf)}</td>
+      <td>${cell(row.growth, p.growth, '%')}</td>
+    </tr>`;
+  }).join('');
+
+  // حكم قاعدة التثبيت عبر كامل السجل لا آخر تقييمين فقط
+  let verdict = '';
+  if (rows.length >= 2) {
+    const first = rows[rows.length - 1], last = rows[0];
+    if (first.fair != null && last.fair != null) {
+      const fairUp = last.fair > first.fair * 1.01;
+      const earnUp = last.earn != null && first.earn != null && last.earn > first.earn;
+      const divUp  = last.div  != null && first.div  != null && last.div  > first.div;
+      const fcfUp  = last.fcf  != null && first.fcf  != null && last.fcf  > first.fcf;
+      if (fairUp && !earnUp && !divUp && !fcfUp) {
+        verdict = `<div class="de-d-row de-d-warn"><div class="de-d-ic">⚠️</div><div class="de-d-txt">
+          <div class="de-d-title">قاعدة التثبيت عبر كل السجل</div>
+          <div class="de-d-body small">قيمتك العادلة ارتفعت من ${formatNum(first.fair)} إلى ${formatNum(last.fair)}
+          عبر ${rows.length} تقييمات، لكن ${earnLbl} والتوزيع وFCF لم يرتفع أيٌّ منها بين أول تقييم وآخره.
+          الدستور (§4) يمنع رفع القيمة العادلة بلا دليل من الأرقام.</div></div></div>`;
+      } else if (fairUp) {
+        const ev = [earnUp ? earnLbl : null, divUp ? 'التوزيع' : null, fcfUp ? 'FCF' : null].filter(Boolean);
+        verdict = `<div class="de-d-row de-d-ok"><div class="de-d-ic">✅</div><div class="de-d-txt">
+          <div class="de-d-title">قاعدة التثبيت عبر كل السجل</div>
+          <div class="de-d-body small">ارتفاع القيمة العادلة مسنود بارتفاع فعلي في: ${E(ev.join('، '))}.</div></div></div>`;
+      }
+    }
+  }
+
+  return `<h4 class="de-d-h">تطوّر تقييماتك لهذا السهم (${rows.length} تقييم)</h4>
+    <div class="de-tl-wrap"><table class="de-tl">
+      <thead><tr><th>التاريخ</th><th>القيمة العادلة</th><th>${earnLbl}</th>
+        <th>التوزيع</th><th>FCF</th><th>النمو</th></tr></thead>
+      <tbody>${body}</tbody></table></div>${verdict}`;
+}
+
+// ── ⑦ دفتر المراجعة + استحقاق الدورة النصف سنوية (§5) ───────────────
+function reviewSectionHtml(ticker) {
+  const E = escapeHtmlSafe;
+  const revs = reviewByTicker[ticker] || [];
+  const last = revs[0];
+  const days = last ? Math.floor((Date.now() - new Date(last.date + 'T00:00:00').getTime()) / 86400000) : null;
+  const due  = days == null || days > REVIEW_CYCLE_DAYS;
+
+  const head = `<div class="de-d-row de-d-${due ? 'warn' : 'ok'}">
+    <div class="de-d-ic">${due ? '⏰' : '✅'}</div><div class="de-d-txt">
+    <div class="de-d-title">دورة المراجعة (الدستور §5 — كل 6 أشهر)</div>
+    <div class="de-d-body small">${last
+      ? `آخر مراجعة: ${E(last.date)} (قبل ${days} يوماً) — ${due ? 'مستحقة الآن' : `القادمة بعد ${REVIEW_CYCLE_DAYS - days} يوماً`}`
+      : 'لم تُسجَّل أي مراجعة لهذا السهم — مستحقة الآن'}</div></div></div>`;
+
+  const list = revs.slice(0, 3).map(v => `<div class="de-rev">
+    <div class="de-rev-d">${E(v.date)}</div>
+    <div class="de-rev-n">${v.notes ? E(v.notes) : '<span class="text-muted">بلا ملاحظات</span>'}</div></div>`).join('');
+
+  return `<h4 class="de-d-h">سجل مراجعاتك لهذا السهم</h4>${head}${list}` +
+    (revs.length > 3 ? `<div class="small text-muted">و${revs.length - 3} مراجعة أقدم في دفتر المراجعة.</div>` : '');
+}
+
+// ── ⑧ مدخلاتك اليدوية للمحرّك — جدول مقروء بدل JSON خام ─────────────
+function manualCfgHtml(ticker) {
+  const cfg = engineCfg[ticker];
+  if (!cfg || !Object.keys(cfg).length) {
+    return `<h4 class="de-d-h">مدخلاتك اليدوية للمحرّك</h4>
+      <div class="small text-muted">لم تُدخل شيئاً — المحرّك يشتقّ ما يقدر عليه من تقييمك وسجل أرباحك،
+      وما لا يقدر يُعلنه «غير متوفر» (§8).</div>`;
+  }
+  const E = escapeHtmlSafe;
+  const LBL = {
+    divCoverage:  ['تغطية التوزيع', { covered: '✅ مغطّى', weak: '🟡 ضعف ربع واحد', uncovered: '🔴 غير مغطّى مزمن' }],
+    fundamentals: ['الأساسيات',     { healthy: '✅ سليمة', soft: '🟡 ضعف ربع واحد', deteriorating: '🔴 تدهور مستمر' }],
+    divSignal:    ['إشارة التوزيع', { stable: '✅ مستقر', temp: '🟡 تأجيل/تخفيف مؤقت', cut: '🔴 قطع مؤكّد' }],
+    assetType:    ['نوع الأصل',     ASSET_LABEL],
+    blueChip:     ['سهم قيادي',     { true: 'نعم (سقف 12%)', false: 'لا (سقف 7%)' }],
+  };
+  const rows = Object.keys(LBL).filter(k => cfg[k] != null && cfg[k] !== '').map(k => {
+    const [label, map] = LBL[k];
+    return `<div class="de-kv"><span>${label}</span><b>${E(map[String(cfg[k])] || String(cfg[k]))}</b></div>`;
+  });
+  return `<h4 class="de-d-h">مدخلاتك اليدوية للمحرّك</h4>
+    <div class="de-d-kvs">${rows.join('')}</div>
+    ${cfg.notes ? `<div class="small" style="margin-top:6px"><b>📝 ملاحظتك:</b> ${E(cfg.notes)}</div>` : ''}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // البطاقة التفصيلية (قراءة فقط) — كل شيء: الفلاتر بالترتيب (كسر/سليم)،
 // المالية، الأرباح، آخر تقييم، خطة الأسعار، الهدف/السقف، سقف القطاع.
 // ══════════════════════════════════════════════════════════════════════
@@ -955,11 +1300,62 @@ function openDetailCard(ticker) {
   document.getElementById('de-detail-title').textContent = `🔍 ${ticker} — ${h.name || ''}`;
   const out = [];
 
-  // رأس: الإجراء النهائي
-  out.push(`<div class="de-d-verdict de-row-${r.severity || 'green'}">
+  // ══════════════════════════════════════════════════════════════════
+  // القسم الأول — الخلاصة التنفيذية: ماذا أفعل؟ كم؟ لماذا؟ وما أثره؟
+  // ══════════════════════════════════════════════════════════════════
+  const plan = actionPlanOf(r, totalValue);
+
+  // ① الحكم + الكمية بالضبط
+  let actionLine;
+  if (plan) {
+    actionLine = `<div class="de-hero-qty">${E(plan.verb)} <b>${formatNum(plan.shares)}</b> سهماً` +
+      ` <span class="de-hero-amt">≈ ${formatNum(Math.abs(plan.amount))} ر.س</span></div>` +
+      (plan.toWeight != null && r.action !== 'exit'
+        ? `<div class="de-hero-to">لإرجاع الوزن من ${formatNum(r.weight)}% إلى ${formatNum(plan.toWeight)}%</div>` : '');
+  } else if (r.action === 'hold') {
+    actionLine = `<div class="de-hero-qty">لا إجراء مطلوب الآن — <b>احتفظ</b></div>`;
+  } else if (r.action === 'monitor') {
+    actionLine = `<div class="de-hero-qty">لا بيع ولا شراء — <b>راقب فقط</b></div>`;
+  } else {
+    actionLine = `<div class="de-hero-qty">${E(r.label)}</div>`;
+  }
+
+  out.push(`<div class="de-hero de-row-${r.severity || 'green'}">
     <span class="de-badge ${badgeFor(r)}" style="font-size:.95rem">${E(r.label)}</span>
-    <div class="small" style="margin-top:6px;line-height:1.6">${E(r.reason)}</div>
+    ${actionLine}
   </div>`);
+
+  // ② المؤشرات الستة
+  out.push(kpiTilesHtml(r, fin));
+
+  // ③ مسطرة السعر بين مناطق قرارك والقيمة العادلة
+  const ruler = priceRulerHtml(r);
+  if (ruler) {
+    out.push('<h4 class="de-d-h">أين يقع السعر الآن</h4>');
+    out.push(ruler);
+  }
+
+  // ④ صحة السهم في نظرة
+  out.push('<h4 class="de-d-h">صحة السهم في نظرة</h4>');
+  out.push(healthChipsHtml(r, fin));
+
+  // ⑤ لماذا هذا القرار — أسباب مفصولة كنقاط
+  const reasons = String(r.reason || '').split('|').map(s => s.trim()).filter(Boolean);
+  out.push('<h4 class="de-d-h">لماذا هذا القرار؟</h4>');
+  out.push('<ul class="de-why">' + reasons.map(s => `<li>${E(s)}</li>`).join('') + '</ul>');
+
+  // ⑥ أثر التنفيذ على المحفظة
+  out.push(impactHtml(r, fin, plan, totalValue));
+
+  // ⑦ ما ينقص لقرار أدقّ (§8: النقص يُعلَن ولا يُقدَّر)
+  if (r.gaps && r.gaps.length) {
+    out.push(`<div class="de-d-row de-d-warn"><div class="de-d-ic">📌</div><div class="de-d-txt">
+      <div class="de-d-title">لإتمام الصورة — بيانات ناقصة</div>
+      <div class="de-d-body small">${E(r.gaps.join(' · '))}<br>
+      <span class="text-muted">المحرّك لا يقدّرها بصمت؛ أدخلها ليصبح القرار أدقّ.</span></div></div></div>`);
+  }
+
+  out.push('<div class="de-split">التفاصيل والإثبات</div>');
 
   // ── الفلاتر بالترتيب الإجباري (الدستور §4/§5) ──
   out.push('<h4 class="de-d-h">الفلاتر بالترتيب — ما الذي كُسر وما الذي سليم</h4>');
@@ -1050,9 +1446,17 @@ function openDetailCard(ticker) {
   // ملاحظة دستورية خاصة
   if (r.specialNote) out.push(_dRow('warn', 'ملاحظة دستورية (§3)', E(r.specialNote)));
 
-  // ── المالية التفصيلية ──
-  out.push('<h4 class="de-d-h">المالية التفصيلية لهذا السهم</h4>');
+  // ── المالية التفصيلية + تاريخ مركزك ──
+  out.push('<h4 class="de-d-h">مركزك في هذا السهم</h4>');
   const kv = (k, v) => `<div class="de-kv"><span>${k}</span><b>${v}</b></div>`;
+
+  const txAll   = txByTicker[ticker] || [];
+  const firstTx = txAll.find(t => t.type === 'buy' || t.type === 'grant');
+  const holdDays = firstTx ? Math.floor((Date.now() - firstTx.date.getTime()) / 86400000) : null;
+  const nBuy  = txAll.filter(t => t.type === 'buy').length;
+  const nSell = txAll.filter(t => t.type === 'sell').length;
+  const nGrant = txAll.filter(t => t.type === 'grant').length;
+
   out.push('<div class="de-d-kvs">' + [
     kv('عدد الأسهم', formatNum(fin.shares)),
     kv('متوسط التكلفة', formatNum(+h.avg_price)),
@@ -1065,20 +1469,35 @@ function openDetailCard(ticker) {
     kv('العائد الفعلي السنوي XIRR', fin.xirr != null
       ? `<span style="color:${fin.xirr >= 0 ? '#10b981' : '#ef4444'}">${sign(fin.xirr)}%</span>`
       : '<span class="text-muted">غير كافٍ للحساب</span>'),
+    kv('أول شراء', firstTx
+      ? `${E(firstTx.date.toISOString().slice(0, 10))} (${holdDays} يوماً)`
+      : '<span class="text-muted">—</span>'),
+    kv('حركاتك على السهم', `${nBuy} شراء · ${nSell} بيع${nGrant ? ` · ${nGrant} منحة` : ''}`),
+    kv('طزاجة السعر', (() => {
+      if (h.price_manual) return '✋ يدوي (محميّ من التحديث الآلي)';
+      if (!h.price_updated_at) return '<span class="text-muted">غير معروفة</span>';
+      const d = Math.floor((Date.now() - new Date(h.price_updated_at).getTime()) / 86400000);
+      return d <= 7 ? `✅ محدَّث (${d} يوم)` : `<span style="color:#f59e0b">⏰ عمره ${d} يوماً</span>`;
+    })()),
   ].join('') + '</div>');
 
-  // عدسة الدخل (مهمة المحفظة: دخل توزيعات) — مساهمة المركز في دخل المحفظة
+  // عدسة الدخل — مساهمة المركز في دخل المحفظة وفي هدف الدخل الشهري (§1)
   let portfolioTTM = 0;
   Object.values(divByTicker).forEach(arr => arr.forEach(d => { if (d.date.getTime() >= Date.now() - 365 * 86400000) portfolioTTM += (d.amount || 0); }));
   const incomeShare = portfolioTTM > 0 ? fin.ttmDiv / portfolioTTM * 100 : 0;
-  out.push('<h4 class="de-d-h">عدسة الدخل — مساهمة المركز في دخل المحفظة</h4>');
+  const monthlyFromStock = fin.ttmDiv / 12;
+  const goalShare = incomeGoalMonthly > 0 ? monthlyFromStock / incomeGoalMonthly * 100 : 0;
+
+  out.push('<h4 class="de-d-h">عدسة الدخل — مساهمته في هدفك</h4>');
   out.push('<div class="de-d-kvs">' + [
     kv('دخل التوزيعات (آخر 12 شهراً)', formatNum(fin.ttmDiv) + ' ر.س'),
+    kv('أي شهرياً', formatNum(monthlyFromStock) + ' ر.س'),
     kv('حصته من دخل المحفظة', formatNum(incomeShare) + '%'),
+    kv(`من هدف ${formatNum(incomeGoalMonthly)} ر.س شهرياً`, `<b>${formatNum(goalShare)}%</b>`),
     kv('YOC (آخر 12 شهراً)', formatNum(fin.fwdYoc) + '%'),
     kv('YOC التراكمي', formatNum(fin.yoc) + '%'),
   ].join('') + '</div>');
-  out.push(`<div class="small text-muted" style="margin-top:4px">دخل المحفظة الكلي (آخر 12 شهراً): ${formatNum(portfolioTTM)} ر.س · المهمة: دخل شهري مستهدف (الدستور).</div>`);
+  out.push(`<div class="small text-muted" style="margin-top:4px">دخل المحفظة الكلي (آخر 12 شهراً): ${formatNum(portfolioTTM)} ر.س — أي ${formatNum(portfolioTTM / 12)} ر.س شهرياً مقابل هدف ${formatNum(incomeGoalMonthly)} ر.س (§1).</div>`);
 
   // الأرباح السنوية
   const years = Object.keys(fin.byYear).map(Number).sort((a, b) => b - a);
@@ -1087,7 +1506,30 @@ function openDetailCard(ticker) {
     out.push('<div class="de-d-kvs">' + years.map(y => kv(String(y), formatNum(fin.byYear[y]))).join('') + '</div>');
   }
 
-  // آخر تقييم — أهم المدخلات
+  // ── تطوّر تقييماتك عبر الزمن (الدستور §4 الفلتر 2) ──
+  out.push(valuationTimelineHtml(ticker));
+
+  // تفصيل نماذج آخر تقييم — أي نموذج أعطى أي قيمة (من حاسبة القيمة العادلة)
+  const lastVal = valByTicker[ticker];
+  const models  = (lastVal && lastVal.results && Array.isArray(lastVal.results.models)) ? lastVal.results.models : [];
+  const usable  = models.filter(m => m && m.raw != null && isFinite(+m.raw) && +m.raw > 0);
+  if (usable.length) {
+    out.push(`<div class="small text-muted" style="margin-top:10px">نماذج آخر تقييم (${E(lastVal.date || '—')}) — ${usable.length} نموذج صالح:</div>`);
+    out.push('<div class="de-d-kvs">' + usable.map(m => {
+      const v = +m.raw;
+      const vs = r.price > 0 ? (v - r.price) / r.price * 100 : null;
+      return kv(E(m.name), `${formatNum(v)}${vs != null
+        ? ` <span class="text-muted small">(${vs >= 0 ? '+' : '−'}${formatNum(Math.abs(vs))}% عن السعر)</span>` : ''}`);
+    }).join('') + '</div>');
+    const raws = usable.map(m => +m.raw);
+    const spread = Math.max(...raws) - Math.min(...raws);
+    const mid = raws.reduce((a, b) => a + b, 0) / raws.length;
+    if (mid > 0 && spread / mid > 0.5) {
+      out.push(`<div class="small" style="color:#f59e0b;margin-top:4px">⚠️ تشتّت النماذج واسع (${formatNum(spread / mid * 100)}% من المتوسط) — القيمة العادلة هنا تقديرية أكثر منها دقيقة؛ اعتمد نطاقاً لا رقماً واحداً.</div>`);
+    }
+  }
+
+  // مدخلات آخر تقييم + ملاحظاتك
   if (r.valInputs) {
     const inp = r.valInputs;
     const keyInputs = [];
@@ -1100,23 +1542,26 @@ function openDetailCard(ticker) {
       pushIf('EPS', inp.eps); pushIf('FCF', inp.fcf); pushIf('توزيع/سهم', inp.dividends);
     }
     pushIf('نمو 5سنوات', inp.growth5yr, '%'); pushIf('Beta', inp.betaMain);
+    pushIf('السعر وقت التقييم', inp.currentPrice);
     if (keyInputs.length) {
       out.push('<h4 class="de-d-h">أهم مدخلات آخر تقييم</h4>');
       out.push('<div class="de-d-kvs">' + keyInputs.map(([k, v]) => kv(k, E(String(v)))).join('') + '</div>');
     }
-    if (inp.notes)         out.push(`<div class="small" style="margin-top:6px"><b>📝 ملاحظات التقييم:</b> ${E(inp.notes)}</div>`);
+    if (inp.notes)          out.push(`<div class="small" style="margin-top:6px"><b>📝 ملاحظات التقييم:</b> ${E(inp.notes)}</div>`);
     if (inp.perplexityEval) out.push(`<div class="small" style="margin-top:6px"><b>🔍 تقييم Perplexity:</b> ${E(inp.perplexityEval)}</div>`);
   }
 
-  // المدخلات اليدوية المحفوظة للمحرّك
-  const cfg = engineCfg[ticker];
-  if (cfg && Object.keys(cfg).length) {
-    out.push('<h4 class="de-d-h">مدخلاتك اليدوية المحفوظة للمحرّك</h4>');
-    out.push(`<div class="small">${E(JSON.stringify(cfg))}</div>`);
-  }
+  // ── سجل مراجعاتك (§5) ──
+  out.push(reviewSectionHtml(ticker));
 
-  out.push(`<div class="de-card-foot" style="margin-top:14px">
+  // ── مدخلاتك اليدوية للمحرّك (جدول مقروء) ──
+  out.push(manualCfgHtml(ticker));
+
+  out.push(`<div class="de-card-foot" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
     <button class="btn btn-secondary btn-sm" onclick="closeDetailCard(); openStockCard('${escapeHtmlSafe(ticker)}')">⚙️ تعديل المدخلات اليدوية</button>
+    <a class="btn btn-secondary btn-sm" href="stock-valuation.html">💹 تحديث القيمة العادلة</a>
+    <a class="btn btn-secondary btn-sm" href="tasks.html">📊 خطة الأسعار</a>
+    <a class="btn btn-secondary btn-sm" href="review-log.html">📒 تسجيل مراجعة</a>
   </div>`);
 
   document.getElementById('de-detail-body').innerHTML = out.join('');
