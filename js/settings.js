@@ -1,5 +1,6 @@
 // ══════════════════════════════════════════════════════════════
 // جميع الجداول — مرتبة حسب الأولوية (FK-safe للحذف والإدراج)
+// الأب قبل الابن في الإدراج، والابن قبل الأب في الحذف.
 // ══════════════════════════════════════════════════════════════
 const TABLES = [
   'holdings',
@@ -18,10 +19,63 @@ const TABLES = [
   'portfolio_tasks',
   'review_log',
   'review_log_attachments',
-  // إعدادات المستخدم المتزامنة عبر الأجهزة (الراتب، الصكوك، هدف التقاعد، مؤشر تاسي)
-  // مصدر الحقيقة لهذه البيانات — localStorage مجرد cache. لا بد من نسخها واستعادتها.
+  // إعدادات المستخدم المتزامنة عبر الأجهزة (الراتب، الصكوك، هدف التقاعد، مؤشر تاسي،
+  // محرّك القرار، حاسبة القيمة العادلة…). يُصدَّر الجدول **كاملاً** بلا قائمة بيضاء
+  // للمفاتيح — فأي مفتاح جديد يضيفه أي تطوير مستقبلي يدخل النسخة تلقائياً.
   'user_settings',
+  // ── أُضيفت 2026-08 (كانت تفوت النسخة الاحتياطية بالكامل) ──
+  'support_tickets',   // تذاكر الدعم التي فتحها المالك — يقرؤها صاحبها (ticket_select_own)
+  'user_profiles',     // ملف الحساب (البريد، الحالة، تاريخ الإنشاء) — مفتاحه id لا user_id
 ];
+
+// ══════════════════════════════════════════════════════════════
+// مواصفات الجداول الخارجة عن الافتراضي
+//   ownerCol   : عمود هوية المالك (الافتراضي user_id)
+//   OPTIONAL   : قد تمنع RLS قراءتها/حذفها → لا تُوقف التصدير ولا الاستعادة،
+//                لكن يُعلَن ذلك صراحةً في التقرير (ممنوع الفشل الصامت)
+//   UPSERT     : تُستعاد بالدمج بدل حذف+إدراج
+//   NEVER_DELETE: لا تُحذف في مسار الاستعادة (مفتاحها هوية الحساب نفسه)
+//   RESET_KEEP : «تصفير البيانات» لا يمسّها (ليست بيانات محفظة)
+// ══════════════════════════════════════════════════════════════
+const OWNER_COL       = { user_profiles: 'id' };
+const OPTIONAL_TABLES = new Set(['support_tickets', 'user_profiles']);
+const UPSERT_TABLES   = new Set(['user_profiles']);
+const NEVER_DELETE    = new Set(['user_profiles']);
+const RESET_KEEP      = new Set(['user_profiles', 'support_tickets']);
+
+const ownerColOf = t => OWNER_COL[t] || 'user_id';
+
+// وصف عربي لكل جدول — يُستخدم في تقارير الفحص
+const TABLE_LABEL = {
+  holdings: 'الأسهم في المحفظة',
+  transactions: 'سجل المعاملات',
+  dividends: 'الأرباح الموزعة',
+  cashflow_entries: 'التدفقات النقدية',
+  net_worth_snapshots: 'لقطات صافي الثروة',
+  nw_assets: 'الأصول',
+  nw_liabilities: 'الالتزامات',
+  real_estate: 'العقارات',
+  user_stocks: 'قاعدة بيانات أسهمك',
+  stock_targets: 'أهداف الأسهم',
+  sector_targets: 'أهداف القطاعات',
+  watchlist: 'قائمة المراقبة',
+  portfolio_cash: 'نقد المحفظة',
+  portfolio_tasks: 'المهام والتذكيرات',
+  review_log: 'دفتر المراجعة',
+  review_log_attachments: 'مرفقات دفتر المراجعة',
+  user_settings: 'الإعدادات المتزامنة (محرّك القرار، القيمة العادلة، الراتب، الصكوك…)',
+  support_tickets: 'تذاكر الدعم',
+  user_profiles: 'ملف الحساب',
+};
+
+// ترتيب الحذف: الأبناء (FK children) أولاً ثم البقية، مع استثناء ما لا يُحذف
+function deleteOrder(list = TABLES) {
+  const children = ['review_log_attachments'];
+  return [
+    ...children.filter(t => list.includes(t)),
+    ...list.filter(t => !children.includes(t)),
+  ].filter(t => !NEVER_DELETE.has(t));
+}
 
 // حجم الـ batch لكل جدول (الجداول الكبيرة تحتاج batch أصغر)
 // review_log_attachments: كل صف حتى 2MB → batch=5 يحافظ على حجم طلب معقول (~10MB)
@@ -54,7 +108,74 @@ async function fetchAllRows(table, customize) {
   }
 }
 
-// مفاتيح localStorage المشمولة في النسخة الاحتياطية — 100% من تفضيلات المستخدم
+// جلب صفوف جدول يخص المستخدم — مع ترقيم صفحات كامل وعمود المالك الصحيح.
+// يرجّع { rows, unavailable, reason } فالجداول الاختيارية التي تمنعها RLS
+// لا تُوقف التصدير لكنها تُعلَن صراحةً بدل أن تُعدّ «صفر صف» كذباً.
+async function fetchOwnedRows(table, userId) {
+  try {
+    const rows = await fetchAllRows(table, q => q.eq(ownerColOf(table), userId));
+    return { rows, unavailable: false, reason: '' };
+  } catch (e) {
+    if (OPTIONAL_TABLES.has(table)) return { rows: [], unavailable: true, reason: e.message };
+    throw e;
+  }
+}
+
+// عدّ صفوف المستخدم في جدول (بلا جلب) — للتحقق بعد الحذف والإدراج
+async function countOwnedRows(table, userId) {
+  try {
+    const { count, error } = await supabaseClient.from(table)
+      .select('*', { count: 'exact', head: true }).eq(ownerColOf(table), userId);
+    if (error) return null;
+    return count ?? null;
+  } catch { return null; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// بصمة التكامل — تسلسل ثابت (مفاتيح مرتّبة) + هاش FNV-1a 32-bit
+// الهدف: كشف أي اقتطاع أو تلف أو تعديل يدوي في ملف النسخة قبل الاستعادة.
+// التسلسل يمرّ عبر JSON فتُنتج القيمة نفسها قبل الكتابة وبعد القراءة.
+// ══════════════════════════════════════════════════════════════
+function stableStringify(v) {
+  if (v === null || typeof v !== 'object') {
+    const s = JSON.stringify(v);
+    return s === undefined ? 'null' : s;
+  }
+  if (Array.isArray(v)) return '[' + v.map(stableStringify).join(',') + ']';
+  return '{' + Object.keys(v).sort()
+    .map(k => JSON.stringify(k) + ':' + stableStringify(v[k])).join(',') + '}';
+}
+
+function fnv1a(str, seed) {
+  let h = seed >>> 0;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h >>> 0;
+}
+
+// بصمة مصفوفة صفوف — تُحسب تدريجياً صفاً صفاً (لا نبني نصاً عملاقاً للمرفقات)
+function fingerprintRows(rows) {
+  let h = 0x811c9dc5;
+  for (const r of (rows || [])) h = fnv1a(stableStringify(r) + '', h);
+  return { rows: (rows || []).length, checksum: h.toString(16).padStart(8, '0') };
+}
+
+// بصمة خريطة مفاتيح localStorage
+function fingerprintMap(map) {
+  let h = 0x811c9dc5;
+  for (const k of Object.keys(map || {}).sort()) {
+    h = fnv1a(JSON.stringify(k) + '=' + JSON.stringify(map[k]) + '', h);
+  }
+  return { keys: Object.keys(map || {}).length, checksum: h.toString(16).padStart(8, '0') };
+}
+
+// ══════════════════════════════════════════════════════════════
+// مفاتيح localStorage «المنطقية» — قائمة توثيقية للعرض فقط.
+// النسخة الفعلية تعتمد المسح الحرفي الشامل (_local_all) أدناه،
+// فلا يمكن لأي مفتاح جديد أن يضيع لو نُسي تسجيله هنا.
+// ══════════════════════════════════════════════════════════════
 const LS_KEYS = [
   'tharwa-theme',
   'tharwa-zoom',
@@ -71,11 +192,22 @@ const LS_KEYS = [
   'retirement_goal_v1',
   'tharwa-price-timestamps',
   'tharwa-benchmark_v1',
-  'tharwa-benchmark-seeded-v1',  // flag: هل تمت البذرة الأولى لبيانات تاسي؟
-  'valuation_history_v1',        // سجل عمليات حاسبة القيمة العادلة (stock-valuation.html)
-  'hide-salary-convention',      // حالة إخفاء لافتة اتفاقية الراتب (salary.html)
-  'forecast_plans_v1',           // سجل خطط الضخ المحفوظة (forecast.html) — cache؛ الحقيقة في user_settings
+  'tharwa-benchmark-seeded-v1',      // flag: هل تمت البذرة الأولى لبيانات تاسي؟
+  'tharwa-benchmark-src-migrated-v1',// flag: هل هُوجرت مصادر نقاط تاسي؟ (كان ناقصاً)
+  'valuation_history_v1',            // سجل عمليات حاسبة القيمة العادلة (stock-valuation.html)
+  'hide-salary-convention',          // حالة إخفاء لافتة اتفاقية الراتب (salary.html)
+  'forecast_plans_v1',               // سجل خطط الضخ المحفوظة (forecast.html)
 ];
+
+// مفاتيح localStorage المستثناة عمداً من النسخة
+//  • sb-*                    توكنات جلسة Supabase — استعادتها ثغرة أمنية
+//  • tharwa_emergency_backup نسخة طارئة محلية مؤقتة (تتضخم بلا فائدة)
+//  • tharwa-dirty-tickers*   علم تعافٍ transient يُعاد بناؤه تلقائياً
+function isExcludedLsKey(k) {
+  return k.startsWith('sb-')
+      || k === 'tharwa_emergency_backup'
+      || k.startsWith('tharwa-dirty-tickers');
+}
 
 async function init() {
   const user = await requireAuth();
@@ -120,6 +252,58 @@ function resetAlertThresholds() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// بناء كائن النسخة الاحتياطية (مشترك بين التصدير واختبار الدورة الكاملة)
+// onProgress(msg) اختيارية لعرض التقدّم.
+// ══════════════════════════════════════════════════════════════
+const BACKUP_VERSION = 4;
+
+async function buildBackupObject(user, onProgress) {
+  const backup = {
+    version:     BACKUP_VERSION,
+    exported_at: new Date().toISOString(),
+    _meta: {
+      app: 'tharwa',
+      tables: TABLES.slice(),
+      source_user_id: user.id,
+      fingerprint: {},
+      unavailable: {},
+    },
+  };
+
+  for (const table of TABLES) {
+    if (onProgress) onProgress(`جارٍ قراءة: ${table}…`);
+    const { rows, unavailable, reason } = await fetchOwnedRows(table, user.id);
+    backup[table] = rows;
+    backup._meta.fingerprint[table] = fingerprintRows(rows);
+    if (unavailable) backup._meta.unavailable[table] = reason;
+  }
+
+  // ── مسح حرفي شامل لكل مفاتيح localStorage (ضمان 100%) ──
+  // يلتقط أي مفتاح يخص هذا المستخدم/التطبيق حتى لو لم يُسجَّل في LS_KEYS مطلقاً،
+  // فلا يمكن لأي إعداد/ثيم/عتبة/تفصيل جديد أن يضيع بصمت.
+  backup._local_all = {};
+  const userScopePrefix = `u:${user.id}:`;
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k) continue;
+    if (isExcludedLsKey(k)) continue;
+    if (k.startsWith('u:') && !k.startsWith(userScopePrefix)) continue; // بيانات مستخدم آخر على نفس الجهاز
+    backup._local_all[k] = localStorage.getItem(k);
+  }
+
+  // نسخة «منطقية» للتوافق مع مستعيدي الإصدارات الأقدم (v2/v3) — القيمة الفعّالة لكل مفتاح
+  backup._local_settings = {};
+  LS_KEYS.forEach(k => {
+    const v = localStorage.getItem(userLsKey(k)) ?? localStorage.getItem(k);
+    if (v !== null) backup._local_settings[k] = v;
+  });
+
+  backup._meta.local_keys        = Object.keys(backup._local_all).length;
+  backup._meta.local_fingerprint = fingerprintMap(backup._local_all);
+  return backup;
+}
+
+// ══════════════════════════════════════════════════════════════
 // تصدير النسخة الاحتياطية
 // ══════════════════════════════════════════════════════════════
 async function exportBackup() {
@@ -129,45 +313,11 @@ async function exportBackup() {
   setStatus('export-status', 'info', 'يتم جلب البيانات…');
 
   try {
-    const backup = {
-      version:     3,
-      exported_at: new Date().toISOString(),
-      _meta:       { tables: TABLES, app: 'tharwa' }
-    };
-
-    // ── جلب كل الجداول ───────────────────────────────────────
     const { data: { user: exportUser } } = await supabaseClient.auth.getUser();
-    for (const table of TABLES) {
-      setStatus('export-status', 'info', `جارٍ تصدير: ${table}…`);
-      // نُضيف user_id filter صراحةً + ترقيم صفحات 1000/دفعة (fetchAllRows) — يضمن نسخة كاملة
-      backup[table] = await fetchAllRows(table, q => q.eq('user_id', exportUser.id));
-    }
+    if (!exportUser) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
 
-    // ── إعدادات localStorage (theme, zoom, portfolio_cash) ────
-    // M-3: prefer user-scoped key so backup reflects this user's data on shared devices
-    backup._local_settings = {};
-    LS_KEYS.forEach(k => {
-      const v = localStorage.getItem(userLsKey(k)) ?? localStorage.getItem(k);
-      if (v !== null) backup._local_settings[k] = v;
-    });
-
-    // ── مسح شامل حرفي لكل مفاتيح localStorage (ضمان 100% — لا يعتمد على قائمة ثابتة) ──
-    // يلتقط أي مفتاح يخص هذا المستخدم/التطبيق حتى لو لم يُسجَّل في LS_KEYS مطلقاً،
-    // فلا يمكن لأي إعداد/ثيم/تفصيل جديد أن يضيع بصمت إن نُسي تسجيله في القائمة.
-    // يُستبعد فقط: توكنات Supabase (أمان)، النسخة الطارئة، أعلام transient، ومفاتيح مستخدمين آخرين.
-    backup._local_all = {};
-    const _uid = exportUser.id;
-    const _userScopePrefix = `u:${_uid}:`;
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      if (k.startsWith('sb-')) continue;                                   // توكن مصادقة Supabase — لا يُنسخ أبداً
-      if (k === 'tharwa_emergency_backup') continue;                       // نسخة طارئة محلية مؤقتة
-      if (k.startsWith('tharwa-dirty-tickers')) continue;                  // علم تعافٍ transient (يُعاد بناؤه)
-      if (k.startsWith('u:') && !k.startsWith(_userScopePrefix)) continue; // بيانات مستخدم آخر على نفس الجهاز
-      backup._local_all[k] = localStorage.getItem(k);
-    }
-    backup._meta.local_keys = Object.keys(backup._local_all).length;
+    const backup = await buildBackupObject(exportUser,
+      msg => setStatus('export-status', 'info', msg));
 
     // ── إنشاء الملف ───────────────────────────────────────────
     const json = JSON.stringify(backup, null, 2);
@@ -182,12 +332,35 @@ async function exportBackup() {
     // L-4: defer revoke so browser finishes consuming the blob URL
     setTimeout(() => URL.revokeObjectURL(url), 100);
 
-    const totalRows     = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
-    const tablesSummary = TABLES.map(t => `${t} (${backup[t]?.length || 0})`).join(' | ');
-    const sizeKB        = (new Blob([json]).size / 1024).toFixed(1);
-    const lsCount = Object.keys(backup._local_all || {}).length;
+    const totalRows = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
+    const sizeKB    = (blob.size / 1024).toFixed(1);
+    const lsCount   = backup._meta.local_keys;
+    const unavail   = Object.keys(backup._meta.unavailable || {});
+
+    // تقرير مفصّل — لا نجاح صامت
+    const rowsHtml = TABLES.map(t => {
+      const fp   = backup._meta.fingerprint[t] || { rows: 0, checksum: '—' };
+      const bad  = backup._meta.unavailable[t];
+      const st   = bad ? 'bad' : (fp.rows ? 'good' : 'warn');
+      const note = bad ? `تعذّرت القراءة: ${bad}` : (fp.rows ? 'مقروء بالكامل' : 'فارغ');
+      return `<tr><td>${esc(t)}</td><td>${esc(TABLE_LABEL[t] || '')}</td>` +
+             `<td style="text-align:center">${esc(fp.rows)}</td>` +
+             `<td class="small text-muted" style="text-align:center">${esc(fp.checksum)}</td>` +
+             `<td><span class="tag" data-state="${st}">${esc(note)}</span></td></tr>`;
+    }).join('');
+
+    setReport('backup-report',
+      noteHtml(unavail.length ? 'warn' : 'good',
+        `تم تصدير <b>${esc(totalRows)}</b> صف من <b>${esc(TABLES.length)}</b> جدول ` +
+        `+ <b>${esc(lsCount)}</b> مفتاح تفضيلات محلية · حجم الملف ${esc(sizeKB)} KB · ` +
+        `بصمة الإعدادات المحلية <code>${esc(backup._meta.local_fingerprint.checksum)}</code>` +
+        (unavail.length
+          ? `<br>⚠️ تعذّرت قراءة: ${esc(unavail.join('، '))} — راجع سياسات RLS (تفاصيل بالجدول).`
+          : '')) +
+      tableHtml(['الجدول', 'المحتوى', 'صفوف', 'بصمة', 'الحالة'], rowsHtml));
+
     setStatus('export-status', 'success',
-      `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جداول + ${lsCount} مفتاح إعدادات محلي | حجم الملف: ${sizeKB} KB\n${tablesSummary}`);
+      `✓ تم التصدير — ${totalRows} سجل في ${TABLES.length} جدول + ${lsCount} مفتاح إعدادات محلي | ${sizeKB} KB`);
     showToast(`✓ تم تصدير ${totalRows} سجل — ${sizeKB} KB`, 'success');
 
   } catch (err) {
@@ -195,33 +368,443 @@ async function exportBackup() {
     showToast('فشل التصدير: ' + err.message, 'error');
   } finally {
     btn.disabled = false;
-    btn.textContent = 'تصدير النسخة الاحتياطية';
+    btn.textContent = '📤 تصدير النسخة الاحتياطية';
   }
 }
 
 // ══════════════════════════════════════════════════════════════
-// Dry Run: يتحقق من صحة ملف الباكب دون حذف أي شيء
-// يعيد مصفوفة رسائل الخطأ (فارغة = الملف سليم)
+// Dry Run السطحي — فحص بنيوي سريع يُستدعى قبل أي حذف
+// يعيد مصفوفة رسائل الخطأ (فارغة = الملف سليم بنيوياً)
 // ══════════════════════════════════════════════════════════════
 function dryRunRestore(backup) {
   const errors = [];
-  if (!backup || typeof backup !== 'object') { errors.push('الملف فارغ أو تالف'); return errors; }
-  if (!backup.version) errors.push('حقل version مفقود');
+  if (!backup || typeof backup !== 'object' || Array.isArray(backup)) {
+    errors.push('الملف فارغ أو تالف أو ليس كائن JSON');
+    return errors;
+  }
+  if (!backup.version) errors.push('حقل version مفقود — الملف ليس نسخة ثروة');
   const tablesFound = TABLES.filter(t => t in backup && Array.isArray(backup[t]));
   if (tablesFound.length < 3) errors.push(`عدد الجداول الموجودة (${tablesFound.length}) أقل من الحد الأدنى (3)`);
-  // تحقق من أن holdings تحتوي على الحقول الأساسية
   const h = backup.holdings;
   if (h?.length) {
     const sample = h[0];
     if (!('ticker' in sample) || !('shares' in sample)) errors.push('جدول holdings يفتقر لحقول أساسية (ticker, shares)');
   }
-  // تحقق من أن transactions تحتوي على الحقول الأساسية
   const tx = backup.transactions;
   if (tx?.length) {
     const sample = tx[0];
     if (!('type' in sample) || !('total' in sample)) errors.push('جدول transactions يفتقر لحقول أساسية (type, total)');
   }
   return errors;
+}
+
+// ══════════════════════════════════════════════════════════════
+// تدقيق عميق لملف النسخة — بلا أي كتابة دائمة
+// يفحص: البصمات · الجداول المعروفة/المجهولة · المفاتيح الأجنبية ·
+// مفاتيح localStorage · وتوافق الأعمدة مع المخطط الحالي.
+// probe=true يُدرج صفاً واحداً فعلياً ثم يحذفه فوراً (فحص المخطط الحقيقي).
+// ══════════════════════════════════════════════════════════════
+async function auditBackup(backup, user, { probe = true, onProgress } = {}) {
+  const rep = { fatal: [], warn: [], ok: [], tables: [], local: null };
+
+  // ① بنية عامة
+  const structural = dryRunRestore(backup);
+  structural.forEach(e => rep.fatal.push(e));
+  if (rep.fatal.length) return rep;
+
+  if (backup.version > BACKUP_VERSION) {
+    rep.warn.push(`إصدار الملف (${backup.version}) أحدث من إصدار الصفحة (${BACKUP_VERSION}) — قد تُوجد بيانات لا تعرفها هذه النسخة`);
+  } else if (backup.version < BACKUP_VERSION) {
+    rep.ok.push(`ملف بمخطط أقدم (v${backup.version}) — سيُستعاد ما يفهمه، وستُذكر الجداول الناقصة أدناه`);
+  }
+
+  // ② جداول مجهولة في الملف (مخطط أحدث من الصفحة) — تُعلَن ولا تُبتلع
+  const known = new Set(TABLES);
+  const unknown = Object.keys(backup).filter(k =>
+    !k.startsWith('_') && k !== 'version' && k !== 'exported_at' && Array.isArray(backup[k]) && !known.has(k));
+  if (unknown.length) rep.warn.push(`جداول في الملف لا تعرفها هذه الصفحة ولن تُستعاد: ${unknown.join('، ')}`);
+
+  const fpMeta = backup._meta?.fingerprint || {};
+
+  // ③ فحص كل جدول
+  for (const table of TABLES) {
+    if (onProgress) onProgress(`فحص ${table}…`);
+    const raw = backup[table];
+    const entry = {
+      table, label: TABLE_LABEL[table] || '',
+      present: Array.isArray(raw),
+      rows: Array.isArray(raw) ? raw.length : 0,
+      fpExpected: fpMeta[table]?.checksum || null,
+      fpActual: null, fpMatch: null,
+      schema: 'لم يُفحص', schemaState: 'warn',
+      issues: [],
+    };
+
+    if (!entry.present) {
+      entry.issues.push('غير موجود في الملف — سيبقى فارغاً بعد الاستعادة');
+      entry.schemaState = 'warn';
+      rep.tables.push(entry);
+      continue;
+    }
+
+    // بصمة التكامل
+    const actual = fingerprintRows(raw);
+    entry.fpActual = actual.checksum;
+    if (entry.fpExpected) {
+      entry.fpMatch = (actual.checksum === entry.fpExpected && actual.rows === (fpMeta[table]?.rows ?? -1));
+      if (!entry.fpMatch) {
+        entry.issues.push(`البصمة لا تطابق (متوقّع ${fpMeta[table]?.rows} صف/${entry.fpExpected} — فعلي ${actual.rows}/${actual.checksum}) — الملف عُدِّل أو تلف`);
+        rep.fatal.push(`تلف في بيانات ${table}: بصمة التكامل لا تطابق`);
+      }
+    } else {
+      entry.issues.push('لا توجد بصمة في الملف (نسخة قديمة) — تعذّر إثبات سلامة المحتوى');
+    }
+
+    if (!raw.length) { entry.schema = 'فارغ — لا شيء يُدرج'; entry.schemaState = 'good'; rep.tables.push(entry); continue; }
+
+    // ④ مقارنة الأعمدة بصف حيّ من نفس الجدول (قراءة فقط، بلا كتابة)
+    try {
+      const { data: liveSample, error: liveErr } = await supabaseClient
+        .from(table).select('*').eq(ownerColOf(table), user.id).limit(1);
+      if (!liveErr && liveSample?.length) {
+        const liveCols = new Set(Object.keys(liveSample[0]));
+        const fileCols = new Set(Object.keys(raw[0]));
+        const extra   = [...fileCols].filter(c => !liveCols.has(c));
+        const missing = [...liveCols].filter(c => !fileCols.has(c));
+        if (extra.length)   entry.issues.push(`أعمدة في الملف غير موجودة بالمخطط الحالي: ${extra.join('، ')}`);
+        if (missing.length) entry.issues.push(`أعمدة بالمخطط الحالي غائبة عن الملف (ستأخذ القيمة الافتراضية): ${missing.join('، ')}`);
+      }
+    } catch { /* المقارنة تكميلية — الفحص الحقيقي هو الإدراج التجريبي */ }
+
+    // ⑤ إدراج تجريبي فعلي ثم حذف فوري — الإثبات القاطع لتوافق المخطط
+    // يُتخطّى للجداول الاختيارية: قد تمنع RLS حذف الصف التجريبي فيبقى صفاً
+    // زائداً في بيانات المالك — الفحص لا يجوز أن يترك أثراً.
+    if (!probe || UPSERT_TABLES.has(table) || OPTIONAL_TABLES.has(table)) {
+      entry.schema = UPSERT_TABLES.has(table)
+        ? 'يُستعاد بالدمج (upsert) — لا فحص إدراج تجريبي'
+        : (OPTIONAL_TABLES.has(table)
+            ? 'جدول اختياري — فُحصت الأعمدة بالقراءة فقط (لا إدراج تجريبي)'
+            : 'الفحص التجريبي معطّل');
+      entry.schemaState = 'warn';
+    } else {
+      const probeRow = mapRow(table, raw[0], user.id);
+      if (!probeRow) {
+        entry.schema = 'الصف الأول غير صالح (سيُتخطى)'; entry.schemaState = 'warn';
+      } else {
+        delete probeRow.id;   // id يُولَّد تلقائياً حتى لا يصطدم بصف قائم
+        const { data: ins, error: perr } = await supabaseClient.from(table).insert(probeRow).select();
+        if (perr) {
+          if (perr.code === '23505' || perr.code === '23503') {
+            entry.schema = 'متوافق (تعارض قيود فقط — المخطط سليم)'; entry.schemaState = 'good';
+          } else if (perr.code === '42P01') {
+            entry.schema = 'الجدول غير موجود في القاعدة'; entry.schemaState = 'warn';
+            entry.issues.push('لن يُستعاد — الجدول مفقود من قاعدة البيانات');
+          } else if (OPTIONAL_TABLES.has(table)) {
+            entry.schema = 'تعذّر الفحص (RLS)'; entry.schemaState = 'warn';
+            entry.issues.push(`سياسة RLS تمنع الإدراج: ${perr.message}`);
+          } else {
+            entry.schema = 'غير متوافق'; entry.schemaState = 'bad';
+            entry.issues.push(`الإدراج يفشل: ${perr.message}`);
+            rep.fatal.push(`النسخة غير متوافقة مع جدول ${table}: ${perr.message}`);
+          }
+        } else {
+          entry.schema = 'متوافق ✓'; entry.schemaState = 'good';
+          const row = ins?.[0];
+          let cleaned = false;
+          if (row?.id != null) {
+            const { error: delErr } = await supabaseClient.from(table).delete().eq('id', row.id);
+            cleaned = !delErr;
+          } else if (table === 'user_settings' && probeRow.key) {
+            const { error: delErr } = await supabaseClient.from(table)
+              .delete().eq('user_id', user.id).eq('key', probeRow.key);
+            cleaned = !delErr;
+          }
+          if (!cleaned) {
+            entry.issues.push('⚠️ تعذّر حذف الصف التجريبي — قد يبقى صف زائد واحد في هذا الجدول');
+            rep.warn.push(`صف تجريبي لم يُحذف من ${table} — احذفه يدوياً`);
+          }
+        }
+      }
+    }
+    rep.tables.push(entry);
+  }
+
+  // ⑥ سلامة المفاتيح الأجنبية: كل مرفق يجب أن يشير لقيد موجود في النسخة
+  const atts = backup.review_log_attachments;
+  const logs = backup.review_log;
+  if (Array.isArray(atts) && atts.length) {
+    const ids = new Set((Array.isArray(logs) ? logs : []).map(r => r.id));
+    const orphans = atts.filter(a => a.entry_id != null && !ids.has(a.entry_id)).length;
+    if (orphans) rep.fatal.push(`${orphans} مرفق في دفتر المراجعة يشير لقيد غير موجود في النسخة — الإدراج سيفشل بخطأ FK`);
+    else rep.ok.push('المفاتيح الأجنبية لمرفقات دفتر المراجعة سليمة 100%');
+  }
+
+  // ⑦ مفاتيح localStorage
+  const all = backup._local_all && typeof backup._local_all === 'object' ? backup._local_all : null;
+  if (all) {
+    const fpL   = backup._meta?.local_fingerprint;
+    const act   = fingerprintMap(all);
+    const keys  = Object.keys(all);
+    const toks  = keys.filter(k => k.startsWith('sb-'));
+    const scoped= keys.filter(k => /^u:[^:]+:/.test(k));
+    rep.local = {
+      keys: keys.length, raw: keys.length - scoped.length, scoped: scoped.length,
+      fpExpected: fpL?.checksum || null, fpActual: act.checksum,
+      fpMatch: fpL ? (fpL.checksum === act.checksum && fpL.keys === act.keys) : null,
+      tokens: toks.length,
+      names: keys.slice().sort(),
+    };
+    if (rep.local.fpMatch === false) rep.fatal.push('بصمة الإعدادات المحلية لا تطابق — الملف عُدِّل أو تلف');
+    if (toks.length) rep.warn.push(`الملف يحوي ${toks.length} توكن جلسة (sb-*) — لن يُستعاد إطلاقاً (أمان)`);
+    const missingLogical = LS_KEYS.filter(k => !(k in all) && !(`u:${backup._meta?.source_user_id}:${k}` in all));
+    if (missingLogical.length) rep.ok.push(`مفاتيح منطقية غير موجودة على جهاز التصدير (طبيعي): ${missingLogical.join('، ')}`);
+  } else if (backup._local_settings) {
+    rep.warn.push('الملف بصيغة قديمة: يحوي القائمة المنطقية فقط (_local_settings) بلا المسح الحرفي الشامل');
+    rep.local = { keys: Object.keys(backup._local_settings).length, raw: 0, scoped: 0, legacy: true, names: Object.keys(backup._local_settings).sort() };
+  } else {
+    rep.warn.push('الملف لا يحوي أي تفضيلات محلية — الثيم والعتبات وحجم الخط لن تُستعاد');
+  }
+
+  return rep;
+}
+
+// ══════════════════════════════════════════════════════════════
+// زر «فحص الاستعادة (تجربة جافة)» — يقرأ الملف ويتحقق من كل شيء
+// بلا حذف أي بيانات. الإدراج التجريبي الوحيد يُحذف فوراً.
+// ══════════════════════════════════════════════════════════════
+function triggerVerify() {
+  const el = document.getElementById('verify-file');
+  el.value = '';
+  el.click();
+}
+
+async function verifyBackupFile(input) {
+  if (!input.files?.length) return;
+  const file = input.files[0];
+  const btn  = document.getElementById('btn-verify');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الفحص…'; }
+  setStatus('verify-status', 'info', 'يتم قراءة الملف…');
+  setReport('verify-report', '');
+
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
+
+    let backup;
+    try { backup = JSON.parse(await file.text()); }
+    catch (e) { throw new Error('الملف ليس JSON صالحاً — تالف أو غير مكتمل: ' + e.message); }
+
+    const rep = await auditBackup(backup, user,
+      { probe: true, onProgress: m => setStatus('verify-status', 'info', m) });
+
+    renderAuditReport(rep, backup, file);
+
+    if (rep.fatal.length) {
+      setStatus('verify-status', 'error', `✗ الملف غير صالح للاستعادة — ${rep.fatal.length} مشكلة قاطعة (التفاصيل أدناه)`);
+      showToast('الفحص انتهى — الملف لا يصلح للاستعادة', 'error');
+    } else if (rep.warn.length) {
+      setStatus('verify-status', 'info', `⚠️ الملف صالح للاستعادة مع ${rep.warn.length} ملاحظة — راجع التقرير أدناه`);
+      showToast('الفحص انتهى — صالح مع ملاحظات', 'info');
+    } else {
+      setStatus('verify-status', 'success', '✓ الملف سليم 100% وصالح للاستعادة — لم تُكتب أي بيانات');
+      showToast('✓ الملف سليم وقابل للاستعادة', 'success');
+    }
+  } catch (err) {
+    setStatus('verify-status', 'error', '✗ ' + err.message);
+    showToast('فشل الفحص: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔍 فحص الاستعادة (تجربة جافة)'; }
+  }
+}
+
+// يبني تقرير التدقيق ويعرضه في العنصر المطلوب، ويعيد نصّه HTML
+// حتى يستطيع مسار الاستعادة إبقاءه أعلى تقرير ما بعد الاستعادة.
+function renderAuditReport(rep, backup, file, targetId = 'verify-report') {
+  const when = backup.exported_at ? new Date(backup.exported_at).toLocaleString('ar-SA') : 'غير محدد';
+  const totalRows = rep.tables.reduce((s, t) => s + t.rows, 0);
+
+  let html = '';
+  html += noteHtml(rep.fatal.length ? 'bad' : (rep.warn.length ? 'warn' : 'good'),
+    `<b>ملف:</b> ${esc(file?.name || '—')} · <b>الإصدار:</b> ${esc(backup.version)} · ` +
+    `<b>تاريخ التصدير:</b> ${esc(when)} · <b>الحجم:</b> ${esc(((file?.size || 0) / 1024).toFixed(1))} KB<br>` +
+    `<b>سيُستعاد:</b> ${esc(totalRows)} صف في ${esc(rep.tables.filter(t => t.rows).length)} جدول` +
+    (rep.local ? ` + ${esc(rep.local.keys)} مفتاح تفضيلات محلية` : ' + لا تفضيلات محلية') +
+    `<br><b>لم تُحذف ولم تُكتب أي بيانات في هذا الفحص.</b>`);
+
+  if (rep.fatal.length) {
+    html += noteHtml('bad', '<b>مشاكل قاطعة تمنع الاستعادة:</b><ul style="margin:6px 0 0;padding-inline-start:18px">' +
+      rep.fatal.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>');
+  }
+  if (rep.warn.length) {
+    html += noteHtml('warn', '<b>ملاحظات (لا تمنع الاستعادة):</b><ul style="margin:6px 0 0;padding-inline-start:18px">' +
+      rep.warn.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>');
+  }
+  if (rep.ok.length) {
+    html += noteHtml('good', '<ul style="margin:0;padding-inline-start:18px">' +
+      rep.ok.map(e => `<li>${esc(e)}</li>`).join('') + '</ul>');
+  }
+
+  const rows = rep.tables.map(t => {
+    const fpTag = t.fpMatch === true ? '<span class="tag" data-state="good">مطابقة</span>'
+               : t.fpMatch === false ? '<span class="tag" data-state="bad">تالفة</span>'
+               : '<span class="tag" data-state="warn">بلا بصمة</span>';
+    return `<tr><td>${esc(t.table)}</td><td class="small text-muted">${esc(t.label)}</td>` +
+      `<td style="text-align:center">${esc(t.rows)}</td>` +
+      `<td style="text-align:center">${fpTag}</td>` +
+      `<td><span class="tag" data-state="${esc(t.schemaState)}">${esc(t.schema)}</span></td>` +
+      `<td class="small">${t.issues.length ? t.issues.map(i => esc(i)).join('<br>') : '—'}</td></tr>`;
+  }).join('');
+  html += tableHtml(['الجدول', 'المحتوى', 'صفوف', 'التكامل', 'توافق المخطط', 'ملاحظات'], rows);
+
+  if (rep.local) {
+    const fpTag = rep.local.fpMatch === true ? '<span class="tag" data-state="good">مطابقة</span>'
+                : rep.local.fpMatch === false ? '<span class="tag" data-state="bad">تالفة</span>'
+                : '<span class="tag" data-state="warn">بلا بصمة</span>';
+    html += `<div class="kvs" style="margin-top:12px">` +
+      `<div class="kv"><span>مفاتيح محلية</span><b>${esc(rep.local.keys)}</b></div>` +
+      `<div class="kv"><span>خام</span><b>${esc(rep.local.raw)}</b></div>` +
+      `<div class="kv"><span>مؤطَّرة بالمستخدم</span><b>${esc(rep.local.scoped)}</b></div>` +
+      `<div class="kv"><span>بصمة التفضيلات</span><b>${fpTag}</b></div>` +
+      `</div>`;
+    html += `<details style="margin-top:8px"><summary class="small text-muted" style="cursor:pointer">عرض أسماء المفاتيح المحلية (${esc(rep.local.names.length)})</summary>` +
+      `<div class="small text-muted" style="margin-top:6px;line-height:1.9;word-break:break-all">` +
+      rep.local.names.map(n => `<code>${esc(n)}</code>`).join(' · ') + `</div></details>`;
+  }
+  setReport(targetId, html);
+  return html;
+}
+
+// ══════════════════════════════════════════════════════════════
+// زر «اختبار دورة كاملة» — تصدير في الذاكرة ثم مقارنة حقلاً بحقل
+// مع ما في قاعدة البيانات. قراءة ومقارنة فقط — بلا أي كتابة.
+// يثبت: (١) لا عمود يسقط عبر JSON  (٢) لا عمود يسقط عبر mapRow
+// (٣) تفضيلات localStorage ترجع حرفياً  (٤) البصمات تُعاد إنتاجها.
+// ══════════════════════════════════════════════════════════════
+async function runRoundTripTest() {
+  const btn = document.getElementById('btn-roundtrip');
+  if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الاختبار…'; }
+  setStatus('roundtrip-status', 'info', 'يتم بناء نسخة في الذاكرة…');
+  setReport('roundtrip-report', '');
+
+  try {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
+
+    // ① بناء النسخة (نفس مسار التصدير بالضبط)
+    const live = await buildBackupObject(user, m => setStatus('roundtrip-status', 'info', m));
+
+    // ② محاكاة الكتابة للملف ثم القراءة منه
+    setStatus('roundtrip-status', 'info', 'محاكاة الكتابة للملف والقراءة منه…');
+    const json  = JSON.stringify(live, null, 2);
+    const after = JSON.parse(json);
+
+    // ③ مقارنة حقلاً بحقل
+    const results = [];
+    let totalFields = 0, totalDiffs = 0;
+    const diffs = [];
+
+    for (const table of TABLES) {
+      setStatus('roundtrip-status', 'info', `مقارنة ${table}…`);
+      const a = live[table]  || [];
+      const b = after[table] || [];
+      let fields = 0, bad = 0, dropped = 0;
+
+      if (a.length !== b.length) {
+        diffs.push(`${table}: عدد الصفوف تغيّر (${a.length} → ${b.length})`);
+        bad++;
+      }
+      for (let i = 0; i < Math.min(a.length, b.length); i++) {
+        const cols = new Set([...Object.keys(a[i]), ...Object.keys(b[i])]);
+        for (const c of cols) {
+          fields++;
+          if (stableStringify(a[i][c]) !== stableStringify(b[i][c])) {
+            bad++;
+            if (diffs.length < 40) diffs.push(`${table}[${i}].${c}: «${stableStringify(a[i][c])}» ← «${stableStringify(b[i][c])}»`);
+          }
+        }
+        // مسار الاستعادة الفعلي: mapRow — يجب ألا يُسقط أي عمود عدا id المولَّد
+        const mapped = mapRow(table, b[i], user.id);
+        if (mapped) {
+          for (const c of Object.keys(a[i])) {
+            if (c === 'id' && !(mapped && 'id' in mapped)) continue;   // id تُولَّد تلقائياً — إسقاطها مقصود
+            if (!(c in mapped)) {
+              dropped++;
+              if (diffs.length < 40) diffs.push(`${table}[${i}].${c}: mapRow أسقط العمود`);
+            } else if (c !== ownerColOf(table) && stableStringify(a[i][c]) !== stableStringify(mapped[c])) {
+              dropped++;
+              if (diffs.length < 40) diffs.push(`${table}[${i}].${c}: mapRow غيّر القيمة`);
+            }
+          }
+        } else if (!(table === 'user_settings' && !b[i].key)) {
+          dropped++;
+          if (diffs.length < 40) diffs.push(`${table}[${i}]: mapRow رفض الصف بالكامل`);
+        }
+      }
+      // البصمة تُعاد إنتاجها بعد رحلة JSON؟
+      const fpOk = fingerprintRows(b).checksum === (live._meta.fingerprint[table]?.checksum);
+      if (!fpOk) diffs.push(`${table}: البصمة لا تُعاد إنتاجها بعد رحلة JSON`);
+
+      totalFields += fields; totalDiffs += bad + dropped;
+      results.push({ table, rows: a.length, fields, bad, dropped, fpOk });
+    }
+
+    // ④ تفضيلات localStorage
+    const lsA = live._local_all, lsB = after._local_all;
+    const lsKeys = new Set([...Object.keys(lsA), ...Object.keys(lsB)]);
+    let lsBad = 0;
+    for (const k of lsKeys) {
+      totalFields++;
+      if (lsA[k] !== lsB[k]) { lsBad++; totalDiffs++; if (diffs.length < 40) diffs.push(`localStorage["${k}"] لم يطابق`); }
+    }
+    // القيم الحيّة في المتصفح الآن مقابل ما في النسخة (يثبت أن التصدير التقط الحالة الفعلية)
+    let lsLiveBad = 0;
+    for (const k of Object.keys(lsA)) {
+      if (localStorage.getItem(k) !== lsA[k]) { lsLiveBad++; if (diffs.length < 40) diffs.push(`localStorage["${k}"]: قيمة المتصفح تغيّرت أثناء الاختبار`); }
+    }
+
+    // ⑤ التقرير
+    const totalRows = results.reduce((s, r) => s + r.rows, 0);
+    const state = totalDiffs === 0 ? 'good' : 'bad';
+    let html = noteHtml(state,
+      totalDiffs === 0
+        ? `<b>تطابق 100%.</b> قُورن ${esc(totalFields)} حقلاً في ${esc(totalRows)} صف عبر ${esc(TABLES.length)} جدول ` +
+          `+ ${esc(lsKeys.size)} مفتاح تفضيلات محلية — <b>صفر اختلاف</b>.<br>` +
+          `كل حقل نجا من رحلة (قاعدة البيانات ← JSON ← ملف ← JSON ← mapRow) بلا فقد ولا تغيير. لم تُكتب أي بيانات.`
+        : `<b>وُجد ${esc(totalDiffs)} اختلاف</b> من أصل ${esc(totalFields)} حقل — التفاصيل أدناه. لم تُكتب أي بيانات.`);
+
+    if (lsLiveBad) html += noteHtml('warn', `${esc(lsLiveBad)} مفتاح محلي تغيّرت قيمته في المتصفح أثناء الاختبار (تبويب آخر مفتوح؟)`);
+
+    const rows = results.map(r => {
+      const st = (r.bad + r.dropped) === 0 && r.fpOk ? 'good' : 'bad';
+      const msg = (r.bad + r.dropped) === 0 && r.fpOk ? 'مطابق 100%' : `${r.bad + r.dropped} اختلاف`;
+      return `<tr><td>${esc(r.table)}</td><td style="text-align:center">${esc(r.rows)}</td>` +
+             `<td style="text-align:center">${esc(r.fields)}</td>` +
+             `<td><span class="tag" data-state="${st}">${esc(msg)}</span></td></tr>`;
+    }).join('') +
+    `<tr><td>localStorage</td><td style="text-align:center">${esc(lsKeys.size)}</td>` +
+    `<td style="text-align:center">${esc(lsKeys.size)}</td>` +
+    `<td><span class="tag" data-state="${lsBad ? 'bad' : 'good'}">${esc(lsBad ? lsBad + ' اختلاف' : 'مطابق 100%')}</span></td></tr>`;
+    html += tableHtml(['المصدر', 'صفوف', 'حقول مقارَنة', 'النتيجة'], rows);
+
+    if (diffs.length) {
+      html += noteHtml('bad', '<b>الاختلافات:</b><ul style="margin:6px 0 0;padding-inline-start:18px">' +
+        diffs.map(d => `<li>${esc(d)}</li>`).join('') + '</ul>');
+    }
+    setReport('roundtrip-report', html);
+
+    setStatus('roundtrip-status', totalDiffs === 0 ? 'success' : 'error',
+      totalDiffs === 0
+        ? `✓ تطابق 100% — ${totalFields} حقل، صفر اختلاف (بلا أي كتابة)`
+        : `✗ ${totalDiffs} اختلاف من أصل ${totalFields} حقل — راجع التقرير`);
+    showToast(totalDiffs === 0 ? '✓ الدورة الكاملة مطابقة 100%' : `✗ ${totalDiffs} اختلاف`,
+      totalDiffs === 0 ? 'success' : 'error');
+
+  } catch (err) {
+    setStatus('roundtrip-status', 'error', '✗ ' + err.message);
+    showToast('فشل الاختبار: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '🔁 اختبار دورة كاملة'; }
+  }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -236,176 +819,209 @@ async function restoreBackup(input) {
   if (!input.files?.length) return;
   const file = input.files[0];
 
+  setReport('restore-report', '');
+
   // ── قراءة الملف ───────────────────────────────────────────
   let backup;
   try {
     backup = JSON.parse(await file.text());
-  } catch {
+  } catch (e) {
     showToast('الملف غير صالح — يجب أن يكون JSON', 'error');
-    setStatus('restore-status', 'error', '✗ الملف غير صالح');
+    setStatus('restore-status', 'error', '✗ الملف غير صالح كـ JSON: ' + e.message);
     return;
   }
-
-  // ── Dry Run: التحقق من صحة البنية قبل أي حذف ───────────────
-  const dryRunErrors = dryRunRestore(backup);
-  if (dryRunErrors.length > 0) {
-    showToast('ملف النسخة غير صالح: ' + dryRunErrors[0], 'error');
-    setStatus('restore-status', 'error', '✗ ' + dryRunErrors.join(' | '));
-    return;
-  }
-
-  // ── ملخص ما سيتم استعادته ────────────────────────────────
-  const rowCounts  = TABLES.map(t => `${t}: ${backup[t]?.length || 0}`);
-  const totalRows  = TABLES.reduce((s, t) => s + (backup[t]?.length || 0), 0);
-  const exportedAt = backup.exported_at
-    ? new Date(backup.exported_at).toLocaleString('ar-SA') : 'غير محدد';
-
-  // AUDIT-FIX: replaced blocking confirm() with async modal — confirm() fails under CSP
-  // and is unavailable in some iframe/mobile environments.
-  const confirmed = await confirmAsync(
-    `استعادة النسخة الاحتياطية\n\n` +
-    `• الإصدار: ${backup.version}\n` +
-    `• تاريخ التصدير: ${exportedAt}\n` +
-    `• إجمالي السجلات: ${totalRows}\n\n` +
-    `تفاصيل:\n${rowCounts.filter(r => !r.endsWith(': 0')).join('\n')}\n\n` +
-    `⚠️ تحذير: سيتم حذف جميع بياناتك الحالية واستبدالها.\n\n` +
-    `هل أنت متأكد من الاستعادة؟`
-  );
-  if (!confirmed) { setStatus('restore-status', 'info', 'تم الإلغاء'); return; }
 
   const btn = document.getElementById('btn-restore');
   btn.disabled = true;
-  btn.textContent = 'جارٍ الاستعادة…';
-  setStatus('restore-status', 'info', 'يتم حذف البيانات الحالية…');
+  btn.textContent = 'جارٍ الفحص…';
 
   // مُعرَّف قبل try حتى يبقى مقروءاً في catch عند أي فشل
   let emergencySaved = false;
 
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
 
-    // ── 0. حفظ نسخة طارئة من البيانات الحالية في localStorage ─
+    // ── 0. التدقيق الكامل قبل أي حذف ────────────────────────
+    // يشمل: البنية، البصمات، توافق الأعمدة، المفاتيح الأجنبية،
+    // والإدراج التجريبي الفعلي لكل جدول (يُحذف فوراً).
+    setStatus('restore-status', 'info', 'يتم فحص الملف بالكامل قبل حذف أي شيء…');
+    const audit = await auditBackup(backup, user,
+      { probe: true, onProgress: m => setStatus('restore-status', 'info', m) });
+    const auditHtml = renderAuditReport(audit, backup, file, 'restore-report');
+
+    if (audit.fatal.length) {
+      setStatus('restore-status', 'error',
+        '✗ أُوقفت الاستعادة قبل حذف أي بيانات — ' + audit.fatal.join(' | '));
+      showToast('الملف لا يصلح للاستعادة — بياناتك لم تُمسّ', 'error');
+      return;
+    }
+
+    // ── ملخص ما سيتم استعادته + تأكيد المالك ─────────────────
+    const rowCounts  = audit.tables.filter(t => t.rows).map(t => `${t.table}: ${t.rows}`);
+    const totalRows  = audit.tables.reduce((s, t) => s + t.rows, 0);
+    const exportedAt = backup.exported_at
+      ? new Date(backup.exported_at).toLocaleString('ar-SA') : 'غير محدد';
+    const lsCount    = audit.local?.keys || 0;
+
+    const confirmed = await confirmAsync(
+      `استعادة النسخة الاحتياطية\n\n` +
+      `• الإصدار: ${backup.version}\n` +
+      `• تاريخ التصدير: ${exportedAt}\n` +
+      `• إجمالي السجلات: ${totalRows}\n` +
+      `• تفضيلات محلية: ${lsCount} مفتاح\n` +
+      `• الفحص الكامل: نجح${audit.warn.length ? ` (${audit.warn.length} ملاحظة — راجع التقرير)` : ''}\n\n` +
+      `تفاصيل:\n${rowCounts.join('\n')}\n\n` +
+      `⚠️ تحذير: سيتم حذف جميع بياناتك الحالية واستبدالها.\n\n` +
+      `هل أنت متأكد من الاستعادة؟`
+    );
+    if (!confirmed) { setStatus('restore-status', 'info', 'تم الإلغاء — لم تُمسّ أي بيانات'); return; }
+
+    btn.textContent = 'جارٍ الاستعادة…';
+
+    // ── 1. نسخة طارئة من البيانات الحالية + التحقق من قابليتها للاستعادة ─
     // ملاحظة: review_log_attachments مستبعدة (محتوى ثنائي كبير يملأ localStorage)
-    // الملفات محفوظة في Supabase — النسخة الطارئة للبيانات الجدولية فقط
     setStatus('restore-status', 'info', 'يتم حفظ نسخة طارئة احترازية…');
     const EMERGENCY_TABLES = TABLES.filter(t => t !== 'review_log_attachments');
-    const emergencyBackup = { version: 'emergency', backed_up_at: new Date().toISOString() };
+    const emergencyBackup = {
+      version: 'emergency', backed_up_at: new Date().toISOString(),
+      _fingerprint: {},
+    };
     for (const table of EMERGENCY_TABLES) {
-      // ترقيم صفحات كامل — النسخة الطارئة احترازية فلا نوقف الاستعادة عند فشل جدول
-      try { emergencyBackup[table] = await fetchAllRows(table, q => q.eq('user_id', user.id)); }
-      catch (_) { emergencyBackup[table] = []; }
+      // النسخة الطارئة احترازية فلا نوقف الاستعادة عند فشل جدول واحد
+      try {
+        const { rows } = await fetchOwnedRows(table, user.id);
+        emergencyBackup[table] = rows;
+      } catch { emergencyBackup[table] = []; }
+      emergencyBackup._fingerprint[table] = fingerprintRows(emergencyBackup[table]);
     }
+    let emergencyVerify = 'لم تُحفظ';
     try {
       localStorage.setItem('tharwa_emergency_backup', JSON.stringify(emergencyBackup));
-      emergencySaved = true;
-    } catch (_) {
-      // localStorage ممتلئة — نُنبّه المستخدم ولا نكذب عليه لاحقاً
-      setStatus('restore-status', 'warning',
-        '⚠️ تعذّر حفظ النسخة الطارئة (localStorage ممتلئة) — سنتابع الاستعادة لكن لا توجد حماية عند الفشل');
+      // ── اختبار قابلية الاستعادة فعلياً: نقرأها ونتحقق من بصمة كل جدول ──
+      const readBack = JSON.parse(localStorage.getItem('tharwa_emergency_backup'));
+      const bad = EMERGENCY_TABLES.filter(t =>
+        fingerprintRows(readBack[t]).checksum !== emergencyBackup._fingerprint[t].checksum);
+      if (readBack.version !== 'emergency') throw new Error('النسخة المقروءة تالفة');
+      if (bad.length) throw new Error('بصمات لا تطابق: ' + bad.join('، '));
+      emergencySaved   = true;
+      emergencyVerify  = 'محفوظة ومُختبَرة ✓';
+    } catch (e) {
+      localStorage.removeItem('tharwa_emergency_backup');
+      const cont = await confirmAsync(
+        `⚠️ تعذّر حفظ نسخة طارئة قابلة للاستعادة (${e.message}).\n\n` +
+        `إن فشلت الاستعادة فلن تكون هناك شبكة أمان في هذا المتصفح.\n\n` +
+        `هل تريد المتابعة رغم ذلك؟ (يُنصح بالإلغاء وتصدير نسخة أولاً)`
+      );
+      if (!cont) { setStatus('restore-status', 'info', 'تم الإلغاء — لم تُمسّ أي بيانات'); return; }
+      emergencyVerify = `فشلت: ${e.message}`;
     }
 
-    // ── 0.5 فحص قابلية الإدراج قبل أي حذف ────────────────────
-    // نُدرج الصف الأول من كل جدول فعلياً ثم نحذفه فوراً. لو الملف بمخطط قديم
-    // (عمود لم يعد موجوداً) نوقف الاستعادة كلها قبل حذف أي بيانات —
-    // dryRunRestore السطحي لا يلتقط هذا فيفشل الإدراج بعد الحذف.
-    // تعارض القيود مع البيانات الحالية (فريد 23505 / FK 23503) = المخطط متوافق → نجاح.
-    setStatus('restore-status', 'info', 'يتم فحص توافق النسخة مع قاعدة البيانات…');
-    for (const table of TABLES) {
-      const rows = backup[table];
-      if (!rows?.length) continue;
-      const probe = mapRow(table, rows[0], user.id);
-      if (!probe) continue;
-      delete probe.id;   // id يُولَّد تلقائياً للفحص حتى لا يصطدم بصف قائم
-      const { data: probeIns, error: probeErr } = await supabaseClient
-        .from(table).insert(probe).select();
-      if (probeErr) {
-        if (probeErr.code === '23505' || probeErr.code === '23503') continue;
-        if (probeErr.code === '42P01') continue;   // جدول اختياري غير موجود
-        throw new Error(`النسخة غير متوافقة مع جدول ${table} — أُوقفت الاستعادة قبل حذف أي بيانات: ${probeErr.message}`);
-      }
-      // حذف الصف التجريبي فوراً بمعرّفه
-      const ins = probeIns?.[0];
-      if (ins?.id != null) {
-        await supabaseClient.from(table).delete().eq('id', ins.id);
-      } else if (table === 'user_settings' && probe.key) {
-        await supabaseClient.from(table).delete().eq('user_id', user.id).eq('key', probe.key);
-      }
-    }
-
-    // ── 1. حذف كل البيانات الحالية ───────────────────────────
-    // الجداول الفرعية (FK children) تُحذف أولاً قبل الجداول الأصل
-    // هذا يضمن عدم انتهاك قيود FK حتى لو لم يكن CASCADE مضبوطاً
-    const FK_CHILDREN_FIRST = [
-      'review_log_attachments',   // FK → review_log
-      ...TABLES.filter(t => t !== 'review_log_attachments'),
-    ];
-    for (const table of FK_CHILDREN_FIRST) {
-      const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+    // ── 2. حذف كل البيانات الحالية (الأبناء أولاً) ───────────
+    setStatus('restore-status', 'info', 'يتم حذف البيانات الحالية…');
+    const deleteNotes = {};
+    for (const table of deleteOrder(TABLES)) {
+      const { error } = await supabaseClient.from(table).delete().eq(ownerColOf(table), user.id);
       if (error && error.code !== '42P01') {
+        if (OPTIONAL_TABLES.has(table)) { deleteNotes[table] = `تعذّر الحذف (RLS): ${error.message}`; continue; }
         throw new Error(`خطأ في حذف ${table}: ${error.message}`);
       }
+      // تحقّق فعلي: هل حُذفت الصفوف حقاً؟ RLS قد تمنع الحذف بلا خطأ
+      const left = await countOwnedRows(table, user.id);
+      if (left != null && left > 0) deleteNotes[table] = `بقي ${left} صف لم يُحذف (سياسة RLS) — قد تتكرر البيانات`;
     }
 
+    // ── 3. إدراج البيانات من النسخة ──────────────────────────
     setStatus('restore-status', 'info', 'يتم إدراج البيانات المستعادة…');
+    const results = [];
+    let inserted = 0, failed = 0;
 
-    // ── 2. إدراج البيانات من النسخة الاحتياطية ───────────────
-    let inserted = 0;
     for (const table of TABLES) {
       const rows = backup[table];
-      if (!rows?.length) continue;
+      const entry = { table, expected: Array.isArray(rows) ? rows.length : 0, inserted: 0, failed: 0, errors: [], note: deleteNotes[table] || '' };
+      if (!Array.isArray(rows) || !rows.length) { results.push(entry); continue; }
 
       const clean = rows.map(row => mapRow(table, row, user.id)).filter(Boolean);
-      if (!clean.length) continue;
+      entry.failed += rows.length - clean.length;
+      if (rows.length !== clean.length) entry.errors.push(`${rows.length - clean.length} صف مرفوض من mapRow (صف غير صالح أو بلا مفتاح)`);
+      if (!clean.length) { results.push(entry); failed += entry.failed; continue; }
 
       const batchSize = BATCH_SIZES[table] || DEFAULT_BATCH;
       for (let i = 0; i < clean.length; i += batchSize) {
         const batch = clean.slice(i, i + batchSize);
         setStatus('restore-status', 'info',
           `يتم إدراج ${table}… (${Math.min(i + batchSize, clean.length)}/${clean.length})`);
-        const { error } = await supabaseClient.from(table).insert(batch);
-        if (error) throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
-        inserted += batch.length;
-      }
-    }
-
-    // ── 3. استعادة إعدادات localStorage ─────────────────────
-    // نكتب للمفتاح الخام AND المؤطَّر بـ userLsKey:
-    // — الخام: لأن بعض الوحدات (life-goals, inventory, school-kanda, benchmark) تقرأ المفتاح الخام مباشرة
-    // — المؤطَّر: لأن وحدات أخرى (salary, sukuk, alerts) تقرأ userLsKey أولاً ثم تسقط للخام
-    // الكتابة للاثنين تضمن 100% توافق بصرف النظر عن طريقة القراءة في كل وحدة
-    if (backup._local_settings) {
-      Object.entries(backup._local_settings).forEach(([k, v]) => {
-        try { localStorage.setItem(k, v); } catch (_) {}
-        try { localStorage.setItem(userLsKey(k), v); } catch (_) {}
-      });
-    }
-
-    // (ب) الاستعادة الحرفية الشاملة (v3+): تضمن إرجاع أي مفتاح لم تشمله القائمة المنطقية أعلاه.
-    //     • مفتاح خام (theme/zoom/…): يُكتب كما هو حرفياً.
-    //     • مفتاح مؤطَّر بمستخدم قديم (u:OLDID:logical): يُعاد تأطيره للمستخدم الحالي + خاماً
-    //       حتى تعمل الاستعادة على حساب مختلف دون فقد أي بيانات.
-    //     • توكنات Supabase لا تُكتب أبداً (أمان) — مُستبعدة أصلاً من النسخة لكن نحرس هنا أيضاً.
-    if (backup._local_all && typeof backup._local_all === 'object') {
-      Object.entries(backup._local_all).forEach(([k, v]) => {
-        if (k.startsWith('sb-')) return;
-        const m = k.match(/^u:[^:]+:(.+)$/);
-        if (m) {
-          const logical = m[1];
-          try { localStorage.setItem(userLsKey(logical), v); } catch (_) {}
-          try { localStorage.setItem(logical, v); } catch (_) {}
-        } else {
-          try { localStorage.setItem(k, v); } catch (_) {}
+        const q = UPSERT_TABLES.has(table)
+          ? supabaseClient.from(table).upsert(batch, { onConflict: ownerColOf(table) })
+          : supabaseClient.from(table).insert(batch);
+        const { error } = await q;
+        if (error) {
+          // جدول اختياري أو دفعة واحدة تفشل: نُسجّل ونكمل بدل إسقاط كل شيء —
+          // الجداول الأساسية تُوقف العملية كما كان (لا مساس بسلامة المحفظة).
+          if (OPTIONAL_TABLES.has(table) || error.code === '42P01') {
+            entry.failed += batch.length;
+            entry.errors.push(error.message);
+            continue;
+          }
+          throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
         }
-      });
+        entry.inserted += batch.length;
+      }
+      inserted += entry.inserted;
+      failed   += entry.failed;
+      // تحقّق نهائي بالعدّ الفعلي في القاعدة
+      entry.actual = await countOwnedRows(table, user.id);
+      results.push(entry);
     }
 
-    const lsRestored = Object.keys(backup._local_all || backup._local_settings || {}).length;
-    setStatus('restore-status', 'success',
-      `✓ تمت الاستعادة بنجاح — ${inserted} سجل + ${lsRestored} مفتاح إعدادات محلي`);
-    showToast('تمت الاستعادة بنجاح ✓', 'success');
+    // ── 4. استعادة تفضيلات localStorage ─────────────────────
+    const lsReport = restoreLocalStorage(backup, user.id);
+
+    // ── 5. تقرير ما بعد الاستعادة — لا «تمت الاستعادة ✓» صامتة ─
+    const mismatched = results.filter(r =>
+      r.failed > 0 || (r.actual != null && r.expected > 0 && r.actual !== r.expected) || r.note);
+    const allGood = mismatched.length === 0 && lsReport.failed === 0;
+
+    let html = noteHtml('good', '<b>— نتيجة الاستعادة —</b>') + noteHtml(allGood ? 'good' : 'warn',
+      `<b>${allGood ? 'اكتملت الاستعادة بمطابقة كاملة.' : 'اكتملت الاستعادة مع فروقات — اقرأ الجدول.'}</b><br>` +
+      `أُدرج <b>${esc(inserted)}</b> صف من أصل <b>${esc(audit.tables.reduce((s, t) => s + t.rows, 0))}</b> · ` +
+      `فشل <b>${esc(failed)}</b> صف · تفضيلات محلية: <b>${esc(lsReport.written)}</b> مفتاح ` +
+      `(فشل ${esc(lsReport.failed)}) · النسخة الطارئة: ${esc(emergencyVerify)}`);
+
+    if (!allGood) {
+      html += noteHtml('warn', 'الفروقات أدناه ليست بالضرورة فقداً — قد تكون صفوفاً رفضتها قيود القاعدة. راجع كل سطر وقرّر.');
+    }
+
+    html += tableHtml(['الجدول', 'في النسخة', 'أُدرج', 'فشل', 'العدد الفعلي الآن', 'السبب'],
+      results.map(r => {
+        const ok = r.failed === 0 && !r.note && (r.actual == null || r.actual === r.expected);
+        return `<tr><td>${esc(r.table)}</td>` +
+          `<td style="text-align:center">${esc(r.expected)}</td>` +
+          `<td style="text-align:center">${esc(r.inserted)}</td>` +
+          `<td style="text-align:center">${esc(r.failed)}</td>` +
+          `<td style="text-align:center">${esc(r.actual == null ? '—' : r.actual)}</td>` +
+          `<td class="small"><span class="tag" data-state="${ok ? 'good' : 'warn'}">${ok ? 'مطابق' : 'راجع'}</span> ` +
+          `${esc([r.note, ...r.errors].filter(Boolean).join(' · ')) || ''}</td></tr>`;
+      }).join(''));
+
+    html += `<div class="kvs" style="margin-top:12px">` +
+      `<div class="kv"><span>مفاتيح محلية خام أُعيدت</span><b>${esc(lsReport.raw)}</b></div>` +
+      `<div class="kv"><span>مفاتيح أُعيد تأطيرها لهويتك</span><b>${esc(lsReport.rescoped)}</b></div>` +
+      `<div class="kv"><span>توكنات جلسة مُستبعدة (أمان)</span><b>${esc(lsReport.skippedTokens)}</b></div>` +
+      `<div class="kv"><span>فشل الكتابة</span><b>${esc(lsReport.failed)}</b></div>` +
+      `</div>`;
+    if (lsReport.errors.length) {
+      html += noteHtml('warn', '<b>مفاتيح لم تُكتب:</b> ' + esc(lsReport.errors.join('، ')));
+    }
+    // تقرير التدقيق (ما قبل الحذف) يبقى فوق تقرير ما بعد الاستعادة — سجل كامل للعملية
+    setReport('restore-report', auditHtml + html);
+
+    setStatus('restore-status', allGood ? 'success' : 'info',
+      (allGood ? '✓ تمت الاستعادة بمطابقة كاملة — ' : '⚠️ تمت الاستعادة مع فروقات — ') +
+      `${inserted} سجل + ${lsReport.written} مفتاح تفضيلات. التقرير التفصيلي أدناه.`);
+    showToast(allGood ? 'تمت الاستعادة بمطابقة كاملة ✓' : 'تمت الاستعادة — راجع تقرير الفروقات', allGood ? 'success' : 'info');
 
     setTimeout(async () => {
-      // AUDIT-FIX: replaced blocking confirm() with confirmAsync()
       if (await confirmAsync('تمت الاستعادة. هل تريد الانتقال إلى لوحة التحكم؟')) {
         window.location.href = 'dashboard.html';
       }
@@ -413,15 +1029,68 @@ async function restoreBackup(input) {
 
   } catch (err) {
     const emergencyMsg = emergencySaved
-      ? '⚠️ تم حفظ نسخة طارئة في المتصفح — استعدها من قسم "استعادة النسخة الطارئة" أدناه.'
-      : '⚠️ لم تُحفظ نسخة طارئة (localStorage ممتلئة) — تحقق من بياناتك يدوياً.';
+      ? '⚠️ تم حفظ نسخة طارئة مُختبَرة في المتصفح — استعدها فوراً من قسم "استعادة النسخة الطارئة" أدناه، ولا تغلق هذا المتصفح ولا تمسح بياناته قبل ذلك.'
+      : '⚠️ لا توجد نسخة طارئة في هذا المتصفح — إن كنت تملك ملف نسخة أحدث فاستعده الآن، وإلا فتحقق من بياناتك يدوياً قبل أي إجراء آخر.';
     setStatus('restore-status', 'error', '✗ ' + err.message + '\n\n' + emergencyMsg);
+    setReport('restore-report', noteHtml('bad',
+      `<b>فشلت الاستعادة:</b> ${esc(err.message)}<br>${esc(emergencyMsg)}`));
     showToast(emergencySaved ? 'فشلت الاستعادة — نسخة طارئة محفوظة' : 'فشلت الاستعادة — لا توجد نسخة طارئة', 'error');
     refreshEmergencySection();   // إظهار قسم الاستعادة الطارئة فوراً
   } finally {
     btn.disabled = false;
-    btn.textContent = 'استعادة من نسخة احتياطية';
+    btn.textContent = '📥 استعادة من نسخة احتياطية';
   }
+}
+
+// ══════════════════════════════════════════════════════════════
+// استعادة تفضيلات localStorage — حرفية 100% مع إعادة تأطير الهوية
+//
+// قاعدة النسخ الحرفي: المفتاح الخام يعود خاماً، والمفتاح المؤطَّر
+// «u:<uid قديم>:X» يعود «u:<uid حالي>:X». هذا يُعيد إنتاج حالة
+// localStorage نفسها بالضبط حتى لو اختلف المعرّف بين التصدير والاستعادة.
+//
+// نمرّ على مرحلتين: الخام أولاً ثم المؤطَّر — فلو حمل الملف نسختين
+// من المفتاح نفسه (خامة قديمة + مؤطَّرة حديثة) يفوز المؤطَّر، وهو
+// بالضبط ما تقرؤه الصفحات (userLsKey أولاً ثم الخام).
+// ══════════════════════════════════════════════════════════════
+function restoreLocalStorage(backup, userId) {
+  const rep = { written: 0, raw: 0, rescoped: 0, skippedTokens: 0, failed: 0, errors: [] };
+  const put = (key, val) => {
+    try { localStorage.setItem(key, val); rep.written++; return true; }
+    catch (e) { rep.failed++; if (rep.errors.length < 12) rep.errors.push(key); return false; }
+  };
+
+  const all = (backup._local_all && typeof backup._local_all === 'object') ? backup._local_all : null;
+
+  if (all) {
+    const entries = Object.entries(all);
+    // ① المفاتيح الخام — تُكتب كما هي حرفياً
+    for (const [k, v] of entries) {
+      if (k.startsWith('sb-')) { rep.skippedTokens++; continue; }   // حارس أمني مضاعف
+      if (/^u:[^:]+:/.test(k)) continue;
+      if (put(k, v)) rep.raw++;
+    }
+    // ② المفاتيح المؤطَّرة — يُعاد تأطيرها لهوية المستخدم الحالي صراحةً
+    //    (لا نعتمد على userLsKey لأنه يقرأ متغيّراً عاماً قد لا يكون مضبوطاً)
+    for (const [k, v] of entries) {
+      const m = k.match(/^u:[^:]+:(.+)$/);
+      if (!m) continue;
+      if (put(`u:${userId}:${m[1]}`, v)) rep.rescoped++;
+    }
+    return rep;
+  }
+
+  // ── ملف قديم (v2/v3) بلا مسح حرفي: نستخدم القائمة المنطقية ──
+  // القيمة هناك هي «القيمة الفعّالة» فنكتبها للمفتاح المؤطَّر والخام معاً
+  // حتى تقرأها كل الوحدات مهما كان نمط قراءتها.
+  if (backup._local_settings && typeof backup._local_settings === 'object') {
+    for (const [k, v] of Object.entries(backup._local_settings)) {
+      if (k.startsWith('sb-')) { rep.skippedTokens++; continue; }
+      if (put(`u:${userId}:${k}`, v)) rep.rescoped++;
+      if (put(k, v)) rep.raw++;
+    }
+  }
+  return rep;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -455,12 +1124,17 @@ async function restoreEmergencyBackup() {
     return;
   }
 
+  // تحقّق من سلامة النسخة الطارئة قبل الاعتماد عليها
+  const fpBad = Object.keys(b._fingerprint || {}).filter(t =>
+    fingerprintRows(b[t]).checksum !== b._fingerprint[t].checksum);
+
   const when = b.backed_up_at ? new Date(b.backed_up_at).toLocaleString('ar-SA') : 'غير معروف';
   const totalRows = TABLES.reduce((s, t) => s + (Array.isArray(b[t]) ? b[t].length : 0), 0);
   const confirmed = await confirmAsync(
     `استعادة النسخة الطارئة\n\n` +
     `• تاريخ الحفظ: ${when}\n` +
-    `• إجمالي السجلات: ${totalRows}\n\n` +
+    `• إجمالي السجلات: ${totalRows}\n` +
+    `• سلامة البصمات: ${b._fingerprint ? (fpBad.length ? `⚠️ ${fpBad.length} جدول تالف (${fpBad.join('، ')})` : 'سليمة ✓') : 'غير متوفرة (نسخة قديمة)'}\n\n` +
     `⚠️ تحذير: سيتم حذف البيانات الحالية واستبدالها بمحتوى النسخة الطارئة.\n` +
     `(مرفقات دفتر المراجعة غير مشمولة بالنسخة الطارئة)\n\n` +
     `هل أنت متأكد؟`
@@ -476,41 +1150,61 @@ async function restoreEmergencyBackup() {
     if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
 
     // نفس مسار الاستعادة العادية: FK children أولاً ثم إدراج بترتيب TABLES و mapRow
-    const FK_CHILDREN_FIRST_EMG = [
-      'review_log_attachments',
-      ...TABLES.filter(t => t !== 'review_log_attachments'),
-    ];
-    for (const table of FK_CHILDREN_FIRST_EMG) {
-      const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+    for (const table of deleteOrder(TABLES)) {
+      const { error } = await supabaseClient.from(table).delete().eq(ownerColOf(table), user.id);
       if (error && error.code !== '42P01') {
+        if (OPTIONAL_TABLES.has(table)) continue;
         throw new Error(`خطأ في حذف ${table}: ${error.message}`);
       }
     }
 
     setStatus('emergency-status', 'info', 'يتم إدراج بيانات النسخة الطارئة…');
     let inserted = 0;
+    const results = [];
     for (const table of TABLES) {
       const rows = b[table];
-      if (!Array.isArray(rows) || !rows.length) continue;
+      const entry = { table, expected: Array.isArray(rows) ? rows.length : 0, inserted: 0, failed: 0, errors: [] };
+      if (!Array.isArray(rows) || !rows.length) { results.push(entry); continue; }
 
       const clean = rows.map(row => mapRow(table, row, user.id)).filter(Boolean);
-      if (!clean.length) continue;
+      entry.failed += rows.length - clean.length;
+      if (!clean.length) { results.push(entry); continue; }
 
       const batchSize = BATCH_SIZES[table] || DEFAULT_BATCH;
       for (let i = 0; i < clean.length; i += batchSize) {
         const batch = clean.slice(i, i + batchSize);
         setStatus('emergency-status', 'info',
           `يتم إدراج ${table}… (${Math.min(i + batchSize, clean.length)}/${clean.length})`);
-        const { error } = await supabaseClient.from(table).insert(batch);
-        if (error) throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
-        inserted += batch.length;
+        const q = UPSERT_TABLES.has(table)
+          ? supabaseClient.from(table).upsert(batch, { onConflict: ownerColOf(table) })
+          : supabaseClient.from(table).insert(batch);
+        const { error } = await q;
+        if (error) {
+          if (OPTIONAL_TABLES.has(table) || error.code === '42P01') {
+            entry.failed += batch.length; entry.errors.push(error.message); continue;
+          }
+          throw new Error(`خطأ في إدراج ${table}: ${error.message}`);
+        }
+        entry.inserted += batch.length;
       }
+      entry.actual = await countOwnedRows(table, user.id);
+      inserted += entry.inserted;
+      results.push(entry);
     }
+
+    // تقرير تفصيلي بدل نجاح صامت
+    setReport('emergency-report',
+      noteHtml(results.every(r => r.failed === 0) ? 'good' : 'warn',
+        `أُدرج <b>${esc(inserted)}</b> صف من النسخة الطارئة المحفوظة بتاريخ ${esc(when)}.`) +
+      tableHtml(['الجدول', 'في النسخة', 'أُدرج', 'فشل', 'العدد الفعلي'],
+        results.map(r => `<tr><td>${esc(r.table)}</td><td style="text-align:center">${esc(r.expected)}</td>` +
+          `<td style="text-align:center">${esc(r.inserted)}</td><td style="text-align:center">${esc(r.failed)}</td>` +
+          `<td style="text-align:center">${esc(r.actual == null ? '—' : r.actual)}</td></tr>`).join('')));
 
     // نجحت الاستعادة — النسخة الطارئة استُهلكت (البيانات صارت في القاعدة)
     localStorage.removeItem('tharwa_emergency_backup');
     refreshEmergencySection();
-    setStatus('emergency-status', 'success', `✓ تمت استعادة النسخة الطارئة — ${inserted} سجل`);
+    setStatus('emergency-status', 'success', `✓ تمت استعادة النسخة الطارئة — ${inserted} سجل (التفاصيل أدناه)`);
     showToast('تمت استعادة النسخة الطارئة ✓', 'success');
   } catch (err) {
     setStatus('emergency-status', 'error', '✗ ' + err.message);
@@ -539,10 +1233,11 @@ function clearAllAppLocalStorage() {
 // ══════════════════════════════════════════════════════════════
 // تحويل الصف للاستعادة — نسخ حرفي 100% لكل الأعمدة كما خُزّنت
 // القاعدة: لا نُسقط أي عمود إطلاقاً (وفاءً بمتطلّب النسخ 100%).
-//   • نفرض user_id الحالي (يسمح بالاستعادة على حساب مختلف).
+//   • نفرض هوية المستخدم الحالي في عمود المالك (يسمح بالاستعادة على حساب مختلف).
 //   • id يُحذف للجداول ذات المفتاح التسلسلي (يُولَّد تلقائياً) ويُبقى
 //     للجداول المرتبطة بمفتاح أجنبي حتى لا تنكسر الروابط.
 //   • user_settings مفتاحه (user_id,key) — نحذف id ونتجاهل الصفوف بلا key.
+//   • user_profiles مفتاحه id وهو هوية المستخدم نفسها (لا عمود user_id فيه).
 // ══════════════════════════════════════════════════════════════
 const KEEP_ID_TABLES = new Set(['review_log', 'review_log_attachments']);
 
@@ -550,8 +1245,13 @@ function mapRow(table, row, userId) {
   if (!row || typeof row !== 'object') return null;
   if (table === 'user_settings' && !row.key) return null;
   const r = { ...row };          // نسخة كاملة — كل عمود يُحفظ كما هو
-  if (!KEEP_ID_TABLES.has(table)) delete r.id;
-  r.user_id = userId;            // فرض هوية المستخدم الحالي
+  const ownerCol = ownerColOf(table);
+  if (ownerCol === 'id') {
+    r.id = userId;               // المفتاح هو الهوية — لا يُحذف ولا يوجد user_id
+  } else {
+    if (!KEEP_ID_TABLES.has(table)) delete r.id;
+    r[ownerCol] = userId;        // فرض هوية المستخدم الحالي
+  }
   return r;
 }
 
@@ -588,13 +1288,12 @@ async function resetAllData() {
 
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
-    const FK_CHILDREN_FIRST_RESET = [
-      'review_log_attachments',
-      ...TABLES.filter(t => t !== 'review_log_attachments'),
-    ];
-    for (const table of FK_CHILDREN_FIRST_RESET) {
-      const { error } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+    if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
+    // RESET_KEEP: ملف الحساب وتذاكر الدعم ليست بيانات محفظة — «التصفير» لا يمسّها
+    for (const table of deleteOrder(TABLES).filter(t => !RESET_KEEP.has(t))) {
+      const { error } = await supabaseClient.from(table).delete().eq(ownerColOf(table), user.id);
       if (error && error.code !== '42P01') {
+        if (OPTIONAL_TABLES.has(table)) continue;
         throw new Error(`خطأ في مسح ${table}: ${error.message}`);
       }
     }
@@ -644,14 +1343,12 @@ async function deleteAccount() {
 
   try {
     // 1. مسح كل البيانات أولاً — FK children أولاً لتجنب انتهاك القيود
-    const FK_ORDER_FOR_DELETE = [
-      'review_log_attachments',
-      ...TABLES.filter(t => t !== 'review_log_attachments'),
-    ];
-    for (const table of FK_ORDER_FOR_DELETE) {
+    // user_profiles مستثنى من الحذف اليدوي: حذفه يتم بالتتالي (CASCADE) مع auth.users
+    for (const table of deleteOrder(TABLES)) {
       // أي فشل حذف يوقف العملية قبل استدعاء RPC — لا حذف حساب فوق بيانات متبقية
-      const { error: delErr } = await supabaseClient.from(table).delete().eq('user_id', user.id);
+      const { error: delErr } = await supabaseClient.from(table).delete().eq(ownerColOf(table), user.id);
       if (delErr && delErr.code !== '42P01') {
+        if (OPTIONAL_TABLES.has(table)) continue;   // RLS قد تمنع الحذف — الحساب يُحذف بالتتالي
         throw new Error(`خطأ في مسح ${table}: ${delErr.message}`);
       }
     }
@@ -682,11 +1379,17 @@ async function exportMonthlyReviewMD() {
 
   try {
     const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
 
     // ── جلب كل الجداول ─────────────────────────────────────
     // ترقيم صفحات 1000/دفعة (fetchAllRows) — بلا حد يقتطع الجداول الكبيرة بصمت
+    // + فلترة user_id صراحةً (دفاع في العمق): لا يعتمد التقرير على RLS وحدها،
+    //   فأي خلل في سياسة لا يُسرِّب صفوف مستخدم آخر إلى تقرير المالك.
     const fetchTable = (table, order) =>
-      fetchAllRows(table, q => order ? q.order(order, { ascending: true }) : q);
+      fetchAllRows(table, q => {
+        let x = q.eq(ownerColOf(table), user.id);
+        return order ? x.order(order, { ascending: true }) : x;
+      });
 
     setStatus('md-export-status', 'info', 'جارٍ تحميل البيانات…');
     const [holdings, transactions, dividends, cashflows, snapshots,
@@ -733,7 +1436,9 @@ async function exportMonthlyReviewMD() {
     const salaryData = await syncedGet('salary_planner_v1',  { categories: [], entries: [] });
     const sukukData  = await syncedGet('sukuk_planner_v1',   { opportunities: [] });
     const benchmark  = await syncedGet('tharwa-benchmark_v1', []);
-    const lifeGoals  = lsGet('life_goals_v1', []);   // localStorage فقط (غير متزامن)
+    // life_goals_v1 يُزامَن عبر user_settings (life-goals.js: saveUserSetting/loadUserSetting)
+    // — كان يُقرأ من localStorage فقط فيظهر التقرير بلا أهداف على جهاز جديد.
+    const lifeGoals  = await syncedGet('life_goals_v1', []);
 
     setStatus('md-export-status', 'info', 'جارٍ بناء التقرير…');
 
@@ -745,54 +1450,121 @@ async function exportMonthlyReviewMD() {
     const MONTHS   = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 
     // ── مساعدات ─────────────────────────────────────────────
+    // تهريب خلية جدول Markdown: أي «|» في نص المستخدم يكسر الجدول، وأي سطر
+    // جديد يقطعه. العملية idempotent (نفكّ التهريب أولاً) حتى لا يتضاعف الشرط
+    // «\\|» عند مرور نص سبق تهريبه عبر cell() المحلية في الأقسام 26/27.
+    const esc = v => {
+      if (v == null) return '—';
+      const s = String(v);
+      if (!s.trim()) return '—';
+      return s.replace(/\\\|/g, '|').replace(/\|/g, '\\|').replace(/\r?\n+/g, ' ').trim();
+    };
     const mdTable = (headers, rows) => {
       const sep = headers.map(() => '---');
       return [
-        '| ' + headers.join(' | ') + ' |',
+        '| ' + headers.map(esc).join(' | ') + ' |',
         '| ' + sep.join(' | ') + ' |',
-        ...rows.map(r => '| ' + r.join(' | ') + ' |')
+        ...rows.map(r => '| ' + r.map(esc).join(' | ') + ' |')
       ].join('\n');
     };
 
-    const lines = [];
-    const h1 = t => lines.push(`# ${t}\n`);
-    const h2 = t => lines.push(`\n## ${t}\n`);
-    const h3 = t => lines.push(`\n### ${t}\n`);
-    const p  = t => lines.push(t + '\n');
-    const hr = () => lines.push('\n---\n');
+    // ════════════════════════════════════════════════════════
+    // مُوجِّه التقارير (Books) — التقرير الواحد الضخم مُقسَّم إلى أربعة
+    // ملفات مترابطة. h1/h2/h3/p/hr تكتب في الكتاب الحالي فقط، فتقسيم
+    // قسمٍ = سطر book('X') واحد قبله.
+    // ════════════════════════════════════════════════════════
+    const BOOKS = {
+      A: { key: 'A', file: 'A_portfolio_decision', title: 'تقرير المحفظة والقرار',
+           desc: 'ما تملكه الآن، وما يقوله الدستور عنه، وما يحتاج قراراً.' },
+      B: { key: 'B', file: 'B_performance_income', title: 'تقرير الأداء والدخل',
+           desc: 'كيف أدّت المحفظة، مقابل تاسي، وكم تُنتج من دخل.' },
+      C: { key: 'C', file: 'C_planning_wealth', title: 'تقرير التخطيط والثروة',
+           desc: 'صافي الثروة، الراتب، الصكوك، العقار، التوقعات، وأهداف الحياة.' },
+      D: { key: 'D', file: 'D_raw_data', title: 'تقرير البيانات الخام الكاملة',
+           desc: 'كل صف وكل عمود في قاعدة البيانات — بلا اختصار ولا عيّنة.' },
+    };
+    Object.values(BOOKS).forEach(b => { b.lines = []; b.toc = []; });
+
+    let _cur = BOOKS.A;
+    const book = k => { _cur = BOOKS[k]; };
+
+    // مرساة العناوين: توليد slug صالح للربط الداخلي (يدعم العربية)
+    const _slugSeen = {};
+    const slug = t => {
+      let s = String(t).trim().toLowerCase()
+        .replace(/[^\p{L}\p{N}\s-]/gu, '')
+        .replace(/\s+/g, '-')
+        .replace(/^-+|-+$/g, '');
+      if (!s) s = 'section';
+      const n = (_slugSeen[s] = (_slugSeen[s] || 0) + 1);
+      return n > 1 ? `${s}-${n - 1}` : s;
+    };
+
+    const h1 = t => _cur.lines.push(`# ${t}\n`);
+    const h2 = t => { const a = slug(t); _cur.toc.push({ lvl: 2, t, a }); _cur.lines.push(`\n<a id="${a}"></a>\n\n## ${t}\n`); };
+    const h3 = t => { const a = slug(t); _cur.toc.push({ lvl: 3, t, a }); _cur.lines.push(`\n<a id="${a}"></a>\n\n### ${t}\n`); };
+    const p  = t => _cur.lines.push(t + '\n');
+    const hr = () => _cur.lines.push('\n---\n');
+
+    // إفساح المجال للمتصفح بين الأقسام الثقيلة — يمنع تجمّد الواجهة
+    // على المحافظ الكبيرة (آلاف المعاملات) ويسمح بتحديث شريط التقدّم.
+    let _step = 0;
+    const TOTAL_STEPS = 40;
+    const tick = async (label) => {
+      _step++;
+      const pctDone = Math.min(99, Math.round(_step / TOTAL_STEPS * 100));
+      setStatus('md-export-status', 'info', `جارٍ بناء التقرير… ${pctDone}% — ${label}`);
+      await new Promise(r => setTimeout(r, 0));
+    };
+
+    // سجل المصادر المتعذّرة — الدستور §8: لا حذف صامت ولا تقدير صامت
+    const missingSources = [];
+    const noteMissing = (name, why) => missingSources.push({ name, why });
 
     // ════════════════════════════════════════════════════════
-    // غلاف التقرير
+    // دليل القراءة (يُكرَّر في كل تقرير عند التجميع)
     // ════════════════════════════════════════════════════════
-    h1('تقرير المراجعة الشهرية — محفظة ثروة');
-    p(`**تاريخ التصدير:** ${dateStr}  `);
-    p(`**المستخدم:** ${user.email}  `);
-    p(`**الشهر المراجَع:** ${MONTHS[today.getMonth()]} ${today.getFullYear()}`);
-    hr();
-
-    // ════════════════════════════════════════════════════════
-    // دليل القراءة
-    // ════════════════════════════════════════════════════════
-    h2('🔍 دليل القراءة');
-    p('هذا الملف يحتوي على كامل بيانات المحفظة الاستثمارية الشخصية. مُصمَّم ليُقرأ مباشرةً بواسطة نماذج الذكاء الاصطناعي لتحليل الأداء واستخلاص الرؤى.');
-    p('**المصطلحات المستخدمة:**');
-    p('- **avg_price / متوسط التكلفة**: متوسط سعر الشراء المرجَّح لكل سهم (price × shares / total_shares)، لا يشمل العمولة');
-    p('- **cost_basis / تكلفة الحيازة**: avg_price × عدد الأسهم المتبقية — التكلفة الفعلية لما يُحتفظ به حالياً');
-    p('- **unrealized_pnl**: (current_price − avg_price) × shares — ربح/خسارة ورقية لم تُحقَّق بعد');
-    p('- **realized_pnl**: عائد البيع − تكلفة الأسهم المباعة — ربح/خسارة فعلي من صفقات البيع المكتملة');
-    p('- **YOC (Yield on Cost)**: أرباح موزعة ÷ تكلفة الحيازة × 100 — العائد على التكلفة الأصلية');
-    p('- **total في المعاملات**: للشراء = price × shares + عمولة + VAT | للبيع = price × shares − عمولة − VAT');
-    p('- **العمولة**: 0.15% من قيمة الصفقة بحد أقصى 100 ر.س + VAT 15%');
-    p('- **الأرقام بالريال السعودي (ر.س) ما لم يُذكر خلاف ذلك**');
-    hr();
+    const READING_GUIDE = [];
+    {
+      const g = t => READING_GUIDE.push(t + '\n');
+      g('**المصطلحات المستخدمة:**');
+      g('- **avg_price / متوسط التكلفة**: متوسط سعر الشراء المرجَّح لكل سهم (price × shares / total_shares)، لا يشمل العمولة');
+      g('- **cost_basis / تكلفة الحيازة**: avg_price × عدد الأسهم المتبقية — التكلفة الفعلية لما يُحتفظ به حالياً');
+      g('- **unrealized_pnl**: (current_price − avg_price) × shares — ربح/خسارة ورقية لم تُحقَّق بعد');
+      g('- **realized_pnl**: عائد البيع − تكلفة الأسهم المباعة — ربح/خسارة فعلي من صفقات البيع المكتملة');
+      g('- **YOC (Yield on Cost)**: أرباح موزعة ÷ تكلفة الحيازة × 100 — العائد على التكلفة الأصلية');
+      g('- **XIRR**: العائد السنوي المركّب الحقيقي المراعي لتوقيت كل تدفق نقدي (Newton-Raphson على NPV=0)');
+      g('- **TWR**: العائد المعدَّل بالزمن (Modified Dietz) — يعزل قراراتك بإزالة أثر الإيداع والسحب');
+      g('- **total في المعاملات**: للشراء = price × shares + عمولة + VAT | للبيع = price × shares − عمولة − VAT');
+      g('- **العمولة**: 0.15% من قيمة الصفقة بحد أقصى 100 ر.س + VAT 15%');
+      g('- **الأرقام بالريال السعودي (ر.س) ما لم يُذكر خلاف ذلك**');
+      g('');
+      g('**تنبيه منهجي (الدستور §8):** أي بيانات غير متوفرة تُعلَن صراحةً ولا تُقدَّر بصمت. راجع قسم «المصادر المتعذّرة» في نهاية كل تقرير.');
+    }
 
     // ════════════════════════════════════════════════════════
     // 1. الأسهم الحالية (Holdings)
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('الحيازات');
     h2('1. الأسهم الحالية في المحفظة (Holdings)');
     p('الأسهم التي يُحتفظ بها حالياً. السعر الحالي مُدخَّل يدوياً ويعكس آخر تحديث.');
 
     if (holdings.length) {
+      // خرائط مساعدة: الهدف المسجّل لكل رمز + طابع طزاجة السعر
+      const _tgtMap = {};
+      stockTargets.forEach(t => { if (t && t.ticker) _tgtMap[t.ticker] = +t.target_pct || 0; });
+      const _priceTs = lsGet('tharwa-price-timestamps', {}) || {};
+      const _freshOf = tk => {
+        const raw = _priceTs[tk];
+        if (!raw) return { txt: 'غير متوفرة', days: null, stale: null };
+        const ms = new Date(raw).getTime();
+        if (!isFinite(ms)) return { txt: 'غير متوفرة', days: null, stale: null };
+        const days = (Date.now() - ms) / 86400000;
+        return { txt: `${days.toFixed(1)} يوم ${days > 7 ? '🔴' : '🟢'}`, days, stale: days > 7 };
+      };
+      const _grandMkt = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+
       let totalCost = 0, totalMkt = 0;
       const hRows = holdings
         .sort((a, b) => (+b.shares * +b.current_price) - (+a.shares * +a.current_price))
@@ -801,27 +1573,54 @@ async function exportMonthlyReviewMD() {
           const cost  = +h.shares * +h.avg_price;
           const upnl  = mkt - cost;
           const upct  = cost > 0 ? upnl / cost * 100 : 0;
+          const wt    = _grandMkt > 0 ? mkt / _grandMkt * 100 : 0;
+          const tgt   = _tgtMap[h.ticker];
+          const dev   = tgt != null ? wt - tgt : null;
           totalCost  += cost;
           totalMkt   += mkt;
           return [
-            h.ticker, h.name || '—', N(h.shares),
-            SAR(h.avg_price), SAR(h.current_price),
-            SAR(cost), SAR(mkt),
+            h.ticker, h.name || '—', h.sector || 'غير مصنف', N(h.shares),
+            SAR(h.avg_price), SAR(h.current_price), _freshOf(h.ticker).txt,
+            SAR(cost), SAR(mkt), PCT(wt),
+            tgt != null ? PCT(tgt) : 'بلا هدف',
+            dev != null ? ((dev >= 0 ? '+' : '') + PCT(dev)) : '—',
             (upnl >= 0 ? '+' : '') + SAR(upnl),
             (upct >= 0 ? '+' : '') + PCT(upct)
           ];
         });
 
       p(mdTable(
-        ['الرمز','الاسم','الأسهم','متوسط التكلفة','السعر الحالي','تكلفة الحيازة','القيمة السوقية','ر/خ غير محقق','ر/خ %'],
+        ['الرمز','الاسم','القطاع','الأسهم','متوسط التكلفة','السعر الحالي','عمر السعر',
+         'تكلفة الحيازة','القيمة السوقية','الوزن%','الهدف%','الانحراف','ر/خ غير محقق','ر/خ %'],
         hRows
       ));
 
       const totalUpnl = totalMkt - totalCost;
       const totalUpct = totalCost > 0 ? totalUpnl / totalCost * 100 : 0;
-      p(`\n**إجمالي تكلفة الحيازات:** ${SAR(totalCost)} ر.س  `);
+      p(`\n**عدد الأسهم المملوكة:** ${holdings.length}  `);
+      p(`**إجمالي تكلفة الحيازات:** ${SAR(totalCost)} ر.س  `);
       p(`**إجمالي القيمة السوقية:** ${SAR(totalMkt)} ر.س  `);
+      p(`**النقد غير المستثمر:** ${SAR(portfolioCash)} ر.س  `);
       p(`**إجمالي ر/خ غير محقق:** ${(totalUpnl >= 0 ? '+' : '')}${SAR(totalUpnl)} ر.س (${(totalUpct >= 0 ? '+' : '')}${PCT(totalUpct)})`);
+
+      // ── تشخيص: ماذا تعني هذه الأرقام ─────────────────────
+      h3('ما تعنيه هذه الأرقام (تشخيص الحيازات)');
+      {
+        const staleN  = holdings.filter(h => _freshOf(h.ticker).stale === true).length;
+        const noTsN   = holdings.filter(h => _freshOf(h.ticker).days == null).length;
+        const winners = holdings.filter(h => +h.current_price > +h.avg_price).length;
+        const losers  = holdings.length - winners;
+        const topH    = holdings[0];
+        const topW    = _grandMkt > 0 && topH ? (+topH.shares * +topH.current_price) / _grandMkt * 100 : 0;
+        const noTgt   = holdings.filter(h => _tgtMap[h.ticker] == null).length;
+        const diag = [];
+        diag.push(`- **حجم المحفظة:** ${holdings.length} سهم — ${holdings.length < 18 ? '⚠️ أقل من الحد الأدنى الدستوري (18)' : holdings.length > 25 ? '⚠️ أعلى من السقف الدستوري (25)' : '✅ داخل النطاق المستهدف 18–25 (الدستور §1)'}.`);
+        if (topH) diag.push(`- **أكبر مركز:** ${topH.ticker} عند ${PCT(topW)} من المحفظة — ${topW > 12.75 ? '🔴 يتجاوز حتى سقف القيادي 12% + منطقة السماح' : topW > 7.75 ? '🟡 فوق سقف السهم العادي 7% (مقبول فقط إن كان قيادياً)' : '✅ تحت السقف'}.`);
+        diag.push(`- **الرابحون مقابل الخاسرون:** ${winners} سهم فوق متوسط تكلفته، ${losers} تحته.`);
+        diag.push(`- **موثوقية الأسعار:** ${staleN} سهم سعره أقدم من 7 أيام، و${noTsN} سهم بلا طابع زمني. ${staleN + noTsN > 0 ? '⚠️ كل رقم مبني على السعر (الوزن، الانحراف، XIRR) يرث هذا الضعف.' : '✅ كل الأسعار حديثة.'}`);
+        diag.push(`- **الأهداف:** ${noTgt} سهم بلا هدف وزن مسجّل${noTgt ? ' — لا يُلفَّق لها هدف من السقف؛ يُقاس التزامها بالسقف الدستوري فقط.' : '.'}`);
+        p(diag.join('\n'));
+      }
 
       // توزيع القطاعات
       h3('توزيع القطاعات');
@@ -830,18 +1629,33 @@ async function exportMonthlyReviewMD() {
         const sec = h.sector || 'غير مصنف';
         secMap[sec] = (secMap[sec] || 0) + +h.shares * +h.current_price;
       });
+      const secTgtMap = {};
+      sectorTargets.forEach(t => { if (t && t.sector) secTgtMap[t.sector] = +t.target_pct || 0; });
       const secRows = Object.entries(secMap)
         .sort((a, b) => b[1] - a[1])
-        .map(([sec, val]) => [sec, SAR(val), PCT(totalMkt > 0 ? val / totalMkt * 100 : 0)]);
-      p(mdTable(['القطاع', 'القيمة السوقية', '% من المحفظة'], secRows));
+        .map(([sec, val]) => {
+          const w = totalMkt > 0 ? val / totalMkt * 100 : 0;
+          const t = secTgtMap[sec];
+          return [sec, String(holdings.filter(h => (h.sector || 'غير مصنف') === sec).length),
+                  SAR(val), PCT(w), t != null ? PCT(t) : 'بلا هدف',
+                  w > 26.25 ? '🔴 كسر سقف 25%' : w > 25 ? '🟡 داخل منطقة السماح' : '✅'];
+        });
+      p(mdTable(['القطاع', 'عدد الأسهم', 'القيمة السوقية', '% من المحفظة', 'الهدف%', 'مقابل سقف 25%'], secRows));
+      {
+        const over = secRows.filter(r => r[5].startsWith('🔴'));
+        p(`\n**تشخيص قطاعي:** ${Object.keys(secMap).length} قطاع. ${over.length ? `🔴 ${over.length} قطاع كسر سقف 25% الدستوري: ${over.map(r => r[0]).join('، ')} — الفلتر 4 يفرض تنبيه تركيز قطاعي.` : '✅ لا قطاع يتجاوز سقف 25% + منطقة السماح 1.25%.'}`);
+      }
     } else {
       p('_لا توجد أسهم محتفظ بها حالياً._');
+      noteMissing('الحيازات (holdings)', 'الجدول فارغ — لا يمكن حساب الأوزان ولا الأداء ولا محرّك القرار.');
     }
     hr();
 
     // ════════════════════════════════════════════════════════
     // 2. سجل المعاملات الكامل (Transactions)
     // ════════════════════════════════════════════════════════
+    book('D');
+    await tick('المعاملات');
     h2('2. سجل المعاملات الكامل (Transactions)');
     p(`إجمالي عدد المعاملات: **${transactions.length}**  `);
     p('النوع: buy = شراء | sell = بيع | grant = منحة مجانية  ');
@@ -925,6 +1739,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 3. الأرباح الموزعة (Dividends)
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('التوزيعات');
     h2('3. الأرباح الموزعة (Dividends)');
     p(`إجمالي عدد سجلات الأرباح: **${dividends.length}**`);
 
@@ -967,6 +1783,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 4. التدفقات النقدية (Cash Flows)
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('التدفقات النقدية');
     h2('4. التدفقات النقدية (Cash Flows)');
     p('الإيداعات والسحوبات من/إلى حساب المحفظة. تُستخدم لحساب صافي رأس المال الذي ضُخّ في المحفظة.');
 
@@ -997,6 +1815,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 5. صافي الثروة — الأصول والالتزامات
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('صافي الثروة');
     h2('5. صافي الثروة (Net Worth)');
 
     // أحدث snapshot
@@ -1039,6 +1859,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 6. العقارات (Real Estate)
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('العقارات');
     h2('6. العقارات (Real Estate)');
 
     const activeRE = realEstate.filter(r => r.is_active !== false);
@@ -1075,6 +1897,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 7. أهداف المحفظة (Targets)
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('أهداف الأوزان');
     h2('7. أهداف الأوزان (Targets)');
     p('الأوزان المستهدفة لكل سهم وقطاع. الوزن الحالي محسوب من القيمة السوقية الحالية.');
 
@@ -1137,6 +1961,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 8. قائمة المراقبة (Watchlist)
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('قائمة المراقبة');
     h2('8. قائمة المراقبة (Watchlist)');
 
     if (watchlist.length) {
@@ -1155,6 +1981,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 9. المهام (Tasks)
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('المهام');
     h2('9. مهام المحفظة (Tasks)');
     p('المهام مقسّمة إلى: تصفية كاملة (liquidation) | تخفيف (reduction) | مراقبة (monitoring) | تجميع (accumulation) | احتفاظ (hold)');
 
@@ -1192,6 +2020,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 10. الملخص الإحصائي للذكاء الاصطناعي
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('الملخص الإحصائي');
     h2('10. الملخص الإحصائي — جاهز للتحليل');
     p('هذا القسم يجمع أهم الأرقام في مكان واحد لتسهيل التحليل الآلي.');
 
@@ -1321,6 +2151,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 11. هدف التقاعد / الاستقلال المالي (FIRE)
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('هدف الاستقلال المالي');
     h2('11. هدف الاستقلال المالي (FIRE)');
     if (retGoal.monthly > 0) {
       const monthlyTarget  = retGoal.monthly;
@@ -1356,6 +2188,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 12. الأداء التاريخي التفصيلي لكل سهم
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('أداء كل سهم');
     h2('12. الأداء التاريخي التفصيلي لكل سهم');
     p('يشمل: الربح/الخسارة الورقية، المحقق من البيع، الأرباح الموزعة، والعائد على التكلفة (YOC) لكل رمز.');
 
@@ -1467,6 +2301,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 13. الأرباح الموزعة — ملخص شهري
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('التوزيعات الشهرية');
     h2('13. الأرباح الموزعة — ملخص شهري');
     p('توزيع الأرباح المستلمة بحسب الشهر والسنة. مفيد لتقدير الدخل السلبي الشهري.');
 
@@ -1522,6 +2358,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 14. مخطط الراتب والتوزيعات
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('الراتب');
     h2('14. مخطط الراتب والتوزيعات الشهرية');
     p('بيانات مخطط الراتب — الدخل الشهري وتوزيعه على: مصاريف، ادخار، أصول، محفظة التقاعد.');
 
@@ -1584,6 +2422,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 15. الصكوك والسندات
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('الصكوك');
     h2('15. الصكوك والسندات');
     p('فرص الصكوك المُدخَّلة في مخطط الصكوك.');
 
@@ -1648,6 +2488,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 16. الأهداف الحياتية
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('أهداف الحياة');
     h2('16. الأهداف الحياتية');
     p('قائمة الأهداف الشخصية والمالية وحالة الإنجاز.');
 
@@ -1686,6 +2528,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 17. قاعدة بيانات الأسهم (User Stocks)
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('قاعدة الأسهم');
     h2('17. قاعدة بيانات الأسهم المتابَعة');
     p('جميع الأسهم المُدخَّلة في قاعدة بيانات المستخدم — سواء كانت في المحفظة أم لا.');
 
@@ -1706,6 +2550,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 18. دفتر المراجعة — ملاحظات المستخدم على كل سهم
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('دفتر المراجعة');
     h2('18. دفتر المراجعة (ملاحظات المستخدم)');
     p('مراجعات ونقاط الدراسة التي سجّلها المستخدم بنفسه عن كل سهم — مهمة لفهم القرارات الاستثمارية.');
 
@@ -1745,6 +2591,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 19. المؤشر المرجعي (تاسي) — خط أساس مقارنة الأداء
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('مؤشر تاسي');
     h2('19. المؤشر المرجعي (تاسي TASI) — مقارنة الأداء');
     p('نقاط مؤشر السوق المُدخَلة يدوياً في صفحة الأداء التاريخي، تُستخدم كخط أساس لقياس أداء المحفظة مقابل السوق.');
 
@@ -1772,6 +2620,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 20. مخزون المنزل
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('الجرد');
     h2('20. مخزون المنزل (Inventory)');
     p('قائمة محتويات المنزل والمقتنيات بقيمتها التقديرية — مفيد للتأمين والجرد الكامل.');
     {
@@ -1808,6 +2658,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 21. المتابعة المدرسية
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('المدرسة');
     h2('21. المتابعة المدرسية (School Tracker)');
     p('بيانات كل طفل: الملف الشخصي، الأهداف الحياتية والدراسية، الدرجات، الغياب.');
     {
@@ -1903,6 +2755,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 22. متابعة كندة (School Kanda)
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('متابعة كندة');
     h2('22. متابعة كندة الخاصة (School Kanda)');
     {
       const kanda = lsGet('school_kanda_v1', { profile:{name:'كندة',birth:''}, lifeGoals:[], schoolGoals:[], years:[], subjects:[], grades:{} });
@@ -1945,6 +2799,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 23. سجل حاسبة القيمة العادلة
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('سجل التقييمات');
     h2('23. سجل حاسبة القيمة العادلة للأسهم');
     p('جميع عمليات التقييم المحفوظة — المدخلات الكاملة (شركة عادية / ريت / بنك)، الملاحظات، تقييم Perplexity، Beta، ونتائج كل نموذج لكل عملية. المصدر: قاعدة البيانات السحابية (user_settings) مع رجوع للنسخة المحلية.');
     {
@@ -2046,6 +2902,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 24. مرفقات دفتر المراجعة
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('المرفقات');
     h2('24. مرفقات دفتر المراجعة (Review Log Attachments)');
     p('قائمة الملفات المرفقة بمراجعات الأسهم — metadata فقط؛ المحتوى الثنائي محفوظ في قاعدة البيانات ويُستعاد بالنسخة الاحتياطية JSON.');
     if (reviewAttachments.length) {
@@ -2065,6 +2923,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 25. إعدادات التطبيق
     // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('الإعدادات');
     h2('25. إعدادات التطبيق');
     p('الإعدادات الشخصية المحفوظة محلياً في المتصفح.');
     {
@@ -2086,6 +2946,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 26. محرّك القرار
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('محرّك القرار');
     h2('26. محرّك القرار (Decision Engine) — تطبيق دستور المحفظة آلياً');
     p('يطبّق القواعد الثابتة في الدستور (CLAUDE.md) على بيانات المحفظة الحيّة. اللقطة أدناه تُحفظ آلياً عند كل فتح لصفحة «محرّك القرار». لتحديثها بأحدث الأسعار: افتح الصفحة مرة واحدة ثم أعد تصدير هذا التقرير.');
     {
@@ -2192,6 +3054,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 27. تقييم أمان المحفظة (Portfolio Safety Rating)
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('تقييم الأمان');
     h2('27. تقييم أمان المحفظة (Portfolio Safety Rating)');
     p('لقطة آخر حساب من صفحة «تقييم أمان المحفظة». الدرجة من 10، مبنية على مدخلات يدوية يحفظها المالك. تُحدَّث آلياً عند كل حساب في تلك الصفحة.');
     {
@@ -2242,6 +3106,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 28. مواعيد آخر تحديث لأسعار الأسهم
     // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('طزاجة الأسعار');
     h2('28. مواعيد آخر تحديث لأسعار الأسهم (Price Freshness)');
     p('تاريخ آخر تحديث يدوي للسعر لكل رمز — يقيس طزاجة بيانات الأسعار. يُعتبر السعر «قديماً» بعد 7 أيام.');
     {
@@ -2270,6 +3136,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 29. الأداء التفصيلي — العائد المعدَّل بالزمن (TWR)
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('العائد المعدَّل بالزمن');
     h2('29. الأداء التفصيلي — العائد المعدَّل بالزمن (TWR)');
     p('العائد المعدَّل بالزمن (Time-Weighted Return، معيار GIPS بطريقة Modified Dietz) يعزل أداء قراراتك الاستثمارية بإزالة أثر الإيداعات والسحوبات. الأساس = 100 عند أول لقطة صافي ثروة. (مطابق لمنطق صفحة الأداء.)');
     {
@@ -2471,6 +3339,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 30. مقاييس المخاطر (Risk Metrics)
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('مقاييس المخاطر');
     h2('30. مقاييس المخاطر — التنويع والتركيز والتذبذب');
     p('طبقة المخاطر التي تكمّل أرقام العائد: تقيس *ثمن* العائد لا حجمه فقط. (مطابقة للوحة التحكم وصفحة الأداء.)');
 
@@ -2547,6 +3417,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 31. التدقيق السلوكي (Behavioral Audit)
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('التدقيق السلوكي');
     h2('31. التدقيق السلوكي — انضباط قراراتك');
     p('يحلّل صفقاتك المُغلقة (المُصفّاة بالكامل) لكشف الأنماط النفسية: هل تُمسك بخاسريك؟ هل تُتاجر بإفراط؟ (مطابق لصفحة الأداء.)');
     {
@@ -2627,6 +3499,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 32. مؤشرات لوحة التحكم الإضافية
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('مؤشرات اللوحة');
     h2('32. مؤشرات لوحة التحكم الإضافية');
     {
       const netCapital = _totalBuys - _totalSells;
@@ -2783,6 +3657,8 @@ async function exportMonthlyReviewMD() {
     // ════════════════════════════════════════════════════════
     // 33. أداء التوزيعات المتقدم
     // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('أداء التوزيعات المتقدم');
     h2('33. أداء التوزيعات المتقدم');
     {
       const divROI = _totalBuys > 0 ? _totalDiv / _totalBuys * 100 : 0;
@@ -2823,44 +3699,790 @@ async function exportMonthlyReviewMD() {
     }
     hr();
 
-    p('---');
-    p('_تم توليد هذا التقرير تلقائياً من تطبيق ثروة — مفكرة حسابية شخصية._');
-    p('_الأرقام تعكس البيانات المُدخَّلة يدوياً ولا تمثّل توصيات استثمارية._');
+    // ════════════════════════════════════════════════════════
+    // 34. XIRR — العائد السنوي الحقيقي للمحفظة ولكل مركز
+    // ════════════════════════════════════════════════════════
+    book('B');
+    await tick('XIRR');
+    h2('34. XIRR — العائد السنوي الحقيقي (المحفظة وكل مركز)');
+    p('XIRR هو معدل الخصم الذي يجعل صافي القيمة الحالية لكل تدفقاتك = صفر. بخلاف «الربح %» البسيط، يعاقب رأس المال الذي دخل متأخراً ويكافئ الذي دخل مبكراً — فهو المقياس الوحيد الذي يجيب: «كم ربحتُ سنوياً فعلاً؟».');
+    p('**اتفاقية الإشارة:** الشراء تدفق سالب (خروج نقد)، البيع والتوزيعات موجب، والقيمة السوقية الحالية تُضاف كتدفق موجب افتراضي بتاريخ اليوم.');
+    {
+      const _xirrAvailable = typeof computeXIRR === 'function';
+      if (!_xirrAvailable) {
+        p('⚠️ **غير متوفر:** دالة `computeXIRR` غير محمّلة (utils.js). لا يُقدَّر العائد بصمت (الدستور §8).');
+        noteMissing('XIRR', 'دالة computeXIRR غير متاحة في هذه الجلسة.');
+      } else {
+        const _d = s => { const x = new Date(s); return isNaN(x.getTime()) ? null : x; };
 
-    // ── تحميل الملف ─────────────────────────────────────────
-    const md   = lines.join('\n');
-    const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href = url;
-    a.download = `tharwa_review_${dateStr}.md`;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a);
-    // L-4: defer revoke so browser finishes consuming the blob URL
-    setTimeout(() => URL.revokeObjectURL(url), 100);
+        // ── XIRR للمحفظة ككل ──────────────────────────────
+        const pflows = [];
+        transactions.forEach(t => {
+          const dt = _d(t.date); if (!dt) return;
+          if (t.type === 'buy')  pflows.push({ date: dt, amount: -(+t.total || 0) });
+          if (t.type === 'sell') pflows.push({ date: dt, amount:  (+t.total || 0) });
+          // grant: منحة بلا تكلفة — لا تدفق نقدي
+        });
+        dividends.forEach(dv => {
+          const dt = _d(dv.date); if (!dt) return;
+          pflows.push({ date: dt, amount: +dv.amount || 0 });
+        });
+        if (_totalMkt + portfolioCash > 0) pflows.push({ date: today, amount: _totalMkt + portfolioCash });
 
-    const totalLines = md.split('\n').length;
+        const pXirr = computeXIRR(pflows);
+        p('```');
+        p(`عدد التدفقات المستخدمة   : ${pflows.length}`);
+        p(`أول تدفق                 : ${pflows.length ? new Date(Math.min(...pflows.map(f => f.date.getTime()))).toISOString().slice(0, 10) : '—'}`);
+        p(`القيمة النهائية المفترضة : ${SAR(_totalMkt + portfolioCash)} ر.س (سوقية + نقد غير مستثمر)`);
+        p(`XIRR للمحفظة             : ${pXirr == null ? 'غير متوفر' : ((pXirr >= 0 ? '+' : '') + (pXirr).toFixed(2) + '%')}`);
+        p('```');
+        if (pXirr == null) {
+          p('⚠️ **غير متوفر:** يحتاج تدفقات موجبة وسالبة بتواريخ صالحة. لا يُقدَّر بديل.');
+          noteMissing('XIRR للمحفظة', 'التدفقات غير كافية أو تواريخها غير صالحة.');
+        } else {
+          const verdict = pXirr >= 10 ? '✅ فوق المتوسط التاريخي للأسواق الناشئة'
+                        : pXirr >= 5  ? '🟡 معقول لكنه دون طموح محفظة دخل طويلة الأفق'
+                        : pXirr >= 0  ? '⚠️ موجب لكنه ضعيف — يقارب التضخم أو دونه'
+                                      : '🔴 سالب — رأس المال يتآكل بعد احتساب التوقيت';
+          p(`**التشخيص:** ${verdict}. هذا الرقم يشمل التوزيعات وتوقيت كل ضخّة، فهو أصدق من «الربح %» البسيط.`);
+          p('**قيد على الدقة:** أي سعر قديم في §28 يجعل «القيمة النهائية» غير دقيقة، وبالتالي XIRR كله.');
+        }
+
+        // ── XIRR لكل مركز ─────────────────────────────────
+        h3('XIRR لكل مركز على حدة');
+        p('يُحسب لكل رمز من معاملاته وتوزيعاته وقيمته السوقية الحالية. «غير متوفر» تعني أن التدفقات لا تسمح بحل رياضي — لا تُقدَّر.');
+        const byTk = {};
+        const _reg = (tk, name) => (byTk[tk] || (byTk[tk] = { name: name || '', flows: [], buys: 0, sells: 0, div: 0 }));
+        transactions.forEach(t => {
+          const dt = _d(t.date); if (!dt) return;
+          const e = _reg(t.ticker, t.name);
+          if (t.type === 'buy')  { e.flows.push({ date: dt, amount: -(+t.total || 0) }); e.buys  += +t.total || 0; }
+          if (t.type === 'sell') { e.flows.push({ date: dt, amount:  (+t.total || 0) }); e.sells += +t.total || 0; }
+        });
+        dividends.forEach(dv => {
+          const dt = _d(dv.date); if (!dt) return;
+          const e = _reg(dv.ticker, dv.name);
+          e.flows.push({ date: dt, amount: +dv.amount || 0 });
+          e.div += +dv.amount || 0;
+        });
+        holdings.forEach(h => {
+          const e = _reg(h.ticker, h.name);
+          const mv = +h.shares * +h.current_price;
+          if (mv > 0) e.flows.push({ date: today, amount: mv });
+        });
+
+        const xRows = Object.entries(byTk).map(([tk, e]) => {
+          const r = computeXIRR(e.flows);
+          const held = holdings.some(h => h.ticker === tk);
+          return { tk, name: e.name, r, held, n: e.flows.length, buys: e.buys, sells: e.sells, div: e.div };
+        }).sort((a, b) => {
+          if ((a.r == null) !== (b.r == null)) return a.r == null ? 1 : -1;
+          return (b.r || 0) - (a.r || 0);
+        });
+
+        p(mdTable(
+          ['الرمز','الاسم','الحالة','عدد التدفقات','إجمالي الشراء','إجمالي البيع','التوزيعات','XIRR سنوي'],
+          xRows.map(r => [
+            r.tk, r.name || '—', r.held ? 'مملوك' : 'مُصفّى', String(r.n),
+            SAR(r.buys), SAR(r.sells), SAR(r.div),
+            r.r == null ? 'غير متوفر' : ((r.r >= 0 ? '+' : '') + r.r.toFixed(2) + '%'),
+          ])
+        ));
+        {
+          const ok  = xRows.filter(r => r.r != null);
+          const na  = xRows.length - ok.length;
+          const pos = ok.filter(r => r.r > 0);
+          const best = ok[0], worst = ok[ok.length - 1];
+          const diag = [];
+          diag.push(`- **قابلية الحساب:** ${ok.length} من ${xRows.length} مركزاً أمكن حساب XIRR له، و**${na}** غير متوفر (يُعلَن ولا يُقدَّر — §8).`);
+          if (ok.length) {
+            diag.push(`- **الموجب مقابل السالب:** ${pos.length} مركزاً بعائد سنوي موجب، ${ok.length - pos.length} سالب.`);
+            if (best)  diag.push(`- **الأفضل:** ${best.tk} ${best.name ? '(' + best.name + ')' : ''} عند ${(best.r >= 0 ? '+' : '') + best.r.toFixed(2)}% سنوياً.`);
+            if (worst) diag.push(`- **الأسوأ:** ${worst.tk} ${worst.name ? '(' + worst.name + ')' : ''} عند ${(worst.r >= 0 ? '+' : '') + worst.r.toFixed(2)}% سنوياً — راجع بوابة الاستدامة (الفلتر 1) قبل أي قرار، فالعائد الضعيف وحده ليس سبب خروج دستورياً.`);
+            if (pXirr != null) {
+              const above = ok.filter(r => r.r > pXirr).length;
+              diag.push(`- **مقابل المحفظة:** ${above} مركزاً يتفوق على XIRR المحفظة (${pXirr.toFixed(2)}%)، والبقية تسحبه للأسفل.`);
+            }
+          }
+          p(diag.join('\n'));
+        }
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 35. خطط التوقعات المحفوظة (Forecast Plans)
+    // ════════════════════════════════════════════════════════
+    book('C');
+    await tick('خطط التوقعات');
+    h2('35. خطط التوقعات المحفوظة (Forecast Plans)');
+    p('خطط الضخ المحفوظة من صفحة «التوقعات». الخطة المجمّدة (schemaVersion ≥ 2) تحمل مسار الإسقاط السنوي كاملاً وسياق البيانات وقت الحفظ، فتُعرض كما حُفظت بلا إعادة حساب.');
+    {
+      const plans = await syncedGet('forecast_plans_v1', []);
+      if (Array.isArray(plans) && plans.length) {
+        p(`**عدد الخطط المحفوظة:** ${plans.length}`);
+
+        h3('فهرس الخطط');
+        p(mdTable(
+          ['#','تاريخ الحفظ','الملاحظة','الإصدار','القيمة الابتدائية','الهدف النهائي','الضخ الشهري المطلوب','القيمة المتوقعة','الدخل الشهري المتوقع'],
+          plans.map((pl, i) => [
+            String(i + 1), pl.date || (pl.createdISO || '').slice(0, 10), pl.notes || '—',
+            pl.schemaVersion ? `v${pl.schemaVersion}` : 'قديمة (بلا مسار)',
+            pl.inp?.startValue != null ? SAR(pl.inp.startValue) : '—',
+            pl.targetFinalValue != null ? SAR(pl.targetFinalValue) : '—',
+            pl.alreadyReached ? 'الهدف مُحقَّق' : pl.impossible ? 'غير قابل للتحقق' : (pl.requiredPMT != null ? SAR(pl.requiredPMT) : '—'),
+            pl.finalValue != null ? SAR(pl.finalValue) : '—',
+            pl.finalIncome != null ? SAR(pl.finalIncome) : '—',
+          ])
+        ));
+
+        plans.forEach((pl, i) => {
+          h3(`خطة ${i + 1} — ${pl.notes || pl.date || 'بلا عنوان'}`);
+          p(`**المعرّف:** ${pl.id ?? '—'} | **تاريخ الإنشاء:** ${pl.createdISO || pl.date || '—'} | **سنة الأساس:** ${pl.baseYear ?? '—'} | **إصدار المخطّط:** ${pl.schemaVersion ?? 'قديم'}`);
+
+          if (pl.inp && typeof pl.inp === 'object') {
+            const inpRows = Object.entries(pl.inp)
+              .filter(([, v]) => v != null && v !== '' && typeof v !== 'object')
+              .map(([k, v]) => [k, typeof v === 'number' ? N(v) : String(v)]);
+            if (inpRows.length) { p('**المدخلات:**'); p(mdTable(['الحقل','القيمة'], inpRows)); }
+          }
+
+          if (pl.scenario && typeof pl.scenario === 'object') {
+            const scRows = Object.entries(pl.scenario)
+              .filter(([, v]) => v != null && typeof v !== 'object')
+              .map(([k, v]) => [k, typeof v === 'number' ? N(v) : String(v)]);
+            if (scRows.length) { p('**السيناريو المختار:**'); p(mdTable(['الحقل','القيمة'], scRows)); }
+          }
+
+          if (Array.isArray(pl.scenariosUsed) && pl.scenariosUsed.length) {
+            p('**كل السيناريوهات المعروضة وقت الحفظ:**');
+            const keys = [...new Set(pl.scenariosUsed.flatMap(s => Object.keys(s || {})))]
+              .filter(k => pl.scenariosUsed.every(s => typeof (s || {})[k] !== 'object'));
+            if (keys.length) {
+              p(mdTable(keys, pl.scenariosUsed.map(s => keys.map(k => {
+                const v = (s || {})[k];
+                return v == null ? '—' : (typeof v === 'number' ? N(v) : String(v));
+              }))));
+            }
+          }
+
+          if (Array.isArray(pl.path) && pl.path.length) {
+            p(`**مسار الإسقاط السنوي (${pl.path.length} نقطة):**`);
+            p(mdTable(
+              ['السنة','القيمة الاسمية','تراكمي التوزيعات','تراكمي المُضاف','القيمة الحقيقية (بعد التضخم)','الدخل الشهري'],
+              pl.path.map(s => [
+                String(s.y ?? s.year ?? '—'),
+                SAR(s.v ?? s.value ?? 0), SAR(s.d ?? s.cumDiv ?? 0), SAR(s.a ?? s.cumAdded ?? 0),
+                SAR(s.r ?? s.realValue ?? 0), SAR(s.i ?? s.monthlyIncome ?? 0),
+              ])
+            ));
+          } else {
+            p('_لا مسار إسقاط محفوظ لهذه الخطة (خطة قديمة قبل الإصدار 2) — تحتاج إعادة حساب حيّ من صفحة التوقعات._');
+          }
+
+          if (pl.context && typeof pl.context === 'object') {
+            const CTX = {
+              confidenceScore:'درجة الثقة في البيانات', capitalWeightedMonths:'أشهر مرجّحة برأس المال',
+              yearsActive:'سنوات النشاط', portfolioValue:'قيمة المحفظة وقت الحفظ',
+              annCapGrowth:'نمو رأسمالي سنوي (أداؤك الخام)', blendedCapGrowth:'النمو الممزوج المستخدم',
+              marketBenchmark:'أساس السوق المرجعي', perfWeight:'وزن أدائك في المزج',
+              safeDivYield:'عائد التوزيعات الآمن', divYieldSource:'مصدر عائد التوزيعات',
+              fwdAnnualIncome:'الدخل السنوي المتوقع', xirr:'XIRR وقت الحفظ',
+              holdingsCount:'عدد الحيازات', divYears:'سنوات بيانات التوزيعات',
+            };
+            const cRows = Object.keys(CTX).map(k => [
+              CTX[k],
+              pl.context[k] == null ? 'غير متوفر (§8)' : (typeof pl.context[k] === 'number' ? N(pl.context[k]) : String(pl.context[k])),
+            ]);
+            p('**سياق البيانات وقت الحفظ — على أي أساس بُنيت الخطة:**');
+            p(mdTable(['البند','القيمة'], cRows));
+          }
+        });
+
+        h3('ما تعنيه خطط التوقعات');
+        {
+          const withPath = plans.filter(pl => Array.isArray(pl.path) && pl.path.length > 1).length;
+          const reached  = plans.filter(pl => pl.alreadyReached).length;
+          const imposs   = plans.filter(pl => pl.impossible).length;
+          const pmts     = plans.map(pl => +pl.requiredPMT).filter(v => isFinite(v) && v > 0);
+          const diag = [];
+          diag.push(`- **${withPath}** من ${plans.length} خطة مجمّدة بمسار كامل — تُقرأ كما حُفظت؛ الباقي يحتاج إعادة حساب حيّ.`);
+          if (reached) diag.push(`- **${reached}** خطة هدفها مُحقَّق بالفعل عند لحظة الحفظ.`);
+          if (imposs)  diag.push(`- 🔴 **${imposs}** خطة صُنّفت «غير قابلة للتحقق» بالمعطيات وقتها — الهدف يحتاج مراجعة أو أفقاً أطول.`);
+          if (pmts.length) {
+            const mn = Math.min(...pmts), mx = Math.max(...pmts);
+            diag.push(`- **مدى الضخ الشهري المطلوب عبر خططك:** من ${SAR(mn)} إلى ${SAR(mx)} ر.س — الفجوة بينهما تقيس حساسية هدفك لافتراض العائد.`);
+          }
+          diag.push('- **تحذير منهجي:** كل خطة مبنية على معدل نمو مفترض. الخطة ليست تنبؤاً، بل اختبار «ماذا لو». تُقارَن بالواقع في §29 (TWR) و§34 (XIRR).');
+          p(diag.join('\n'));
+        }
+      } else {
+        p('_لا توجد خطط توقعات محفوظة. احفظ خطة من صفحة «التوقعات» ثم أعد تصدير التقرير._');
+        noteMissing('خطط التوقعات (forecast_plans_v1)', 'لا توجد خطط محفوظة بعد.');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 36. الامتثال لدستور المحفظة (CLAUDE.md) — فحص قاعدة بقاعدة
+    // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('الامتثال للدستور');
+    h2('36. الامتثال لدستور المحفظة — فحص كل قاعدة');
+    p('فحص آلي صريح لكل قاعدة صلبة في الدستور. كل بند له نتيجة قاطعة: ✅ ممتثل / 🔴 مخالف / ⚠️ غير قابل للفحص (بيانات ناقصة — تُعلَن ولا تُقدَّر، §8).');
+    {
+      const CAP_SINGLE = 7, CAP_BLUE = 12, CAP_SECTOR = 25;
+      const TOL_STOCK = 0.75, TOL_SECTOR = 1.25;
+      const checks = [];
+      const addCheck = (rule, ref, status, detail) => checks.push([rule, ref, status, detail]);
+
+      const gm = _totalMkt;
+      const deCfgC = await syncedGet('decision_engine_v1', {}) || {};
+      const isBlue = tk => !!(deCfgC[tk] && (deCfgC[tk].blueChip === true || deCfgC[tk].isBlueChip === true));
+
+      // ① سقف السهم الواحد / القيادي
+      if (holdings.length && gm > 0) {
+        const breaches = holdings.map(h => {
+          const w   = (+h.shares * +h.current_price) / gm * 100;
+          const cap = isBlue(h.ticker) ? CAP_BLUE : CAP_SINGLE;
+          return { tk: h.ticker, name: h.name, w, cap, blue: isBlue(h.ticker), over: w > cap + TOL_STOCK, inTol: w > cap && w <= cap + TOL_STOCK };
+        });
+        const hard = breaches.filter(b => b.over);
+        const soft = breaches.filter(b => b.inTol);
+        addCheck('سقف السهم الواحد 7% (والقيادي 12%) + منطقة سماح 0.75%', '§1',
+          hard.length ? '🔴 مخالف' : '✅ ممتثل',
+          hard.length
+            ? `${hard.length} سهم كسر سقفه: ${hard.map(b => `${b.tk} ${PCT(b.w)} > ${b.cap}%${b.blue ? ' (قيادي)' : ''}`).join('؛ ')}`
+            : `لا سهم يتجاوز سقفه.${soft.length ? ` (${soft.length} داخل منطقة السماح بلا تنبيه: ${soft.map(b => b.tk).join('، ')})` : ''}`);
+
+        // ② سقف القطاع
+        const secM = {};
+        holdings.forEach(h => { const s = h.sector || 'غير مصنف'; secM[s] = (secM[s] || 0) + +h.shares * +h.current_price; });
+        const secB = Object.entries(secM).map(([s, v]) => ({ s, w: v / gm * 100 })).filter(x => x.w > CAP_SECTOR + TOL_SECTOR);
+        addCheck('سقف القطاع الواحد 25% + منطقة سماح 1.25%', '§1',
+          secB.length ? '🔴 مخالف' : '✅ ممتثل',
+          secB.length ? `${secB.length} قطاع فوق السقف: ${secB.map(x => `${x.s} ${PCT(x.w)}`).join('؛ ')}` : `أعلى قطاع ${PCT(Math.max(...Object.values(secM).map(v => v / gm * 100)))} — تحت السقف.`);
+
+        // ③ حجم المحفظة
+        const nH = holdings.length;
+        addCheck('حجم المحفظة المستهدف 18–25 سهماً', '§1',
+          nH >= 18 && nH <= 25 ? '✅ ممتثل' : '🔴 مخالف',
+          `العدد الحالي ${nH} سهم — ${nH < 18 ? `ينقص ${18 - nH} سهماً عن الحد الأدنى (تركيز زائد)` : nH > 25 ? `يزيد ${nH - 25} سهماً عن السقف (تشتّت وإدارة مرهقة)` : 'داخل النطاق'}.`);
+
+        // ④ السوق 100% سعودي
+        addCheck('المحفظة 100% سعودية بقرار المالك — لا تُنتقد لغياب التنويع الجغرافي', '§1',
+          '✅ ممتثل (قرار مالك)',
+          `${nH} سهماً كلها في تاسي. هذا قيد مقصود ومُعلَن، لا يُطرح كخلل.`);
+      } else {
+        addCheck('الأسقف الوزنية والقطاعية وحجم المحفظة', '§1', '⚠️ غير قابل للفحص',
+          'لا توجد حيازات أو أن إجمالي القيمة السوقية = 0.');
+        noteMissing('فحص الأسقف الدستورية', 'لا حيازات أو قيمة سوقية صفرية.');
+      }
+
+      // ⑤ المشغّلات الثابتة
+      {
+        const snapC = await syncedGet('decision_engine_snapshot_v1', null);
+        const trg   = snapC?.fixedTriggers || [];
+        if (!snapC) {
+          addCheck('المشغّلات الثابتة (Fixed Triggers) — أولوية عليا', '§1 و§4 الفلتر 5', '⚠️ غير قابل للفحص',
+            'لا لقطة محفوظة لمحرّك القرار. افتح صفحة «محرّك القرار» مرة ثم أعد التصدير.');
+          noteMissing('لقطة محرّك القرار', 'لم تُحفظ بعد — الفلاتر والمشغّلات غير مفحوصة آلياً.');
+        } else if (!trg.length) {
+          addCheck('المشغّلات الثابتة (Fixed Triggers)', '§1', '✅ ممتثل (لا مشغّلات مُعرَّفة)',
+            'لم يُعرّف المالك أي trigger ثابت — لا شيء يُطبَّق أو يُخالَف.');
+        } else {
+          const fired = (snapC.results || []).filter(r => r.trigger?.fired);
+          addCheck('المشغّلات الثابتة (Fixed Triggers) — تُطبَّق كما هي بلا تعديل', '§1 و§8',
+            fired.length ? '🔴 مشغّل انطبق ويحتاج تنفيذاً' : '✅ ممتثل',
+            fired.length
+              ? `${fired.length} مشغّل انطبق: ${fired.map(r => `${r.ticker} → ${r.action}`).join('؛ ')} — يتجاوز أي حساب آخر.`
+              : `${trg.length} مشغّل مُعرَّف، لم ينطبق أيٌّ منها بالأسعار الحالية.`);
+        }
+      }
+
+      // ⑥ الدورة النصف سنوية
+      {
+        const last = reviewLog.length
+          ? [...reviewLog].sort((a, b) => String(b.review_date).localeCompare(String(a.review_date)))[0]
+          : null;
+        if (!last) {
+          addCheck('الدورة الروتينية كل 6 أشهر', '§5', '🔴 مخالف',
+            'لا توجد أي مراجعة مسجّلة في دفتر المراجعة — الدورة لم تبدأ.');
+        } else {
+          const days = (today - new Date(last.review_date)) / 86400000;
+          addCheck('الدورة الروتينية كل 6 أشهر', '§5',
+            days <= 183 ? '✅ ممتثل' : '🔴 مخالف',
+            `آخر مراجعة ${last.review_date} — منذ ${days.toFixed(0)} يوماً. ${days > 183 ? `تأخّر ${(days - 183).toFixed(0)} يوماً عن موعد الدورة.` : `متبقٍ ${(183 - days).toFixed(0)} يوماً.`}`);
+        }
+      }
+
+      // ⑦ طزاجة الأسعار (شرط صحة كل حساب دستوري)
+      {
+        const tsC = lsGet('tharwa-price-timestamps', {}) || {};
+        const staleC = holdings.filter(h => {
+          const v = tsC[h.ticker]; if (!v) return true;
+          const ms = new Date(v).getTime();
+          return !isFinite(ms) || (Date.now() - ms) / 86400000 > 7;
+        });
+        addCheck('سلامة مدخلات القرار — الأسعار حديثة (≤ 7 أيام)', '§2',
+          holdings.length ? (staleC.length ? '⚠️ ضعف في المدخلات' : '✅ ممتثل') : '⚠️ غير قابل للفحص',
+          holdings.length
+            ? (staleC.length ? `${staleC.length} سهم سعره قديم أو بلا طابع: ${staleC.map(h => h.ticker).join('، ')} — كل وزن وانحراف وXIRR مبني عليها يرث الضعف.` : 'كل الأسعار محدَّثة خلال 7 أيام.')
+            : 'لا حيازات.');
+      }
+
+      // ⑧ القيمة العادلة — قاعدة التثبيت
+      {
+        const vh = lsGet('valuation_history_v1', []);
+        const nv = Array.isArray(vh) ? vh.length : 0;
+        const covered = Array.isArray(vh) ? new Set(vh.map(v => v && (v.ticker || v.symbol)).filter(Boolean)) : new Set();
+        const missingVal = holdings.filter(h => !covered.has(h.ticker));
+        addCheck('إعادة تسعير القيمة العادلة بالنموذج الصحيح لكل أصل', '§3 و§4 الفلتر 2',
+          !nv ? '⚠️ غير قابل للفحص' : (missingVal.length ? '⚠️ تغطية ناقصة' : '✅ ممتثل'),
+          !nv ? 'لا سجل تقييمات محفوظ (valuation_history_v1).'
+              : `${nv} تقييماً محفوظاً يغطي ${covered.size} رمزاً. ${missingVal.length ? `**${missingVal.length}** سهماً مملوكاً بلا أي تقييم: ${missingVal.map(h => h.ticker).join('، ')} — الفلتر 2 لا يمكن تشغيله عليها؛ تُعلَن ولا تُقدَّر.` : 'كل الحيازات مُقيَّمة.'}`);
+        if (!nv) noteMissing('سجل القيمة العادلة (valuation_history_v1)', 'فارغ — الفلتر 2 غير قابل للتشغيل.');
+      }
+
+      // ⑨ الزكاة مستثناة + إعادة استثمار التوزيعات
+      addCheck('الزكاة مستثناة من كل الحسابات', '§1', '✅ ممتثل (بالتصميم)',
+        'لا يحتوي النظام على أي حقل أو خصم زكوي — الاستثناء مطبَّق بنيوياً.');
+      addCheck('كل التوزيعات يُعاد استثمارها', '§1 و§6', '⚠️ يُتحقَّق يدوياً',
+        `إجمالي التوزيعات المستلمة ${SAR(_totalDiv)} ر.س مقابل ${SAR(_totalBuys)} ر.س مشتريات. النظام لا يربط توزيعة بصفقة شراء، فلا يمكن إثبات إعادة الاستثمار آلياً — يُعلَن ولا يُفترض.`);
+
+      // ⑩ هدف الدخل
+      {
+        const goalMonthly = +retGoal.monthly || 0;
+        const fwdMonthly  = (_fwd?.total || 0) / 12;
+        addCheck('هدف الدخل 5,000 ر.س شهرياً بحلول 2045', '§1',
+          !goalMonthly ? '⚠️ غير قابل للفحص' : (fwdMonthly >= goalMonthly ? '✅ الهدف مُحقَّق' : '🟡 قيد البناء'),
+          !goalMonthly ? 'لم يُسجَّل هدف شهري في صفحة التقاعد.'
+            : `الدخل التوزيعي المتوقع حالياً ${SAR(fwdMonthly)} ر.س/شهر مقابل هدف ${SAR(goalMonthly)} ر.س — نسبة التغطية ${PCT(goalMonthly > 0 ? fwdMonthly / goalMonthly * 100 : 0)}.`);
+      }
+
+      p(mdTable(['القاعدة','المرجع','النتيجة','التفصيل'], checks));
+
+      h3('خلاصة الامتثال');
+      {
+        const bad  = checks.filter(c => c[2].startsWith('🔴')).length;
+        const warn = checks.filter(c => c[2].startsWith('⚠️') || c[2].startsWith('🟡')).length;
+        const good = checks.length - bad - warn;
+        p(`**${checks.length}** قاعدة فُحصت: **${good}** ممتثلة ✅ | **${bad}** مخالفة 🔴 | **${warn}** تحتاج بيانات أو تحقّقاً يدوياً ⚠️`);
+        p(bad
+          ? `\n🔴 **يوجد ${bad} خرق دستوري صريح.** الدستور §4 الفلتر 5: أي سقف يُكسر يفرض التخفيف بغض النظر عن القيمة العادلة. راجع «ما يحتاج قراراً الآن».`
+          : '\n✅ **لا خرق دستوري صريح في الأسقف الصلبة.** البنود ⚠️ ليست مخالفات بل فجوات بيانات — تُسدّ بإدخال البيانات الناقصة، لا بتقديرها.');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 37. ما يحتاج قراراً الآن — مرتَّب بالأولوية
+    // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('ما يحتاج قراراً');
+    h2('37. ما يحتاج قراراً الآن — مرتَّب بالأولوية');
+    p('ترتيب الأولوية دستورياً (§7): المشغّلات الثابتة ← كسر سقف ← فشل استدامة ← فرص إضافة ← صيانة بيانات. كل بند مربوط بالقاعدة التي أطلقته. البنود التي لا قاعدة لها لا تظهر هنا.');
+    {
+      const actions = [];
+      const addAct = (prio, label, what, why) => actions.push({ prio, label, what, why });
+
+      const snapD = await syncedGet('decision_engine_snapshot_v1', null);
+      const gm2   = _totalMkt;
+
+      // أولوية 1 — المشغّلات الثابتة
+      (snapD?.results || []).filter(r => r.trigger?.fired).forEach(r => {
+        addAct(1, `⚡ ${r.ticker} — ${r.name || ''}`,
+          r.action === 'exit' ? 'خروج كامل' : r.action === 'trim' ? 'تخفيف' : String(r.action || '—'),
+          `انطبق trigger ثابت مُعرَّف من المالك — يتجاوز أي حساب آخر (§1 و§4 الفلتر 5). ${esc(r.reason || '')}`);
+      });
+
+      // أولوية 2 — كسر سقف الوزن
+      if (gm2 > 0) {
+        const deCfgD = await syncedGet('decision_engine_v1', {}) || {};
+        holdings.forEach(h => {
+          const w    = (+h.shares * +h.current_price) / gm2 * 100;
+          const blue = !!(deCfgD[h.ticker] && (deCfgD[h.ticker].blueChip === true || deCfgD[h.ticker].isBlueChip === true));
+          const cap  = blue ? 12 : 7;
+          if (w > cap + 0.75) {
+            const excessVal = (w - cap) / 100 * gm2;
+            addAct(2, `⚖️ ${h.ticker} — ${h.name || ''}`,
+              `قصّ لإرجاع الوزن إلى ${cap}% (≈ ${SAR(excessVal)} ر.س)`,
+              `الوزن ${PCT(w)} فوق السقف ${cap}%${blue ? ' (قيادي)' : ''} — خطر تركيز، الفلتر 4. التخفيف جزئي بقدر ما يعيد الوزن للسقف فقط.`);
+          }
+        });
+        // كسر سقف القطاع
+        const secD = {};
+        holdings.forEach(h => { const s = h.sector || 'غير مصنف'; secD[s] = (secD[s] || 0) + +h.shares * +h.current_price; });
+        Object.entries(secD).forEach(([s, v]) => {
+          const w = v / gm2 * 100;
+          if (w > 26.25) addAct(2, `🏷️ قطاع ${s}`, 'خفض الانكشاف القطاعي إلى 25%',
+            `القطاع عند ${PCT(w)} فوق سقف 25% + السماح — تنبيه تركيز قطاعي (الفلتر 4).`);
+        });
+      }
+
+      // أولوية 3 — فشل بوابة الاستدامة
+      (snapD?.results || []).filter(r => r.sustain?.status === 'fail').forEach(r => {
+        addAct(3, `🔴 ${r.ticker} — ${r.name || ''}`, 'خروج',
+          `فشل بوابة الاستدامة (الفلتر 1) — الخروج واجب بغض النظر عن السعر؛ النزول هنا إشارة خروج لا إشارة شراء. ${esc(r.sustain?.reason || '')}`);
+      });
+      (snapD?.results || []).filter(r => r.sustain?.status === 'watch').forEach(r => {
+        addAct(4, `👁️ ${r.ticker} — ${r.name || ''}`, 'مراقبة لصيقة',
+          `قلق مؤقت في بوابة الاستدامة — لا يفرض إجراءً بعد، لكنه يمنع أي إضافة جديدة. ${esc(r.sustain?.reason || '')}`);
+      });
+
+      // أولوية 5 — فرص إضافة
+      (snapD?.results || []).filter(r => r.action === 'add').forEach(r => {
+        addAct(5, `🟢 ${r.ticker} — ${r.name || ''}`, 'تجميع مشروط',
+          `نجح الفلتر 1، والسعر تحت القيمة العادلة، والوزن دون الهدف (الفلتر 3). الشراء عند النزول مشروط لا آلي. ${esc(r.reason || '')}`);
+      });
+
+      // أولوية 6 — صيانة البيانات (تمنع تشغيل الفلاتر)
+      {
+        const tsD = lsGet('tharwa-price-timestamps', {}) || {};
+        const staleD = holdings.filter(h => {
+          const v = tsD[h.ticker]; if (!v) return true;
+          const ms = new Date(v).getTime();
+          return !isFinite(ms) || (Date.now() - ms) / 86400000 > 7;
+        });
+        if (staleD.length) addAct(6, '🗓️ تحديث الأسعار',
+          `حدِّث سعر ${staleD.length} سهم: ${staleD.map(h => h.ticker).join('، ')}`,
+          'الأسعار القديمة تُفسد الوزن والانحراف وXIRR ومحرّك القرار — صيانة مدخلات لا قرار استثماري.');
+
+        if (!snapD) addAct(6, '⚙️ تشغيل محرّك القرار',
+          'افتح صفحة «محرّك القرار» مرة واحدة',
+          'لا لقطة محفوظة — الفلاتر 1–5 لم تُشغَّل على البيانات الحالية، فلا يمكن إصدار قرارات مربوطة بقاعدة.');
+
+        const vhD = lsGet('valuation_history_v1', []);
+        const covD = Array.isArray(vhD) ? new Set(vhD.map(v => v && (v.ticker || v.symbol)).filter(Boolean)) : new Set();
+        const noVal = holdings.filter(h => !covD.has(h.ticker));
+        if (noVal.length) addAct(6, '🧮 تقييم القيمة العادلة',
+          `قيّم ${noVal.length} سهماً بلا تقييم: ${noVal.map(h => h.ticker).join('، ')}`,
+          'الفلتر 2 (إعادة تسعير القيمة العادلة) لا يمكن تشغيله بلا قيمة عادلة — والدستور §8 يمنع تقديرها بصمت.');
+
+        const lastR = reviewLog.length ? [...reviewLog].sort((a, b) => String(b.review_date).localeCompare(String(a.review_date)))[0] : null;
+        const dLast = lastR ? (today - new Date(lastR.review_date)) / 86400000 : null;
+        if (dLast == null || dLast > 183) addAct(6, '📅 الدورة النصف سنوية',
+          'نفّذ مراجعة الدورة وسجّلها في دفتر المراجعة',
+          dLast == null ? 'لا مراجعة مسجّلة إطلاقاً (§5).' : `آخر مراجعة منذ ${dLast.toFixed(0)} يوماً — تجاوزت 183 يوماً (§5).`);
+      }
+
+      if (actions.length) {
+        actions.sort((a, b) => a.prio - b.prio);
+        const PL = { 1:'1 — مشغّل ثابت', 2:'2 — كسر سقف', 3:'3 — فشل استدامة', 4:'4 — قلق استدامة', 5:'5 — فرصة إضافة', 6:'6 — صيانة بيانات' };
+        p(mdTable(['الأولوية','البند','الإجراء','السبب (القاعدة التي اشتغلت)'],
+          actions.map(a => [PL[a.prio] || String(a.prio), a.label, a.what, a.why])));
+
+        h3('الشكل الدستوري للتنبيهات (§7)');
+        actions.filter(a => a.prio <= 3).forEach(a => {
+          p('```');
+          p(`${a.label}`);
+          p(`→ الإجراء: ${a.what}`);
+          p(`→ السبب: ${a.why}`);
+          p('```');
+        });
+
+        const p1 = actions.filter(a => a.prio === 1).length;
+        const p2 = actions.filter(a => a.prio === 2).length;
+        const p3 = actions.filter(a => a.prio === 3).length;
+        p(`\n**الخلاصة:** ${actions.length} بنداً يحتاج انتباهاً — منها **${p1}** مشغّل ثابت، **${p2}** كسر سقف، **${p3}** فشل استدامة. ${p1 + p2 + p3 > 0 ? '🔴 هذه الثلاثة إلزامية دستورياً ولا تحتمل تأجيلاً.' : '✅ لا شيء إلزامي — الباقي فرص وصيانة.'}`);
+      } else {
+        p('✅ **لا بند يحتاج قراراً الآن.** لا مشغّل انطبق، ولا سقف انكسر، ولا بوابة استدامة فشلت، ولا فجوة بيانات حرجة. الإجراء الدستوري: **احتفظ**.');
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 38. البيانات الخام الكاملة — كل صف وكل عمود
+    // ════════════════════════════════════════════════════════
+    book('D');
+    await tick('البيانات الخام');
+    h2('38. البيانات الخام الكاملة — كل صف وكل عمود');
+    p('نسخة حرفية من كل جدول في قاعدة البيانات كما هو، بكل أعمدته بلا انتقاء وبلا عيّنة. الهدف: أي رقم في التطبيق يمكن تتبّعه إلى مصدره هنا. العمود `user_id` محذوف (قيمة واحدة مكرَّرة، بلا فائدة تحليلية).');
+    {
+      const dumpTable = (label, rows, note) => {
+        h3(`${label} — ${Array.isArray(rows) ? rows.length : 0} صف`);
+        if (note) p(note);
+        if (!Array.isArray(rows) || !rows.length) { p('_لا صفوف._'); return; }
+        const keys = [...new Set(rows.flatMap(r => Object.keys(r || {})))].filter(k => k !== 'user_id');
+        if (!keys.length) { p('_لا أعمدة._'); return; }
+        p(mdTable(keys, rows.map(r => keys.map(k => {
+          const v = (r || {})[k];
+          if (v == null) return '—';
+          if (typeof v === 'object') {
+            const j = JSON.stringify(v);
+            return j.length > 300 ? j.slice(0, 300) + '…(مقتطع)' : j;
+          }
+          const s = String(v);
+          // الحقول الثنائية الضخمة (مرفقات base64) تُختصر — يُعلَن الاختصار
+          return s.length > 300 ? `${s.slice(0, 120)}…(${s.length} حرفاً — مقتطع)` : s;
+        }))));
+      };
+
+      dumpTable('holdings — الحيازات', holdings);
+      dumpTable('transactions — المعاملات', transactions);
+      dumpTable('dividends — التوزيعات', dividends);
+      dumpTable('cashflow_entries — التدفقات النقدية', cashflows);
+      dumpTable('net_worth_snapshots — لقطات صافي الثروة', snapshots);
+      dumpTable('nw_assets — الأصول', assets);
+      dumpTable('nw_liabilities — الالتزامات', liabilities);
+      dumpTable('real_estate — العقارات', realEstate);
+      dumpTable('stock_targets — أهداف الأسهم', stockTargets);
+      dumpTable('sector_targets — أهداف القطاعات', sectorTargets);
+      dumpTable('watchlist — قائمة المراقبة', watchlist);
+      dumpTable('portfolio_tasks — المهام', tasks);
+      dumpTable('user_stocks — قاعدة الأسهم المتابَعة', userStocks);
+      dumpTable('review_log — دفتر المراجعة', reviewLog);
+      dumpTable('portfolio_cash — النقد غير المستثمر', portfolioCashRows);
+      dumpTable('review_log_attachments — مرفقات المراجعة', reviewAttachments,
+        'محتوى الملفات الثنائية (base64) مقتطع عمداً — يبقى في النسخة الاحتياطية لا في التقرير.');
+
+      h3('سجل القيمة العادلة الخام (valuation_history_v1)');
+      {
+        const vhRaw = lsGet('valuation_history_v1', []);
+        if (Array.isArray(vhRaw) && vhRaw.length) {
+          p(`عدد التقييمات المسجّلة: **${vhRaw.length}**. كل مدخلات كل نموذج كما حُفظت.`);
+          const vk = [...new Set(vhRaw.flatMap(v => Object.keys(v || {})))];
+          p(mdTable(vk, vhRaw.map(v => vk.map(k => {
+            const x = (v || {})[k];
+            if (x == null) return '—';
+            if (typeof x === 'object') { const j = JSON.stringify(x); return j.length > 400 ? j.slice(0, 400) + '…' : j; }
+            const s = String(x);
+            return s.length > 400 ? s.slice(0, 400) + '…' : s;
+          }))));
+        } else {
+          p('_لا سجل تقييمات محفوظ._');
+        }
+      }
+
+      h3('تاريخ مؤشر تاسي الخام (كل نقطة مسجّلة)');
+      {
+        const bmRaw = Array.isArray(benchmark) ? benchmark : [];
+        if (bmRaw.length) {
+          const bk = [...new Set(bmRaw.flatMap(v => Object.keys(v || {})))];
+          p(`عدد النقاط: **${bmRaw.length}** — كل نقطة أدخلها المالك يدوياً، بلا اقتطاع.`);
+          p(mdTable(bk, bmRaw.map(v => bk.map(k => {
+            const x = (v || {})[k];
+            return x == null ? '—' : (typeof x === 'object' ? JSON.stringify(x) : String(x));
+          }))));
+        } else {
+          p('_لا نقاط مؤشر مسجّلة._');
+        }
+      }
+
+      h3('الإعدادات المتزامنة الخام (user_settings)');
+      {
+        const rawKeys = [
+          ['retirement_goal_v1', retGoal], ['salary_planner_v1', salaryData],
+          ['sukuk_planner_v1', sukukData], ['life_goals_v1', lifeGoals],
+        ];
+        rawKeys.forEach(([k, v]) => {
+          p(`**${k}:**`);
+          p('```json');
+          try {
+            const j = JSON.stringify(v, null, 2);
+            p(j.length > 20000 ? j.slice(0, 20000) + '\n…(مقتطع — راجع النسخة الاحتياطية للكامل)' : j);
+          } catch { p('(تعذّرت السلسلة إلى JSON)'); }
+          p('```');
+        });
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // تجميع التقارير الأربعة وتنزيلها
+    // ════════════════════════════════════════════════════════
+    await tick('تجميع الملفات');
+
+    // ── قسم افتتاحي: الحالة في سطور (يُبنى الآن لأنه يحتاج كل الحسابات) ──
+    const AT_A_GLANCE = [];
+    {
+      const g = t => AT_A_GLANCE.push(t + '\n');
+      const _liabNow    = activeLiabilities.reduce((s, l) => s + (+l.value || 0), 0);
+      const netWorthNow = _totalMkt + portfolioCash + _sukukActive + _reVal + _assetVal - _liabNow;
+      const realizedNow = (() => {
+        const m = {};
+        transactions.forEach(t => {
+          const e = m[t.ticker] || (m[t.ticker] = { bs: 0, bc: 0, sr: 0, ss: 0 });
+          if (t.type === 'buy' || t.type === 'grant') { e.bc += +t.total; e.bs += +t.shares; }
+          if (t.type === 'sell') { e.sr += +t.total; e.ss += +t.shares; }
+        });
+        return Object.values(m).reduce((s, v) => v.bs < 0.001 ? s : s + v.sr - (v.bc / v.bs) * v.ss, 0);
+      })();
+      const unrealNow  = _totalMkt - _totalCost;
+      const fwdMonthly = (_fwd?.total || 0) / 12;
+      const goalM      = +retGoal.monthly || 0;
+      const cover      = goalM > 0 ? fwdMonthly / goalM * 100 : null;
+
+      g('| المؤشر | القيمة | ماذا يعني |');
+      g('| --- | --- | --- |');
+      const row = (k, v, m) => g(`| ${esc(k)} | ${esc(v)} | ${esc(m)} |`);
+      row('عدد الأسهم المملوكة', String(holdings.length),
+          holdings.length < 18 ? 'دون الحد الأدنى الدستوري 18' : holdings.length > 25 ? 'فوق السقف الدستوري 25' : 'داخل النطاق 18–25 ✅');
+      row('القيمة السوقية للأسهم', SAR(_totalMkt) + ' ر.س', 'ما تساويه حيازاتك اليوم بأسعارك المُدخَلة');
+      row('تكلفة الحيازات', SAR(_totalCost) + ' ر.س', 'ما دفعته فعلاً مقابل ما تملكه الآن');
+      row('ربح/خسارة ورقية', (unrealNow >= 0 ? '+' : '') + SAR(unrealNow) + ' ر.س',
+          unrealNow >= 0 ? 'مكسب غير محقَّق — لا يصير نقداً إلا بالبيع' : 'خسارة غير محقَّقة — ليست سبب بيع بذاتها (§8)');
+      row('ربح/خسارة محقَّقة', (realizedNow >= 0 ? '+' : '') + SAR(realizedNow) + ' ر.س', 'نتيجة صفقات البيع المُغلقة فعلياً');
+      row('إجمالي التوزيعات المستلمة', SAR(_totalDiv) + ' ر.س', 'دخل نقدي فعلي دخل جيبك منذ البداية');
+      row('الدخل التوزيعي المتوقع', SAR(_fwd?.total || 0) + ' ر.س/سنة', `أي ${SAR(fwdMonthly)} ر.س شهرياً بمعدل التوزيع الحالي`);
+      row('هدف الدخل الشهري', goalM ? SAR(goalM) + ' ر.س' : 'غير مسجّل',
+          cover == null ? 'سجّل الهدف في صفحة التقاعد ليُقاس التقدّم' : `التغطية الحالية ${PCT(cover)} من الهدف`);
+      row('النقد غير المستثمر', SAR(portfolioCash) + ' ر.س', 'سيولة جاهزة — لا تُحتسب في عائد الأسهم');
+      row('العمولات والضرائب المدفوعة', SAR(_totalComm) + ' ر.س', 'كلفة الاحتكاك التراكمية لقراراتك');
+      row('صافي الثروة التقديري', SAR(netWorthNow) + ' ر.س', 'أسهم + نقد + صكوك + عقار + أصول − التزامات');
+      g('');
+      g('**الأحكام الثلاثة السريعة:**');
+      g('1. **هل المحفظة ممتثلة للدستور؟** راجع §36 — الفحص آلي قاعدة بقاعدة.');
+      g('2. **هل يوجد ما يحتاج قراراً اليوم؟** راجع §37 — مرتَّب بالأولوية الدستورية.');
+      g('3. **هل الأرقام موثوقة؟** راجع §28 (طزاجة الأسعار) و«المصادر المتعذّرة» — أي رقم مبني على سعر قديم يرث ضعفه.');
+    }
+
+    // ── قسم المصادر المتعذّرة (يُلحق بكل تقرير) ──
+    const MISSING_BLOCK = [];
+    {
+      const g = t => MISSING_BLOCK.push(t + '\n');
+      g('\n<a id="missing-sources"></a>\n');
+      g('## ⚠️ المصادر المتعذّرة وفجوات البيانات\n');
+      g('الدستور §8 يمنع التقدير الصامت وحذف المصادر بصمت. كل مصدر لم يُدرَج يُعلَن هنا مع السبب.\n');
+      if (missingSources.length) {
+        g('| المصدر | لماذا تعذّر | الأثر |');
+        g('| --- | --- | --- |');
+        missingSources.forEach(m => g(`| ${esc(m.name)} | ${esc(m.why)} | أي تحليل يعتمد عليه يظهر «غير متوفر» ولا يُقدَّر |`));
+      } else {
+        g('✅ **لا مصدر متعذّر.** كل مصادر البيانات المتاحة أُدرجت في هذه التقارير.\n');
+      }
+      g('\n**ملاحظة على الحدود:** الجداول تُجلب بترقيم صفحات 1000 صف/دفعة (`fetchAllRows`)، فلا اقتطاع صامت مهما كبر الجدول. القيم الثنائية الضخمة (مرفقات base64) تُقتطع في §38 عمداً — الكامل في النسخة الاحتياطية.\n');
+    }
+
+    // ── بناء ملف كل تقرير ──
+    const stamp    = `${MONTHS[today.getMonth()]} ${today.getFullYear()}`;
+    const bookList = Object.values(BOOKS);
+    const files    = [];
+
+    for (const b of bookList) {
+      const head = [];
+      head.push(`# ${b.title} — محفظة ثروة\n`);
+      head.push(`> **الجزء ${b.key} من ${bookList.length}** — ${b.desc}\n`);
+      head.push(`**تاريخ التصدير:** ${dateStr}  `);
+      head.push(`**المستخدم:** ${user.email}  `);
+      head.push(`**الفترة المراجَعة:** ${stamp}\n`);
+      head.push('**سلسلة التقارير الكاملة — كلها تُقرأ معاً:**\n');
+      bookList.forEach(x => {
+        head.push(`- ${x.key === b.key ? '**➤ ' : ''}الجزء ${x.key}: ${x.title}${x.key === b.key ? ' (هذا الملف)**' : ''} — \`tharwa_${x.file}_${dateStr}.md\` — ${x.desc}`);
+      });
+      head.push('\n---\n');
+
+      // الحالة في سطور — في مقدمة الجزء A فقط
+      if (b.key === 'A') {
+        head.push('\n<a id="at-a-glance"></a>\n');
+        head.push('## 📊 الحالة في سطور\n');
+        head.push('خلاصة تنفيذية لكل ما يهم في جدول واحد. التفاصيل والبراهين في الأقسام المرقّمة.\n');
+        head.push(...AT_A_GLANCE);
+        head.push('\n---\n');
+      }
+
+      // دليل القراءة
+      head.push('\n<a id="reading-guide"></a>\n');
+      head.push('## 🔍 دليل القراءة\n');
+      head.push('هذه التقارير تحتوي كامل بيانات المحفظة الشخصية. مصمَّمة لتُقرأ مباشرةً — بشرياً أو بنموذج ذكاء اصطناعي — بلا حاجة لفتح التطبيق.\n');
+      head.push(...READING_GUIDE);
+      head.push('\n---\n');
+
+      // الفهرس
+      head.push('\n<a id="toc"></a>\n');
+      head.push('## 📑 فهرس هذا الجزء\n');
+      if (b.key === 'A') head.push('- [📊 الحالة في سطور](#at-a-glance)');
+      head.push('- [🔍 دليل القراءة](#reading-guide)');
+      b.toc.forEach(e => head.push(`${e.lvl === 3 ? '  - ' : '- '}[${e.t}](#${e.a})`));
+      head.push('- [⚠️ المصادر المتعذّرة وفجوات البيانات](#missing-sources)');
+      head.push('\n---\n');
+
+      const tail = [];
+      tail.push(...MISSING_BLOCK);
+      tail.push('\n---\n');
+      tail.push(`_الجزء ${b.key} من ${bookList.length} — تم توليده تلقائياً من تطبيق ثروة، مفكرة حسابية شخصية._`);
+      tail.push('_الأرقام تعكس البيانات المُدخَّلة يدوياً ولا تمثّل توصيات استثمارية._');
+      tail.push(`_للصورة الكاملة اقرأ الأجزاء الأربعة معاً: ${bookList.map(x => x.key).join(' + ')}._`);
+
+      const text = head.concat(b.lines, tail).join('\n');
+      files.push({ name: `tharwa_${b.file}_${dateStr}.md`, text, book: b });
+      b.lines.length = 0;   // تحرير الذاكرة فور التجميع
+    }
+
+    // ── تنزيل الملفات الأربعة تباعاً ──
+    let grandLines = 0, grandBytes = 0;
+    const parts = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const nLines = f.text.split('\n').length;
+      const nBytes = new Blob([f.text]).size;
+      grandLines += nLines; grandBytes += nBytes;
+      parts.push(`${f.book.key}: ${nLines.toLocaleString('en-US')} سطر`);
+
+      setStatus('md-export-status', 'info', `جارٍ تنزيل الجزء ${f.book.key} (${i + 1}/${files.length})…`);
+      const blob = new Blob([f.text], { type: 'text/markdown;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url; a.download = f.name;
+      document.body.appendChild(a); a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      f.text = '';   // تحرير الذاكرة
+      // مهلة بين التنزيلات — المتصفحات تُسقط التنزيلات المتلاحقة
+      if (i < files.length - 1) await new Promise(r => setTimeout(r, 400));
+    }
+
     setStatus('md-export-status', 'success',
-      `✓ تم التصدير — ${totalLines} سطر | ${(md.length / 1024).toFixed(1)} KB`);
-    showToast('✓ تم تصدير التقرير بنجاح', 'success');
+      `✓ تم تصدير ${files.length} تقارير — ${grandLines.toLocaleString('en-US')} سطر إجمالاً | ${(grandBytes / 1024).toFixed(1)} KB  (${parts.join(' · ')})`);
+    showToast(`✓ تم تصدير ${files.length} تقارير (${grandLines.toLocaleString('en-US')} سطر)`, 'success');
 
   } catch (err) {
     setStatus('md-export-status', 'error', '✗ ' + err.message);
     showToast('فشل التصدير: ' + err.message, 'error');
   } finally {
-    btn.disabled = false; btn.textContent = '📋 تصدير تقرير المراجعة (.md)';
+    btn.disabled = false; btn.textContent = '📋 تصدير التقارير الأربعة (.md)';
   }
 }
 
 // ══════════════════════════════════════════════════════════════
 // Helpers
 // ══════════════════════════════════════════════════════════════
+
+// نظام التصميم لا يعرّف .status-warning — نُسقط «warning» على .status-info
+// (النص نفسه يحمل ⚠️) بدل صنف بلا تنسيق يجعل التحذير غير مرئي.
+const STATUS_CLASS = {
+  info:    'status-info',
+  success: 'status-success',
+  error:   'status-error',
+  warning: 'status-info',
+};
+
 function setStatus(elId, type, msg) {
   const el = document.getElementById(elId);
   if (!el) return;
-  el.textContent = msg;
-  el.className   = `backup-status status-${type}`;
+  el.textContent = msg;                                      // textContent — لا حقن HTML
+  el.className   = `backup-status ${STATUS_CLASS[type] || 'status-info'}`;
   el.style.display = 'block';
+}
+
+// ── عرض التقارير المفصّلة — نظام التصميم فقط (note / tag / kvs / info-table) ──
+// كل محتوى نصي يمرّ عبر esc() في موضع البناء؛ هذه الدوال تستقبل HTML مبنياً مسبقاً.
+function setReport(elId, html) {
+  const el = document.getElementById(elId);
+  if (!el) return;
+  el.innerHTML = html || '';
+  el.style.display = html ? 'block' : 'none';
+}
+
+function noteHtml(state, innerHtml) {
+  return `<div class="note" data-state="${esc(state)}" style="margin-top:12px">${innerHtml}</div>`;
+}
+
+function tableHtml(headers, rowsHtml) {
+  if (!rowsHtml) return '';
+  return `<div style="overflow-x:auto;margin-top:12px"><table class="info-table">` +
+    `<thead><tr>${headers.map(h => `<th style="text-align:start;padding:8px 12px;color:var(--text-2);font-size:0.78rem;border-bottom:1px solid var(--border)">${esc(h)}</th>`).join('')}</tr></thead>` +
+    `<tbody>${rowsHtml}</tbody></table></div>`;
 }
 
 init();

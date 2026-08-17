@@ -16,6 +16,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css?v=20260817j">
+  <style>
+    /* صناديق تقارير النسخ الاحتياطي — تعتمد نظام التصميم وحده (صفر لون مكتوب يدوياً).
+       .info-table تفرض عرض 40% على أول عمود وهو غير مناسب لجداول التقارير متعددة الأعمدة. */
+    .report-box { display: none; }
+    .report-box .info-table td:first-child { width: auto; color: var(--text); }
+    .report-box .info-table td { vertical-align: top; }
+    .report-box .note ul { line-height: 1.9; }
+  </style>
 </head>
 <body>
 
@@ -208,8 +216,9 @@
           <div class="bc-icon">📤</div>
           <h3>تصدير نسخة احتياطية</h3>
           <p>
-            يصدّر <strong>100% من بياناتك</strong> — جميع الجداول الـ 14 + جميع بيانات localStorage —
-            في ملف JSON واحد محمي يمكنك حفظه على جهازك.
+            يصدّر <strong>100% من بياناتك</strong> — جميع الجداول الـ 19 + كل مفاتيح localStorage —
+            في ملف JSON واحد يمكنك حفظه على جهازك، مع <strong>بصمة تكامل</strong> لكل جدول
+            تكشف أي تلف أو اقتطاع لاحق.
           </p>
           <p class="small text-muted">
             اسم الملف: <code style="color:var(--accent)">tharwa_backup_YYYY-MM-DD.json</code>
@@ -225,18 +234,67 @@
           <div class="bc-icon">📥</div>
           <h3>استعادة من نسخة احتياطية</h3>
           <p>
-            استعد بياناتك من ملف نسخة احتياطية سبق تصديره.
-            <strong class="text-danger">تحذير:</strong> ستُحذف جميع بياناتك الحالية
-            ويتم استبدالها ببيانات الملف المختار.
+            استعد بياناتك من ملف نسخة احتياطية سبق تصديره. يُفحص الملف بالكامل
+            <strong>قبل</strong> حذف أي شيء، فإن كان تالفاً تتوقف العملية وبياناتك سليمة.
+            <strong class="text-danger">تحذير:</strong> عند المتابعة ستُحذف بياناتك الحالية
+            ويتم استبدالها ببيانات الملف.
           </p>
           <button class="btn btn-danger" id="btn-restore" onclick="triggerRestore()">
-            استعادة من نسخة احتياطية
+            📥 استعادة من نسخة احتياطية
           </button>
           <input type="file" id="restore-file" accept=".json" style="display:none"
                  onchange="restoreBackup(this)">
           <div class="backup-status" id="restore-status"></div>
         </div>
       </div>
+
+      <div class="report-box" id="backup-report"></div>
+      <div class="report-box" id="restore-report"></div>
+
+      <!-- ── أدوات إثبات الاستعادة — بلا أي كتابة على بياناتك ── -->
+      <div class="note" data-state="good" style="margin-top:20px">
+        <strong>🧪 هل تعمل الاستعادة فعلاً؟ أثبتها بنفسك — الأداتان أدناه لا تكتبان حرفاً واحداً على بياناتك.</strong>
+      </div>
+
+      <div class="settings-grid" style="margin-top:12px">
+        <!-- Dry-run verify -->
+        <div class="backup-card">
+          <div class="bc-icon">🔍</div>
+          <h3>فحص الاستعادة (تجربة جافة)</h3>
+          <p>
+            اختر ملف نسخة احتياطية ليُفحص بالكامل <strong>بلا حذف ولا كتابة</strong>:
+            صحة JSON، وجود كل جدول، مطابقة بصمة التكامل، توافق أعمدة كل جدول مع المخطط
+            الحالي (بإدراج صف تجريبي واحد يُحذف فوراً)، وسلامة المفاتيح الأجنبية.
+            النتيجة تقرير مفصّل: ما الذي سيُستعاد، وكم صفاً لكل جدول، وما الذي سيفشل ولماذا.
+          </p>
+          <button class="btn btn-secondary" id="btn-verify" onclick="triggerVerify()">
+            🔍 فحص الاستعادة (تجربة جافة)
+          </button>
+          <input type="file" id="verify-file" accept=".json" style="display:none"
+                 onchange="verifyBackupFile(this)">
+          <div class="backup-status" id="verify-status"></div>
+        </div>
+
+        <!-- Round-trip test -->
+        <div class="backup-card">
+          <div class="bc-icon">🔁</div>
+          <h3>اختبار دورة كاملة</h3>
+          <p>
+            يصدّر حالتك الراهنة إلى الذاكرة، يمرّرها عبر رحلة الملف كاملة
+            (قاعدة البيانات ← JSON ← ملف ← JSON ← منطق الاستعادة)، ثم يقارن
+            <strong>كل حقل في كل صف</strong> بالأصل — بما فيها تفضيلات localStorage.
+            المخرَج: تطابق 100% أو قائمة بكل اختلاف باسم الجدول والصف والحقل.
+            <strong>قراءة ومقارنة فقط.</strong>
+          </p>
+          <button class="btn btn-secondary" id="btn-roundtrip" onclick="runRoundTripTest()">
+            🔁 اختبار دورة كاملة
+          </button>
+          <div class="backup-status" id="roundtrip-status"></div>
+        </div>
+      </div>
+
+      <div class="report-box" id="verify-report"></div>
+      <div class="report-box" id="roundtrip-report"></div>
 
       <!-- ── استعادة النسخة الطارئة — يظهر فقط عند وجود نسخة طارئة في المتصفح ── -->
       <div id="emergency-section" style="display:none;margin:16px 0;border:1px solid #f0b429;border-radius:var(--radius);padding:14px;background:var(--bg-2)">
@@ -251,9 +309,16 @@
           🛟 استعادة النسخة الطارئة
         </button>
         <div class="backup-status" id="emergency-status"></div>
+        <div class="report-box" id="emergency-report"></div>
       </div>
 
-      <p class="small text-muted mb-4">النسخة الاحتياطية تنسخ <strong>كل شيء حرفياً (100%)</strong>: جميع أعمدة كل صف في 17 جدول Supabase + 18 مفتاح تفضيلات محلية. عند الاستعادة تُكتب كل القيم كما هي بلا إسقاط أي حقل. جدول <code>user_settings</code> وحده يحمل بيانات محرّك القرار وحاسبة القيمة العادلة والمؤشر المرجعي وهدف التقاعد — فكلها مشمولة.</p>
+      <p class="small text-muted mb-4">النسخة الاحتياطية تنسخ <strong>كل شيء حرفياً (100%)</strong>: جميع أعمدة كل صف في 19 جدول Supabase + <strong>كل</strong> مفتاح في localStorage (مسح حرفي شامل، لا قائمة بيضاء — فأي إعداد جديد يدخل النسخة تلقائياً). عند الاستعادة تُكتب كل القيم كما هي بلا إسقاط أي حقل، ويُعاد تأطير المفاتيح المؤطَّرة بالمستخدم لهويتك الحالية فتعمل الاستعادة حتى على حساب مختلف. جدول <code>user_settings</code> يُصدَّر كاملاً — وهو يحمل محرّك القرار وحاسبة القيمة العادلة والمؤشر المرجعي وهدف التقاعد والراتب والصكوك والأهداف والمخزون والمتابعة المدرسية.</p>
+      <div class="note" data-state="warn">
+        <strong>مستثنى عمداً:</strong> توكنات جلسة Supabase (<code>sb-*</code>) — نسخها واستعادتها ثغرة أمنية.
+        وكذلك <code>tharwa_emergency_backup</code> (نسخة محلية مؤقتة) و<code>tharwa-dirty-tickers</code> (علم تعافٍ يُعاد بناؤه تلقائياً)
+        ومفاتيح أي مستخدم آخر على نفس الجهاز.
+        وجدول <code>consent_logs</code> (سجل الموافقة على الشروط) — سجل قانوني ثابت لا يُحذف ولا يُستعاد بحكم تصميمه.
+      </div>
       <table class="info-table">
         <tbody>
           <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">☁️ Supabase — البيانات الرئيسية</th></tr>
@@ -273,8 +338,10 @@
           <tr><td>portfolio_tasks</td><td>المهام والتذكيرات</td></tr>
           <tr><td>review_log</td><td>دفتر المراجعة (ملاحظات كل سهم)</td></tr>
           <tr><td>review_log_attachments</td><td>مرفقات دفتر المراجعة (الملفات الثنائية كاملة)</td></tr>
-          <tr><td>user_settings</td><td>إعدادات مزامَنة: محرّك القرار + حاسبة القيمة العادلة + المؤشر المرجعي + هدف التقاعد + الراتب + الصكوك + الأهداف + المخزون + المتابعة المدرسية</td></tr>
-          <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">💾 localStorage — البيانات المحلية وتفضيلات المستخدم</th></tr>
+          <tr><td>user_settings</td><td>الجدول كاملاً بلا قائمة بيضاء: محرّك القرار + لقطة محرّك القرار + حاسبة القيمة العادلة + المؤشر المرجعي + هدف التقاعد + الراتب + الصكوك + خطط الضخ + الأهداف + المخزون + المتابعة المدرسية + أي مفتاح مستقبلي</td></tr>
+          <tr><td>support_tickets</td><td>تذاكر الدعم التي فتحتها</td></tr>
+          <tr><td>user_profiles</td><td>ملف الحساب (البريد، الحالة، تاريخ الإنشاء) — يُستعاد بالدمج لا بالحذف</td></tr>
+          <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">💾 localStorage — مسح حرفي شامل لكل المفاتيح (القائمة أدناه توثيقية لا حصرية)</th></tr>
           <tr><td>salary_planner_v1</td><td>مخطط الراتب والمصاريف</td></tr>
           <tr><td>sukuk_planner_v1</td><td>مخطط الصكوك</td></tr>
           <tr><td>life_goals_v1</td><td>أهداف الحياة</td></tr>
@@ -291,8 +358,11 @@
           <tr><td>tharwa-price-timestamps</td><td>طوابع زمنية لآخر تحديث أسعار</td></tr>
           <tr><td>tharwa-benchmark_v1</td><td>نقاط مؤشر تاسي (نسخة محلية)</td></tr>
           <tr><td>tharwa-benchmark-seeded-v1</td><td>علم بذر بيانات تاسي الأولى</td></tr>
+          <tr><td>tharwa-benchmark-src-migrated-v1</td><td>علم هجرة مصادر نقاط تاسي</td></tr>
           <tr><td>valuation_history_v1</td><td>سجل حاسبة القيمة العادلة (نسخة محلية)</td></tr>
+          <tr><td>forecast_plans_v1</td><td>خطط الضخ المحفوظة (نسخة محلية)</td></tr>
           <tr><td>hide-salary-convention</td><td>حالة إخفاء لافتة اتفاقية الراتب</td></tr>
+          <tr><td><em>أي مفتاح آخر</em></td><td>يُلتقط تلقائياً بالمسح الحرفي الشامل — لا يعتمد على هذه القائمة</td></tr>
         </tbody>
       </table>
     </div>
@@ -300,24 +370,26 @@
     <!-- ── Monthly Review MD Export ── -->
     <div class="card mb-6">
       <div class="section-header mb-4">
-        <span class="section-title">📋 تقرير المراجعة الشهرية</span>
+        <span class="section-title">📋 تقرير المراجعة الشامل — 4 ملفات</span>
       </div>
       <p style="font-size:0.9rem;color:var(--text-2);margin-bottom:12px">
-        يُصدّر ملف <strong>.md</strong> شامل يحتوي على <strong>كل شيء</strong> في المحفظة —
-        المعاملات، الأرباح، الأصول، الأهداف، المهام — بصياغة واضحة يفهمها الذكاء الاصطناعي مباشرةً.
-        مثالي للمراجعة الشهرية: ارفع الملف لأي نموذج AI واسأله ما تريد.
+        يُصدّر <strong>أربعة ملفات .md</strong> مترابطة تحتوي <strong>كل رقم ونسبة في النظام</strong> —
+        كل سهم، كل معاملة، كل توزيعة، كل نقطة مؤشر، كل تقييم، وكل خطة. لكل ملف فهرس وروابط داخلية،
+        ولكل قسم خلاصة تنفيذية ثم الأرقام ثم <strong>تشخيص ما تعنيه</strong>.
+        التقارير وحدها تكفي لتحليل المحفظة والوضع المالي بالكامل بلا فتح الموقع.
       </p>
       <ul style="font-size:0.82rem;color:var(--text-2);margin:0 0 16px 0;padding-right:18px;line-height:2">
-        <li>الأسهم الحالية مع القيم والر/خ غير المحقق</li>
-        <li>كامل سجل المعاملات (شراء / بيع / منح)</li>
-        <li>الأرباح الموزعة مقسّمة بالسنة والرمز</li>
-        <li>التدفقات النقدية وصافي الإيداع</li>
-        <li>الأصول والالتزامات والعقارات</li>
-        <li>الأهداف وقائمة المراقبة والمهام النشطة</li>
-        <li>ملخص إحصائي جاهز للتحليل</li>
+        <li><strong>الجزء A — المحفظة والقرار:</strong> الحالة في سطور، الحيازات بأوزانها وانحرافاتها، الأهداف، محرّك القرار، سجل التقييمات، <strong>فحص الامتثال للدستور قاعدة بقاعدة</strong>، و<strong>ما يحتاج قراراً الآن</strong> مرتَّباً بالأولوية</li>
+        <li><strong>الجزء B — الأداء والدخل:</strong> TWR، <strong>XIRR للمحفظة ولكل مركز</strong>، الربح المحقق وغير المحقق، التوزيعات والدخل المتوقَّع، <strong>كل نقاط مؤشر تاسي المسجّلة</strong> والمقارنة، المخاطر والتدقيق السلوكي</li>
+        <li><strong>الجزء C — التخطيط والثروة:</strong> صافي الثروة، العقار، الراتب، الصكوك، التدفقات، <strong>خطط التوقعات بمساراتها وسيناريوهاتها</strong>، أهداف الحياة، الجرد، دفتر المراجعة</li>
+        <li><strong>الجزء D — البيانات الخام:</strong> كل صف وكل عمود في كل جدول، بلا عيّنة وبلا اقتطاع</li>
       </ul>
+      <div class="note" data-state="warn" style="margin-bottom:14px">
+        <strong>تنبيه المتصفح:</strong> التصدير ينزّل <strong>4 ملفات تباعاً</strong> — قد يسألك المتصفح
+        عن السماح بتنزيلات متعددة، فاسمح بها. البناء يعرض نسبة تقدّم ولا يجمّد الصفحة.
+      </div>
       <button class="btn btn-primary" id="btn-export-md" onclick="exportMonthlyReviewMD()">
-        📋 تصدير تقرير المراجعة (.md)
+        📋 تصدير التقارير الأربعة (.md)
       </button>
       <div class="backup-status" id="md-export-status"></div>
     </div>
@@ -384,18 +456,18 @@
   <script src="js/supabase.js?v=20260817j"></script>
   <script src="js/auth.js?v=20260817j"></script>
   <script src="js/utils.js?v=20260817j"></script>
-  <script src="js/settings.js?v=20260817j"></script>
+  <script src="js/settings.js?v=20260817k"></script>
   <script>
     (async () => {
       const { data: { user } } = await supabaseClient.auth.getUser();
       if (!user) return;
 
-      // Account info
+      // Account info — كل قيمة تمرّ عبر esc() (بريد المستخدم نصّ يتحكم به مصدر خارجي)
       document.getElementById('account-info').innerHTML = `
         <table class="info-table">
-          <tr><td>البريد الإلكتروني</td><td>${user.email}</td></tr>
-          <tr><td>معرّف المستخدم</td><td class="small text-muted">${user.id}</td></tr>
-          <tr><td>تاريخ إنشاء الحساب</td><td>${new Date(user.created_at).toLocaleDateString('ar-SA',{year:'numeric',month:'long',day:'numeric'})}</td></tr>
+          <tr><td>البريد الإلكتروني</td><td>${esc(user.email)}</td></tr>
+          <tr><td>معرّف المستخدم</td><td class="small text-muted">${esc(user.id)}</td></tr>
+          <tr><td>تاريخ إنشاء الحساب</td><td>${esc(new Date(user.created_at).toLocaleDateString('ar-SA',{year:'numeric',month:'long',day:'numeric'}))}</td></tr>
         </table>`;
 
       // Theme toggle state
