@@ -900,10 +900,53 @@ function _renderMonteCarlo(r) {
 // خطة الضخ للوصول للهدف (وضع عكسي) + سجل الخطط المحفوظة
 // ──────────────────────────────────────────────────────────────────────
 const FORECAST_PLANS_KEY = 'forecast_plans_v1';
+// إصدار مخطّط الخطة المحفوظة:
+//   (بلا رقم) = خطط قديمة تحفظ المدخلات والنتيجة النهائية فقط → تُعاد بالحساب الحيّ
+//   2         = لقطة مجمّدة كاملة (مسار + معدّلات + سياق بيانات) → تُعرض كما هي بلا حساب
+const PLAN_SCHEMA_VERSION = 2;
 let _forecastPlans = [];
 let _lastComputedPlan = null;
+let _planCompare = null;   // { id, live, at } — مقارنة «المحفوظ مقابل اليوم» بلا كتابة
+let _viewedPlanId = null;  // الخطة المعروضة حالياً في بطاقة العرض المجمَّد
 
 const _scenLabel = k => k === 'conservative' ? '🛡️ متحفّظ' : k === 'optimistic' ? '🚀 متفائل' : '📊 معتدل';
+
+// خطة مجمّدة = تحمل إصدار مخطّط ≥2 ومسار إسقاط محفوظ
+const _isFrozenPlan = p => !!p && +p.schemaVersion >= 2 && Array.isArray(p.path) && p.path.length > 1;
+
+// ── ضغط مسار الإسقاط السنوي للتخزين ────────────────────────────────
+// نخزّن اللقطات السنوية فقط (لا الشهرية) بمفاتيح قصيرة وأرقام صحيحة:
+//   y=السنة  v=القيمة الاسمية  d=تراكمي التوزيعات  a=تراكمي المُضاف
+//   r=القيمة الحقيقية (بعد التضخم)  i=الدخل الشهري
+// 45 سنة ⇒ 46 صفاً × 6 أرقام ≈ 3 ك.ب — آمن على سجل user_settings.
+function _compressPath(snaps) {
+  if (!Array.isArray(snaps)) return [];
+  return snaps.map(s => ({
+    y: s.year,
+    v: Math.round(s.value),
+    d: Math.round(s.cumDiv),
+    a: Math.round(s.cumAdded),
+    r: Math.round(s.realValue),
+    i: Math.round(s.monthlyIncome),
+  }));
+}
+
+// ── سياق البيانات وقت الحفظ — يخبر المالك على أي أساس بُنيت الخطة ──
+function _snapshotContext() {
+  const h = _hist || {};
+  return {
+    confidenceScore:  h.confidenceScore ?? null,
+    capitalWeightedMonths: h.capitalWeightedMonths != null ? Math.round(h.capitalWeightedMonths) : null,
+    yearsActive:      h.yearsActive != null ? +h.yearsActive.toFixed(2) : null,
+    portfolioValue:   h.currentValue != null ? Math.round(h.currentValue) : null,
+    annCapGrowth:     h.annCapGrowth ?? null,        // الأداء الشخصي الخام
+    blendedCapGrowth: h.blendedCapGrowth ?? null,    // المستخدم فعلياً في السيناريوهات
+    safeDivYield:     h.safeDivYield ?? null,
+    xirr:             h.xirr ?? null,
+    holdingsCount:    h.holdingsCount ?? null,
+    divYears:         h.divYears ?? null,
+  };
+}
 
 // قراءة مدخلات الصفحة الحالية للخطة
 function _readPlanInputs() {
@@ -975,6 +1018,10 @@ function computeContributionPlan() {
     finalValue: finalSnap.value,
     finalIncome: finalSnap.monthlyIncome,
     totalContributed: (alreadyReached ? 0 : Math.max(0, requiredPMT)) * years * 12 + inp.lumpSum,
+    // ── مادة اللقطة المجمّدة (لا تدخل في أي حساب — تُحفظ فقط) ──
+    path:           _compressPath(snaps),
+    scenariosUsed:  _scenarios.map(s => ({ key: s.key, capRate: s.capRate, divRate: s.divRate })),
+    context:        _snapshotContext(),
   };
   _renderPlanResults(snaps, targetFinalValue);
 }
@@ -1059,25 +1106,66 @@ async function _persistForecastPlans() {
   try { localStorage.setItem(userLsKey(FORECAST_PLANS_KEY), JSON.stringify(_forecastPlans)); } catch (_) {}
 }
 
-async function saveForecastPlan() {
-  if (!_lastComputedPlan) { showToast('احسب الخطة أولاً', 'warning'); return; }
-  const notes = (document.getElementById('plan-notes')?.value || '').trim();
-  const pl = _lastComputedPlan;
-  _forecastPlans.unshift({
+// بناء كائن الخطة المجمّدة من آخر حساب — لقطة كافية لإعادة العرض بلا حساب حيّ
+function _buildFrozenPlan(pl, notes) {
+  const now = new Date();
+  return {
     id: Date.now(),
-    date: new Date().toLocaleDateString('en-GB'),
-    createdISO: new Date().toISOString(),
+    schemaVersion: PLAN_SCHEMA_VERSION,
+    date: now.toLocaleDateString('en-GB'),
+    createdISO: now.toISOString(),
+    baseYear: now.getFullYear(),          // مرجع سنوات المسار (السنة 0 = هذه)
     notes,
-    inp: pl.inp,
-    scenario: pl.scenario,
-    requiredPMT: pl.requiredPMT,
-    alreadyReached: pl.alreadyReached,
-    finalValue: pl.finalValue,
+    // ① كل المدخلات (startValue والأفق والتضخم ضمنها)
+    inp: { ...pl.inp },
+    // ② معدّلات السيناريو المستخدمة فعلاً — المختار + كل المعروضة
+    scenario:      { ...pl.scenario },
+    scenariosUsed: pl.scenariosUsed || [],
+    // ③ النتيجة المجمّدة
+    requiredPMT:      pl.requiredPMT,
+    alreadyReached:   pl.alreadyReached,
+    impossible:       pl.impossible,
+    targetFinalValue: pl.targetFinalValue,
+    finalValue:       pl.finalValue,
+    finalIncome:      pl.finalIncome,
     totalContributed: pl.totalContributed,
-  });
+    // ④ مسار الإسقاط السنوي — يسمح بإعادة رسم نفس المنحنى حرفياً
+    path: pl.path || [],
+    // ⑤ سياق البيانات وقت الحفظ
+    context: pl.context || _snapshotContext(),
+  };
+}
+
+// حفظ خطة جديدة، أو تحديث خطة قائمة بضغطة صريحة (updateId)
+async function saveForecastPlan(updateId) {
+  if (!_lastComputedPlan) { showToast('احسب الخطة أولاً', 'warning'); return; }
+  const pl = _lastComputedPlan;
+
+  if (updateId) {
+    const idx = _forecastPlans.findIndex(x => x.id === updateId);
+    if (idx === -1) { showToast('الخطة غير موجودة', 'warning'); return; }
+    const old = _forecastPlans[idx];
+    const ok = await confirmAsync(
+      `تحديث الخطة «${old.notes || 'بلا ملاحظة'}» بأرقام اليوم؟\nستُستبدل اللقطة المجمّدة المحفوظة في ${old.date} ولا يمكن التراجع.`);
+    if (!ok) return;
+    const fresh = _buildFrozenPlan(pl, old.notes || '');
+    fresh.id            = old.id;               // نُبقي المعرّف والملاحظة
+    fresh.originalISO   = old.originalISO || old.createdISO;
+    fresh.revision      = (+old.revision || 1) + 1;
+    _forecastPlans[idx] = fresh;
+    _planCompare = null;
+    await _persistForecastPlans();
+    renderForecastPlans();
+    renderSavedPlanView(fresh.id);
+    showToast('حُدِّثت الخطة بأرقام اليوم ✓', 'success');
+    return;
+  }
+
+  const notes = (document.getElementById('plan-notes')?.value || '').trim();
+  _forecastPlans.unshift(_buildFrozenPlan(pl, notes));
   await _persistForecastPlans();
   renderForecastPlans();
-  showToast('تم حفظ الخطة ✓', 'success');
+  showToast('تم حفظ الخطة كلقطة مجمّدة ✓', 'success');
 }
 
 async function deleteForecastPlan(id) {
@@ -1086,9 +1174,295 @@ async function deleteForecastPlan(id) {
   const ok = await confirmAsync(`حذف الخطة «${label}» نهائياً؟\nلا يمكن التراجع.`);
   if (!ok) return;
   _forecastPlans = _forecastPlans.filter(x => x.id !== id);
+  if (_planCompare?.id === id) _planCompare = null;
   await _persistForecastPlans();
   renderForecastPlans();
+  if (_viewedPlanId === id) closeSavedPlanView();   // لا نُغلق عرض خطة أخرى
   showToast('حُذفت الخطة', 'info');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// عرض الخطة المحفوظة — الأرقام المجمّدة كما حُسبت، بلا أي حساب حيّ
+// ══════════════════════════════════════════════════════════════════════
+function openSavedPlan(id) {
+  _planCompare = null;
+  renderSavedPlanView(id);
+  document.getElementById('saved-plan-view-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function closeSavedPlanView() {
+  _planCompare = null;
+  _viewedPlanId = null;
+  const card = document.getElementById('saved-plan-view-card');
+  if (card) card.style.display = 'none';
+}
+
+const _planTitle = p => p.notes
+  ? esc(p.notes)
+  : (p.inp.goalType === 'monthly_income' ? `دخل ${fmt(p.inp.goalAmount)} ر.س/شهر` : `محفظة ${fmt(p.inp.goalAmount)} ر.س`);
+
+function _planPmtText(p) {
+  if (p.alreadyReached) return 'لا حاجة لضخ';
+  return p.requiredPMT == null ? '—' : `${fmt(p.requiredPMT)} ر.س/شهر`;
+}
+
+function renderSavedPlanView(id) {
+  const card = document.getElementById('saved-plan-view-card');
+  const box  = document.getElementById('saved-plan-view');
+  if (!card || !box) return;
+  const p = _forecastPlans.find(x => x.id === id);
+  if (!p) { card.style.display = 'none'; _viewedPlanId = null; return; }
+  card.style.display = 'block';
+  _viewedPlanId = id;
+
+  const frozen = _isFrozenPlan(p);
+  const titleEl = document.getElementById('saved-plan-view-title');
+  if (titleEl) titleEl.innerHTML = `📄 ${_planTitle(p)}`;
+
+  const stamp = frozen
+    ? `<span class="tag" data-state="good">🔒 مجمَّدة — كما حُسبت في ${esc(p.date)}${p.revision > 1 ? ` (مراجعة ${p.revision})` : ''}</span>`
+    : `<span class="tag" data-state="warn">⚠️ خطة قديمة — بلا لقطة مجمّدة</span>`;
+
+  const goalTxt = p.inp.goalType === 'monthly_income'
+    ? `دخل شهري ${fmt(p.inp.goalAmount)} ر.س` : `قيمة محفظة ${fmt(p.inp.goalAmount)} ر.س`;
+
+  // ── الترويسة: الرقم البطل ──
+  const head = `
+    <div class="stack-2" style="margin-bottom:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${stamp}
+        <span class="tag">🎯 ${esc(goalTxt)}</span>
+        <span class="tag">⏳ ${p.inp.horizonYears} سنة</span>
+        <span class="tag">${esc(_scenLabel(p.inp.scenarioKey))}</span>
+      </div>
+      <div class="hero-num">${p.alreadyReached ? 'لا حاجة لضخ ✅' : (p.requiredPMT == null ? '—' : fmt(p.requiredPMT))}
+        ${p.alreadyReached || p.requiredPMT == null ? '' : '<span class="unit">ر.س / شهر</span>'}</div>
+      <div class="hero-cap">الضخ الشهري الثابت الذي يبلغ الهدف في نهاية الأفق — بالأرقام المحفوظة، لا المُعاد حسابها.</div>
+    </div>`;
+
+  if (!frozen) {
+    box.innerHTML = head + `
+      <div class="note" data-state="warn" style="margin-bottom:12px">
+        <span class="ic">🕰️</span>
+        <div>هذه الخطة حُفظت قبل تفعيل اللقطة المجمَّدة، فلا تحمل مسار الإسقاط ولا معدّلات السيناريو وقت حفظها.
+        المعروض أدناه مدخلاتها ونتيجتها النهائية فقط. لتجميدها: اضغط «أعد الحساب ببيانات اليوم» ثم احفظها كخطة محدَّثة.</div>
+      </div>
+      <div class="kvs" style="margin-bottom:14px">
+        ${_kv('القيمة الابتدائية', fmt(p.inp.startValue))}
+        ${_kv('مبلغ فوري', fmt(p.inp.lumpSum || 0))}
+        ${_kv('الأفق', p.inp.horizonYears + ' سنة')}
+        ${_kv('الضخ المطلوب', _planPmtText(p))}
+        ${_kv('القيمة المتوقّعة عند الهدف', fmt(p.finalValue))}
+        ${_kv('إجمالي ما ستضخّه', fmt(p.totalContributed))}
+      </div>
+      ${_planActionsBar(p, false)}
+      ${_planCompareBlock(p)}`;
+    return;
+  }
+
+  // ── المدخلات المجمّدة ──
+  const infl = p.inp.adjustInflation
+    ? `مفعّل (${((p.inp.inflationRate || 0) * 100).toFixed(1)}%)` : 'مطفأ';
+  const inputsKvs = `
+    <div class="kvs">
+      ${_kv('القيمة الابتدائية وقت الحفظ', fmt(p.inp.startValue))}
+      ${_kv('مبلغ فوري', fmt(p.inp.lumpSum || 0))}
+      ${_kv('الأفق الزمني', p.inp.horizonYears + ' سنة')}
+      ${_kv('الهدف', goalTxt)}
+      ${_kv('إعادة استثمار التوزيعات', p.inp.reinvest ? 'نعم' : 'لا')}
+      ${_kv('تعديل التضخم', infl)}
+      ${_kv('الهدف الاسمي عند نهاية الأفق', fmt(p.targetFinalValue))}
+      ${_kv('القيمة المتوقّعة عند الهدف', fmt(p.finalValue))}
+      ${_kv('الدخل الشهري عند نهاية الأفق', fmt(p.finalIncome))}
+      ${_kv('إجمالي ما ستضخّه', fmt(p.totalContributed))}
+    </div>`;
+
+  // ── معدّلات السيناريوهات المجمّدة ──
+  const rates = (p.scenariosUsed && p.scenariosUsed.length ? p.scenariosUsed : [p.scenario]).map(s => {
+    const chosen = s.key === p.inp.scenarioKey;
+    return `<tr${chosen ? ' style="font-weight:700"' : ''}>
+      <td>${esc(_scenLabel(s.key))}${chosen ? ' ✓' : ''}</td>
+      <td class="num">${pct(s.capRate)}</td>
+      <td class="num">${pct(s.divRate)}</td>
+      <td class="num">${pct(s.capRate + s.divRate)}</td>
+    </tr>`;
+  }).join('');
+
+  // ── جدول المعالم من المسار المحفوظ ──
+  const milestoneRows = _frozenMilestoneRows(p);
+
+  // ── سياق البيانات ──
+  const c = p.context || {};
+  const ctxKvs = `
+    <div class="kvs">
+      ${_kv('درجة ثقة البيانات', c.confidenceScore != null ? c.confidenceScore + '%' : 'غير متوفرة')}
+      ${_kv('عمر رأس المال الفعلي', c.capitalWeightedMonths != null ? c.capitalWeightedMonths + ' شهر' : 'غير متوفر')}
+      ${_kv('عمر المحفظة التقويمي', c.yearsActive != null ? c.yearsActive + ' سنة' : 'غير متوفر')}
+      ${_kv('عائدك الشخصي الخام', c.annCapGrowth != null ? pct(c.annCapGrowth) : 'غير متوفر')}
+      ${_kv('النمو المُستخدَم (بعد المزج)', c.blendedCapGrowth != null ? pct(c.blendedCapGrowth) : 'غير متوفر')}
+      ${_kv('عائد التوزيعات المُستخدَم', c.safeDivYield != null ? pct(c.safeDivYield) : 'غير متوفر')}
+      ${_kv('XIRR وقت الحفظ', c.xirr != null ? c.xirr.toFixed(2) + '%' : 'غير متوفر')}
+      ${_kv('عدد الأسهم وقت الحفظ', c.holdingsCount != null ? String(c.holdingsCount) : 'غير متوفر')}
+      ${_kv('قيمة المحفظة وقت الحفظ', c.portfolioValue != null ? fmt(c.portfolioValue) : 'غير متوفرة')}
+    </div>`;
+
+  box.innerHTML = head + `
+    <div class="note" data-state="good" style="margin-bottom:14px">
+      <span class="ic">🔒</span>
+      <div>كل رقم هنا محفوظ حرفياً كما حُسب في <b>${esc(p.date)}</b> — لا يُعاد حسابه ولا يتأثر بتغيّر بيانات محفظتك بعد ذلك.
+      لمقارنته بواقع اليوم استخدم زر «أعد الحساب ببيانات اليوم» أدناه؛ لن يُكتب فوق الخطة إلا بحفظ صريح.</div>
+    </div>
+    <h4 style="font-size:.86rem;margin:0 0 8px">① المدخلات والهدف</h4>
+    ${inputsKvs}
+    <h4 style="font-size:.86rem;margin:16px 0 8px">② معدّلات السيناريوهات المستخدمة فعلاً</h4>
+    <div class="table-wrap" style="overflow-x:auto">
+      <table style="width:100%;font-size:.82rem"><thead><tr>
+        <th>السيناريو</th><th>نمو رأس المال</th><th>عائد التوزيعات</th><th>الإجمالي</th>
+      </tr></thead><tbody>${rates}</tbody></table>
+    </div>
+    <h4 style="font-size:.86rem;margin:16px 0 8px">③ مسار الإسقاط المحفوظ</h4>
+    <div class="table-wrap" style="overflow-x:auto">
+      <table style="width:100%;font-size:.82rem"><thead><tr>
+        <th>السنة</th><th>العام</th><th>قيمة المحفظة</th><th>رأس مالك المُضاف</th>
+        <th>تراكمي التوزيعات</th><th>القيمة الحقيقية</th><th>الدخل الشهري</th>
+      </tr></thead><tbody>${milestoneRows}</tbody></table>
+    </div>
+    <h4 style="font-size:.86rem;margin:16px 0 8px">④ سياق البيانات وقت الحفظ</h4>
+    ${ctxKvs}
+    ${_planActionsBar(p, true)}
+    ${_planCompareBlock(p)}`;
+}
+
+const _kv = (k, v) => `<div class="kv"><span>${esc(k)}</span><b>${esc(String(v))}</b></div>`;
+
+// صفوف المعالم من المسار المحفوظ (خطوة 1 سنة حتى 20، ثم 5 سنوات)
+function _frozenMilestoneRows(p) {
+  const path = p.path || [];
+  const step = p.inp.horizonYears <= 20 ? 1 : 5;
+  const baseYear = p.baseYear || new Date(p.createdISO || Date.now()).getFullYear();
+  const out = [];
+  path.forEach(s => {
+    if (s.y === 0) return;
+    if (s.y % step !== 0 && s.y !== p.inp.horizonYears) return;
+    out.push(`<tr>
+      <td>${s.y}</td>
+      <td>${baseYear + s.y}</td>
+      <td class="num">${fmtShort(s.v)}</td>
+      <td class="num">${fmtShort((p.inp.startValue || 0) + s.a)}</td>
+      <td class="num">${fmtShort(s.d)}</td>
+      <td class="num">${fmtShort(s.r)}</td>
+      <td class="num">${fmtShort(s.i)}</td>
+    </tr>`);
+  });
+  return out.join('');
+}
+
+function _planActionsBar(p, frozen) {
+  return `
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+      <button class="btn btn-primary btn-sm" onclick="recalcPlanWithToday(${p.id})">🔄 أعد الحساب ببيانات اليوم</button>
+      <button class="btn btn-secondary btn-sm" onclick="exportPlanToPDF(${p.id})">📄 تصدير PDF</button>
+      <button class="btn btn-secondary btn-sm" onclick="loadForecastPlanIntoInputs(${p.id})">✏️ حمّل مدخلاتها للتعديل</button>
+      <button class="btn btn-secondary btn-sm" onclick="closeSavedPlanView()" style="margin-inline-start:auto">إغلاق</button>
+    </div>
+    ${frozen ? '' : `<p class="small text-muted" style="margin-top:6px">إعادة الحساب لا تمسّ المحفوظ — الكتابة فوقه تحتاج ضغطة حفظ صريحة.</p>`}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// إعادة الحساب ببيانات اليوم — مقارنة جنباً إلى جنب بلا كتابة فوق الخطة
+// ══════════════════════════════════════════════════════════════════════
+function recalcPlanWithToday(id) {
+  const p = _forecastPlans.find(x => x.id === id);
+  if (!p) return;
+  if (!_hist || !_scenarios.length) { showToast('لا توجد بيانات كافية بعد', 'warning'); return; }
+
+  // نفس الهدف والأفق والسيناريو — لكن بقيمة محفظة اليوم وعائد توزيعات اليوم
+  const i = p.inp;
+  document.getElementById('inp-current-value').value = Math.round(_hist.currentValue || 0);
+  document.getElementById('inp-lump-sum').value      = i.lumpSum || 0;
+  document.getElementById('inp-goal-amount').value   = i.goalAmount || '';
+  document.getElementById('inp-reinvest').checked    = !!i.reinvest;
+  document.getElementById('inp-inflation').checked   = !!i.adjustInflation;
+  if (i.inflationRate) document.getElementById('inp-inflation-rate').value = (i.inflationRate * 100).toFixed(1);
+  const dyInp = document.getElementById('inp-div-yield');
+  if (dyInp) dyInp.value = '';                       // «بيانات اليوم» = العائد التلقائي الفعلي
+  document.getElementById('plan-scenario').value = i.scenarioKey || 'base';
+  setGoalType(i.goalType || 'portfolio_value');
+  const hSel = document.getElementById('inp-horizon');
+  if (hSel) {
+    const opts = [...hSel.options].map(o => +o.value);
+    hSel.value = opts.reduce((pp, c) => Math.abs(c - i.horizonYears) < Math.abs(pp - i.horizonYears) ? c : pp);
+  }
+
+  runForecast();
+  computeContributionPlan();
+  if (!_lastComputedPlan) return;
+
+  _planCompare = { id, live: _lastComputedPlan, at: new Date().toLocaleDateString('en-GB') };
+  renderSavedPlanView(id);
+  document.getElementById('plan-compare-anchor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function _cmpRow(label, savedVal, liveVal, fmtFn, higherIsBetter) {
+  const has = savedVal != null && liveVal != null && isFinite(savedVal) && isFinite(liveVal);
+  let diffTxt = '—', state = '';
+  if (has) {
+    const abs = liveVal - savedVal;
+    const rel = Math.abs(savedVal) > 1e-9 ? (abs / Math.abs(savedVal)) * 100 : null;
+    const flat = Math.abs(rel ?? 0) < 0.05;
+    const good = higherIsBetter == null ? null : (higherIsBetter ? abs > 0 : abs < 0);
+    state = flat ? '' : (good == null ? '' : good ? ' data-state="good"' : ' data-state="bad"');
+    const sign = abs > 0 ? '▲ +' : abs < 0 ? '▼ ' : '= ';
+    diffTxt = flat ? '= بلا تغيّر'
+      : `${sign}${fmtFn(Math.abs(abs))}${rel != null ? ` (${abs > 0 ? '+' : '−'}${Math.abs(rel).toFixed(1)}%)` : ''}`;
+  }
+  return `<tr>
+    <td>${esc(label)}</td>
+    <td class="num">${has || savedVal != null ? fmtFn(savedVal) : '—'}</td>
+    <td class="num">${has || liveVal != null ? fmtFn(liveVal) : '—'}</td>
+    <td class="num"><span class="tag"${state}>${diffTxt}</span></td>
+  </tr>`;
+}
+
+function _planCompareBlock(p) {
+  if (!_planCompare || _planCompare.id !== p.id) return '<div id="plan-compare-anchor"></div>';
+  const L = _planCompare.live;
+  const pctFn = v => v == null ? '—' : pct(v);
+  const numFn = v => v == null ? '—' : fmt(v);
+
+  const rows = [
+    _cmpRow('القيمة الابتدائية للمحفظة', p.inp.startValue, L.inp.startValue, numFn, true),
+    _cmpRow('نمو رأس المال المفترض/سنة', p.scenario?.capRate, L.scenario.capRate, pctFn, true),
+    _cmpRow('عائد التوزيعات المفترض/سنة', p.scenario?.divRate, L.scenario.divRate, pctFn, true),
+    _cmpRow('الضخ الشهري المطلوب', p.alreadyReached ? 0 : p.requiredPMT, L.alreadyReached ? 0 : L.requiredPMT, numFn, false),
+    _cmpRow('القيمة عند نهاية الأفق', p.finalValue, L.finalValue, numFn, true),
+    _cmpRow('الدخل الشهري عند نهاية الأفق', p.finalIncome, L.finalIncome, numFn, true),
+    _cmpRow('إجمالي ما ستضخّه', p.totalContributed, L.totalContributed, numFn, false),
+    _cmpRow('درجة ثقة البيانات', p.context?.confidenceScore != null ? p.context.confidenceScore / 100 : null,
+            L.context?.confidenceScore != null ? L.context.confidenceScore / 100 : null, pctFn, true),
+  ].join('');
+
+  return `
+    <div id="plan-compare-anchor" style="margin-top:18px;padding-top:14px;border-top:2px solid var(--border)">
+      <div class="card-head" style="margin-bottom:10px">
+        <span class="ttl">⚖️ المحفوظ مقابل اليوم</span>
+        <span class="sub">حُسب بالبيانات الحيّة في ${esc(_planCompare.at)} — لم يُحفَظ شيء</span>
+      </div>
+      <div class="note" style="margin-bottom:10px">
+        <span class="ic">ℹ️</span>
+        <div>الهدف والأفق والسيناريو كما في الخطة، لكن القيمة الابتدائية ومعدّلات السيناريو من بيانات محفظتك اليوم.
+        الفروق أدناه هي <b>معلومة</b> عن انحراف الواقع عن الخطة — لا تغييراً فيها.</div>
+      </div>
+      <div class="table-wrap" style="overflow-x:auto">
+        <table style="width:100%;font-size:.82rem"><thead><tr>
+          <th>البند</th><th>المحفوظ (${esc(p.date)})</th><th>اليوم</th><th>الفرق</th>
+        </tr></thead><tbody>${rows}</tbody></table>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+        <button class="btn btn-success btn-sm" onclick="saveForecastPlan(${p.id})">💾 احفظ أرقام اليوم فوق هذه الخطة</button>
+        <button class="btn btn-secondary btn-sm" onclick="_planCompare=null;renderSavedPlanView(${p.id})">أخفِ المقارنة</button>
+      </div>
+      <p class="small text-muted" style="margin-top:6px">أو احفظها كخطة جديدة مستقلة من بطاقة «خطة الضخ» أعلاه (زر «احفظ هذه الخطة») لتُبقي القديمة كما هي.</p>
+    </div>`;
 }
 
 function loadForecastPlanIntoInputs(id) {
@@ -1112,7 +1486,7 @@ function loadForecastPlanIntoInputs(id) {
   runForecast();
   computeContributionPlan();
   document.getElementById('plan-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  showToast('تم تحميل الخطة', 'success');
+  showToast('حُمِّلت مدخلات الخطة للتعديل — الخطة المحفوظة لم تتغيّر', 'info');
 }
 
 function renderForecastPlans() {
@@ -1132,25 +1506,271 @@ function renderForecastPlans() {
   }
   el.innerHTML = plans.map(p => {
     const goalTxt = p.inp.goalType === 'monthly_income' ? `دخل ${fmt(p.inp.goalAmount)} ر.س/شهر` : `محفظة ${fmt(p.inp.goalAmount)} ر.س`;
-    const pmtTxt = p.alreadyReached ? 'لا حاجة لضخ' : (p.requiredPMT == null ? '—' : `${fmt(p.requiredPMT)} ر.س/شهر`);
+    const pmtTxt = _planPmtText(p);
+    const frozen = _isFrozenPlan(p);
+    const badge = frozen
+      ? `<span class="tag" data-state="good">🔒 مجمَّدة</span>`
+      : `<span class="tag" data-state="warn" title="حُفظت قبل تفعيل اللقطة المجمّدة — بلا مسار ولا معدّلات محفوظة">⚠️ خطة قديمة</span>`;
     return `
     <div style="border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;background:var(--bg-2)">
       <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:flex-start">
         <div style="flex:1;min-width:200px">
-          <div style="font-weight:700">${p.notes ? esc(p.notes) : goalTxt}</div>
+          <div style="font-weight:700;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <span>${p.notes ? esc(p.notes) : goalTxt}</span>${badge}
+          </div>
           ${p.notes ? `<div class="small text-muted">${goalTxt}</div>` : ''}
           <div class="small text-muted" style="margin-top:4px">
             الضخ المطلوب: <b style="color:var(--accent)">${pmtTxt}</b> ·
-            ${p.inp.horizonYears} سنة · ${_scenLabel(p.inp.scenarioKey)} · حُفظت ${p.date}
+            ${p.inp.horizonYears} سنة · ${_scenLabel(p.inp.scenarioKey)} · حُفظت ${esc(p.date)}
           </div>
         </div>
-        <div style="display:flex;gap:6px">
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="openSavedPlan(${p.id})">📂 افتح</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportPlanToPDF(${p.id})">📄 تصدير PDF</button>
           <button class="btn btn-secondary btn-sm" onclick="loadForecastPlanIntoInputs(${p.id})">تحميل</button>
           <button class="btn btn-danger btn-sm" onclick="deleteForecastPlan(${p.id})">حذف</button>
         </div>
       </div>
     </div>`;
   }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 📄 تصدير الخطة إلى PDF — بلا مكتبات خارجية
+// نبني طبقة تقرير مخصّصة للطباعة (خلفية بيضاء/حبر أسود/RTL) ثم window.print()
+// فيحفظها المستخدم PDF من حوار الطباعة («حفظ كـ PDF» وجهة الطباعة).
+// ══════════════════════════════════════════════════════════════════════
+
+// رسم المسار المحفوظ على canvas مؤقّت خارج الشاشة ثم تصويره PNG.
+// لا نصوّر مخطط الصفحة الحيّ لأنه يعرض السيناريوهات الحيّة لا مسار الخطة المجمّد.
+function _planChartImage(p) {
+  const path = Array.isArray(p.path) ? p.path : [];
+  if (typeof Chart === 'undefined') return null;
+  if (path.length < 2) {
+    // خطة قديمة بلا مسار: نرجع لمخطط الصفحة الظاهر إن وُجد (مع وسم أنه حيّ)
+    const live = document.getElementById('forecast-chart');
+    try { return (live && _forecastChart) ? live.toDataURL('image/png') : null; } catch (_) { return null; }
+  }
+
+  const host = document.createElement('div');
+  host.setAttribute('aria-hidden', 'true');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:960px;height:440px;pointer-events:none';
+  const cv = document.createElement('canvas');
+  cv.width = 960; cv.height = 440;
+  host.appendChild(cv);
+  document.body.appendChild(host);
+
+  const baseYear = p.baseYear || new Date(p.createdISO || Date.now()).getFullYear();
+  const labels   = path.map(s => String(baseYear + s.y));
+  const start    = p.inp.startValue || 0;
+
+  // ألوان الطباعة: حبر داكن على أبيض — الثيم الداكن يُطبع رديئاً
+  const INK = '#1a1a1a', GRID = '#d0d0d0';
+  const datasets = [
+    { label: 'قيمة المحفظة (اسمية)', data: path.map(s => s.v),
+      borderColor: '#166534', backgroundColor: 'rgba(22,101,52,0.10)', borderWidth: 2.5, fill: true, tension: .3, pointRadius: 0 },
+    { label: 'رأس مالك المُضاف', data: path.map(s => start + s.a),
+      borderColor: '#1d4ed8', borderDash: [6, 4], borderWidth: 2, fill: false, tension: .1, pointRadius: 0 },
+  ];
+  if (p.inp.adjustInflation) {
+    datasets.push({ label: 'القيمة الحقيقية (بقوة شراء اليوم)', data: path.map(s => s.r),
+      borderColor: '#b45309', borderDash: [3, 3], borderWidth: 2, fill: false, tension: .3, pointRadius: 0 });
+  }
+  if (p.targetFinalValue > 0 && isFinite(p.targetFinalValue)) {
+    datasets.push({ label: 'الهدف', data: path.map(() => Math.round(p.targetFinalValue)),
+      borderColor: '#b91c1c', borderDash: [8, 5], borderWidth: 2, fill: false, tension: 0, pointRadius: 0 });
+  }
+
+  const whiteBg = {
+    id: 'prWhiteBg',
+    beforeDraw(chart) {
+      const { ctx, width, height } = chart;
+      ctx.save(); ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, width, height); ctx.restore();
+    },
+  };
+
+  let url = null, ch = null;
+  try {
+    ch = new Chart(cv, {
+      type: 'line',
+      data: { labels, datasets },
+      plugins: [whiteBg],
+      options: {
+        responsive: false, animation: false, devicePixelRatio: 2,
+        interaction: { mode: 'index' },
+        plugins: {
+          legend: { rtl: true, textDirection: 'rtl', labels: { color: INK, font: { family: 'Tajawal', size: 13 }, boxWidth: 14 } },
+          tooltip: { enabled: false },
+        },
+        scales: {
+          x: { ticks: { color: INK, font: { family: 'Tajawal', size: 11 }, maxTicksLimit: 12 }, grid: { color: GRID } },
+          y: { ticks: { color: INK, font: { family: 'Tajawal', size: 11 }, callback: v => fmtShort(v) }, grid: { color: GRID } },
+        },
+      },
+    });
+    url = cv.toDataURL('image/png');
+  } catch (e) {
+    console.warn('plan chart image failed:', e);
+  } finally {
+    if (ch) ch.destroy();
+    host.remove();
+  }
+  return url;
+}
+
+// كل صفوف المسار للتقرير (خطوة 1 سنة حتى 25، ثم كل 5 سنوات + السنة الأخيرة)
+function _planReportRows(p) {
+  const path = Array.isArray(p.path) ? p.path : [];
+  if (!path.length) return '';
+  const H = p.inp.horizonYears;
+  const step = H <= 25 ? 1 : 5;
+  const baseYear = p.baseYear || new Date(p.createdISO || Date.now()).getFullYear();
+  const start = p.inp.startValue || 0;
+  return path.filter(s => s.y > 0 && (s.y % step === 0 || s.y === H)).map(s => `<tr>
+      <td>${s.y}</td><td>${baseYear + s.y}</td>
+      <td class="pr-n">${fmtShort(s.v)}</td>
+      <td class="pr-n">${fmtShort(start + s.a)}</td>
+      <td class="pr-n">${fmtShort(s.d)}</td>
+      <td class="pr-n">${fmtShort(s.r)}</td>
+      <td class="pr-n">${fmtShort(s.i)}</td>
+    </tr>`).join('');
+}
+
+const _prKv = (k, v) => `<div class="pr-kv"><span>${esc(k)}</span><b>${esc(String(v))}</b></div>`;
+
+function exportPlanToPDF(planId) {
+  const p = _forecastPlans.find(x => x.id === planId);
+  if (!p) { showToast('الخطة غير موجودة', 'warning'); return; }
+
+  const frozen  = _isFrozenPlan(p);
+  const goalTxt = p.inp.goalType === 'monthly_income'
+    ? `دخل شهري ${fmt(p.inp.goalAmount)} ر.س` : `قيمة محفظة ${fmt(p.inp.goalAmount)} ر.س`;
+  const imgUrl  = _planChartImage(p);
+  const c       = p.context || {};
+  const baseYear = p.baseYear || new Date(p.createdISO || Date.now()).getFullYear();
+
+  const stamp = frozen
+    ? `<span class="pr-tag pr-tag-ok">🔒 لقطة مجمَّدة — الأرقام كما حُسبت في ${esc(p.date)}</span>`
+    : `<span class="pr-tag pr-tag-warn">⚠️ خطة قديمة — بلا لقطة مجمّدة (المعروض: مدخلاتها ونتيجتها فقط)</span>`;
+
+  const ratesRows = (p.scenariosUsed && p.scenariosUsed.length ? p.scenariosUsed : (p.scenario ? [p.scenario] : []))
+    .map(s => `<tr${s.key === p.inp.scenarioKey ? ' class="pr-strong"' : ''}>
+        <td>${esc(_scenLabel(s.key))}${s.key === p.inp.scenarioKey ? ' ✓ (المعتمد)' : ''}</td>
+        <td class="pr-n">${pct(s.capRate)}</td><td class="pr-n">${pct(s.divRate)}</td>
+        <td class="pr-n">${pct(s.capRate + s.divRate)}</td>
+      </tr>`).join('');
+
+  const pathRows = _planReportRows(p);
+
+  const html = `
+    <div class="pr-sheet">
+      <div class="pr-noprint pr-bar">
+        <button type="button" class="pr-btn pr-btn-main" onclick="window.print()">🖨️ اطبع / احفظ كـ PDF</button>
+        <button type="button" class="pr-btn" onclick="closePlanReport()">إغلاق</button>
+        <span class="pr-hint">من حوار الطباعة اختر الوجهة «حفظ كـ PDF» (Save as PDF).</span>
+      </div>
+
+      <header class="pr-head pr-block">
+        <div class="pr-brand">ثروة — الرؤية المستقبلية · خطة الضخ للوصول للهدف</div>
+        <h1 class="pr-title">${p.notes ? esc(p.notes) : esc(goalTxt)}</h1>
+        <div class="pr-sub">${p.notes ? esc(goalTxt) + ' · ' : ''}حُفظت في ${esc(p.date)}${p.revision > 1 ? ` · مراجعة ${p.revision}` : ''} · طُبعت في ${new Date().toLocaleDateString('en-GB')}</div>
+        <div class="pr-stamps">${stamp}</div>
+      </header>
+
+      <section class="pr-block">
+        <div class="pr-hero">
+          <div class="pr-hero-v">${p.alreadyReached ? 'لا حاجة لضخ إضافي' : (p.requiredPMT == null ? '—' : fmt(p.requiredPMT))}</div>
+          <div class="pr-hero-l">${p.alreadyReached ? 'أصولك وقت الحفظ تبلغ الهدف وحدها في نهاية الأفق' : 'الضخ الشهري الثابت المطلوب للوصول للهدف'}</div>
+        </div>
+      </section>
+
+      <section class="pr-block">
+        <h2 class="pr-h2">① المدخلات والهدف</h2>
+        <div class="pr-kvs">
+          ${_prKv('الهدف', goalTxt)}
+          ${_prKv('الأفق الزمني', p.inp.horizonYears + ' سنة (' + baseYear + ' → ' + (baseYear + p.inp.horizonYears) + ')')}
+          ${_prKv('السيناريو المعتمد', _scenLabel(p.inp.scenarioKey))}
+          ${_prKv('القيمة الابتدائية وقت الحفظ', fmt(p.inp.startValue))}
+          ${_prKv('مبلغ فوري', fmt(p.inp.lumpSum || 0))}
+          ${_prKv('إعادة استثمار التوزيعات', p.inp.reinvest ? 'نعم' : 'لا')}
+          ${_prKv('تعديل التضخم', p.inp.adjustInflation ? `مفعّل (${((p.inp.inflationRate || 0) * 100).toFixed(1)}%)` : 'مطفأ')}
+          ${_prKv('الهدف الاسمي عند نهاية الأفق', fmt(p.targetFinalValue))}
+          ${_prKv('القيمة المتوقّعة عند الهدف', fmt(p.finalValue))}
+          ${_prKv('الدخل الشهري عند نهاية الأفق', p.finalIncome != null ? fmt(p.finalIncome) : 'غير متوفر')}
+          ${_prKv('إجمالي ما ستضخّه', fmt(p.totalContributed))}
+        </div>
+      </section>
+
+      ${imgUrl ? `
+      <section class="pr-block">
+        <h2 class="pr-h2">② مسار الإسقاط المحفوظ</h2>
+        <img class="pr-img" src="${imgUrl}" alt="مخطط مسار نمو المحفظة للخطة المحفوظة">
+        ${frozen ? '' : '<div class="pr-note">المخطط أعلاه من الإسقاط الحيّ في الصفحة — هذه الخطة القديمة لا تحمل مساراً محفوظاً.</div>'}
+      </section>` : ''}
+
+      ${ratesRows ? `
+      <section class="pr-block">
+        <h2 class="pr-h2">③ معدّلات السيناريوهات المستخدمة فعلاً</h2>
+        <table class="pr-table">
+          <thead><tr><th>السيناريو</th><th>نمو رأس المال/سنة</th><th>عائد التوزيعات/سنة</th><th>الإجمالي/سنة</th></tr></thead>
+          <tbody>${ratesRows}</tbody>
+        </table>
+      </section>` : ''}
+
+      ${pathRows ? `
+      <section class="pr-block">
+        <h2 class="pr-h2">④ المعالم السنوية من المسار المحفوظ</h2>
+        <table class="pr-table">
+          <thead><tr>
+            <th>السنة</th><th>العام</th><th>قيمة المحفظة</th><th>رأس مالك المُضاف</th>
+            <th>تراكمي التوزيعات</th><th>القيمة الحقيقية</th><th>الدخل الشهري</th>
+          </tr></thead>
+          <tbody>${pathRows}</tbody>
+        </table>
+        <div class="pr-note">القيم بالريال السعودي (م = مليون، ألف = ألف). «القيمة الحقيقية» = بقوة شراء ${baseYear} بعد خصم التضخم. «الدخل الشهري» = قيمة المحفظة × عائد التوزيعات ÷ 12.</div>
+      </section>` : ''}
+
+      <section class="pr-block">
+        <h2 class="pr-h2">⑤ سياق البيانات وقت الحفظ</h2>
+        <div class="pr-kvs">
+          ${_prKv('درجة ثقة البيانات', c.confidenceScore != null ? c.confidenceScore + '%' : 'غير متوفرة')}
+          ${_prKv('عمر رأس المال الفعلي', c.capitalWeightedMonths != null ? c.capitalWeightedMonths + ' شهر' : 'غير متوفر')}
+          ${_prKv('عمر المحفظة التقويمي', c.yearsActive != null ? c.yearsActive + ' سنة' : 'غير متوفر')}
+          ${_prKv('عائدك الشخصي الخام', c.annCapGrowth != null ? pct(c.annCapGrowth) : 'غير متوفر')}
+          ${_prKv('النمو المُستخدَم بعد المزج', c.blendedCapGrowth != null ? pct(c.blendedCapGrowth) : 'غير متوفر')}
+          ${_prKv('عائد التوزيعات المُستخدَم', c.safeDivYield != null ? pct(c.safeDivYield) : 'غير متوفر')}
+          ${_prKv('XIRR وقت الحفظ', c.xirr != null ? c.xirr.toFixed(2) + '%' : 'غير متوفر')}
+          ${_prKv('عدد الأسهم وقت الحفظ', c.holdingsCount != null ? String(c.holdingsCount) : 'غير متوفر')}
+          ${_prKv('قيمة المحفظة وقت الحفظ', c.portfolioValue != null ? fmt(c.portfolioValue) : 'غير متوفرة')}
+        </div>
+        ${frozen ? '' : '<div class="pr-note">خطة قديمة: سياق البيانات لم يُحفظ معها، فالحقول أعلاه «غير متوفرة» صراحةً — لم تُقدَّر.</div>'}
+      </section>
+
+      <footer class="pr-foot pr-block">
+        <b>تنبيه:</b> هذه الوثيقة إسقاط حسابي مبني على افتراضات ومعدّلات محفوظة وقت إنشائها — <b>ليست وعداً ولا توقّعاً مضموناً ولا توصية استثمارية</b>.
+        الأداء التاريخي لا يضمن نتائج مستقبلية، والسوق يمرّ بسنوات هابطة لا يحاكيها أي سيناريو هنا. القرار الاستثماري مسؤوليتك الكاملة.
+        <div class="pr-foot-src">ثروة — مفكرة حسابية شخصية · وُلّدت من صفحة الرؤية المستقبلية</div>
+      </footer>
+    </div>`;
+
+  let layer = document.getElementById('print-report');
+  if (!layer) {
+    layer = document.createElement('div');
+    layer.id = 'print-report';
+    document.body.appendChild(layer);
+  }
+  layer.innerHTML = html;
+  layer.classList.add('open');
+  document.body.classList.add('pr-printing');
+  layer.scrollTop = 0;
+  showToast('جاهزة للطباعة — اختر «حفظ كـ PDF» من حوار الطباعة', 'info');
+}
+
+function closePlanReport() {
+  const layer = document.getElementById('print-report');
+  if (layer) { layer.classList.remove('open'); layer.innerHTML = ''; }
+  document.body.classList.remove('pr-printing');
 }
 
 // ── Render historical summary ──────────────────────────────────────────
@@ -2081,3 +2701,7 @@ function pct(r) {
 
 // ── Boot ──────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', init);
+// Esc يغلق طبقة تقرير الطباعة (وإلا بقيت الصفحة محجوبة خلفها)
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && document.body.classList.contains('pr-printing')) closePlanReport();
+});

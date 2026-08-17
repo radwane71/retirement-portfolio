@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817b">
+  <link rel="stylesheet" href="css/style.css?v=20260817c">
   <style>
     /* ── Scenario Cards ── */
     .scenario-grid {
@@ -302,6 +302,98 @@
       line-height: 1.7;
     }
     .disclaimer strong { color: var(--danger); }
+
+    /* ══════════════════════════════════════════════════════════════════
+       طبقة تقرير الخطة (تصدير PDF عبر حوار الطباعة — بلا مكتبات خارجية)
+       ملاحظة مقصودة: هذه الطبقة سطح طباعة، فتُثبَّت على حبر داكن/ورق أبيض
+       بدل متغيّرات الثيم — الثيم الداكن يستهلك حبراً ويُطبع رديئاً.
+       ══════════════════════════════════════════════════════════════════ */
+    #print-report { display: none; }
+    #print-report.open {
+      --pr-ink: #111827; --pr-ink-2: #4b5563; --pr-line: #d1d5db;
+      --pr-ok: #166534; --pr-warn: #92400e; --pr-paper: #ffffff;
+      display: block; position: fixed; inset: 0; z-index: 4000;
+      overflow: auto; -webkit-overflow-scrolling: touch;
+      background: var(--pr-paper); color: var(--pr-ink);
+      direction: rtl; text-align: right;
+      font-family: 'Tajawal', sans-serif; font-size: 12px; line-height: 1.65;
+      padding: 20px 16px 60px;
+    }
+    #print-report .pr-sheet { max-width: 186mm; margin: 0 auto; }
+    #print-report .pr-bar {
+      display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+      padding: 0 0 14px; margin-bottom: 14px; border-bottom: 1px dashed var(--pr-line);
+    }
+    #print-report .pr-btn {
+      font-family: 'Tajawal', sans-serif; font-size: .82rem; cursor: pointer;
+      padding: 7px 14px; border-radius: 8px;
+      border: 1px solid var(--pr-line); background: #f3f4f6; color: var(--pr-ink);
+    }
+    #print-report .pr-btn-main { background: var(--pr-ok); border-color: var(--pr-ok); color: #fff; font-weight: 700; }
+    #print-report .pr-hint { font-size: .74rem; color: var(--pr-ink-2); }
+    #print-report .pr-head { border-bottom: 2px solid var(--pr-ink); padding-bottom: 10px; margin-bottom: 16px; }
+    #print-report .pr-brand { font-size: .72rem; color: var(--pr-ink-2); letter-spacing: .02em; }
+    #print-report .pr-title { font-size: 1.35rem; font-weight: 900; margin: 4px 0 3px; }
+    #print-report .pr-sub { font-size: .76rem; color: var(--pr-ink-2); }
+    #print-report .pr-stamps { margin-top: 8px; }
+    #print-report .pr-tag {
+      display: inline-block; font-size: .72rem; font-weight: 700;
+      padding: 3px 10px; border-radius: 999px; border: 1px solid var(--pr-line);
+    }
+    #print-report .pr-tag-ok   { color: var(--pr-ok);   border-color: var(--pr-ok);   background: #f0fdf4; }
+    #print-report .pr-tag-warn { color: var(--pr-warn); border-color: var(--pr-warn); background: #fffbeb; }
+    #print-report .pr-h2 { font-size: .92rem; font-weight: 800; margin: 0 0 8px; padding-bottom: 5px; border-bottom: 1px solid var(--pr-line); }
+    #print-report .pr-block { margin-bottom: 18px; }
+    #print-report .pr-hero { border: 1.5px solid var(--pr-ink); border-radius: 10px; padding: 12px 16px; text-align: center; }
+    #print-report .pr-hero-v { font-size: 1.7rem; font-weight: 900; line-height: 1.15; }
+    #print-report .pr-hero-l { font-size: .76rem; color: var(--pr-ink-2); margin-top: 3px; }
+    #print-report .pr-kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 2px 22px; }
+    #print-report .pr-kv { display: flex; justify-content: space-between; gap: 10px; align-items: baseline;
+      font-size: .78rem; padding: 4px 0; border-bottom: 1px dotted var(--pr-line); }
+    #print-report .pr-kv > span { color: var(--pr-ink-2); }
+    #print-report .pr-kv > b { font-variant-numeric: tabular-nums; text-align: end; }
+    #print-report .pr-img { width: 100%; height: auto; border: 1px solid var(--pr-line); border-radius: 6px; }
+    #print-report .pr-table { width: 100%; border-collapse: collapse; font-size: .75rem; }
+    #print-report .pr-table th, #print-report .pr-table td { border: 1px solid var(--pr-line); padding: 4px 7px; text-align: right; }
+    #print-report .pr-table th { background: #f3f4f6; font-weight: 700; font-size: .73rem; }
+    #print-report .pr-table .pr-n { font-variant-numeric: tabular-nums; }
+    #print-report .pr-table .pr-strong td { font-weight: 800; background: #f9fafb; }
+    #print-report .pr-note { font-size: .71rem; color: var(--pr-ink-2); margin-top: 6px; line-height: 1.6; }
+    #print-report .pr-foot { border-top: 1px solid var(--pr-line); padding-top: 10px; font-size: .72rem; color: var(--pr-ink-2); line-height: 1.7; }
+    #print-report .pr-foot-src { margin-top: 6px; font-size: .68rem; }
+
+    /* ── قواعد الطباعة ── */
+    @media print {
+      @page { size: A4 portrait; margin: 12mm; }
+
+      /* (أ) طباعة طبقة التقرير وحدها عند فتحها */
+      body.pr-printing > *:not(#print-report) { display: none !important; }
+      body.pr-printing #print-report.open { position: static; overflow: visible; padding: 0; font-size: 11px; }
+      #print-report .pr-noprint { display: none !important; }
+      #print-report .pr-block, #print-report .pr-hero, #print-report .pr-kv,
+      #print-report img, #print-report tr { page-break-inside: avoid; break-inside: avoid; }
+      #print-report thead { display: table-header-group; }
+      #print-report .pr-h2 { page-break-after: avoid; break-after: avoid; }
+
+      /* (ب) طباعة الصفحة نفسها (Ctrl+P بلا تقرير): ورق أبيض وحبر أسود بلا تنقّل */
+      body:not(.pr-printing) { background: #fff !important; }
+      body:not(.pr-printing) .sidebar,
+      body:not(.pr-printing) .toast,
+      body:not(.pr-printing) .chart-mode-btns,
+      body:not(.pr-printing) .info-btn,
+      body:not(.pr-printing) .btn,
+      body:not(.pr-printing) button,
+      body:not(.pr-printing) input,
+      body:not(.pr-printing) select { display: none !important; }
+      body:not(.pr-printing) .main { margin: 0 !important; padding: 0 !important; width: 100% !important; max-width: none !important; }
+      body:not(.pr-printing) .main, body:not(.pr-printing) .main * { color: #000 !important; }
+      body:not(.pr-printing) .card,
+      body:not(.pr-printing) .hist-summary,
+      body:not(.pr-printing) .inputs-panel,
+      body:not(.pr-printing) .disclaimer { background: #fff !important; border-color: #ccc !important; box-shadow: none !important;
+        page-break-inside: avoid; break-inside: avoid; }
+      body:not(.pr-printing) table, body:not(.pr-printing) tr { page-break-inside: avoid; break-inside: avoid; }
+    }
   </style>
 </head>
 <body>
@@ -564,7 +656,21 @@
         <input type="text" id="plan-search" placeholder="بحث بالهدف أو الملاحظة…" oninput="renderForecastPlans()"
                style="max-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-2);color:var(--text);font-size:.85rem">
       </div>
+      <p class="small text-muted" style="margin:0 0 10px;line-height:1.7">
+        الخطة المحفوظة <b>وثيقة مجمَّدة</b>: تُخزَّن معها مدخلاتها ومعدّلات سيناريوهاتها ومسار إسقاطها السنوي
+        وسياق بياناتك وقتها — فتُعرض لاحقاً بالأرقام نفسها مهما تغيّرت محفظتك. لمقارنتها بالواقع استخدم
+        «أعد الحساب ببيانات اليوم» داخلها؛ لا يُكتب فوقها إلا بحفظ صريح.
+      </p>
       <div id="saved-plans-list"></div>
+    </div>
+
+    <!-- ── عرض خطة محفوظة (مجمَّدة) + مقارنة اليوم ── -->
+    <div class="card" id="saved-plan-view-card" style="display:none">
+      <div class="card-head">
+        <span class="ttl" id="saved-plan-view-title">📄 الخطة المحفوظة</span>
+        <span class="sub acts">أرقام محفوظة — لا يُعاد حسابها</span>
+      </div>
+      <div id="saved-plan-view"></div>
     </div>
 
     <!-- ── Monte Carlo — مخاطر تسلسل العوائد ── -->
@@ -676,9 +782,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260817b"></script>
-  <script src="js/auth.js?v=20260817b"></script>
-  <script src="js/utils.js?v=20260817b"></script>
-  <script src="js/forecast.js?v=20260817b"></script>
+  <script src="js/supabase.js?v=20260817c"></script>
+  <script src="js/auth.js?v=20260817c"></script>
+  <script src="js/utils.js?v=20260817c"></script>
+  <script src="js/forecast.js?v=20260817c"></script>
 </body>
 </html>
