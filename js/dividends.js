@@ -125,7 +125,9 @@ function _ttmDividends() {
   const yearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
   return dividends.reduce((s, d) => {
     const dt = d.date ? parseDateLocal(d.date) : parseDateLocal(_divSortDate(d));
-    return (dt && dt >= yearAgo && dt <= now) ? s + +d.amount : s;
+    // AUDIT-FIX (2026-08): كانت النافذة مغلقة الطرفين (>=) أي 366 يوماً، فتحتسب
+    // دفعة الموزّع السنوي مرتين في يوم الذكرى السنوية بالضبط (دخل مضاعف ليوم كامل).
+    return (dt && dt > yearAgo && dt <= now) ? s + +d.amount : s;
   }, 0);
 }
 
@@ -318,17 +320,32 @@ function _projectedAnnualIncome() {
 
     const currentShares = +holding.shares;
     const projected = dps * freq * currentShares;
-    total += projected;
+
+    // AUDIT-FIX (2026-08): «الدخل المتوقع» كان يُسقط دخلاً كاملاً لسهم توقّف عن
+    // التوزيع منذ سنوات — lastDivDate كان يُخزَّن ولا يُفحص في أي شرط. سهم قطع
+    // توزيعه هو حالة «فشل بوابة الاستدامة» في الدستور (§4 الفلتر 1) فلا يجوز
+    // بناء دخل تقاعدي متوقَّع عليه. القاعدة: تجاوز 1.75 ضعف دورته المعتادة بلا
+    // توزيع = فوّت دورة كاملة مع مهلة → يُستبعد من المجموع ويُعلَن صراحةً (§8:
+    // لا إسقاط صامت — يظهر في التحذير مع عدد أشهر الانقطاع).
+    const daysSinceDiv = lastDivDate
+      ? Math.floor((Date.now() - parseDateLocal(lastDivDate).getTime()) / 86400000)
+      : null;
+    const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+    const isStale    = daysSinceDiv != null && daysSinceDiv > staleAfter;
+
+    if (!isStale) total += projected;
 
     breakdown.push({
       ticker, name: holding.name || ticker,
       dps, freq, freqLabel, currentShares,
       lastDivDate, lastDivAmt: lastValidAmt,
       sharesAtLastDiv: sharesAtRefDiv, projected, usedFallback, dpsTrend,
+      isStale, daysSinceDiv,
     });
   });
 
-  return { total, breakdown };
+  const stale = breakdown.filter(b => b.isStale);
+  return { total, breakdown, stale };
 }
 
 // ── شريط الإحصائيات الكلية ────────────────────────────────────
@@ -443,6 +460,23 @@ function renderDivStats(fwdPrecomputed) {
       <div class="tx-stat-lbl">أسهم موزِّعة</div>
       <div class="tx-stat-sub">${coveredByFwd} مغطى بـ Forward</div>
     </div>`;
+
+  // إعلان صريح عن الأسهم المستبعَدة من الدخل المتوقع لانقطاع توزيعها (§8)
+  const staleEl = document.getElementById('div-stale-note');
+  if (staleEl) {
+    const st = fwd.stale || [];
+    if (!st.length) { staleEl.style.display = 'none'; staleEl.innerHTML = ''; }
+    else {
+      staleEl.style.display = '';
+      const items = st.map(s =>
+        `${esc(s.name || s.ticker)} (${Math.round(s.daysSinceDiv / 30.44)} شهراً بلا توزيع، كان متوقّعه ${formatSAR(s.projected)})`
+      ).join(' · ');
+      staleEl.innerHTML = `<div class="note" data-state="warn"><span class="ic">⚠️</span><div>
+        <b>مستبعَد من «الدخل المتوقع»:</b> ${items}<br>
+        <span class="text-muted">انقطاع التوزيع إشارة فشل بوابة الاستدامة (الدستور §4 الفلتر 1) —
+        لا يُبنى عليه دخل متوقَّع. راجع السهم في محرّك القرار.</span></div></div>`;
+    }
+  }
 
   // عرض مؤشر ثقة البيانات التوزيعية
   renderDivConfidenceBanner(netCapital, ttm, fwd.total, fwd.breakdown.length);
