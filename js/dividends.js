@@ -260,27 +260,38 @@ function _projectedAnnualIncome() {
 
     // سلسلة DPS لكل دفعة كان المستخدم يملك أسهماً عندها (بالترتيب الزمني)
     let lastValidShares = 0, lastValidDate = null, lastValidAmt = 0;
-    const dpsSeries = [];
+    const dpsSeries = [];   // { dps, date } — التاريخ لازم لنافذة الـ12 شهراً
     for (let i = 0; i < tickerDivs.length; i++) {
-      const sh = _sharesAtDate(ticker, _divSortDate(tickerDivs[i]));
+      const dt = _divSortDate(tickerDivs[i]);
+      const sh = _sharesAtDate(ticker, dt);
       if (sh >= 0.001) {
-        dpsSeries.push(+tickerDivs[i].amount / sh);
+        dpsSeries.push({ dps: +tickerDivs[i].amount / sh, date: dt });
         lastValidShares = sh;
-        lastValidDate   = _divSortDate(tickerDivs[i]);
+        lastValidDate   = dt;
         lastValidAmt    = +tickerDivs[i].amount;
       }
     }
 
-    // DPS المتوقع:
-    //  • الافتراضي = وسيط آخر freq دفعات (محصّن ضد توزيع خاص/شاذ يضخّم التشغيل المستقبلي)
-    //  • استثناء الأسهم النامية: لو آخر دورة سنوية كاملة تصاعدية بانتظام (راجحي/STC مثلاً)
-    //    فالوسيط يتخلّف عن الواقع ويعطي Forward Yield أقل من الحقيقي → نستخدم آخر دفعة معلنة.
-    //    (يطابق dashboard.js — نفس منطق _dpsTrendAware)
-    let dps, lastDivDate, sharesAtRefDiv, usedFallback = false, dpsTrend = 'median';
+    // DPS السنوي المتوقع = مجموع DPS آخر 12 شهراً (قرار المالك 2026-08).
+    // كان: دفعة واحدة (وسيط أو آخر دفعة) × الدورية — وهو يفترض تساوي الدفعات،
+    // فيضخّم النمط السعودي الشائع (مرحلي صغير + ختامي كبير) حتى +129%، ويتذبذب
+    // ±20% لنفس السهم حسب شهر فتح الصفحة رغم ثبات سياسة الشركة. مجموع الاثني
+    // عشر شهراً يعطي الرقم نفسه في كل الحالات بلا فروع اتجاه.
+    // احتياطي للموزّع السنوي الذي دفعته الأخيرة تجاوزت 12 شهراً ولمّا يُعدّ منقطعاً:
+    // مجموع آخر دورة كاملة (آخر freq دفعة).
+    let dps, lastDivDate, sharesAtRefDiv, usedFallback = false, dpsTrend = 'ttm';
     if (dpsSeries.length) {
-      const t = _dpsTrendAware(dpsSeries, freq);
-      dps            = t.dps;
-      dpsTrend       = t.mode;
+      const cutoff = Date.now() - 365 * 86400000;
+      const ttmDps = dpsSeries
+        .filter(p => parseDateLocal(p.date).getTime() >= cutoff)
+        .reduce((s, p) => s + p.dps, 0);
+      if (ttmDps > 0) {
+        dps = ttmDps / freq;              // يُضرب بـ freq لاحقاً → المجموع كما هو
+      } else {
+        const cycle = dpsSeries.slice(-freq).reduce((s, p) => s + p.dps, 0);
+        dps = cycle / freq;
+        dpsTrend = 'last-cycle';
+      }
       lastDivDate    = lastValidDate;
       sharesAtRefDiv = lastValidShares;
     } else {
