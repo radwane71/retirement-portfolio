@@ -15,24 +15,30 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817f">
   <style>
-    /* ── Valuation Cards Grid ── */
+    /* ── Valuation Cards Grid ──
+       أعمدة صريحة متدرّجة 4 → 3 → 2 → 1. auto-fill كان يحشر 5 كروت على
+       الشاشات العريضة فتتزاحم؛ السقف الآن 4 ليتنفّس كل كرت. */
     .val-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-      gap: 16px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: var(--sp-4);
     }
-    @media (max-width: 680px) { .val-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 1500px) { .val-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+    @media (max-width: 1150px) { .val-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+    @media (max-width: 680px)  { .val-grid { grid-template-columns: 1fr; } }
 
+    /* التباعد الداخلي: gap واحد يحكم الإيقاع الرأسي بدل margin-bottom
+       متفرّق على كل قسم — كل المسافات من سلّم var(--sp-*). */
     .val-card {
       background: var(--bg-2);
       border: 2px solid var(--border);
       border-radius: var(--radius-lg);
-      padding: 18px 16px 14px;
+      padding: var(--sp-5) var(--sp-4) var(--sp-4);
       display: flex;
       flex-direction: column;
-      gap: 0;
+      gap: var(--sp-4);
       transition: border-color .15s;
       position: relative;
     }
@@ -50,10 +56,10 @@
     .vc-header {
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: var(--sp-2);
       flex-wrap: wrap;
-      margin-bottom: 10px;
-      padding-left: 60px;
+      margin-bottom: 0;
+      padding-left: 64px;
     }
     .vc-ticker { font-size: 1.1rem; font-weight: 900; color: var(--accent); }
     .vc-name   { font-size: 0.82rem; color: var(--text-2); }
@@ -72,9 +78,9 @@
 
     .vc-weight-row {
       display: flex;
-      gap: 6px;
+      gap: var(--sp-2);
       flex-wrap: wrap;
-      margin-bottom: 10px;
+      margin-bottom: 0;
     }
     .vc-pill {
       font-size: 0.73rem;
@@ -86,6 +92,7 @@
       line-height: 1.5;
     }
     .vc-pill strong { color: var(--text); }
+    .vc-pill-off { opacity: .6; font-style: italic; }
     .vc-pill.gap-up   { color: #f85149; font-weight:700; }
     .vc-pill.gap-down { color: #3b82f6; font-weight:700; }
     .vc-pill.gap-ok   { color: #3fb950; font-weight:700; }
@@ -93,38 +100,54 @@
     .vc-notes {
       font-size: 0.78rem;
       color: var(--text-2);
-      line-height: 1.55;
-      margin-bottom: 10px;
+      line-height: 1.6;
+      margin-bottom: 0;
       white-space: pre-wrap;
     }
 
     .vc-prices {
       display: flex;
       flex-direction: column;
-      gap: 5px;
-      margin-bottom: 10px;
+      gap: var(--sp-2);
+      margin-bottom: 0;
       background: var(--bg-3);
       border-radius: var(--radius);
-      padding: 10px 12px;
+      padding: var(--sp-3) var(--sp-3);
     }
     .vc-price-row {
       display: flex;
       justify-content: space-between;
+      gap: var(--sp-2);
       font-size: 0.79rem;
     }
     .vc-price-row .pr-label { color: var(--text-2); }
-    .vc-price-row .pr-val   { font-weight: 700; }
-    .pr-acc  { color: #3fb950; }
-    .pr-trim { color: #f0b429; }
-    .pr-liq  { color: #f85149; }
+    .vc-price-row .pr-val   { font-weight: 700; font-variant-numeric: tabular-nums; }
+    .pr-acc  { color: var(--st-good); }
+    .pr-trim { color: var(--st-warn); }
+    .pr-liq  { color: var(--st-bad); }
 
+    /* ── السعر الحالي: الرقم البطل + الطزاجة + موقعه من الخطة ── */
+    .vc-now      { display: flex; flex-direction: column; gap: var(--sp-1); }
+    .vc-now-top  { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+    .vc-now-l    { font-size: 0.72rem; color: var(--text-2); }
+    .vc-now-tags { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-1); }
+    .val-card .hero-num { font-size: 1.55rem; }
+    .val-card .zrail    { padding: 28px 6px 42px; }
+
+    .vc-foot {
+      margin-top: auto;
+      padding-top: var(--sp-3);
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: var(--sp-2);
+      flex-wrap: wrap;
+    }
     .vc-date {
       font-size: 0.68rem;
       color: var(--text-2);
-      opacity: .7;
-      margin-top: auto;
-      padding-top: 8px;
-      border-top: 1px solid var(--border);
+      opacity: .8;
     }
 
     .vc-actions {
@@ -132,8 +155,33 @@
       top: 10px;
       left: 12px;
       display: flex;
-      gap: 4px;
+      gap: var(--sp-1);
     }
+
+    /* ── نافذة «🔍 تفاصيل كاملة» ── */
+    .vd-modal-card { max-width: 900px; }
+    .vd-body { max-height: 74vh; overflow: auto; padding: var(--sp-1) var(--sp-1) 0; }
+    .vd-h {
+      margin: var(--sp-5) 0 var(--sp-3);
+      font-size: 0.92rem; color: var(--accent);
+      border-bottom: 1px solid var(--border); padding-bottom: var(--sp-2);
+    }
+    .vd-body > .vd-h:first-child { margin-top: 0; }
+    .vd-wrap { overflow-x: auto; }
+    .vd-tbl { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+    .vd-tbl th, .vd-tbl td {
+      padding: 6px 8px; text-align: right; white-space: nowrap;
+      border-bottom: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
+    }
+    .vd-tbl th  { color: var(--text-2); font-weight: 600; font-size: 0.72rem; }
+    .vd-tbl td  { color: var(--text); font-variant-numeric: tabular-nums; }
+    .vd-tbl td.wrap { white-space: normal; }
+    .trend-up { color: var(--st-good); }
+    .trend-dn { color: var(--st-bad); }
+    .trend-eq { color: var(--text-2); }
+    .vd-links { margin-top: var(--sp-5); display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+
+    .val-grid .empty-state { grid-column: 1 / -1; padding: var(--sp-5); }
 
     /* ── Filter pills ── */
     .filter-pills { display:flex; gap:6px; flex-wrap:wrap; }
@@ -174,9 +222,10 @@
     .dec-option .d-name  { font-size: 0.72rem; font-weight: 700; }
 
     @media (max-width: 520px) {
-      .val-card { padding: 14px 12px 12px; }
+      .val-card { padding: var(--sp-4) var(--sp-3) var(--sp-3); gap: var(--sp-3); }
       .vc-ticker { font-size: 1rem; }
-      .vc-header { padding-left: 50px; }
+      .vc-header { padding-left: 52px; }
+      .val-card .hero-num { font-size: 1.4rem; }
     }
   </style>
 </head>
@@ -417,13 +466,24 @@
     </div>
   </div>
 
+  <!-- ── نافذة التفاصيل الكاملة (قراءة فقط) ── -->
+  <div class="modal-overlay" id="vd-modal" style="display:none" onclick="closeTaskDetailOverlay(event)">
+    <div class="modal-card vd-modal-card">
+      <div class="modal-header">
+        <h3 style="margin:0;font-size:1rem" id="vd-title">تفاصيل التقييم</h3>
+        <button class="modal-close" onclick="closeTaskDetail()">✕</button>
+      </div>
+      <div id="vd-body" class="vd-body"></div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/tickerdb.js?v=20260817c"></script>
-  <script src="js/tasks.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817f"></script>
+  <script src="js/auth.js?v=20260817f"></script>
+  <script src="js/utils.js?v=20260817f"></script>
+  <script src="js/tickerdb.js?v=20260817f"></script>
+  <script src="js/tasks.js?v=20260817f"></script>
 </body>
 </html>
