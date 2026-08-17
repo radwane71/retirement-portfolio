@@ -12,26 +12,28 @@ const CHART_COLORS = [
 // جميع الحقول تُدخل يدوياً من قِبل المستخدم — لا توجد قاعدة بيانات مسبقة
 const SECTOR_DB = {};
 
-// قاموس أسماء الأسهم السعودية للمساعدة في الإدخال
+// قاموس أسماء الأسهم السعودية — احتياطي فقط للصفحات التي لا تحمّل tickerdb.js
+// AUDIT-FIX 2026-08: الأسماء مُزامَنة حرفياً مع OFFICIAL_TICKERS (المصدر الرسمي)
+// — النسخة القديمة كانت تحوي ~30 اسماً خاطئاً ورمزين ملغيين (1040، 8130)
 const TICKER_DB = {
-  '1010':'بنك الرياض','1020':'بنك الجزيرة','1030':'البنك السعودي للاستثمار',
-  '1040':'البنك العربي','1050':'البنك السعودي الفرنسي','1060':'بنك الاستثمار',
-  '1080':'العربي الوطني','1120':'مصرف الراجحي','1140':'البنك السعودي الأول',
-  '1150':'بنك الإنماء','1180':'البنك الأهلي السعودي','2010':'سابك',
-  '2030':'بترو رابغ','2060':'كيان السعودية','2090':'الشركة السعودية للنقل',
-  '2200':'أكوا باور','2222':'أرامكو السعودية','2350':'شركة دار الأركان',
-  '4001':'تداول','4007':'المملكة القابضة','4008':'فواز الحكير',
-  '4009':'العثيم للتجزئة','4020':'الجزيرة','4031':'سلامة للتأمين',
-  '4050':'ثمار للزراعة','4150':'أبانا القابضة','4160':'تكوين',
-  '4190':'دله للخدمات','4200':'بن داود التجارية','4210':'إكسترا',
-  '4230':'نادك','4260':'ذهب','4280':'المعادن العربية',
-  '4344':'لجين','4345':'ريسان','4334':'مجموعة صدر',
-  '6010':'صافولا','6020':'أمريكانا المطاعم','6040':'النقل البحري',
-  '6050':'الراجحي للتكافل','7010':'الاتصالات السعودية','7020':'موبايلي',
-  '7030':'زين السعودية','8010':'التأمين السعودية','8030':'الإعادة السعودية',
-  '8060':'الدرع العربي','8100':'ميدغلف','8120':'توكيولات',
-  '8130':'بوبا العربية','8150':'ملاذ للتأمين','8160':'الخليج للتأمين',
-  '8180':'سايكو','8200':'المتحدة للتأمين','8230':'الأهلي للتكافل',
+  '1010':'الرياض','1020':'الجزيرة','1030':'الإستثمار',
+  '1050':'بي اس اف','1060':'الأول','1080':'العربي',
+  '1120':'الراجحي','1140':'البلاد','1150':'الإنماء',
+  '1180':'الأهلي','2010':'سابك','2030':'المصافي',
+  '2060':'التصنيع','2090':'جبسكو','2200':'أنابيب',
+  '2222':'أرامكو السعودية','2350':'كيان السعودية',
+  '4001':'أسواق ع العثيم','4007':'الحمادي','4008':'ساكو',
+  '4009':'السعودي الألماني الصحية','4020':'العقارية','4031':'الخدمات الأرضية',
+  '4050':'ساسكو','4150':'التعمير','4160':'ثمار',
+  '4190':'جرير','4200':'الدريس','4210':'الأبحاث والإعلام',
+  '4230':'البحر الأحمر','4260':'بدجت السعودية','4280':'المملكة',
+  '4334':'المعذر ريت','4344':'سدكو كابيتال ريت','4345':'الإنماء ريت للتجزئة',
+  '6010':'نادك','6020':'جاكو','6040':'تبوك الزراعية',
+  '6050':'الأسماك','7010':'اس تي سي','7020':'إتحاد إتصالات',
+  '7030':'زين السعودية','8010':'التعاونية','8030':'ميدغلف للتأمين',
+  '8060':'ولاء','8100':'سايكو','8120':'إتحاد الخليج الأهلية',
+  '8150':'أسيج','8160':'التأمين العربية','8180':'الصقر للتأمين',
+  '8200':'الإعادة السعودية','8210':'بوبا العربية','8230':'تكافل الراجحي',
 };
 
 // Inline select option sets
@@ -148,13 +150,13 @@ function confirmAsync(message) {
         </div>
       </div>`;
     document.body.appendChild(overlay);
-    const cleanup = (val) => { overlay.remove(); resolve(val); };
+    // AUDIT-FIX 2026-08: إزالة مستمع Escape في كل مسارات الإغلاق (كان يتراكم مع كل حوار)
+    function esc_key(e) { if (e.key === 'Escape') cleanup(false); }
+    const cleanup = (val) => { document.removeEventListener('keydown', esc_key); overlay.remove(); resolve(val); };
     overlay.querySelector('#cdlg-confirm').onclick = () => cleanup(true);
     overlay.querySelector('#cdlg-cancel').onclick  = () => cleanup(false);
     overlay.addEventListener('click', e => { if (e.target === overlay) cleanup(false); });
-    document.addEventListener('keydown', function esc_key(e) {
-      if (e.key === 'Escape') { cleanup(false); document.removeEventListener('keydown', esc_key); }
-    });
+    document.addEventListener('keydown', esc_key);
   });
 }
 
@@ -571,6 +573,7 @@ function chartDefaults() {
   // Font zoom (base 15px, steps of 1px, range 11-21)
   const ZOOM_MIN = 11, ZOOM_MAX = 21, ZOOM_DEF = 15;
   let zoomPx = parseInt(localStorage.getItem('tharwa-zoom') || ZOOM_DEF);
+  if (isNaN(zoomPx)) zoomPx = ZOOM_DEF; // AUDIT-FIX: قيمة فاسدة كانت تكتب fontSize="NaNpx"
   if (zoomPx < ZOOM_MIN) zoomPx = ZOOM_MIN;
   if (zoomPx > ZOOM_MAX) zoomPx = ZOOM_MAX;
   document.documentElement.style.fontSize = zoomPx + 'px';
@@ -772,7 +775,8 @@ window.closeMobileNav = function() {
 const INLINE_EDIT_ALLOWLIST = {
   transactions:     new Set(['date','ticker','name','type','shares','price','notes']),
   holdings:         new Set(['ticker','name','sector','shares','avg_price','current_price','target_weight','notes','price_manual']),
-  real_estate:      new Set(['current_value','status','notes','name','rent_amount','purchase_price','address']),
+  // AUDIT-FIX 2026-08: الأسماء تطابق أعمدة الصفحة الفعلية (كانت rent_amount/purchase_price/address وهمية)
+  real_estate:      new Set(['current_value','status','name','type','purchase_value','monthly_rental','purchase_date']),
   dividends:        new Set(['amount','date','year','month','ticker','name','notes']),
   cashflow_entries: new Set(['amount','date','type','notes','description']),
   stock_targets:    new Set(['target_pct','entry_price','exit_price','notes']),
@@ -783,7 +787,22 @@ const INLINE_EDIT_ALLOWLIST = {
   tasks:            new Set(['title','status','priority','notes','due_date','description']),
   review_logs:      new Set(['notes','rating','date']),
   watchlist:        new Set(['ticker','name','target_price','notes','sector']),
+  // AUDIT-FIX 2026-08: جداول صافي الثروة كانت غائبة فيظهر «حقل غير مصرح به» لكل نقرة
+  nw_assets:            new Set(['name','value']),
+  nw_liabilities:       new Set(['name','value']),
+  net_worth_snapshots:  new Set(['date','total_value','notes']),
 };
+
+// AUDIT-FIX 2026-08: حقول مالية يُرفض فيها الصفر والسالب (كان -100 سهم يحذف الحيازة)
+const INLINE_POSITIVE_FIELDS = new Set([
+  'shares','amount','avg_price','current_price','purchase_value',
+  'current_value','total_value','purchase_price','target_amount',
+]);
+// حقول تقبل الصفر لكن ليس السالب (سعر المنحة 0 مشروع، إيجار 0 مشروع)
+const INLINE_NONNEG_FIELDS = new Set([
+  'price','monthly_rental','value','saved_amount','target_pct',
+  'entry_price','exit_price','target_price',
+]);
 
 function enableInlineEditing(tbody, postSaveFn) {
   if (tbody._ieEnabled) return;
@@ -852,6 +871,19 @@ async function _doInlineEdit(td, tbody, { table, id, field, type, raw, selectKey
       const n = parseFloat(newVal);
       if (isNaN(n)) {
         showToast('قيمة غير صالحة — أدخل رقماً', 'error');
+        td.innerHTML = origHTML;
+        tbody._ieBusy = false;
+        return;
+      }
+      // AUDIT-FIX 2026-08: منع القيم السالبة/الصفرية للحقول المالية
+      if (INLINE_POSITIVE_FIELDS.has(field) && n <= 0) {
+        showToast('القيمة يجب أن تكون أكبر من صفر', 'error');
+        td.innerHTML = origHTML;
+        tbody._ieBusy = false;
+        return;
+      }
+      if (INLINE_NONNEG_FIELDS.has(field) && n < 0) {
+        showToast('القيمة لا يمكن أن تكون سالبة', 'error');
         td.innerHTML = origHTML;
         tbody._ieBusy = false;
         return;
