@@ -20,7 +20,7 @@
     /* ── Scenario Cards ── */
     .scenario-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 16px;
       margin-bottom: 8px;
     }
@@ -58,11 +58,9 @@
     .sc-conservative { --sc-color: #8b949e; }
     .sc-base         { --sc-color: #3fb950; }
     .sc-optimistic   { --sc-color: #f0b429; }
-    .sc-exceptional  { --sc-color: #a371f7; }
     .sc-conservative.active { border-color: #8b949e; }
     .sc-base.active         { border-color: #3fb950; }
     .sc-optimistic.active   { border-color: #f0b429; }
-    .sc-exceptional.active  { border-color: #a371f7; }
 
     /* ── Inputs panel ── */
     .inputs-panel {
@@ -483,7 +481,7 @@
     <div class="page-header">
       <div class="page-header-text">
         <h1>🔮 الرؤية المستقبلية</h1>
-        <p>محاكاة 4 سيناريوهات مستندة إلى أدائك التاريخي الفعلي — أداة حسابية شخصية بحتة</p>
+        <p>محاكاة ثلاثة سيناريوهات مستندة إلى أدائك التاريخي الفعلي — أداة حسابية شخصية بحتة</p>
       </div>
     </div>
 
@@ -510,7 +508,7 @@
     <!-- ── Scenario selector ── -->
     <div class="card">
       <div class="section-header">
-        <span class="section-title">السيناريوهات الأربعة
+        <span class="section-title">السيناريوهات الثلاثة
           <button class="info-btn" type="button" onclick="showCardInfo('scenarios')" title="كيف تُحسب السيناريوهات؟" style="position:static;opacity:.7">ⓘ</button>
         </span>
         <span class="small text-muted">اضغط على السيناريو لتفعيله أو إيقافه في الرسم</span>
