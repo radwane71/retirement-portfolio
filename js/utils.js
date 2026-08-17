@@ -600,7 +600,11 @@ function chartDefaults() {
 (function initThemeAndZoom() {
   // Theme
   const savedTheme = localStorage.getItem('tharwa-theme') || 'dark';
-  if (savedTheme === 'light') document.body.classList.add('light-mode');
+  // يُوضع على html أيضاً — انظر التعليق في toggleTheme
+  if (savedTheme === 'light') {
+    document.documentElement.classList.add('light-mode');
+    document.body.classList.add('light-mode');
+  }
 
   // Font zoom (base 15px, steps of 1px, range 11-21)
   const ZOOM_MIN = 11, ZOOM_MAX = 21, ZOOM_DEF = 15;
@@ -691,12 +695,17 @@ window.showNotePopup = function(btnEl) {
   }, 0);
 };
 
+// AUDIT-FIX 2026-08: الصنف يوضع على <html> أيضاً لا على <body> وحده.
+// السبب: خلفية الصفحة مرسومة على html، ورموز الثيم كانت مُعرَّفة على body —
+// ومتغيّرات CSS تنزل من الأب للابن ولا تصعد، فيبقى html داكناً في الوضع
+// الفاتح بينما البطاقات تبيضّ ⇒ «صفحة سوداء وبوكسات بيضاء».
 window.toggleTheme = function(isLight) {
+  const el = [document.documentElement, document.body];
   if (isLight) {
-    document.body.classList.add('light-mode');
+    el.forEach(e => e.classList.add('light-mode'));
     localStorage.setItem('tharwa-theme', 'light');
   } else {
-    document.body.classList.remove('light-mode');
+    el.forEach(e => e.classList.remove('light-mode'));
     localStorage.setItem('tharwa-theme', 'dark');
   }
 };

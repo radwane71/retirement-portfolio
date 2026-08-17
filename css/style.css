@@ -53,13 +53,7 @@
   --elev-2: 0 6px 20px rgba(0,0,0,.34);
 }
 
-body.light-mode {
-  --st-good-dim: rgba(40,167,69,.10);
-  --st-warn-dim: rgba(189,134,18,.12);
-  --st-bad-dim:  rgba(229,72,77,.10);
-  --elev-1: 0 1px 2px rgba(16,24,40,.06);
-  --elev-2: 0 6px 20px rgba(16,24,40,.10);
-}
+/* رموز الوضع الفاتح موحّدة في كتلة واحدة أسفل الملف (html.light-mode) */
 
 /* font-size على html فقط — حتى تعمل أداة تكبير الخط (تعديل html.style.fontSize)
    على كل النصوص بالوراثة، بدل أن يثبّتها body عند 15px */
@@ -1430,23 +1424,42 @@ th.sortable:hover { color: var(--accent); }
    الثيم الفاتح — لوحة نظيفة: خلفية رمادية فاتحة + كروت بيضاء بظل ناعم
    + سايدبار تركوازي غامق + لون مميّز تركوازي (مطابق للمرجع البصري)
    ══════════════════════════════════════════════════════════════ */
-body.light-mode {
-  --bg:          #eef1f6;   /* خلفية الصفحة — رمادي بارد فاتح يؤطّر البطاقات */
-  --bg-2:        #ffffff;   /* البطاقات واللوحات — أبيض نقي                  */
-  --bg-3:        #f3f5f9;   /* العناصر المرتفعة ورؤوس الجداول — رمادي فاتح   */
-  --border:      #e7ebf1;   /* حدّ ناعم فاتح                                */
-  --text:        #1f2b37;   /* نص أردوازي داكن مريح للعين                   */
-  --text-2:      #7a8696;   /* نص ثانوي رمادي مكتوم                         */
-  --text-muted:  #7a8696;
-  --accent:      #0e9e8e;   /* تركوازي يُقرأ بوضوح على الأبيض               */
-  --accent-dim:  rgba(14,158,142,0.12);
-  --success:     #16a34a;
-  --success-dim: rgba(22,163,74,0.12);
-  --danger:      #e5564b;
-  --danger-dim:  rgba(229,86,75,0.11);
-  --primary:     #0e9e8e;
-  --warning:     #e08a00;
-  --bg-1:        #eef1f6;
+/* ══════════════════════════════════════════════════════════════════════
+   الوضع الفاتح — الرموز
+   ① الصنف على html أيضاً لا على body وحده: خلفية الصفحة مرسومة على html،
+      ومتغيّرات CSS تنزل من الأب للابن ولا تصعد. تعريفها على body وحده كان
+      يُبقي html داكناً ⇒ «صفحة سوداء وبوكسات بيضاء».
+   ② سلّم الارتفاع يطابق دلالة الوضع الداكن: bg (الصفحة، الأدنى) → bg-2 →
+      bg-3 (البطاقات، الأعلى). كان مقلوباً فتأخذ البطاقات رمادياً.
+   ③ كل لون نصّي مقيس ≥ 4.5:1 على الأبيض. القيم السابقة كانت 2.7–3.9
+      (كلها دون الحد) — وهذا سبب «الكلام داخل البوكسات مو واضح».
+   ══════════════════════════════════════════════════════════════════════ */
+html.light-mode, body.light-mode {
+  --bg:          #eef2f7;   /* الصفحة — رمادي بارد يؤطّر البطاقات ولا يصقع العين */
+  --bg-2:        #f7f9fc;   /* وسيط: رؤوس الجداول، المسارات، الحقول             */
+  --bg-3:        #ffffff;   /* البطاقات — الأعلى ارتفاعاً                       */
+  --border:      #dfe4ec;   /* حدّ ناعم لكنه مرئي                              */
+  --text:        #1f2b37;   /* 14.4:1 */
+  --text-2:      #5b6675;   /* 5.8:1  (كان #7a8696 = 3.7 ولا يُقرأ)            */
+  --text-muted:  #5b6675;
+  --accent:      #0b7d70;   /* 5.0:1  (كان #0e9e8e = 3.3)                      */
+  --accent-dim:  rgba(11,125,112,0.12);
+  --success:     #158040;   /* 5.0:1 */
+  --success-dim: rgba(21,128,64,0.11);
+  --danger:      #c8372c;   /* 5.2:1 */
+  --danger-dim:  rgba(200,55,44,0.10);
+  --primary:     #0b7d70;
+  --warning:     #8f5a00;   /* 5.8:1  (كان #e08a00 = 2.7 — الأسوأ) */
+  --bg-1:        #eef2f7;
+
+  /* رموز الحالة كنصّ: ألوان الرسوم المُتحقَّق منها لا تُقرأ نصاً على أبيض
+     (3.1–3.9) — هذه نسخ أغمق تمرّ 5.0+ وتبقى مقروءة كتعبئة أيضاً. */
+  --st-good: #15803d;  --st-good-dim: rgba(21,128,61,.10);
+  --st-warn: #8a6100;  --st-warn-dim: rgba(138,97,0,.12);
+  --st-bad:  #c0332c;  --st-bad-dim:  rgba(192,51,44,.10);
+
+  --elev-1: 0 1px 2px rgba(16,24,40,.06);
+  --elev-2: 0 6px 20px rgba(16,24,40,.10);
 }
 
 /* ── السايدبار: تركوازي غامق بنص فاتح ─────────────────────────── */
@@ -1479,21 +1492,21 @@ body.light-mode .logout-btn:hover      { background: rgba(255,255,255,0.08); col
 /* ── الكروت: بيضاء بظل ناعم بدل الحدّ الثقيل (توقيع المظهر النظيف) ── */
 body.light-mode .card,
 body.light-mode .stat-card {
-  background: #ffffff;                 /* stat-card كانت رمادية (bg-3) — توحيدها بيضاء */
-  border-color: #edf0f4;
+  /* الخلفية تأتي من --bg-3 بعد تصحيح سلّم الارتفاع — لا تُكتب هنا */
+  border-color: var(--border);
   box-shadow: 0 1px 2px rgba(16,24,40,0.04), 0 1px 3px rgba(16,24,40,0.06);
 }
 body.light-mode .stat-card:hover,
 body.light-mode .card:hover {
-  border-color: #d7dde6;
+  border-color: color-mix(in srgb, var(--text-2) 32%, transparent);
   box-shadow: 0 6px 16px rgba(16,24,40,0.08);
 }
 
 /* ── قواعد hover/أشرطة على الخلفية الفاتحة ────────────────────── */
 body.light-mode .hamburger-btn:hover       { background: rgba(0,0,0,0.06); }
 body.light-mode .form-group input[readonly]{ background: rgba(0,0,0,0.03); }
-body.light-mode tr:hover td               { background: rgba(14,158,142,0.05); }
-body.light-mode td.editable:hover         { background: rgba(14,158,142,0.10) !important; }
+body.light-mode tr:hover td               { background: color-mix(in srgb, var(--accent) 6%, transparent); }
+body.light-mode td.editable:hover         { background: color-mix(in srgb, var(--accent) 12%, transparent) !important; }
 
 body.light-mode .w-card-bar-track  { background: rgba(0,0,0,0.08); }
 body.light-mode .w-card-bar-target { background: rgba(0,0,0,0.30); }
