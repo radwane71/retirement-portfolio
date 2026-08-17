@@ -105,11 +105,18 @@ async function init() {
     supabaseClient.from('net_worth_snapshots').select('date,total_value,notes').order('date').limit(10000),
   ]);
 
-  _tx        = rTx.data   || [];
-  _holdings  = rH.data    || [];
-  _divs      = rDiv.data  || [];
-  _cf        = rCf.data   || [];
-  _snapshots = rSnap.data || [];
+  // AUDIT-FIX (2026-08): افحص .error لكل استعلام — الفشل الصامت كان يعرض محفظة فارغة
+  const _failures = [];
+  const _takeData = (res, label) => {
+    if (res.error) { _failures.push(label); console.error('[performance] فشل تحميل ' + label, res.error); return []; }
+    return res.data || [];
+  };
+  _tx        = _takeData(rTx,   'المعاملات');
+  _holdings  = _takeData(rH,    'الحيازات');
+  _divs      = _takeData(rDiv,  'التوزيعات');
+  _cf        = _takeData(rCf,   'التدفقات النقدية');
+  _snapshots = _takeData(rSnap, 'لقطات صافي الثروة');
+  if (_failures.length) showToast('⚠️ تعذّر تحميل: ' + _failures.join('، ') + ' — البيانات المعروضة قد تكون ناقصة', 'error');
   _positionCache    = null; // invalidate cache on fresh load
   _monthlyDataCache = null; // I-3: invalidate monthly data cache
 
@@ -220,8 +227,10 @@ function buildPositionData() {
     p.divReceived   = divMap[p.ticker] || 0;
 
     // المقابل في holdings للسعر الحالي
-    const h       = _holdings.find(x => x.ticker === p.ticker);
-    p.currentPrice = h ? +h.current_price : null;
+    // AUDIT-FIX (2026-08): current_price = null كان يتحول لـ 0 فيُظهر خسارة −100% وهمية
+    const h  = _holdings.find(x => x.ticker === p.ticker);
+    const cp = h?.current_price;
+    p.currentPrice = (cp == null || +cp <= 0) ? null : +cp;
 
     // AUDIT-FIX (2026-07): الربح المحقق بالمنهج الزمني — متوسط التكلفة وقت كل
     // بيع، لا متوسطاً نهائياً يشمل مشتريات لاحقة للبيع. مطابق تماماً لمنهج
@@ -310,8 +319,9 @@ function renderKPIs() {
       : 0;
     const effectiveN = hhi > 0 ? (1 / hhi).toFixed(1) : '—';
     hhiEl.innerHTML   = `${hhi.toFixed(4)} <span style="font-size:.7rem;color:var(--text-2)" title="العدد الفعلي للمراكز المستقلة = 1 ÷ HHI">(N=${effectiveN})</span>`;
-    hhiEl.className   = 'value num ' + (hhi < 0.18 ? 'text-success' : hhi < 0.25 ? '' : 'text-danger');
-    if (hhiSub) hhiSub.textContent = hhi < 0.10 ? 'تنويع ممتاز' : hhi < 0.18 ? 'تنويع معقول' : hhi < 0.25 ? 'تركز متوسط ⚠️' : 'تركز عالٍ ❌';
+    // AUDIT-FIX (2026-08): العتبات مواءَمة مع الهدف الموثّق N_فعّال ≥ 15 (HHI ≤ 1/15 ≈ 0.067)
+    hhiEl.className   = 'value num ' + (hhi <= 0.067 ? 'text-success' : hhi <= 0.10 ? 'text-warning' : 'text-danger');
+    if (hhiSub) hhiSub.textContent = hhi <= 0.067 ? 'تنويع ممتاز — N الفعّال ≥ 15 (الهدف)' : hhi <= 0.10 ? 'تنويع مقبول — N الفعّال 10–15، دون الهدف ⚠️' : 'تركز عالٍ — N الفعّال أقل من 10 ❌';
   }
 
   // Max Drawdown — AUDIT-FIX (H3): compute on the flow-adjusted TWR index, NOT raw net worth.
@@ -332,7 +342,8 @@ function renderKPIs() {
       const dd = peak > 0 ? (v - peak) / peak * 100 : 0;
       if (dd < maxDD) { maxDD = dd; ddPeakDate = peakDate; ddTroughDate = s.date; }
     }
-    const _mDD = assessMetricMaturity('risk', { snapshots: _snapshots.length });
+    // AUDIT-FIX (2026-08): شارة النضج على عدد اللقطات بعد إزالة التكرارات لا العدد الخام
+    const _mDD = assessMetricMaturity('risk', { snapshots: sortedSnaps.length });
     ddEl.innerHTML    = maxDD.toFixed(2) + '%' + maturityBadge(_mDD.level, _mDD.reason);
     ddEl.className    = 'value num ' + (maxDD < -15 ? 'text-danger' : maxDD < -8 ? 'text-warning' : 'text-success');
     ddEl.title        = ddPeakDate ? `من ${formatDate(ddPeakDate)} إلى ${formatDate(ddTroughDate)}` : '';
@@ -367,18 +378,32 @@ function _computeRiskMetrics() {
     .filter(p => p.idx != null && p.idx > 0);
   if (pts.length < 4) return null;                  // نحتاج ≥3 عوائد لتقدير معقول
 
+  // AUDIT-FIX (2026-08): أسقط الفترات الأقصر من 20 يوماً من حساب التذبذب —
+  // فترات قصيرة جداً تضخّم معامل التسنية وتشوّه الانحراف المعياري.
+  // نرقّق السلسلة: نُبقي نقطة فقط إذا بَعُدت ≥ 20 يوماً عن آخر نقطة مُبقاة (يحفظ التركيب الهندسي).
+  const MIN_PERIOD_DAYS = 20;
+  const thinned = [pts[0]];
+  for (let i = 1; i < pts.length; i++) {
+    const gap = (new Date(pts[i].date) - new Date(thinned[thinned.length - 1].date)) / 86400000;
+    if (gap >= MIN_PERIOD_DAYS) thinned.push(pts[i]);
+  }
+
   const rets = [];
-  for (let i = 1; i < pts.length; i++) rets.push(pts[i].idx / pts[i - 1].idx - 1);
+  for (let i = 1; i < thinned.length; i++) rets.push(thinned[i].idx / thinned[i - 1].idx - 1);
   if (rets.length < 3) return null;
 
   const spanDays = (new Date(pts[pts.length - 1].date) - new Date(pts[0].date)) / 86400000;
   const years    = spanDays / 365.25;
   if (years <= 0) return null;
-  const periodsPerYear = rets.length / years;       // متوسط عدد الفترات في السنة
+  const volSpanDays    = (new Date(thinned[thinned.length - 1].date) - new Date(thinned[0].date)) / 86400000;
+  const volYears       = volSpanDays / 365.25;
+  const periodsPerYear = volYears > 0 ? rets.length / volYears : 12; // متوسط عدد الفترات في السنة
 
-  // العائد السنوي المركّب من مؤشر TWR (هندسي — لا يتأثر بالتدفقات)
+  // AUDIT-FIX (2026-08): لا تسنية على فترة أقل من 12 شهراً — العائد يُعرض تراكمياً
+  // بوسم «تراكمي (المدة أقل من سنة)»، والمقاييس تُحسب على مدى الفترة نفسها بلا تضخيم.
+  const shortSpan   = years < 1;
   const totalGrowth = pts[pts.length - 1].idx / pts[0].idx;
-  const annReturn   = Math.pow(totalGrowth, 1 / years) - 1;
+  const annReturn   = shortSpan ? (totalGrowth - 1) : Math.pow(totalGrowth, 1 / years) - 1;
 
   // تذبذب الفترة (عيّنة) وتذبذب الهبوط (مقابل MAR=0)
   const mean   = rets.reduce((s, r) => s + r, 0) / rets.length;
@@ -387,12 +412,15 @@ function _computeRiskMetrics() {
   const downSq = rets.reduce((s, r) => s + (r < 0 ? r * r : 0), 0) / rets.length;
   const ddP    = Math.sqrt(Math.max(0, downSq));
 
-  const annVol      = volP * Math.sqrt(periodsPerYear);
-  const annDownside = ddP  * Math.sqrt(periodsPerYear);
-  const excess      = annReturn - RISK_FREE_RATE;
+  // فترة قصيرة: تذبذب على مدى الفترة كلها (√عدد الفترات) بدل التسنية بـ √(فترات/سنة)
+  const annVol      = shortSpan ? volP * Math.sqrt(rets.length) : volP * Math.sqrt(periodsPerYear);
+  const annDownside = shortSpan ? ddP  * Math.sqrt(rets.length) : ddP  * Math.sqrt(periodsPerYear);
+  const excess      = annReturn - (shortSpan ? RISK_FREE_RATE * years : RISK_FREE_RATE);
 
   return {
     nReturns: rets.length,
+    nSnaps: sortedSnaps.length,   // بعد إزالة التكرارات — لشارة النضج
+    shortSpan,
     annReturn, annVol, annDownside,
     sharpe:  annVol      > 1e-9 ? excess / annVol      : null,
     sortino: annDownside > 1e-9 ? excess / annDownside : null,
@@ -415,23 +443,26 @@ function renderRiskMetrics() {
   if (!m) { setInsufficient(volEl, 'pk-volatility-sub'); setInsufficient(shEl, 'pk-sharpe-sub'); setInsufficient(soEl, 'pk-sortino-sub'); return; }
 
   // شارة نضج موحّدة: مقاييس المخاطر تحتاج لقطات شهرية كافية
-  const _mRisk = assessMetricMaturity('risk', { snapshots: _snapshots.length });
+  // AUDIT-FIX (2026-08): العدد بعد إزالة التكرارات (m.nSnaps) لا _snapshots.length الخام
+  const _mRisk = assessMetricMaturity('risk', { snapshots: m.nSnaps });
   const _rb = maturityBadge(_mRisk.level, _mRisk.reason);
+  // وسم الفترة القصيرة: المقاييس محسوبة على مدى الفترة بلا تسنية
+  const _spanTag = m.shortSpan ? ' <span class="small text-muted">تراكمي (المدة أقل من سنة)</span>' : '';
 
   if (volEl) {
-    volEl.innerHTML  = (m.annVol * 100).toFixed(1) + '%' + _rb;
+    volEl.innerHTML  = (m.annVol * 100).toFixed(1) + '%' + _rb + _spanTag;
     volEl.className   = 'value num ' + (m.annVol < 0.15 ? 'text-success' : m.annVol < 0.30 ? 'text-warning' : 'text-danger');
   }
   const ratioClass = v => v == null ? 'text-muted' : v >= 1 ? 'text-success' : v >= 0 ? 'text-warning' : 'text-danger';
   if (shEl) {
-    shEl.innerHTML   = (m.sharpe == null ? '—' : m.sharpe.toFixed(2)) + _rb;
+    shEl.innerHTML   = (m.sharpe == null ? '—' : m.sharpe.toFixed(2)) + _rb + _spanTag;
     shEl.className   = 'value num ' + ratioClass(m.sharpe);
   }
   if (soEl) {
-    soEl.innerHTML   = (m.sortino == null ? '—' : m.sortino.toFixed(2)) + _rb;
+    soEl.innerHTML   = (m.sortino == null ? '—' : m.sortino.toFixed(2)) + _rb + _spanTag;
     soEl.className   = 'value num ' + ratioClass(m.sortino);
     const sub = document.getElementById('pk-sortino-sub');
-    if (sub) sub.textContent = `🟡 تقريبي · ${m.nReturns} فترة`;
+    if (sub) sub.textContent = (m.shortSpan ? 'تراكمي (المدة أقل من سنة)' : '🟡 تقريبي') + ` · ${m.nReturns} فترة`;
   }
 }
 
@@ -452,6 +483,11 @@ function renderOpenPositions() {
     const costOfRem = p.avgCost * p.remainingShares;
     const pnlCls    = p.unrealizedPnL == null ? '' : p.unrealizedPnL >= 0 ? 'text-success' : 'text-danger';
     const retCls    = p.totalReturn   >= 0 ? 'text-success' : 'text-danger';
+    // AUDIT-FIX (2026-08): حارس عمر لـ XIRR — مركز عمره أقل من 12 شهراً يحمل شارة
+    const ageDays   = p.firstBuyDate ? (Date.now() - parseDateLocal(p.firstBuyDate)) / 86400000 : null;
+    const xirrBadge = (p.xirr != null && ageDays != null && ageDays < 365)
+      ? maturityBadge('early', 'مركز عمره أقل من 12 شهراً — XIRR مُسنّى من فترة قصيرة، فيتضخّم أو ينهار مع أي حركة سعر.')
+      : '';
     return `<tr class="${isPartial ? 'position-partial' : 'position-open'}">
       <td><strong class="text-accent">${esc(p.ticker)}</strong></td>
       <td>${esc(p.name)}</td>
@@ -464,7 +500,7 @@ function renderOpenPositions() {
       <td class="num ${pnlCls}">${p.unrealizedPct != null ? p.unrealizedPct.toFixed(2) + '%' : '—'}</td>
       <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
       <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}<br><span class="small" style="font-weight:400">${p.totalReturnPct != null ? p.totalReturnPct.toFixed(2)+'%' : ''}</span></td>
-      <td class="num ${p.xirr == null ? 'text-muted' : p.xirr >= 0 ? 'text-success' : 'text-danger'}" title="XIRR الفردي لهذا المركز — يشمل مشتريات وأرباح والقيمة الحالية">${p.xirr != null ? (p.xirr >= 0 ? '+' : '') + p.xirr.toFixed(2) + '%' : '—'}</td>
+      <td class="num ${p.xirr == null ? 'text-muted' : p.xirr >= 0 ? 'text-success' : 'text-danger'}" title="XIRR الفردي لهذا المركز — يشمل مشتريات وأرباح والقيمة الحالية">${p.xirr != null ? (p.xirr >= 0 ? '+' : '') + p.xirr.toFixed(2) + '%' + xirrBadge : '—'}</td>
     </tr>`;
   }).join('');
 
@@ -475,7 +511,12 @@ function renderOpenPositions() {
   const totalDiv    = open.reduce((s, p) => s + p.divReceived, 0);
   const totalRet    = open.reduce((s, p) => s + p.totalReturn, 0);
   const totalUPct   = totalCost > 0 ? totalUPnL / totalCost * 100 : 0;
-  const totalRetPct = totalCost > 0 ? totalRet / totalCost * 100 : 0;
+  // AUDIT-FIX (2026-08): مقام نسبة الإجمالي = نفس مقام الصف الفردي (تكلفة المتبقي + تكلفة المُباع)
+  const totalRetBasis = open.reduce((s, p) => {
+    const costOfRem = p.avgCost * p.remainingShares;
+    return s + costOfRem + Math.max(0, p.buyCost - costOfRem);
+  }, 0);
+  const totalRetPct = totalRetBasis > 0 ? totalRet / totalRetBasis * 100 : 0;
   tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
     <td colspan="5"><strong class="small">الإجمالي</strong></td>
     <td class="num bold">${formatSAR(totalCost)}</td>
@@ -638,13 +679,14 @@ function buildMonthlyData() {
     // قيمة المحفظة من أقرب snapshot في نفس الشهر أو قبله
     // نأخذ آخر snapshot حتى نهاية هذا الشهر
     // L-4: use actual last day of month — "day 0" of next month = last day of this month
-    const monthEnd = new Date(yr, mo, 0).toISOString().split('T')[0];
+    // AUDIT-FIX (2026-08): بناء النص محلياً — toISOString كان يُرجع اليوم السابق في UTC+3
+    const monthEnd = `${yr}-${String(mo).padStart(2, '0')}-${String(new Date(yr, mo, 0).getDate()).padStart(2, '0')}`;
     const relevantSnaps = _snapshots.filter(s => s.date && s.date <= monthEnd);
     const latestSnap = relevantSnaps.length
       ? relevantSnaps[relevantSnaps.length - 1]
       : null;
     const portfolioValue = latestSnap ? +latestSnap.total_value : null;
-    const isAutoSnap     = latestSnap?.notes?.startsWith('auto') || false;
+    const isAutoSnap     = latestSnap ? isAutoSnapshot(latestSnap.notes) : false;
 
     return { ym, yr, mo, buys, sells, divs, cumulativeCapital, netMove, portfolioValue, isAutoSnap };
   });
@@ -674,17 +716,13 @@ function renderMonthlyTimeline() {
     data = data.filter(r => r.yr === +filterYr);
   }
 
-  if (!data.length) {
-    tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="icon">📅</div><p>لا توجد بيانات</p></div></td></tr>`;
-    return;
-  }
-
   const MONTHS_AR = ['يناير','فبراير','مارس','أبريل','مايو','يونيو','يوليو','أغسطس','سبتمبر','أكتوبر','نوفمبر','ديسمبر'];
 
   // هل يوجد أي بيانات قيمة المحفظة؟
   const hasPortfolioValues = data.some(r => r.portfolioValue != null);
 
-  // إضافة عمود "قيمة المحفظة" في الـ header إذا وجدت بيانات
+  // AUDIT-FIX (2026-08): مواءمة عمود «قيمة المحفظة» في كل رندر — يُضاف عند وجود بيانات
+  // ويُزال عند غيابها (تغيّر الفلتر)، وempty-state يستخدم colspan مطابقاً لعدد أعمدة الرأس
   const thead = tbody.closest('table')?.querySelector('thead tr');
   if (thead) {
     const existingValCol = thead.querySelector('.col-portfolio-val');
@@ -694,7 +732,15 @@ function renderMonthlyTimeline() {
       th.title = 'قيمة المحفظة الإجمالية في ذلك الشهر (من net_worth_snapshots)\n✦ = تسجيل تلقائي | ✎ = تسجيل يدوي';
       th.innerHTML = 'قيمة المحفظة <span style="font-size:.65rem;opacity:.6">▲</span>';
       thead.insertBefore(th, thead.children[1]); // بعد عمود الشهر
+    } else if (existingValCol && !hasPortfolioValues) {
+      existingValCol.remove();
     }
+  }
+
+  if (!data.length) {
+    const colspan = thead ? thead.children.length : 6;
+    tbody.innerHTML = `<tr><td colspan="${colspan}"><div class="empty-state"><div class="icon">📅</div><p>لا توجد بيانات</p></div></td></tr>`;
+    return;
   }
 
   tbody.innerHTML = [...data].reverse().map(r => {
@@ -857,31 +903,29 @@ function renderMonthlyChart() {
 // ── CSV export ────────────────────────────────────────────────────────
 function exportPerformanceCSV() {
   const { open, closed } = getPositionData();
-  const BOM = '﻿';
-  const lines = [];
-  lines.push('== مراكز مفتوحة ==');
-  lines.push(['الرمز','الاسم','الأسهم','متوسط التكلفة','السعر الحالي','تكلفة كلية','قيمة سوقية','ر/خ غير محقق','%','أرباح مستلمة','إجمالي العائد'].join(','));
-  open.forEach(p => lines.push([
-    p.ticker, p.name, p.remainingShares, p.avgCost.toFixed(4),
-    p.currentPrice?.toFixed(4) || '', (p.avgCost*p.remainingShares).toFixed(2),
-    p.marketValue?.toFixed(2)  || '', p.unrealizedPnL?.toFixed(2)  || '',
-    p.unrealizedPct?.toFixed(2)+'%' || '', p.divReceived.toFixed(2), p.totalReturn.toFixed(2)
-  ].join(',')));
-  lines.push('');
-  lines.push('== مراكز مغلقة ==');
-  lines.push(['الرمز','الاسم','فتح','إغلاق','أيام','تكلفة الشراء','عائد البيع','ر/خ محقق','%','أرباح','إجمالي'].join(','));
-  closed.forEach(p => lines.push([
-    p.ticker, p.name, p.firstBuyDate||'', p.lastSellDate||'', p.holdDays||'',
-    p.buyCost.toFixed(2), p.sellRevenue.toFixed(2), p.realizedPnL.toFixed(2),
-    p.realizedPct.toFixed(2)+'%', p.divReceived.toFixed(2), p.totalReturn.toFixed(2)
-  ].join(',')));
+  // AUDIT-FIX (2026-08): حارس القيم الفارغة (كانت تطبع undefined%) + استخدام exportCSV
+  // المشتركة من utils.js بدل بناء الملف يدوياً
+  const pct = x => x != null ? x.toFixed(2) + '%' : '';
+  const num = (x, d = 2) => x != null ? x.toFixed(d) : '';
 
-  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href = url; a.download = `أداء_${todayISO()}.csv`;
-  document.body.appendChild(a); a.click();
-  document.body.removeChild(a); URL.revokeObjectURL(url);
+  const rows = [];
+  rows.push(['الرمز','الاسم','الأسهم','متوسط التكلفة','السعر الحالي','تكلفة كلية','قيمة سوقية','ر/خ غير محقق','%','أرباح مستلمة','إجمالي العائد']);
+  open.forEach(p => rows.push([
+    p.ticker, p.name, p.remainingShares, num(p.avgCost, 4),
+    num(p.currentPrice, 4), num(p.avgCost * p.remainingShares),
+    num(p.marketValue), num(p.unrealizedPnL),
+    pct(p.unrealizedPct), num(p.divReceived), num(p.totalReturn)
+  ]));
+  rows.push([]);
+  rows.push(['== مراكز مغلقة ==']);
+  rows.push(['الرمز','الاسم','فتح','إغلاق','أيام','تكلفة الشراء','عائد البيع','ر/خ محقق','%','أرباح','إجمالي']);
+  closed.forEach(p => rows.push([
+    p.ticker, p.name, p.firstBuyDate || '', p.lastSellDate || '', p.holdDays ?? '',
+    num(p.buyCost), num(p.sellRevenue), num(p.realizedPnL),
+    pct(p.realizedPct), num(p.divReceived), num(p.totalReturn)
+  ]));
+
+  exportCSV(`أداء_${todayISO()}.csv`, ['== مراكز مفتوحة =='], rows);
   showToast('✓ تم التصدير', 'success');
 }
 
@@ -1086,17 +1130,25 @@ function renderBehavioralAudit() {
   });
   const maxMonth = Math.max(...monthDist);
 
-  // أفضل وأسوأ 3 صفقات
+  // أفضل وأسوأ 3 صفقات — AUDIT-FIX (2026-08): عند أقل من 6 صفقات مغلقة تتداخل
+  // القائمتان (نفس الصفقة في «الأفضل» و«الأسوأ») — لا تُعرضان حينها
+  const showTopBottom  = closed.length >= 6;
   const sortedByReturn = [...closed].sort((a, b) => b.totalReturn - a.totalReturn);
   const top3    = sortedByReturn.slice(0, 3);
   const bottom3 = sortedByReturn.slice(-3).reverse();
 
   // ── التشخيص السلوكي ──
-  const holdBias = avgHoldLosers > avgHoldWinners * 1.3
-    ? { icon: '⚠️', text: `تُمسك بخاسريك ${(avgHoldLosers / avgHoldWinners).toFixed(1)}× أطول من رابحيك — Loss Aversion نمطي. الخاسرون يستهلكون وقتاً أكثر مما يستحقون.`, cls: 'text-danger' }
-    : avgHoldWinners > avgHoldLosers * 1.3
-    ? { icon: '✅', text: `تُمسك برابحيك أطول من خاسريك — هذا النمط الصحيح "دع أرباحك تجري".`, cls: 'text-success' }
-    : { icon: '🟡', text: `مدة الاحتفاظ بالرابحين والخاسرين متقاربة — النمط السلوكي محايد.`, cls: '' };
+  // AUDIT-FIX (2026-08): حارس القسمة على صفر — لا نسبة إذا كان أحد المتوسطين صفراً
+  let holdBias;
+  if (avgHoldWinners > 0 && avgHoldLosers > avgHoldWinners * 1.3) {
+    holdBias = { icon: '⚠️', text: `تُمسك بخاسريك ${(avgHoldLosers / avgHoldWinners).toFixed(1)}× أطول من رابحيك — Loss Aversion نمطي. الخاسرون يستهلكون وقتاً أكثر مما يستحقون.`, cls: 'text-danger' };
+  } else if (avgHoldLosers > 0 && avgHoldWinners > avgHoldLosers * 1.3) {
+    holdBias = { icon: '✅', text: `تُمسك برابحيك أطول من خاسريك — هذا النمط الصحيح "دع أرباحك تجري".`, cls: 'text-success' };
+  } else if (avgHoldWinners <= 0 || avgHoldLosers <= 0) {
+    holdBias = { icon: '🟡', text: `نسبة مدة الاحتفاظ: — (أحد الجانبين رابح/خاسر بلا صفقات كافية للمقارنة).`, cls: '' };
+  } else {
+    holdBias = { icon: '🟡', text: `مدة الاحتفاظ بالرابحين والخاسرين متقاربة — النمط السلوكي محايد.`, cls: '' };
+  }
 
   const winRateDiag = winRate >= 60
     ? { icon: '✅', text: `معدل الربح ${winRate.toFixed(0)}% ممتاز — أكثر من نصف صفقاتك تنتهي بربح.` }
@@ -1186,6 +1238,7 @@ function renderBehavioralAudit() {
     </div>
 
     <!-- أفضل وأسوأ الصفقات -->
+    ${!showTopBottom ? `<p class="small text-muted" style="margin-top:4px">📌 قائمة أفضل/أسوأ 3 صفقات تظهر عند وجود 6 صفقات مغلقة على الأقل (لديك ${closed.length}) — أقل من ذلك تتداخل القائمتان.</p>` : `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
       <div>
         <div class="section-title" style="font-size:.85rem;margin-bottom:8px">🏆 أفضل 3 صفقات</div>
@@ -1209,7 +1262,7 @@ function renderBehavioralAudit() {
             <div class="small text-muted">${p.holdDays != null ? fmtDays(p.holdDays) : '—'} · ${p.totalReturnPct?.toFixed(1) || '—'}%</div>
           </div>`).join('')}
       </div>
-    </div>`;
+    </div>`}`;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1222,15 +1275,30 @@ function renderBehavioralAudit() {
 const BM_KEY = 'tharwa-benchmark_v1';
 let _bmChart = null;
 
+// AUDIT-FIX (2026-08): مفاتيح تاسي مخصوصة بالمستخدم (userLsKey) كبقية المفاتيح —
+// المفتاح القديم غير المخصوص يُقرأ مرة واحدة للترحيل ثم يُحذف.
+function _bmMigrateLegacyKey(key) {
+  try {
+    const scoped = userLsKey(key);
+    if (scoped === key) return; // لا مستخدم بعد — لا ترحيل
+    if (localStorage.getItem(scoped) == null) {
+      const legacy = localStorage.getItem(key);
+      if (legacy != null) localStorage.setItem(scoped, legacy);
+    }
+    localStorage.removeItem(key);
+  } catch (_) {}
+}
+
 // ── تحميل وحفظ بيانات التاسي ─────────────────────────────────
 // S-4: localStorage is the read cache; Supabase user_settings is the durable store.
 // _saveBenchmark writes both; _loadBenchmark reads from localStorage (fast path).
 function _loadBenchmark() {
-  try { return JSON.parse(localStorage.getItem(BM_KEY)) || []; } catch { return []; }
+  try { return JSON.parse(localStorage.getItem(userLsKey(BM_KEY))) || []; } catch { return []; }
 }
 function _saveBenchmark(entries) {
-  localStorage.setItem(BM_KEY, JSON.stringify(entries));
+  localStorage.setItem(userLsKey(BM_KEY), JSON.stringify(entries));
   // async Supabase sync — fire-and-forget, localStorage remains the read source
+  // (مفتاح user_settings يبقى غير مخصوص — الجدول مقيّد بـ user_id أصلاً)
   saveUserSetting(BM_KEY, entries).catch(() => {});
 }
 
@@ -1240,14 +1308,17 @@ async function _syncBenchmarkFromSupabase() {
     const remote = await loadUserSetting(BM_KEY);
     if (!remote?.length) return;
     const local = _loadBenchmark();
-    // دمج: الأحدث تاريخياً يفوز — نفس منطق _mergeBenchmark
+    // AUDIT-FIX (2026-08): تصحيح التعليق ليطابق السلوك الفعلي (المقصود): الدمج بالتاريخ،
+    // وعند تعارض نفس اليوم تفوز نسخة السحابة (Supabase = المصدر الدائم، أسبقية سحابية) —
+    // لا توجد أختام تعديل لكل نقطة تسمح بمنطق «الأحدث تعديلاً يفوز».
+    // النقاط المحلية غير الموجودة سحابياً تُحفَظ كما هي.
     const map = {};
     local.forEach(e  => { map[e.date] = e.value; });
     remote.forEach(e => { map[e.date] = e.value; });
     const merged = Object.entries(map)
       .map(([date, value]) => ({ date, value }))
       .sort((a, b) => a.date.localeCompare(b.date));
-    localStorage.setItem(BM_KEY, JSON.stringify(merged));
+    localStorage.setItem(userLsKey(BM_KEY), JSON.stringify(merged));
   } catch (_) {}
 }
 
@@ -1299,28 +1370,52 @@ async function clearAllBenchmark() {
 // المعيار الدولي (GIPS) لمقارنة أداء المحافظ ببعضها أو بمؤشر
 // الخوارزمية: Modified Dietz لكل فترة بين لقطتين → تجميع مضروب
 // يُبقي آخر لقطة فقط لكل يوم — يُزيل تكرارات نفس اليوم التي تُشوّه TWR
+
+// AUDIT-FIX (2026-08): التمييز الموحّد — اللقطات التلقائية notes تبدأ بـ 'auto'
+function isAutoSnapshot(notes) { return (notes || '').startsWith('auto'); }
+
+// AUDIT-FIX (2026-08): اللقطات التلقائية أساسها أسهم+نقد+عقار، واليدوية صافي ثروة كامل —
+// خلطهما في سلسلة واحدة يسمّم TWR وشارب وسورتينو والتراجع وألفا. نستخدم التلقائية فقط
+// إذا كان عددها ≥ نقطتين، وإلا نستخدم الكل مع تحذير ظاهر بأن الدقة محدودة.
+let _mixedBasisWarned = false;
+function _selectConsistentSnapshots(snapshots) {
+  const autos   = snapshots.filter(s => isAutoSnapshot(s.notes));
+  const isMixed = autos.length > 0 && autos.length < snapshots.length;
+  if (!isMixed) return snapshots;        // أساس واحد أصلاً — لا مشكلة
+  if (autos.length >= 2) return autos;   // سلسلة تلقائية متجانسة كافية
+  if (!_mixedBasisWarned) {
+    _mixedBasisWarned = true;
+    showToast('⚠️ سلسلة اللقطات مختلطة الأساس (تلقائية + يدوية) — الدقة محدودة في TWR ومقاييس المخاطر', 'error');
+  }
+  return snapshots;
+}
+
 function _deduplicateSnapsByDay(snapshots) {
   const byDate = {};
   for (const s of snapshots) {
     // نفضّل اللقطات اليدوية على التلقائية عند التعادل
     const existing = byDate[s.date];
     if (!existing) { byDate[s.date] = s; continue; }
-    const isManual    = s.notes      && !s.notes.startsWith('auto');
-    const wasManual   = existing.notes && !existing.notes.startsWith('auto');
+    const isManual    = !!s.notes        && !isAutoSnapshot(s.notes);
+    const wasManual   = !!existing.notes && !isAutoSnapshot(existing.notes);
     if (isManual && !wasManual) { byDate[s.date] = s; continue; }
     if (!wasManual && !isManual) byDate[s.date] = s; // keep latest
   }
   return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
 }
 
+// AUDIT-FIX (2026-08): تحذير (مرة واحدة) بعدد فترات TWR المُسقطة لمقام ≤ 0
+let _twrDropWarned = false;
+
 function _computeTWR(snapshots, cashflows) {
-  // خطوة أولى: نُحافظ على لقطة واحدة فقط لكل يوم لتجنب تشويه الحسابات
-  const sorted = _deduplicateSnapsByDay(snapshots);
-  if (!sorted.length) return { twrMap: {}, sortedSnaps: sorted };
+  // خطوة أولى: سلسلة متجانسة الأساس، ثم لقطة واحدة فقط لكل يوم لتجنب تشويه الحسابات
+  const sorted = _deduplicateSnapsByDay(_selectConsistentSnapshots(snapshots));
+  if (!sorted.length) return { twrMap: {}, sortedSnaps: sorted, suspiciousPeriods: [] };
 
   const cfs = cashflows.slice().sort((a, b) => a.date.localeCompare(b.date));
   const twrMap = {};
   let factor = 1.0;
+  let droppedPeriods = 0;
   twrMap[sorted[0].date] = 100;
 
   for (let i = 1; i < sorted.length; i++) {
@@ -1339,8 +1434,17 @@ function _computeTWR(snapshots, cashflows) {
     if (denom > 0) {
       const r = (endVal - startVal - netCF) / denom;
       factor *= (1 + r);
+    } else {
+      droppedPeriods++; // AUDIT-FIX (2026-08): كانت تُتخطى بصمت
     }
     twrMap[sorted[i].date] = +(factor * 100).toFixed(3);
+  }
+
+  // AUDIT-FIX (2026-08): تحذير ظاهر (مرة واحدة) بعدد الفترات المُسقطة من TWR
+  if (droppedPeriods > 0 && !_twrDropWarned) {
+    _twrDropWarned = true;
+    showToast(`⚠️ تم إسقاط ${droppedPeriods} فترة من حساب TWR (مقام ≤ 0 — قيمة بداية أو تدفقات غير سليمة) — راجع اللقطات والتدفقات النقدية`, 'error');
+    console.warn(`[performance] TWR: dropped ${droppedPeriods} period(s) with non-positive Modified-Dietz denominator`);
   }
 
   // فترات مشبوهة: تغيّر > 10% في فترة واحدة بدون cashflow يُفسّره
@@ -1848,10 +1952,14 @@ function initBenchmarkTab() {
   const dateInp = document.getElementById('bm-date');
   if (dateInp && !dateInp.value) dateInp.value = todayISO();
 
+  // AUDIT-FIX (2026-08): ترحيل المفاتيح القديمة غير المخصوصة بالمستخدم (مرة واحدة)
+  _bmMigrateLegacyKey(BM_KEY);
+  _bmMigrateLegacyKey(BM_SEEDED_KEY);
+
   // auto-seed: استورد بيانات تاسي التاريخية مرة واحدة فقط (إذا لم تُفعَّل من قبل)
-  if (!localStorage.getItem(BM_SEEDED_KEY)) {
+  if (!localStorage.getItem(userLsKey(BM_SEEDED_KEY))) {
     const total = _mergeBenchmark(TASI_SEED);
-    localStorage.setItem(BM_SEEDED_KEY, '1');
+    localStorage.setItem(userLsKey(BM_SEEDED_KEY), '1');
     showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي تلقائياً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
   }
 

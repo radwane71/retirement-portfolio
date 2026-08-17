@@ -286,10 +286,28 @@ function renderChart() {
   const tableArea = document.getElementById('nwChart-table');
   const canvas    = document.getElementById('nwChart');
 
+  // AUDIT-FIX (2026-08): empty-state القديم كان يدمّر الـ canvas بـ innerHTML فلا يظهر
+  // الرسم أبداً بعد حفظ أول لقطة. نستخدم عنصر رسالة منفصلاً يُنشأ مرة واحدة
+  // ويُخفى/يُظهر — والـ canvas يبقى في الـ DOM دائماً.
+  let emptyMsg = document.getElementById('nwChart-empty-msg');
+  if (!emptyMsg && wrap) {
+    emptyMsg = document.createElement('div');
+    emptyMsg.id = 'nwChart-empty-msg';
+    emptyMsg.style.display = 'none';
+    emptyMsg.innerHTML = `<div class="empty-state" style="height:260px"><div class="icon">📉</div><p>احفظ لقطات لعرض المخطط التاريخي</p></div>`;
+    wrap.appendChild(emptyMsg);
+  }
+
   if (!snapshots.length) {
-    if (wrap) wrap.innerHTML = `<div class="empty-state" style="height:260px"><div class="icon">📉</div><p>احفظ لقطات لعرض المخطط التاريخي</p></div>`;
+    if (nwChart) { nwChart.destroy(); nwChart = null; }
+    if (canvas)    canvas.style.display = 'none';
+    if (emptyMsg)  emptyMsg.style.display = '';
+    if (wrap)      wrap.style.display = '';
+    if (tableArea) tableArea.style.display = 'none';
     return;
   }
+  if (emptyMsg) emptyMsg.style.display = 'none';
+  if (canvas)   canvas.style.display = '';
 
   const sorted = [...snapshots].sort((a, b) => a.date.localeCompare(b.date));
   const labels  = sorted.map(s => formatDate(s.date));
@@ -476,10 +494,6 @@ async function saveSnapshot() {
       `لديك لقطة لهذا الشهر بتاريخ ${formatDate(existing.date)}.\nهل تريد استبدالها بالقيم الحالية؟`
     );
     if (!ok) return;
-    // احذف اللقطة القديمة أولاً
-    const { error: delErr } = await supabaseClient
-      .from('net_worth_snapshots').delete().eq('id', existing.id);
-    if (delErr) { showToast('خطأ: ' + delErr.message, 'error'); return; }
   }
 
   const { totalAssets, totalLiabs, net } = calcTotals();
@@ -495,13 +509,25 @@ async function saveSnapshot() {
     net
   };
 
-  const { error } = await supabaseClient.from('net_worth_snapshots').insert([{
-    user_id:       user.id,
-    date:          today,
-    total_value:   net,
-    notes:         'لقطة شهرية',
-    snapshot_json: snapshotJson
-  }]);
+  // AUDIT-FIX (2026-08): تحديث الصف الموجود بدل حذف-ثم-إدراج — النمط القديم كان
+  // يُضيع لقطة الشهر نهائياً إذا نجح الحذف وفشل الإدراج بعده.
+  let error;
+  if (existing) {
+    ({ error } = await supabaseClient.from('net_worth_snapshots').update({
+      date:          today,
+      total_value:   net,
+      notes:         'لقطة شهرية',
+      snapshot_json: snapshotJson
+    }).eq('id', existing.id));
+  } else {
+    ({ error } = await supabaseClient.from('net_worth_snapshots').insert([{
+      user_id:       user.id,
+      date:          today,
+      total_value:   net,
+      notes:         'لقطة شهرية',
+      snapshot_json: snapshotJson
+    }]));
+  }
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('✓ تم حفظ لقطة ' + thisMonth, 'success');
   const rSnap = await supabaseClient.from('net_worth_snapshots').select('*').order('date', { ascending: true });
@@ -521,15 +547,19 @@ async function deduplicateSnapshots() {
     byMonth[month].push(s);
   });
 
-  // لكل شهر: احتفظ بالأفضل (يدوية > تلقائية، ثم الأحدث id)
+  // لكل شهر: احتفظ بالأفضل (يدوية > تلقائية، ثم الأحدث إنشاءً)
+  // AUDIT-FIX (2026-08): الكشف القديم (notes !== 'لقطة تلقائية') كان ميتاً — اللقطات
+  // التلقائية فعلياً تبدأ notes بـ 'auto'. عند وجود يدوية وتلقائية في نفس الشهر تبقى
+  // اليدوية، ويُحسم التعادل بـ created_at (الأحدث إنشاءً) لا بمقارنة UUID العشوائية.
+  const isAutoSnap = s => (s.notes || '').startsWith('auto');
   const toDelete = [];
   Object.values(byMonth).forEach(group => {
     if (group.length <= 1) return;
     const sorted = [...group].sort((a, b) => {
-      const aManual = a.notes && a.notes !== 'لقطة تلقائية' ? 1 : 0;
-      const bManual = b.notes && b.notes !== 'لقطة تلقائية' ? 1 : 0;
+      const aManual = isAutoSnap(a) ? 0 : 1;
+      const bManual = isAutoSnap(b) ? 0 : 1;
       if (bManual !== aManual) return bManual - aManual;
-      return b.id > a.id ? 1 : -1;
+      return String(b.created_at || '').localeCompare(String(a.created_at || ''));
     });
     sorted.slice(1).forEach(s => toDelete.push(s.id));
   });

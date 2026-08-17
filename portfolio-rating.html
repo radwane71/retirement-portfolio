@@ -9,13 +9,13 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="ثروة">
-  <meta name="theme-color" content="#6366f1">
+  <meta name="theme-color" content="#0d1117">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>تقييم أمان المحفظة - ثروة</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260705">
+  <link rel="stylesheet" href="css/style.css?v=20260817">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -71,6 +71,7 @@
         <div class="nav-group-body" id="grp-portfolio">
           <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
           <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
+          <a href="reconcile.html"     class="nav-link nav-sub" id="nav-reconcile">   <span class="icon">🧾</span><span>تسوية المعاملات</span></a>
           <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
           <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
           <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
@@ -140,7 +141,11 @@
       <div class="rule-section">
         <h3>📦 مكونات المحفظة</h3>
         <div class="two-col">
-          <div class="calc-input-group"><label>عدد الأسهم المنفردة</label><input type="number" id="individualStocks" placeholder="مثال: 15" min="0" max="100"></div>
+          <div class="calc-input-group">
+            <label>عدد الأسهم المنفردة</label>
+            <input type="number" id="individualStocks" placeholder="مثال: 15" min="0" max="100">
+            <p class="field-hint">حجم المحفظة المستهدف حسب دستور المحفظة: 18–25 سهماً</p>
+          </div>
           <div class="calc-input-group">
             <label>عدد صناديق المؤشرات (ETFs)</label>
             <input type="number" id="etfCount" placeholder="مثال: 3" min="0" max="50">
@@ -159,12 +164,12 @@
           <div class="calc-input-group">
             <label>نسبة أكبر سهم / صندوق فردي (%)</label>
             <input type="number" id="largestStockPercentage" placeholder="مثال: 15" min="0" max="100" step="0.1">
-            <p class="field-hint">الموصى به: أقل من 10% لكل ورقة مالية منفردة</p>
+            <p class="field-hint">دستور المحفظة: السقف 7% للسهم الواحد (12% للسهم القيادي)</p>
           </div>
           <div class="calc-input-group">
             <label>نسبة أكبر قطاع (%)</label>
             <input type="number" id="largestSectorPercentage" placeholder="مثال: 30" min="0" max="100" step="0.1">
-            <p class="field-hint">الموصى به: أقل من 30% في قطاع واحد</p>
+            <p class="field-hint">دستور المحفظة: السقف 25% للقطاع الواحد</p>
           </div>
         </div>
       </div>
@@ -197,6 +202,7 @@
             <option value="international">دولية (أسواق عالمية فقط)</option>
             <option value="diversified">متنوعة (محلي + دولي)</option>
           </select>
+          <p class="field-hint">هذا البُعد محايد ولا يدخل في الحساب — المحفظة 100% سعودية بقرار المالك (دستور CLAUDE.md §1) ولا يُخصم عليه.</p>
         </div>
       </div>
 
@@ -295,11 +301,12 @@
   </main>
 
   <div id="toast"></div>
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260705"></script>
-  <script src="js/auth.js?v=20260705"></script>
-  <script src="js/utils.js?v=20260705"></script>
+  <!-- AUDIT-FIX (2026-08): تثبيت إصدار Chart.js بدل التعويم على @4 -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
+  <script src="js/supabase.js?v=20260817"></script>
+  <script src="js/auth.js?v=20260817"></script>
+  <script src="js/utils.js?v=20260817"></script>
   <script>
     let breakdownChartInst = null;
 
@@ -347,7 +354,8 @@
             document.getElementById('leverageRatioGroup').style.display = 'block';
           }
           _ratingLoaded = true;
-          updateResults();
+          // AUDIT-FIX (2026-08): fromUser=false — التحميل الأولي لا يعيد كتابة اللقطة
+          updateResults(false);
         }
       } catch (_) {}
     }
@@ -380,22 +388,28 @@
     }
 
     // ══════════════════════════════════════════════════════════════
-    // نظام التقييم الواقعي — معايير عملية لا مثالية
-    // ──────────────────────────────────────────────────────────────
-    // مجموع النقاط الإيجابية: 10.0 بالضبط
-    //   التنويع الفعلي       2.5 ← أكبر وزن: الأسهم الفردية + ETF + ريت + صكوك
-    //   التنوع القطاعي       1.5 ← موزون لأن السوق السعودي قطاعاته محدودة
-    //   أفق الاستثمار        1.0 ← الطويل الأجل يمتص التذبذب
-    //   تركيز السهم الأكبر   1.0 ← حد واقعي: <15% لا <10%
-    //   تركيز القطاع الأكبر  1.0 ← حد واقعي: <30% لا <20%
-    //   فئات الأصول          1.0 ← التنويع بين أنواع مختلفة
-    //   التوزيع الجغرافي     1.0 ← أقل وزناً: السوق المحلي استراتيجية صحيحة
-    //   احتياطي الكاش        0.5 ← هامش الأمان
-    //   أصول تحوط (ذهب)     0.5 ← اختياري، ليس شرطاً
+    // نظام التقييم — مُواءَم مع دستور المحفظة (CLAUDE.md)
+    // AUDIT-FIX (2026-08):
+    //   • تركيز السهم: الدرجة الكاملة ≤ 7% (سقف الدستور؛ 12% للقيادي — لا يمكن
+    //     تمييز القيادي في هذا النموذج فاعتُمد 7%)، خصم تدريجي فوقها وقوي فوق 12%.
+    //   • تركيز القطاع: الدرجة الكاملة ≤ 25%، خصم فوقها وقوي فوق 30%.
+    //   • حجم المحفظة: 18–25 سهماً = الدرجة الكاملة (لا اشتراط ≥ 60 «وحدة»).
+    //   • التوزيع الجغرافي: بُعد محايد — CLAUDE.md §1 يمنع انتقاد القرار الجغرافي؛
+    //     وزنه (1.0) أعيد توزيعه: +0.5 للتنويع الفعلي، +0.25 لكل من تركيزي السهم والقطاع.
+    //   • الحقل الفارغ لا يأخذ أسوأ درجة — البُعد غير المعبأ يُستثنى من الحساب
+    //     ويُعرض «غير مُقيَّم»، والنتيجة تُقاس على الأبعاد المعبأة فقط (تُقنَّن إلى 10).
+    // مجموع أوزان الأبعاد المقيَّمة: 10.0 بالضبط
+    //   التنويع الفعلي (حجم المحفظة)  3.0
+    //   التنوع القطاعي                1.5
+    //   أفق الاستثمار                 1.0
+    //   تركيز السهم الأكبر            1.25
+    //   تركيز القطاع الأكبر           1.25
+    //   فئات الأصول                   1.0
+    //   احتياطي الكاش                 0.5
+    //   أصول تحوط (ذهب)              0.5
     // ══════════════════════════════════════════════════════════════
     function calculateSafetyRating() {
-      let score = 0;
-      const breakdown = [];
+      const rawVal = id => String(document.getElementById(id).value ?? '').trim();
 
       const is       = parseInt(document.getElementById('individualStocks').value)          || 0;
       const rc       = parseInt(document.getElementById('reitCount').value)                 || 0;
@@ -403,7 +417,6 @@
       const bc       = parseInt(document.getElementById('bondCount').value)                 || 0;
       const lsp      = parseFloat(document.getElementById('largestStockPercentage').value)  || 0;
       const lsecp    = parseFloat(document.getElementById('largestSectorPercentage').value) || 0;
-      const geo      = document.getElementById('geographicDistribution').value;
       const gold     = document.getElementById('goldPercentage').value;
       const cash     = document.getElementById('hasCash').value;
       const sec      = document.getElementById('sectorDiversification').value;
@@ -411,74 +424,81 @@
       const lev      = document.getElementById('usesLeverage').value;
       const levRatio = parseFloat(document.getElementById('leverageRatio').value) || 0;
 
-      // 1. التنويع الفعلي (0–2.5)
+      // هل عُبِّئ البُعد؟ الفارغ = «غير مُقيَّم» — لا يأخذ أسوأ درجة
+      const compAnswered  = ['individualStocks','etfCount','reitCount','bondCount'].some(id => rawVal(id) !== '');
+      const lspAnswered   = rawVal('largestStockPercentage')  !== '';
+      const lsecpAnswered = rawVal('largestSectorPercentage') !== '';
+
+      const breakdown = [];
+      let earned = 0, maxAnswered = 0;
+      const addDim = (label, value, max, answered) => {
+        if (answered) { earned += value; maxAnswered += max; breakdown.push({ label, value, max }); }
+        else breakdown.push({ label, value: null, max, unanswered: true });
+      };
+
+      // 1. التنويع الفعلي / حجم المحفظة (0–3.0) — الدستور: 18–25 سهماً = الدرجة الكاملة
       const effectiveUnits = is + (ec * 30) + (rc * 5) + (bc * 3);
-      const ds = effectiveUnits === 0 ? 0
-               : effectiveUnits >= 60 ? 2.5
-               : effectiveUnits >= 30 ? 2.0
-               : effectiveUnits >= 15 ? 1.5
-               : effectiveUnits >= 5  ? 1.0 : 0.5;
-      score += ds;
-      breakdown.push({ label: `التنويع الفعلي (${effectiveUnits} وحدة)`, value: ds, max: 2.5 });
+      const ds = effectiveUnits >= 18 ? 3.0
+               : effectiveUnits >= 12 ? 2.4
+               : effectiveUnits >= 8  ? 1.8
+               : effectiveUnits >= 4  ? 1.0
+               : effectiveUnits > 0   ? 0.5 : 0;
+      addDim(`التنويع الفعلي (${effectiveUnits} وحدة — الهدف 18–25)`, ds, 3.0, compAnswered);
 
       // 2. التنوع القطاعي (0–1.5)
       const secMap = { 'single-sector': 0, '2-4-sectors': 0.6, '5-7-sectors': 1.1, '8-plus-sectors': 1.5 };
-      const scs = secMap[sec] || 0;
-      score += scs;
-      breakdown.push({ label: 'التنوع القطاعي', value: scs, max: 1.5 });
+      addDim('التنوع القطاعي', secMap[sec] || 0, 1.5, sec !== '');
 
       // 3. أفق الاستثمار (0–1.0)
       const horMap = { long: 1.0, medium: 0.65, short: 0.3 };
-      const hs = horMap[hor] || 0;
-      score += hs;
-      breakdown.push({ label: 'أفق الاستثمار', value: hs, max: 1.0 });
+      addDim('أفق الاستثمار', horMap[hor] || 0, 1.0, hor !== '');
 
-      // 4. تركيز السهم الأكبر (0–1.0) — حد واقعي <15% لا <10%
-      const stockConc = lsp === 0 ? 0
-                      : lsp < 15  ? 1.0
-                      : lsp <= 20 ? 0.75
-                      : lsp <= 30 ? 0.4 : 0;
-      score += stockConc;
-      breakdown.push({ label: 'تركيز السهم الأكبر', value: stockConc, max: 1.0 });
+      // 4. تركيز السهم الأكبر (0–1.25) — الدرجة الكاملة ≤ 7% (سقف الدستور)
+      const stockConc = lsp <= 7  ? 1.25
+                      : lsp <= 12 ? 0.85
+                      : lsp <= 20 ? 0.4 : 0;
+      addDim('تركيز السهم الأكبر (السقف 7%)', stockConc, 1.25, lspAnswered);
 
-      // 5. تركيز القطاع الأكبر (0–1.0) — حد واقعي <30% لا <20%
-      const sconc = lsecp === 0 ? 0
-                  : lsecp < 30  ? 1.0
-                  : lsecp <= 45 ? 0.6
-                  : lsecp <= 60 ? 0.3 : 0;
-      score += sconc;
-      breakdown.push({ label: 'تركيز القطاع الأكبر', value: sconc, max: 1.0 });
+      // 5. تركيز القطاع الأكبر (0–1.25) — الدرجة الكاملة ≤ 25% (سقف الدستور)
+      const sconc = lsecp <= 25 ? 1.25
+                  : lsecp <= 30 ? 0.8
+                  : lsecp <= 45 ? 0.4 : 0;
+      addDim('تركيز القطاع الأكبر (السقف 25%)', sconc, 1.25, lsecpAnswered);
 
       // 6. فئات الأصول (0–1.0)
       const assetClasses = (is>0?1:0)+(ec>0?1:0)+(rc>0?1:0)+(bc>0?1:0);
       const asScore = assetClasses >= 3 ? 1.0 : assetClasses === 2 ? 0.6 : assetClasses === 1 ? 0.3 : 0;
-      score += asScore;
-      breakdown.push({ label: `فئات الأصول (${assetClasses} فئة)`, value: asScore, max: 1.0 });
+      addDim(`فئات الأصول (${assetClasses} فئة)`, asScore, 1.0, compAnswered);
 
-      // 7. التوزيع الجغرافي (0–1.0) — محلي فقط = 0.55 (استراتيجية مشروعة)
-      const geoMap = { diversified: 1.0, international: 0.85, regional: 0.70, 'local-only': 0.55 };
-      const gs = geoMap[geo] || 0;
-      score += gs;
-      breakdown.push({ label: 'التوزيع الجغرافي', value: gs, max: 1.0 });
+      // 7. التوزيع الجغرافي — محايد (CLAUDE.md §1: المحفظة 100% سعودية بقرار المالك)
+      breakdown.push({ label: 'التوزيع الجغرافي', neutral: true });
 
       // 8. احتياطي الكاش (0–0.5)
-      const cs = cash === 'yes' ? 0.5 : 0;
-      score += cs;
-      breakdown.push({ label: 'احتياطي الكاش', value: cs, max: 0.5 });
+      addDim('احتياطي الكاش', cash === 'yes' ? 0.5 : 0, 0.5, cash !== '');
 
       // 9. أصول التحوط / ذهب (0–0.5) — اختياري
       const goldMap = { high: 0.5, medium: 0.35, low: 0.15, none: 0 };
-      const gls = goldMap[gold] || 0;
-      score += gls;
-      breakdown.push({ label: 'أصول تحوط (ذهب)', value: gls, max: 0.5 });
+      addDim('أصول تحوط (ذهب)', goldMap[gold] || 0, 0.5, gold !== '');
 
-      // ── الخصومات: فقط للمخاطر الحقيقية ──────────────────────
-      if      (lsp > 40) { const p=2.5; score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: سهم واحد > 40%', value:-p, isPenalty:true }); }
-      else if (lsp > 30) { const p=1.2; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 30–40%',  value:-p, isPenalty:true }); }
-      else if (lsp > 20) { const p=0.4; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 20–30%',  value:-p, isPenalty:true }); }
+      // لا شيء معبأ إطلاقاً → لا نتيجة
+      if (maxAnswered === 0 && lev === '') return { score: null, breakdown };
 
-      if      (lsecp > 70) { const p=2.0; score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: قطاع واحد > 70%', value:-p, isPenalty:true }); }
-      else if (lsecp > 50) { const p=0.8; score=Math.max(0,score-p); breakdown.push({ label:'خصم: قطاع واحد 50–70%',  value:-p, isPenalty:true }); }
+      // تقنين على الأبعاد المعبأة فقط
+      let score = maxAnswered > 0 ? earned / maxAnswered * 10 : 10;
+
+      // ── الخصومات (على مقياس 10): سقوف الدستور ────────────────
+      if (lspAnswered) {
+        if      (lsp > 40) { const p=2.5;  score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: سهم واحد > 40%', value:-p, isPenalty:true }); }
+        else if (lsp > 30) { const p=1.2;  score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 30–40%',  value:-p, isPenalty:true }); }
+        else if (lsp > 20) { const p=0.6;  score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 20–30%',  value:-p, isPenalty:true }); }
+        else if (lsp > 12) { const p=0.35; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم فوق سقف القيادي (12%)', value:-p, isPenalty:true }); }
+      }
+
+      if (lsecpAnswered) {
+        if      (lsecp > 70) { const p=2.0; score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: قطاع واحد > 70%', value:-p, isPenalty:true }); }
+        else if (lsecp > 50) { const p=0.8; score=Math.max(0,score-p); breakdown.push({ label:'خصم: قطاع واحد 50–70%',  value:-p, isPenalty:true }); }
+        else if (lsecp > 30) { const p=0.4; score=Math.max(0,score-p); breakdown.push({ label:'خصم: قطاع فوق 30% (سقف الدستور 25%)', value:-p, isPenalty:true }); }
+      }
 
       const highDiv = sec === '8-plus-sectors' || sec === '5-7-sectors';
       if (highDiv && lsecp > 50) { const p=0.5; score=Math.max(0,score-p); breakdown.push({ label:'خصم: تناقض (تنويع عالٍ + قطاع مهيمن)', value:-p, isPenalty:true }); }
@@ -506,28 +526,33 @@
       const sec   = document.getElementById('sectorDiversification').value;
       const lev   = document.getElementById('usesLeverage').value;
       const hor   = document.getElementById('investmentHorizon').value;
-      const geo   = document.getElementById('geographicDistribution').value;
       const is    = parseInt(document.getElementById('individualStocks').value) || 0;
       const ec    = parseInt(document.getElementById('etfCount').value) || 0;
 
+      // AUDIT-FIX (2026-08): حُذفت توصية «فكّر في ETF دولي» — CLAUDE.md §1 يمنع انتقاد
+      // القرار الجغرافي (المحفظة 100% سعودية بقرار المالك). والعتبات مواءَمة مع سقوف الدستور.
       const fb = [];
       if (lev === 'yes')           fb.push('• ⛔ <strong>خطر حاد:</strong> الرافعة تُضاعف الخسائر — قلّصها أو أزلها');
-      if (lsecp > 50)              fb.push('• ⛔ تركيز قطاعي خطير — حاول إبقاء القطاع الأكبر تحت 40%');
-      if (lsp > 30)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — خفّضه تحت 20%');
+      if (lsecp > 50)              fb.push('• ⛔ تركيز قطاعي خطير — سقف الدستور 25% للقطاع الواحد');
+      else if (lsecp > 30)         fb.push('• ⚠️ القطاع الأكبر فوق 30% — خفّفه نحو سقف الدستور 25%');
+      if (lsp > 30)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — أعده نحو سقف الدستور 7% (12% للقيادي)');
+      else if (lsp > 12)           fb.push('• ⚠️ السهم الأكبر فوق سقف القيادي 12% — مرشّح للتخفيف حسب الدستور');
       if (cash === 'no')           fb.push('• احتفظ بـ 5-10% كاش — يوفر هامش الأمان وفرص الشراء');
       if (sec === 'single-sector') fb.push('• ⚠️ قطاع واحد = مخاطرة مركّزة — حاول التوسع لقطاعين على الأقل');
       if (hor === 'short')         fb.push('• أفق قصير: ارفع نسبة الكاش، قلّل الأسهم عالية التذبذب');
-      if (geo === 'local-only' && ec === 0) fb.push('• فكّر في ETF دولي واحد للتحوط من مخاطر السوق المحلي');
       if (gold === 'none' && score < 7)    fb.push('• الذهب (5-10%) يوفر حماية في أوقات الأزمات والتضخم');
       if (is > 0 && ec === 0 && is < 8)   fb.push('• مع عدد أسهم محدود، ETF يُضيف تنويعاً واسعاً بسهولة');
 
       return { evaluation: ev, feedback: fb.length ? fb.join('<br>') : null };
     }
 
-    function updateResults() {
+    // AUDIT-FIX (2026-08): fromUser — اللقطة تُحفظ فقط عند تغيير فعلي من المستخدم،
+    // لا عند التحميل الأولي (كانت تُعاد كتابتها سحابياً بكل زيارة للصفحة).
+    function updateResults(fromUser) {
       checkEtfNotice();
       checkSectorConflict();
       const { score, breakdown } = calculateSafetyRating();
+      if (score == null) return; // لا شيء معبأ — تبقى رسالة «أدخل البيانات»
       const { evaluation, feedback } = getEvaluation(score);
       const pct = (score / 10) * 100;
 
@@ -558,26 +583,39 @@
       if (feedback) { fbEl.innerHTML = '<strong>💡 توصيات:</strong><br>' + feedback; fbEl.style.display = 'block'; }
       else            fbEl.style.display = 'none';
 
-      // تفاصيل النص
-      const positives = breakdown.filter(i => !i.isPenalty);
-      const penalties = breakdown.filter(i =>  i.isPenalty);
+      // تفاصيل النص — AUDIT-FIX (2026-08): الأبعاد غير المعبأة تُعرض «غير مُقيَّم»
+      // (مستثناة من الحساب)، والجغرافي يُعرض «محايد» (قرار المالك — خارج التقييم)
+      const answeredPos = breakdown.filter(i => !i.isPenalty && !i.neutral && !i.unanswered);
+      const unansweredD = breakdown.filter(i => i.unanswered);
+      const neutralD    = breakdown.filter(i => i.neutral);
+      const penalties   = breakdown.filter(i => i.isPenalty);
       document.getElementById('breakdownItems').innerHTML =
         (penalties.length ? penalties.map(i => `
           <div class="breakdown-item">
             <span>${esc(i.label)}</span>
             <span class="breakdown-value negative">${i.value.toFixed(2)}</span>
           </div>`).join('') : '') +
+        unansweredD.map(i => `
+          <div class="breakdown-item">
+            <span>${esc(i.label)}</span>
+            <span class="breakdown-value neutral">غير مُقيَّم</span>
+          </div>`).join('') +
+        neutralD.map(i => `
+          <div class="breakdown-item">
+            <span>${esc(i.label)}</span>
+            <span class="breakdown-value neutral">محايد — قرار المالك (خارج التقييم)</span>
+          </div>`).join('') +
         `<div class="breakdown-item" style="font-size:0.78rem;color:var(--text-muted);padding-top:8px">
-          <span>المجموع النهائي</span>
+          <span>المجموع النهائي${unansweredD.length ? ' (مُقنَّن على الأبعاد المعبأة فقط)' : ''}</span>
           <span class="breakdown-value ${score >= 7 ? 'positive' : score >= 5 ? 'neutral' : 'negative'}">${score.toFixed(1)} / 10</span>
         </div>`;
 
-      // شارت الأبعاد الإيجابية
-      renderBreakdownChart(positives);
+      // شارت الأبعاد الإيجابية المعبأة فقط
+      renderBreakdownChart(answeredPos);
       document.getElementById('scoreBreakdown').style.display = 'block';
 
-      // حفظ لقطة التقييم (تُدرَج في تقرير المراجعة وتُنسخ احتياطياً)
-      saveRatingSnapshot(score, evaluation, breakdown);
+      // حفظ لقطة التقييم (تُدرَج في تقرير المراجعة وتُنسخ احتياطياً) — عند تغيير المستخدم فقط
+      if (fromUser) saveRatingSnapshot(score, evaluation, breakdown);
     }
 
     function renderBreakdownChart(items) {
@@ -620,7 +658,7 @@
             }
           },
           scales: {
-            x: { max: 2.5, ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 } }, grid: { color: 'rgba(48,54,61,0.5)' } },
+            x: { max: 3.0, ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 } }, grid: { color: 'rgba(48,54,61,0.5)' } },
             y: { ticks: { color: '#c9d1d9', font: { family: 'Tajawal', size: 10 }, autoSkip: false }, grid: { color: 'rgba(48,54,61,0.3)' } }
           }
         }
@@ -650,8 +688,9 @@
     }
 
     document.querySelectorAll('input[type="number"], select').forEach(el => {
-      el.addEventListener('input',  updateResults);
-      el.addEventListener('change', updateResults);
+      // fromUser=true — الحفظ السحابي فقط عند تغيير فعلي من المستخدم
+      el.addEventListener('input',  () => updateResults(true));
+      el.addEventListener('change', () => updateResults(true));
     });
 
     init();
