@@ -52,9 +52,11 @@ async function init() {
 // ── KPIs ──────────────────────────────────────────────────────────────
 function renderKPIs() {
   const curYr  = new Date().getFullYear();
+  // AUDIT-FIX (2026-08): فلتر auto_generated موحَّد على العدّادات الثلاثة —
+  // كان «منجزة/ملغاة» يحسبان المولَّدة آلياً بينما «نشطة» تستثنيها.
   const active = _tasks.filter(t => t.status === 'active' && !t.auto_generated).length;
-  const done   = _tasks.filter(t => t.status === 'done' && new Date(t.closed_at || t.updated_at).getFullYear() === curYr).length;
-  const canc   = _tasks.filter(t => t.status === 'cancelled').length;
+  const done   = _tasks.filter(t => t.status === 'done' && !t.auto_generated && new Date(t.closed_at || t.updated_at).getFullYear() === curYr).length;
+  const canc   = _tasks.filter(t => t.status === 'cancelled' && !t.auto_generated).length;
   setText('tk-active',    active);
   setText('tk-done',      done);
   setText('tk-cancelled', canc);
@@ -71,12 +73,16 @@ function filterByType(type) {
 
 function applyFilters() {
   const statusF = document.getElementById('status-filter')?.value || 'active';
-  let filtered = _tasks.filter(t => !t.auto_generated);
+  const base = _tasks.filter(t => !t.auto_generated);
+  const typed = _filterType !== 'all' ? base.filter(t => t.type === _filterType) : base;
+
+  let filtered = typed;
   if (statusF !== 'all') filtered = filtered.filter(t => t.status === statusF);
-  if (_filterType !== 'all') filtered = filtered.filter(t => t.type === _filterType);
 
   const active   = filtered.filter(t => t.status === 'active');
-  const archived = filtered.filter(t => t.status !== 'active');
+  // AUDIT-FIX (2026-08): فلتر الحالة الافتراضي (active) كان يُفرَّغ الأرشيف دائماً —
+  // الأرشيف يُبنى من كل التقييمات متجاهلاً فلتر الحالة (يحترم فلتر النوع فقط).
+  const archived = typed.filter(t => t.status !== 'active');
 
   const countEl = document.getElementById('tasks-count-label');
   if (countEl) countEl.textContent = `${active.length} تقييم نشط`;
@@ -184,6 +190,9 @@ function buildCard(t) {
 function openValModal(id = null) {
   _editingTaskId = id;
   document.getElementById('val-modal-title').textContent = id ? 'تعديل التقييم' : 'تقييم جديد';
+  // امسح علامة الملء الآلي لخانة التخفيف — قيم هذا الفتح ليست من ملء آلي سابق
+  const trimEl = document.getElementById('task-trim');
+  if (trimEl) delete trimEl.dataset.autofilled;
 
   if (id) {
     const t = _tasks.find(x => x.id === id);
@@ -234,8 +243,12 @@ function onLiquidateInput() {
   const trimEl = document.getElementById('task-trim');
   if (!liqEl || !trimEl) return;
   const liq = +liqEl.value;
-  if (liq > 0) trimEl.value = (liq - 0.1).toFixed(2);
-  else trimEl.value = '';
+  // AUDIT-FIX (2026-08): لا تدهس قيمة التخفيف المُدخلة يدوياً — الملء الآلي فقط
+  // إذا كانت الخانة فارغة أو كانت قيمتها من ملء آلي سابق (نتتبّعه بـ dataset).
+  const isAuto = trimEl.value === '' || trimEl.value === trimEl.dataset.autofilled;
+  if (!isAuto) return;
+  if (liq > 0) { trimEl.value = (liq - 0.1).toFixed(2); trimEl.dataset.autofilled = trimEl.value; }
+  else         { trimEl.value = ''; delete trimEl.dataset.autofilled; }
 }
 
 function onTaskTickerInput() {
@@ -265,10 +278,24 @@ async function saveTask() {
     if (v !== null && v <= 0) { showToast(`سعر «${lbl}» يجب أن يكون أكبر من صفر`, 'error'); return; }
   }
 
+  // AUDIT-FIX (2026-08): ترتيب المناطق السعرية منطقي إجبارياً (لِما هو مُدخل):
+  // تجميع < تخفيف ≤ تصفية — خطة مقلوبة تُنتج إشارات متناقضة في محرّك القرار.
+  if (accumulate !== null && trimFrom !== null && accumulate >= trimFrom) {
+    showToast('⛔ سعر التجميع يجب أن يكون أقل من سعر التخفيف (تجميع < تخفيف)', 'error'); return;
+  }
+  if (trimFrom !== null && liquidate !== null && trimFrom > liquidate) {
+    showToast('⛔ سعر التخفيف يجب ألا يتجاوز سعر التصفية (تخفيف ≤ تصفية)', 'error'); return;
+  }
+  if (accumulate !== null && liquidate !== null && accumulate >= liquidate) {
+    showToast('⛔ سعر التجميع يجب أن يكون أقل من سعر التصفية (تجميع < تصفية)', 'error'); return;
+  }
+
   const confirmMsg = _editingTaskId ? 'هل تريد حفظ التعديلات على التقييم؟' : 'هل تريد إضافة هذا التقييم؟';
   if (!await confirmAsync(confirmMsg)) return;
 
   const { data: { user } } = await supabaseClient.auth.getUser();
+  // AUDIT-FIX (2026-08): جلسة منتهية كانت تسقط بـ TypeError صامت
+  if (!user) { showToast('انتهت الجلسة — أعد تسجيل الدخول', 'error'); return; }
   const now = new Date().toISOString();
 
   const payload = {
@@ -280,7 +307,11 @@ async function saveTask() {
     accumulate_at:   accumulate,
     liquidate_above: liquidate,
     trim_from:       trimFrom,
-    trim_to:         null,
+    // AUDIT-FIX (2026-08): كل تعديل كان يكتب null فوق trim_to الموجود في السجل —
+    // نحتفظ بالقيمة المخزّنة عند التعديل (لا واجهة لإدخالها هنا).
+    trim_to:         _editingTaskId
+                     ? (_tasks.find(t => t.id === _editingTaskId)?.trim_to ?? null)
+                     : null,
     status:          _editingTaskId
                      ? (_tasks.find(t => t.id === _editingTaskId)?.status || 'active')
                      : 'active',
@@ -293,7 +324,8 @@ async function saveTask() {
 
   let error;
   if (_editingTaskId) {
-    ({ error } = await supabaseClient.from('portfolio_tasks').update(payload).eq('id', _editingTaskId));
+    // AUDIT-FIX (2026-08): eq('user_id') توحيداً للنمط الدفاعي (لا اعتماد على RLS وحده)
+    ({ error } = await supabaseClient.from('portfolio_tasks').update(payload).eq('id', _editingTaskId).eq('user_id', user.id));
   } else {
     payload.created_at = now;
     ({ error } = await supabaseClient.from('portfolio_tasks').insert([payload]));
@@ -308,11 +340,13 @@ async function saveTask() {
 async function closeTask(id, newStatus) {
   const lbl = newStatus === 'done' ? 'إغلاق كمنجز' : 'إلغاء';
   if (!await confirmAsync(`هل تريد ${lbl} هذا التقييم؟`)) return;
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) { showToast('انتهت الجلسة — أعد تسجيل الدخول', 'error'); return; }
   const { error } = await supabaseClient.from('portfolio_tasks').update({
     status:     newStatus,
     closed_at:  new Date().toISOString(),
     updated_at: new Date().toISOString(),
-  }).eq('id', id);
+  }).eq('id', id).eq('user_id', user.id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast(newStatus === 'done' ? '✅ تم الإغلاق' : '❌ تم الإلغاء', 'success');
   await reloadTasks();
@@ -320,11 +354,13 @@ async function closeTask(id, newStatus) {
 
 async function reopenTask(id) {
   if (!await confirmAsync('هل تريد إعادة فتح هذا التقييم؟')) return;
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) { showToast('انتهت الجلسة — أعد تسجيل الدخول', 'error'); return; }
   const { error } = await supabaseClient.from('portfolio_tasks').update({
     status:     'active',
     closed_at:  null,
     updated_at: new Date().toISOString(),
-  }).eq('id', id);
+  }).eq('id', id).eq('user_id', user.id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('↩ تم إعادة الفتح', 'success');
   await reloadTasks();

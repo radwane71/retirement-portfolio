@@ -2,7 +2,24 @@ let watchlist    = [];
 let userStocks   = [];
 let holdings     = [];
 let sectorTargets = {};   // sector → target_pct
+let engineCfg    = {};    // ticker → مدخلات محرّك القرار (منها علم «قيادي» blueChip)
 let editingWlId  = null;
+
+// الأسقف الدستورية (CLAUDE.md §1) — نفس ثوابت محرّك القرار (decision-engine.js)
+const WL_CAP_SINGLE   = 7;     // سقف السهم الواحد
+const WL_CAP_BLUECHIP = 12;    // سقف السهم القيادي
+const WL_CAP_BUFFER   = 0.75;  // منطقة سماح السهم/القيادي
+const WL_CAP_SECTOR   = 25;    // سقف القطاع
+const WL_SECTOR_BUFFER = 1.25; // منطقة سماح القطاع
+
+// هل السهم قيادي؟ — نفس منطق decision-engine.js: علم blueChip اليدوي من
+// إعدادات المحرّك (decision_engine_v1)، وأرامكو 2222 قيادية افتراضياً.
+function wlIsBlueChip(ticker) {
+  const cfg = engineCfg[ticker] || {};
+  if (cfg.blueChip === true)  return true;
+  if (cfg.blueChip === false) return false;
+  return ticker === '2222';
+}
 let _baseDiv     = null;  // تنويع المحفظة الحالية (computeDiversification) — مرجع المقارنة
 let _livePrices  = {};    // ticker → سعر اليوم اللحظي (من Yahoo عبر Edge Function)
 let _livePricesLoading = false;
@@ -85,15 +102,17 @@ function livePriceCell(w) {
 }
 
 async function loadAll() {
-  const [rWl, rUs, rH, rSec] = await Promise.all([
+  const [rWl, rUs, rH, rSec, rEng] = await Promise.all([
     supabaseClient.from('watchlist').select('*').order('created_at', { ascending: false }),
     supabaseClient.from('user_stocks').select('ticker, name, sector'),
     supabaseClient.from('holdings').select('ticker, name, sector, shares, current_price'),
     supabaseClient.from('sector_targets').select('sector, target_pct'),
+    loadUserSetting('decision_engine_v1'),   // أعلام «قيادي» — نفس مصدر محرّك القرار
   ]);
   watchlist  = rWl.data || [];
   userStocks = rUs.data || [];
   holdings   = rH.data  || [];
+  engineCfg  = rEng || {};
   sectorTargets = {};
   (rSec.data || []).forEach(r => { sectorTargets[r.sector] = +r.target_pct; });
 
@@ -175,6 +194,13 @@ function analyzeWatchImpact(w) {
   const overTarget      = secTarget > 0 && secWeightAfter > secTarget + 0.05;
   const bigPosition     = posWeightAfter > 15;     // TARGET_TOP1 = 15% (نفس معيار لوحة التحكم)
 
+  // AUDIT-FIX (2026-08): الأسقف الدستورية (CLAUDE.md §1) على الوزن المتوقع بعد الشراء —
+  // كانت غائبة عن التحليل: سقف السهم 7% (قيادي 12%) + سماح 0.75، وسقف القطاع 25% + سماح 1.25
+  const blueChip     = wlIsBlueChip(w.ticker);
+  const singleCap    = blueChip ? WL_CAP_BLUECHIP : WL_CAP_SINGLE;
+  const overCap      = posWeightAfter > singleCap + WL_CAP_BUFFER;
+  const overSectorCap = secWeightAfter > WL_CAP_SECTOR + WL_SECTOR_BUFFER;
+
   // ── بناء الأسباب (لغة محلل) ──────────────────────────────────
   const reasons = [];
   if (deltaGauge >= 2)      reasons.push({ t: 'pos', txt: `يرفع مقياس التنويع بمقدار +${deltaGauge} نقطة (${_baseDiv.gaugePos} → ${after.gaugePos})` });
@@ -186,13 +212,15 @@ function analyzeWatchImpact(w) {
   else if (secTarget > 0)   reasons.push({ t: 'neu', txt: `وزن قطاع «${sec}» سيصبح ${secWeightAfter.toFixed(1)}% (هدفك ${secTarget.toFixed(1)}% — ضمن النطاق)` });
   else                      reasons.push({ t: 'neu', txt: `يُضاف إلى قطاع «${sec}» الموجود (${secWeightBefore.toFixed(1)}% → ${secWeightAfter.toFixed(1)}%)` });
 
+  if (overCap)              reasons.push({ t: 'neg', txt: `يكسر سقف السهم الدستوري: وزنه بعد الشراء ${posWeightAfter.toFixed(1)}% يتجاوز ${singleCap}%${blueChip ? ' (قيادي — سقف 12%)' : ''} + منطقة السماح ${WL_CAP_BUFFER}% (CLAUDE.md §1)` });
+  if (overSectorCap)        reasons.push({ t: 'neg', txt: `يكسر سقف القطاع الدستوري: قطاع «${sec}» سيصبح ${secWeightAfter.toFixed(1)}% متجاوزاً ${WL_CAP_SECTOR}% + منطقة السماح ${WL_SECTOR_BUFFER}% (CLAUDE.md §1)` });
   if (bigPosition)          reasons.push({ t: 'neg', txt: `مركز كبير: وزنه المخطط ${posWeightAfter.toFixed(1)}% يتجاوز 15% — قد يصبح من أكبر مراكزك ويرفع التركيز` });
   if (held)                 reasons.push({ t: 'neu', txt: `هذا السهم موجود في محفظتك — التحليل يفترض رفع وزنه إلى ${posWeightAfter.toFixed(1)}%` });
 
   // ── الحكم النهائي ────────────────────────────────────────────
   let verdict, label, color, icon;
-  if (overTarget || bigPosition || deltaGauge <= -2) {
-    if (isNewSector && deltaGauge >= 0 && !bigPosition) {
+  if (overTarget || bigPosition || overCap || overSectorCap || deltaGauge <= -2) {
+    if (isNewSector && deltaGauge >= 0 && !bigPosition && !overCap && !overSectorCap) {
       verdict = 'caution'; label = 'إضافة بتحفّظ'; color = '#f97316'; icon = '⚠️';
     } else {
       verdict = 'negative'; label = 'يزيد التركيز'; color = '#ef4444'; icon = '🔻';
@@ -207,6 +235,7 @@ function analyzeWatchImpact(w) {
     verdict, label, color, icon, deltaGauge,
     assumed, plannedPct: p * 100, posWeightAfter,
     sec, isNewSector, secTarget, secWeightBefore, secWeightAfter, overTarget, bigPosition, held: !!held,
+    blueChip, singleCap, overCap, overSectorCap,
     before: _baseDiv, after, reasons,
   };
 }
@@ -405,17 +434,17 @@ function closeModal() {
 async function saveItem(e) {
   e.preventDefault();
   const { data: { user } } = await supabaseClient.auth.getUser();
+  // AUDIT-FIX (2026-08): جلسة منتهية كانت تسقط بـ TypeError صامت
+  if (!user) { showToast('انتهت الجلسة — أعد تسجيل الدخول', 'error'); return; }
 
   const ticker = document.getElementById('wl-ticker').value.trim().toUpperCase();
   const name   = document.getElementById('wl-name').value.trim();
 
   if (!ticker || !name) { showToast('الرمز والاسم مطلوبان', 'error'); return; }
 
-  // منع التكرار (إلا في وضع التعديل)
-  if (!editingWlId) {
-    const dup = watchlist.find(w => w.ticker === ticker);
-    if (dup) { showToast(`⛔ الرمز ${ticker} موجود بالفعل في قائمة المراقبة`, 'error'); return; }
-  }
+  // AUDIT-FIX (2026-08): منع التكرار حتى في وضع التعديل — باستثناء السجل الجاري تعديله
+  const dup = watchlist.find(w => w.ticker === ticker && w.id !== editingWlId);
+  if (dup) { showToast(`⛔ الرمز ${ticker} موجود بالفعل في قائمة المراقبة`, 'error'); return; }
 
   if (!await confirmAsync(editingWlId ? `هل تريد حفظ التعديلات على ${ticker}؟` : `هل تريد إضافة ${ticker} لقائمة المراقبة؟`)) return;
 
@@ -430,7 +459,8 @@ async function saveItem(e) {
   };
 
   let error;
-  if (editingWlId) ({ error } = await supabaseClient.from('watchlist').update(payload).eq('id', editingWlId));
+  // AUDIT-FIX (2026-08): eq('user_id') توحيداً للنمط الدفاعي (لا اعتماد على RLS وحده)
+  if (editingWlId) ({ error } = await supabaseClient.from('watchlist').update(payload).eq('id', editingWlId).eq('user_id', user.id));
   else             ({ error } = await supabaseClient.from('watchlist').insert([payload]));
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
@@ -444,7 +474,9 @@ async function saveItem(e) {
 
 async function deleteItem(id) {
   if (!await confirmAsync('هل أنت متأكد من الحذف؟')) return;
-  const { error } = await supabaseClient.from('watchlist').delete().eq('id', id);
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user) { showToast('انتهت الجلسة — أعد تسجيل الدخول', 'error'); return; }
+  const { error } = await supabaseClient.from('watchlist').delete().eq('id', id).eq('user_id', user.id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   showToast('تم الحذف', 'success');
   await loadAll();

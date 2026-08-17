@@ -44,6 +44,7 @@ let holdings   = [];   // من جدول holdings
 let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
 let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
 let taskTypes  = {};   // ticker → نوع المهمة (monitoring/accumulation/…) — قرار المالك
+let taskConflicts = {}; // ticker → عدد المهام النشطة (>1 = تعارض يُنبَّه عليه)
 let divByTicker = {};  // ticker → [{ amount, date }] من سجل الأرباح الفعلي
 let txByTicker  = {};  // ticker → [{ type, shares, date }] مرتّبة — لاستخراج DPS
 let valByTicker = {};  // ticker → آخر تقييم من حاسبة القيمة العادلة {fair, ts, date, inputs}
@@ -112,6 +113,25 @@ function parseFairValueRange(str) {
 // عمر آخر تقييم بالأيام (من entry.id الطابع الزمني)، أو null
 function valAgeDays(v) { return (v && v.ts) ? Math.floor((Date.now() - v.ts) / 86400000) : null; }
 
+// AUDIT-FIX (2026-08): سجل تقييم بلا id رقمي كان لا يُوسم قديماً أبداً —
+// احتياط: تحليل entry.date (أرقام لاتينية أو عربية-هندية، Y-M-D أو D-M-Y).
+// إن تعذّر الاثنان → ts=null وتُعرض «عمر التقييم غير معروف» (لا تقدير صامت §8).
+function parseValEntryDate(str) {
+  if (!str) return null;
+  const norm = String(str).split('،')[0]
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[^\d/\-.]/g, '');
+  const m = norm.match(/(\d{1,4})[/\-.](\d{1,2})[/\-.](\d{1,4})/);
+  if (!m) return null;
+  let y, mo, d;
+  if (m[1].length === 4)      { y = +m[1]; mo = +m[2]; d = +m[3]; }
+  else if (m[3].length === 4) { d = +m[1]; mo = +m[2]; y = +m[3]; }
+  else return null;
+  if (y < 2000 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  const t = new Date(y, mo - 1, d).getTime();
+  return isFinite(t) ? t : null;
+}
+
 // عدد الأسهم المملوكة لرمز في تاريخ معيّن (من المعاملات المرتّبة) — لاستخراج DPS
 function sharesAtDateOf(ticker, date) {
   const rows = txByTicker[ticker] || [];
@@ -152,8 +172,15 @@ function dividendTrendOf(ticker) {
   // DPS سنوي (جمع دفعات السنة) ثم مقارنة آخر سنتين كاملتين (نستبعد السنة الجارية)
   const byYear = {};
   dps.forEach(r => { const y = r.date.getFullYear(); byYear[y] = (byYear[y] || 0) + r.dps; });
-  const fullYears = Object.keys(byYear).map(Number).filter(y => y < now.getFullYear()).sort((a, b) => b - a);
-  if (fullYears.length < 2) return { signal: 'insufficient', note: 'أقل من سنتين كاملتين — غير كافٍ للمقارنة' };
+  // AUDIT-FIX (2026-08): سنة أول شراء للرمز سنة جزئية (المركز فُتح في منتصفها،
+  // فتوزيعات ما قبل الشراء لا تُحتسب) — دخولها كسنة كاملة يعطي إشارة نمو/قطع
+  // زائفة. تُستبعد من المقارنة السنوية.
+  const firstBuy = (txByTicker[ticker] || []).find(t => t.type === 'buy' || t.type === 'grant');
+  const firstBuyYear = firstBuy ? firstBuy.date.getFullYear() : null;
+  const fullYears = Object.keys(byYear).map(Number)
+    .filter(y => y < now.getFullYear() && (firstBuyYear == null || y > firstBuyYear))
+    .sort((a, b) => b - a);
+  if (fullYears.length < 2) return { signal: 'insufficient', note: 'أقل من سنتين كاملتين (بعد استبعاد سنة أول شراء الجزئية) — غير كافٍ للمقارنة' };
 
   const y1 = byYear[fullYears[0]], y0 = byYear[fullYears[1]];
   if (y0 <= 0) return { signal: 'insufficient', note: 'سنة المقارنة بلا توزيع' };
@@ -185,10 +212,13 @@ function sustainabilityOf(h) {
 
   // ① من آخر تقييم: الأساسيات (EPS/FFO) والتغطية حسب نوع الأصل — أقصاه أصفر
   const val = valByTicker[h.ticker];
+  let covNote = null; // إعلان صريح عند تعذّر القياس الصحيح (الدستور §8)
   if (val) {
     const inp = val.inputs || {};
     const isReit = inp.companyType === 'reit';
-    const eps = numOf(inp.eps), ffo = numOf(inp.ffo), div = numOf(inp.dividends);
+    // AUDIT-FIX (2026-08): تقييم البنوك يخزّن التوزيع في bankDps لا dividends —
+    // تجاهله كان يُبقي البنوك ⚪ دائماً (نفس fallback قاعدة التثبيت في loadAll).
+    const eps = numOf(inp.eps), ffo = numOf(inp.ffo), div = numOf(inp.dividends ?? inp.bankDps);
     const earn = isReit ? ffo : eps;
     if (!fun && earn != null) {
       fun = earn > 0 ? 'healthy' : 'soft';        // سالب → مراقبة لا تصفية
@@ -196,16 +226,26 @@ function sustainabilityOf(h) {
     }
     if (!cov && div != null && div > 0) {
       // AUDIT-FIX (2026-07): المقياس الصحيح حسب نوع الأصل (الدستور §3):
-      // إسمنت/بتروكيماويات ← تغطية FCF (لا EPS) إن توفّر FCF في التقييم؛
-      // REIT ← FFO؛ البقية ← EPS. كان الكل يُقاس بـ EPS عدا الريت.
+      // إسمنت/بتروكيماويات ← تغطية FCF (لا EPS)؛ REIT ← FFO؛ البقية ← EPS.
       const isCement = assetTypeOf(h) === 'cement_petro';
       const fcf = numOf(inp.fcf);
-      const useFcf = isCement && fcf != null && fcf > 0;
-      const coverBase = useFcf ? fcf : (earn != null && earn > 0 ? earn : null);
-      if (coverBase != null) {
-        const payout = div / coverBase;
-        cov = payout <= 1.0 ? 'covered' : 'weak';  // توزيع فوق مصدر التغطية → مراقبة
-        autoSrc.cov = `تقييم: توزيع/${useFcf ? 'FCF' : (isReit ? 'FFO' : 'EPS')} = ${(payout * 100).toFixed(0)}%`;
+      if (isCement) {
+        // AUDIT-FIX (2026-08): عند غياب/سلبية FCF كان القياس يسقط لـ EPS خلافاً
+        // للدستور §3 — الآن تُعلن «تغطية FCF غير متوفرة» صراحةً (§8) بلا قياس بديل.
+        if (fcf != null && fcf > 0) {
+          const payout = div / fcf;
+          cov = payout <= 1.0 ? 'covered' : 'weak';
+          autoSrc.cov = `تقييم: توزيع/FCF = ${(payout * 100).toFixed(0)}%`;
+        } else {
+          covNote = 'تغطية FCF غير متوفرة (الدستور §3: الإسمنت/البتروكيماويات تُقاس بتغطية FCF لا EPS — أدخل FCF في التقييم أو التغطية يدوياً)';
+        }
+      } else {
+        const coverBase = earn != null && earn > 0 ? earn : null;
+        if (coverBase != null) {
+          const payout = div / coverBase;
+          cov = payout <= 1.0 ? 'covered' : 'weak';  // توزيع فوق مصدر التغطية → مراقبة
+          autoSrc.cov = `تقييم: توزيع/${isReit ? 'FFO' : 'EPS'} = ${(payout * 100).toFixed(0)}%`;
+        }
       }
     }
   }
@@ -217,7 +257,7 @@ function sustainabilityOf(h) {
     else if (trend.signal === 'growing' || trend.signal === 'stable') { sig = 'stable'; autoSrc.sig = `أرباح: ${trend.note}`; }
   }
   // وإلا: تقييم حديث بتوزيع قائم وموجب = لا إشارة قطع (مستقر) — استدلال معلَن
-  if (!sig && val && numOf(val.inputs.dividends) > 0) {
+  if (!sig && val && numOf(val.inputs.dividends ?? val.inputs.bankDps) > 0) {
     sig = 'stable'; autoSrc.sig = 'تقييم: توزيع قائم، لا إشارة قطع بالسجل';
   }
   const tag = k => autoSrc[k] ? ` (آلي — ${autoSrc[k]})` : '';
@@ -238,7 +278,7 @@ function sustainabilityOf(h) {
   if (cov === 'covered' && fun === 'healthy' && sig === 'stable') {
     return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع', trend, autoSrc };
   }
-  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة', trend, autoSrc };
+  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة' + (covNote ? ` — ${covNote}` : ''), trend, autoSrc };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -317,6 +357,7 @@ function evaluateHolding(h, ctx) {
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector, shares: +h.shares,
     weight, cap, price, value, assetType, zones, taskType,
+    taskConflict: (taskConflicts[h.ticker] || 0) > 1 ? taskConflicts[h.ticker] : null,
     sustain: sus, targetWeight, hasTarget: hasExplicitTarget,
     entryPrice: tgt.entry_price != null ? +tgt.entry_price : null,
     exitPrice:  tgt.exit_price  != null ? +tgt.exit_price  : null,
@@ -331,7 +372,9 @@ function evaluateHolding(h, ctx) {
   // ── P0: triggers الثابتة — فوق كل شي (الدستور §5) ──
   const trig = FIXED_TRIGGERS.find(t => t.ticker === h.ticker);
   if (trig) {
-    base.trigger = { ...trig, fired: trig.cmp === 'gte' ? price >= trig.price : price <= trig.price };
+    // AUDIT-FIX (2026-08): حارس priceOk — سعر 0/مفقود كان يُطلق trigger «lte»
+    // (أرامكو ≤29) كإشارة كاذبة بأولوية 0. بلا سعر صالح لا تُبنى إشارة سعرية.
+    base.trigger = { ...trig, fired: priceOk && (trig.cmp === 'gte' ? price >= trig.price : price <= trig.price) };
     if (base.trigger.fired) {
       if (trig.kind === 'sell') {
         return { ...base, action: 'exit', label: 'تصفية', priority: 0, severity: 'red',
@@ -362,11 +405,11 @@ function evaluateHolding(h, ctx) {
     return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
       reason: `تدهور مؤكّد/مزمن ببوابة الاستدامة (الفلتر 1): ${sus.reason}` };
   }
-  // قلق مؤقت (ربع واحد) → مراقبة، لا تصفية (حدّث العاقل بما يعقل)
-  if (sus.status === 'watch') {
-    return { ...base, action: 'monitor', label: 'مراقبة', priority: 1.5, severity: 'monitor',
-      reason: `تنبيه استدامة مؤقت (${sus.reason}) — القرار الأمثل مراقبة لا تصفية؛ تأكّد من ربع آخر قبل أي إجراء` };
-  }
+  // قلق مؤقت (ربع واحد) → مراقبة، لا تصفية. AUDIT-FIX (2026-08): بلا رجوع مبكر —
+  // «المراقبة» لا توقف سلسلة الفلاتر: فحوص كسر سقف الوزن / نطاق التخفيف / سقف
+  // القيمة تُستكمل (الفلتر 4: لو الوزن > السقف خفّف بغضّ النظر عن القيمة)، وإن
+  // انطبق أحدها تصدر توصيته مع دمج ملاحظة المراقبة في السبب؛ وإلا «مراقبة» كما كانت.
+  const watchNote = sus.status === 'watch' ? `تنبيه استدامة مؤقت (${sus.reason})` : null;
 
   // ── P2: نطاق التخفيف من المهام (الفلتر 3) — السعر دخل نطاق بيع الزائد ──
   const inTrimBand = zones && zones.trimFrom && priceOk && price >= zones.trimFrom;
@@ -396,6 +439,7 @@ function evaluateHolding(h, ctx) {
       severity = 'red';
       if (!overCap) { label = 'تخفيف (نطاق السعر)'; if (cutTo == null) cutTo = targetWeight; }
     }
+    if (watchNote) reasons.push(`ملاحظة استدامة: ${watchNote} — تأكّد من ربع آخر`);
     return { ...base, action: 'trim', severity,
       label, cutToWeight: cutTo,
       priority: severity === 'red' ? 2 : 2.5,
@@ -411,7 +455,15 @@ function evaluateHolding(h, ctx) {
     ? (base.fairValue - price) / base.fairValue * 100 : null;
   if (fvMargin != null && fvMargin <= -15 && !valStale) {
     return { ...base, action: 'monitor', label: 'مرشّح تخفيف (فوق العادلة)', priority: 2.7, severity: 'yellow',
-      reason: `سقف القيمة (الفلتر 3): السعر ${formatNum(price)} أعلى من القيمة العادلة ${formatNum(base.fairValue)} بهامش ${formatNum(Math.abs(fvMargin))}% (> 15%) — مرشّح للتخفيف بعد مراجعتك. لا بيع آلي: تحقق أولاً أن التقييم محدَّث وأن الأرقام لم ترتفع فعلاً (قاعدة التثبيت §4)` };
+      reason: `سقف القيمة (الفلتر 3): السعر ${formatNum(price)} أعلى من القيمة العادلة ${formatNum(base.fairValue)} بهامش ${formatNum(Math.abs(fvMargin))}% (> 15%) — مرشّح للتخفيف بعد مراجعتك. لا بيع آلي: تحقق أولاً أن التقييم محدَّث وأن الأرقام لم ترتفع فعلاً (قاعدة التثبيت §4)`
+        + (watchNote ? ` | ملاحظة استدامة: ${watchNote}` : '') };
+  }
+
+  // قلق استدامة مؤقت ولا قاعدة وزن/سعر انطبقت → «مراقبة» (السلوك السابق نفسه،
+  // لكنه الآن يصدر بعد استكمال فحوص الوزن/سقف القيمة/نطاق التخفيف لا قبلها)
+  if (watchNote) {
+    return { ...base, action: 'monitor', label: 'مراقبة', priority: 1.5, severity: 'monitor',
+      reason: `${watchNote} — القرار الأمثل مراقبة لا تصفية؛ تأكّد من ربع آخر قبل أي إجراء` };
   }
 
   // ── P3: تجميع من المهام (الفلتر 3) — السعر ≤ حدّ التجميع + استدامة سليمة + وزن تحت الهدف بعتبة ──
@@ -459,7 +511,16 @@ async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-decision-engine');
-  await loadAll();
+  const load = await loadAll();
+  if (!load.ok) {
+    // AUDIT-FIX (2026-08): فشل التحميل كان يمر صامتاً → محرّك على لقطة فارغة
+    // يدهس decision_engine_snapshot_v1 السليمة مع «✅ لا يوجد إجراء» كاذبة.
+    // الآن: نعلن الخطأ، لا نشغّل المحرّك، ولا نحفظ اللقطة.
+    const hero = document.getElementById('de-hero-line');
+    if (hero) hero.innerHTML = `⛔ تعذّر تحميل بيانات المحفظة — لم يُشغَّل المحرّك ولم تُلمَس اللقطة المحفوظة. أعد تحميل الصفحة أو تحقق من الاتصال.<br><span class="small text-muted">${escapeHtmlSafe(load.errorMsg)}</span>`;
+    showToast('⛔ تعذّر تحميل البيانات — المحرّك لم يعمل', 'error');
+    return;
+  }
   runEngine();
 }
 
@@ -469,12 +530,22 @@ async function loadAll() {
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
     supabaseClient.from('portfolio_tasks')
-      .select('ticker, type, accumulate_at, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
+      .select('ticker, type, accumulate_at, target_price, trim_from, trim_to, liquidate_above, status, updated_at, created_at')
       .eq('status', 'active').order('updated_at', { ascending: false }),
     supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
     loadUserSetting(ENGINE_VAL_KEY),
     supabaseClient.from('transactions').select('ticker, type, shares, date, total, price').eq('is_archived', false),
   ]);
+
+  // AUDIT-FIX (2026-08): افحص خطأ كل استعلام قبل أي معالجة — أي فشل يوقف كل شيء
+  // (loadUserSetting يرجع null عند الفشل ولا يفرَّق عن «غير موجود» — يُعامل كفارغ)
+  const failed = [
+    ['holdings', rH.error], ['stock_targets', rT.error], ['portfolio_tasks', rTasks.error],
+    ['dividends', rDiv.error], ['transactions', rTx.error],
+  ].filter(([, e]) => e);
+  if (failed.length) {
+    return { ok: false, errorMsg: failed.map(([t, e]) => `${t}: ${e.message || e}`).join(' · ') };
+  }
 
   holdings = rH.data || [];
   stockTargets = {};
@@ -511,7 +582,7 @@ async function loadAll() {
     const avgNum = (entry.results?.fairValueAvg != null && isFinite(+entry.results.fairValueAvg) && +entry.results.fairValueAvg > 0)
       ? +entry.results.fairValueAvg : null;
     const rec = {
-      ts: typeof entry.id === 'number' ? entry.id : null,
+      ts: typeof entry.id === 'number' ? entry.id : parseValEntryDate(entry.date),
       date: (entry.date || '').split('،')[0] || '',
       fair: avgNum != null
         ? { avg: avgNum, min: parsedRange?.min ?? avgNum, max: parsedRange?.max ?? avgNum }
@@ -544,18 +615,26 @@ async function loadAll() {
   // خطة الأسعار + نوع المهمة لكل رمز من المهام النشطة — أحدث مهمة هي المرجع
   taskZones = {};
   taskTypes = {};
+  taskConflicts = {};
   (rTasks.data || []).forEach(t => {
     const tk = (t.ticker || '').trim().toUpperCase();
-    if (!tk || taskZones[tk]) return; // مرتّبة بالأحدث → أول ظهور هو الأحدث
+    if (!tk) return;
+    // AUDIT-FIX (2026-08): أكثر من مهمة نشطة لنفس الرمز كانت تُحسم صامتاً
+    // بالأحدث — الآن تُعَدّ ويُنبَّه عليها في نتائج السهم.
+    taskConflicts[tk] = (taskConflicts[tk] || 0) + 1;
+    if (taskZones[tk]) return; // مرتّبة بالأحدث → أول ظهور هو الأحدث
     const num = v => (v != null && +v > 0 ? +v : null);
     taskZones[tk] = {
-      accumulate: num(t.accumulate_at),
+      // AUDIT-FIX (2026-08): مهام التجميع القديمة تخزّن السعر في target_price —
+      // نفس fallback صفحة المهام (accumulate_at ?? target_price) حتى لا تضيع إشارة شراء.
+      accumulate: num(t.accumulate_at ?? (t.type === 'accumulation' ? t.target_price : null)),
       trimFrom:   num(t.trim_from),
       trimTo:     num(t.trim_to),
       liquidate:  num(t.liquidate_above),
     };
     taskTypes[tk] = t.type || null;
   });
+  return { ok: true };
 }
 
 // عتبات ألوان التنبيهات من الإعدادات (نفس مفاتيح لوحة التحكم) — قابلة للتغيير
@@ -585,7 +664,8 @@ function runEngine() {
   renderCards();
 
   // حفظ لقطة كاملة لمخرجات المحرّك → user_settings (تُدرَج في تقرير المراجعة وتُنسَخ احتياطياً)
-  saveEngineSnapshot(totalValue, thresholds).catch(() => {});
+  // AUDIT-FIX (2026-08): الفشل لم يعد يُكتم — saveEngineSnapshot تعالج خطأها وتُظهر toast
+  saveEngineSnapshot(totalValue, thresholds);
 }
 
 // مفتاح لقطة المخرجات (مزامَن عبر user_settings ومشمول في النسخة الاحتياطية)
@@ -603,7 +683,10 @@ async function saveEngineSnapshot(totalValue, thresholds) {
     sustainMetric: { ...SUSTAIN_METRIC },
     results:       _results,   // كائنات بسيطة قابلة للتسلسل (بلا دوال)
   };
-  try { await saveUserSetting(ENGINE_SNAPSHOT_KEY, snapshot); } catch (_) {}
+  // AUDIT-FIX (2026-08): كان الفشل يُكتم مرتين (هنا وفي runEngine) — الآن يظهر toast
+  let ok = false;
+  try { ok = await saveUserSetting(ENGINE_SNAPSHOT_KEY, snapshot); } catch (_) { ok = false; }
+  if (!ok) showToast('⚠️ تعذّر حفظ لقطة محرّك القرار — النتائج معروضة لكن اللقطة لم تُحدَّث', 'error');
 }
 
 // ── شريط ملخص علوي: عدّ الإجراءات + فجوات البيانات ──
@@ -729,15 +812,21 @@ function toggleAllCards() {
 function cardHtml(r) {
   const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
   const star    = r.blueChip ? ' <span title="سهم قيادي — سقف 12%">⭐</span>' : '';
+  // AUDIT-FIX (2026-08): تقييم بلا طابع زمني قابل للتحليل → «عمر التقييم غير معروف» (§8)
+  const ageUnknown = r.fairValue != null && r.valAgeDays == null
+    ? ' <span style="color:#f59e0b;cursor:help" title="عمر التقييم غير معروف — لا طابع زمني صالح في السجل">❔</span>' : '';
   const fvLine  = r.fairValue != null
-    ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}${r.stabilizationFlag ? ` <span style="color:#ef4444;cursor:help" title="${escapeHtmlSafe(r.stabilizationFlag)}">🚩</span>` : ''}</b>`
+    ? `<b>${formatNum(r.fairValue)}${r.valStale ? ' <span style="color:#f59e0b" title="أقدم من 6 أشهر">📅</span>' : ''}${ageUnknown}${r.stabilizationFlag ? ` <span style="color:#ef4444;cursor:help" title="${escapeHtmlSafe(r.stabilizationFlag)}">🚩</span>` : ''}</b>`
     : '<b class="text-muted">—</b>';
   const zt = zonesText(r.zones);
+  // AUDIT-FIX (2026-08): تنبيه تعارض المهام النشطة لنفس الرمز (كان يُحسم صامتاً بالأحدث)
+  const conflictLine = r.taskConflict
+    ? `<div class="de-card-zones small" style="color:#f59e0b">⚠️ ${r.taskConflict} مهام نشطة لهذا الرمز في صفحة المهام — المحرّك يعتمد الأحدث فقط؛ وحّدها لتفادي التعارض</div>` : '';
   return `
     <div class="de-card de-card-${r.severity || 'green'}">
       <div class="de-card-top">
         <div class="de-card-id">
-          <strong>${r.ticker}</strong>${star}${noteTag}
+          <strong>${escapeHtmlSafe(r.ticker)}</strong>${star}${noteTag}
           <div class="small text-muted">${escapeHtmlSafe(r.name || '')}</div>
         </div>
         <span class="de-badge ${badgeFor(r)}">${escapeHtmlSafe(r.label)}</span>
@@ -754,10 +843,11 @@ function cardHtml(r) {
       </div>
       ${trendChip(r.sustain.trend) ? `<div class="de-card-trend">${trendChip(r.sustain.trend)}</div>` : ''}
       ${zt ? `<div class="de-card-zones small">🎯 خطة الأسعار: ${escapeHtmlSafe(zt)}</div>` : '<div class="de-card-zones small text-muted">🎯 لا خطة أسعار</div>'}
+      ${conflictLine}
       <div class="de-card-reason small">${escapeHtmlSafe(r.reason)}</div>
       <div class="de-card-foot">
-        <button class="btn btn-primary btn-sm" onclick="openDetailCard('${r.ticker}')">🔍 تفاصيل كاملة</button>
-        <button class="btn btn-secondary btn-sm" onclick="openStockCard('${r.ticker}')">⚙️ إدخال يدوي</button>
+        <button class="btn btn-primary btn-sm" onclick="openDetailCard('${escapeHtmlSafe(r.ticker)}')">🔍 تفاصيل كاملة</button>
+        <button class="btn btn-secondary btn-sm" onclick="openStockCard('${escapeHtmlSafe(r.ticker)}')">⚙️ إدخال يدوي</button>
       </div>
     </div>`;
 }
@@ -917,6 +1007,7 @@ function openDetailCard(ticker) {
       `العادلة ${formatNum(r.fairValue)}${rangeTxt} · السعر ${formatNum(r.price)} → ` +
       `${margin >= 0 ? `هامش أمان ${formatNum(margin)}%` : `مبالغ فيه ${formatNum(Math.abs(margin))}%`}` +
       (r.valDate ? `<br><span class="text-muted">آخر تقييم: ${E(r.valDate)}${r.valStale ? ` · 📅 قديم (${r.valAgeDays} يوم)` : ''}</span>` : '') +
+      (r.valAgeDays == null ? '<br><span style="color:#f59e0b">❔ عمر التقييم غير معروف — لا طابع زمني صالح في السجل</span>' : '') +
       (r.stabilizationFlag ? `<br>${E(r.stabilizationFlag)}` : '')));
   } else {
     out.push(_dRow('neutral', 'الفلتر 2 — القيمة العادلة', 'لا يوجد تقييم محفوظ — احسبه في صفحة القيمة العادلة ليُقارن بالسعر.'));
@@ -930,8 +1021,10 @@ function openDetailCard(ticker) {
     else if (r.zones.trimFrom && r.price >= r.zones.trimFrom) pos = `⚠️ السعر داخل نطاق التخفيف`;
     else if (r.zones.accumulate && r.price <= r.zones.accumulate) pos = `✅ السعر داخل منطقة التجميع`;
     else pos = 'السعر بين النطاقات (لا إشارة سعرية)';
+    const conflictTxt = r.taskConflict
+      ? `<br><span style="color:#f59e0b">⚠️ يوجد ${r.taskConflict} مهام نشطة لهذا الرمز — المحرّك يعتمد الأحدث فقط؛ وحّدها في صفحة المهام</span>` : '';
     out.push(_dRow(pos.startsWith('🔴') ? 'bad' : pos.startsWith('⚠️') ? 'warn' : pos.startsWith('✅') ? 'ok' : 'neutral',
-      'الفلتر 3 — خطة الأسعار (من المهام)', `${E(zt)}<br>${E(pos)}`));
+      'الفلتر 3 — خطة الأسعار (من المهام)', `${E(zt)}<br>${E(pos)}${conflictTxt}`));
   } else {
     out.push(_dRow('neutral', 'الفلتر 3 — خطة الأسعار', 'غير متوفرة — أضِفها في صفحة مهام المحفظة.'));
   }
@@ -1023,7 +1116,7 @@ function openDetailCard(ticker) {
   }
 
   out.push(`<div class="de-card-foot" style="margin-top:14px">
-    <button class="btn btn-secondary btn-sm" onclick="closeDetailCard(); openStockCard('${ticker}')">⚙️ تعديل المدخلات اليدوية</button>
+    <button class="btn btn-secondary btn-sm" onclick="closeDetailCard(); openStockCard('${escapeHtmlSafe(ticker)}')">⚙️ تعديل المدخلات اليدوية</button>
   </div>`);
 
   document.getElementById('de-detail-body').innerHTML = out.join('');
@@ -1084,7 +1177,8 @@ function openStockCard(ticker) {
       valEl.innerHTML = `🧮 آخر تقييم: <strong>عادلة ${formatNum(val.fair.avg)}</strong>` +
         (val.fair.max > val.fair.min ? ` (نطاق ${formatNum(val.fair.min)}–${formatNum(val.fair.max)})` : '') +
         (val.date ? ` · ${escapeHtmlSafe(val.date)}` : '') +
-        (stale ? ` · <span style="color:#f59e0b">📅 قديم (${age} يوم) — حدّثه في الحاسبة</span>` : '');
+        (stale ? ` · <span style="color:#f59e0b">📅 قديم (${age} يوم) — حدّثه في الحاسبة</span>` : '') +
+        (age == null ? ' · <span style="color:#f59e0b">❔ عمر التقييم غير معروف</span>' : '');
     } else {
       valEl.innerHTML = 'لا يوجد تقييم محفوظ — احسبه في <a href="stock-valuation.html" style="color:var(--accent)">القيمة العادلة للأسهم</a> ليغذّي الاستدامة.';
     }
@@ -1136,9 +1230,14 @@ function exportActionsCSV() {
     .filter(r => r.action !== 'hold' || r.buyZone)
     .sort((a, b) => a.priority - b.priority || b.weight - a.weight);
   if (!rows.length) { showToast('لا توجد إجراءات للتصدير', 'info'); return; }
-  const head = ['الرمز','الاسم','الإجراء','الوزن%','الهدف%','السعر','خطة الأسعار','السبب'];
+  // AUDIT-FIX (2026-08): هدف غير مسجّل كان يُطبع «0.00» — الآن «غير متوفرة» (§8)،
+  // وأُضيف عمودا «السقف» و«القيمة العادلة» بمطابقة صيغة مخرجات الدستور §7.
+  const head = ['الرمز','الاسم','الإجراء','الوزن%','الهدف%','السقف%','السعر','القيمة العادلة','خطة الأسعار','السبب'];
   const lines = rows.map(r => [
-    r.ticker, r.name, r.label, formatNum(r.weight), formatNum(r.targetWeight), formatNum(r.price),
+    r.ticker, r.name, r.label, formatNum(r.weight),
+    r.hasTarget ? formatNum(r.targetWeight) : 'غير متوفرة',
+    formatNum(r.cap), formatNum(r.price),
+    r.fairValue != null ? formatNum(r.fairValue) : 'غير متوفرة',
     zonesText(r.zones) || 'غير متوفرة', r.reason,
   ].map(csvCell).join(','));
   const csv = '﻿' + [head.map(csvCell).join(','), ...lines].join('\r\n');

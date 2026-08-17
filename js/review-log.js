@@ -12,10 +12,13 @@ window.CARD_INFO = {
 
 // ── State ──────────────────────────────────────────────────────────────────
 let entries      = [];   // review_log rows
-let attachMap    = {};   // { entry_id: [attachment rows] }
+let attachMap    = {};   // { entry_id: [attachment rows — بيانات وصفية فقط، بلا content] }
+let holdingsList = [];   // holdings (ticker, name) — لشارة «مستحق للمراجعة»
 let pendingFiles = [];   // ملفات الإضافة المعلّقة (قبل الحفظ)
 let editPendingFiles = []; // ملفات التعديل المعلّقة
 let currentUser  = null;
+
+const REVIEW_DUE_DAYS = 180; // دورة المراجعة النصف سنوية (الدستور §5)
 
 const MAX_TOTAL_BYTES   = 2 * 1024 * 1024; // 2MB إجمالي لكل إدخال
 const MAX_FILES_ENTRY   = 10;              // أقصى عدد مرفقات لكل إدخال
@@ -37,15 +40,18 @@ async function loadData() {
 
   setStatus('جارٍ التحميل…');
 
-  const [rEntries, rAtts] = await Promise.all([
+  const [rEntries, rAtts, rHold] = await Promise.all([
     supabaseClient.from('review_log')
       .select('*')
       .eq('user_id', uid)                          // صريح — لا نعتمد على RLS وحده
       .order('review_date', { ascending: false }),
+    // AUDIT-FIX (2026-08): الأعمدة الوصفية فقط — content (base64) كان يُحمَّل
+    // كاملاً عند كل فتح؛ الآن يُجلب عند طلب التنزيل فقط (استعلام منفرد).
     supabaseClient.from('review_log_attachments')
-      .select('*')
+      .select('id, entry_id, filename, ext, size_bytes, created_at')
       .eq('user_id', uid)
       .order('created_at', { ascending: true }),
+    supabaseClient.from('holdings').select('ticker, name'),  // لشارة «مستحق للمراجعة»
   ]);
 
   // جدول غير موجود — Migration لم تُشغَّل بعد
@@ -62,6 +68,7 @@ async function loadData() {
   }
 
   entries = rEntries.data || [];
+  holdingsList = rHold.error ? [] : (rHold.data || []);
 
   // بناء خريطة المرفقات { entry_id → [atts] }
   attachMap = {};
@@ -175,7 +182,14 @@ function renderFilePreviews(bucket, previewId, existingCount = 0, existingBytes 
 function removePending(idx, previewId) {
   const bucket = previewId === 'attach-preview' ? pendingFiles : editPendingFiles;
   bucket.splice(idx, 1);
-  renderFilePreviews(bucket, previewId);
+  // AUDIT-FIX (2026-08): في وضع التعديل مرّر عدّاد/حجم المرفقات المحفوظة —
+  // كما في onEditFilesSelected — وإلا يظهر شريط الحجم أقل من الحقيقة بعد الحذف.
+  if (previewId === 'edit-attach-preview') {
+    const entryId = document.getElementById('edit-id').value;
+    renderFilePreviews(bucket, previewId, savedAttachmentsCountFor(entryId), savedAttachmentsSizeFor(entryId));
+  } else {
+    renderFilePreviews(bucket, previewId);
+  }
 }
 
 // ── Drag & Drop ────────────────────────────────────────────────────────────
@@ -282,8 +296,9 @@ async function deleteEntry(id) {
 
 // ── Delete single attachment ───────────────────────────────────────────────
 async function removeExistingAtt(attId) {
+  // AUDIT-FIX (2026-08): eq('user_id') توحيداً للنمط الدفاعي (لا اعتماد على RLS وحده)
   const { error } = await supabaseClient
-    .from('review_log_attachments').delete().eq('id', attId);
+    .from('review_log_attachments').delete().eq('id', attId).eq('user_id', currentUser.id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   await loadData();
   // تحديث المعاينة داخل المودال
@@ -394,7 +409,22 @@ function closeModalOutside(e) {
 }
 
 // ── Download ───────────────────────────────────────────────────────────────
-function downloadAtt(attId) {
+// AUDIT-FIX (2026-08): content لم يعد يُحمَّل مع الصفحة — يُجلب هنا عند طلب
+// التنزيل فقط (استعلام منفرد) ويُخزَّن مؤقتاً على السجل لتفادي إعادة الجلب.
+async function ensureAttContent(att) {
+  if (att.content != null) return true;
+  const { data, error } = await supabaseClient
+    .from('review_log_attachments')
+    .select('content')
+    .eq('id', att.id)
+    .eq('user_id', currentUser.id)
+    .single();
+  if (error || !data) { showToast('تعذّر جلب المرفق: ' + (error?.message || 'غير موجود'), 'error'); return false; }
+  att.content = data.content;
+  return true;
+}
+
+async function downloadAtt(attId) {
   // البحث في جميع المرفقات المحمّلة
   let att = null;
   for (const list of Object.values(attachMap)) {
@@ -402,6 +432,7 @@ function downloadAtt(attId) {
     if (att) break;
   }
   if (!att) return;
+  if (!await ensureAttContent(att)) return;
   triggerDownload(att);
 }
 
@@ -422,11 +453,14 @@ function triggerDownload(att) {
 async function downloadAllForEntry(entryId) {
   const atts = attachMap[entryId] || [];
   if (!atts.length) return;
+  let ok = 0;
   for (const att of atts) {
     await new Promise(r => setTimeout(r, 150));
+    if (!await ensureAttContent(att)) continue;
     triggerDownload(att);
+    ok++;
   }
-  showToast(`✅ تم تنزيل ${atts.length} مرفق`, 'success');
+  showToast(`✅ تم تنزيل ${ok} مرفق`, 'success');
 }
 
 // ── Bulk export ────────────────────────────────────────────────────────────
@@ -460,6 +494,7 @@ async function exportSelected() {
   for (const id of ids) {
     for (const att of (attachMap[id] || [])) {
       await new Promise(r => setTimeout(r, 150));
+      if (!await ensureAttContent(att)) continue;
       triggerDownload(att);
       downloaded++;
     }
@@ -468,8 +503,51 @@ async function exportSelected() {
   else showToast(`✅ تم تصدير ${downloaded} مرفق`, 'success');
 }
 
+// ── شارة «مستحق للمراجعة» (الدستور §5: دورة روتينية كل 6 أشهر) ─────────────
+// يقارن آخر review_date لكل رمز مملوك بعتبة 180 يوماً — سهم لم يُراجع قط يُعد مستحقاً.
+function renderDueBadge() {
+  const el = document.getElementById('rl-due-banner');
+  if (!el) return;
+  if (!holdingsList.length) { el.style.display = 'none'; return; }
+
+  const lastByTicker = {};
+  entries.forEach(e => {
+    const tk = (e.ticker || '').trim().toUpperCase();
+    if (!tk || !e.review_date) return;
+    if (!lastByTicker[tk] || e.review_date > lastByTicker[tk]) lastByTicker[tk] = e.review_date;
+  });
+
+  const now = Date.now();
+  const due = holdingsList.filter(h => {
+    const tk = (h.ticker || '').trim().toUpperCase();
+    const last = lastByTicker[tk];
+    if (!last) return true;                       // لم يُراجع قط → مستحق
+    const t = new Date(last).getTime();
+    return !isFinite(t) || (now - t) > REVIEW_DUE_DAYS * 86400000;
+  });
+
+  el.style.display = 'block';
+  if (!due.length) {
+    el.innerHTML = `<div class="card" style="border-right:3px solid #3fb950;padding:12px 16px;margin-bottom:18px">
+      <span class="small" style="color:#3fb950">✅ كل أسهمك المملوكة رُوجعت خلال آخر ${REVIEW_DUE_DAYS} يوماً — الدورة النصف سنوية (الدستور §5) مكتملة.</span>
+    </div>`;
+    return;
+  }
+  const chips = due.map(h =>
+    `<span class="ticker-badge" style="cursor:pointer" title="${esc(h.name || '')} — انقر لتعبئة النموذج"
+       onclick="document.getElementById('rl-ticker').value='${esc(h.ticker)}';onTickerInput();document.getElementById('rl-ticker').focus()">${esc(h.ticker)}</span>`
+  ).join(' ');
+  el.innerHTML = `<div class="card" style="border-right:3px solid #f0b429;padding:12px 16px;margin-bottom:18px">
+    <div class="small" style="font-weight:700;color:#f0b429;margin-bottom:6px">
+      ⏰ ${due.length} من أسهمك المملوكة مستحقة للمراجعة — آخر مراجعة أقدم من ${REVIEW_DUE_DAYS} يوماً أو لا مراجعة مسجّلة (الدورة النصف سنوية — الدستور §5)
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
+  </div>`;
+}
+
 // ── Render ─────────────────────────────────────────────────────────────────
 function renderTable() {
+  renderDueBadge();   // الشارة تُحدَّث مع كل إعادة رسم (إضافة/تعديل/حذف مراجعة)
   const wrap = document.getElementById('rl-table-wrap');
   if (!entries.length) {
     wrap.innerHTML = `<div class="empty-rl"><div class="e-icon">📒</div>
