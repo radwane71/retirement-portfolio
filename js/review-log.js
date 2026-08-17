@@ -10,6 +10,60 @@ window.CARD_INFO = {
   },
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم + مولّدات المكوّنات
+// ──────────────────────────────────────────────────────────────────────
+// ربط: نسخة طبق الأصل من مولّدات js/dashboard.js (أعلى الملف) — هذه الصفحة
+// لا تُحمّل dashboard.js، فتُنسخ هنا بنفس التوقيعات بالضبط. أي تعديل هناك
+// يجب أن يُنسخ هنا (والعكس). المكوّنات معرَّفة في css/style.css تحت
+// «نظام مكوّنات اللوحة»: .card-head .hero-num .tag .meter .brow .kvs .note .stack .dot
+// قاعدة ثابتة: لا لون سداسي مكتوب يدوياً في هذا الملف — رموز التصميم فقط،
+// واللون وحده لا يحمل معنى (كل حالة معها أيقونة ونص).
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+// حالة امتلاء المرفقات — نسبة → حالة تصميمية (اللون يتبع الحالة لا العكس)
+function fillState(pct) { return pct > 90 ? 'bad' : pct > 70 ? 'warn' : 'good'; }
+
 // ── State ──────────────────────────────────────────────────────────────────
 let entries      = [];   // review_log rows
 let attachMap    = {};   // { entry_id: [attachment rows — بيانات وصفية فقط، بلا content] }
@@ -51,7 +105,8 @@ async function loadData() {
       .select('id, entry_id, filename, ext, size_bytes, created_at')
       .eq('user_id', uid)
       .order('created_at', { ascending: true }),
-    supabaseClient.from('holdings').select('ticker, name'),  // لشارة «مستحق للمراجعة»
+    // AUDIT-FIX (2026-08): shares مضافة — تُستبعد المراكز المصفّاة من عدّاد الاستحقاق
+    supabaseClient.from('holdings').select('ticker, name, shares'),  // لشارة «مستحق للمراجعة»
   ]);
 
   // جدول غير موجود — Migration لم تُشغَّل بعد
@@ -160,20 +215,22 @@ function renderFilePreviews(bucket, previewId, existingCount = 0, existingBytes 
   const totalCount = existingCount + bucket.length;
   const totalBytes = existingBytes + bucket.reduce((s, f) => s + (f.size_bytes || 0), 0);
   const pct        = Math.round(totalBytes / MAX_TOTAL_BYTES * 100);
-  const barColor   = pct > 90 ? '#f85149' : pct > 70 ? '#f0b429' : '#3fb950';
 
   const chips = bucket.map((f, i) => `
     <span class="attach-chip">
       ${fileIcon(f.ext)} ${esc(f.filename)}
-      <span style="color:var(--text-muted);font-size:.7rem">(${formatBytes(f.size_bytes)})</span>
-      <button onclick="removePending(${i},'${previewId}')">×</button>
+      <span class="chip-size">(${formatBytes(f.size_bytes)})</span>
+      <button onclick="removePending(${i},'${esc(previewId)}')" title="إزالة">×</button>
     </span>`).join('');
 
   const summary = bucket.length
-    ? `<div style="margin-top:6px;font-size:.76rem;color:var(--text-muted)">
-        ${totalCount}/${MAX_FILES_ENTRY} مرفق ·
-        <span style="color:${barColor}">${formatBytes(totalBytes)} / ${formatBytes(MAX_TOTAL_BYTES)}</span>
-       </div>`
+    ? `<div class="attach-meter">${meterHtml({
+        label: `${totalCount} / ${MAX_FILES_ENTRY} مرفق`,
+        valueTxt: `${formatBytes(totalBytes)} / ${formatBytes(MAX_TOTAL_BYTES)}`,
+        pct,
+        state: fillState(pct),
+        foot: pct > 90 ? '⚠️ اقتربت من حد الحجم' : '',
+      })}</div>`
     : '';
 
   el.innerHTML = chips + summary;
@@ -328,20 +385,21 @@ function renderEditExistingAtts(entryId) {
   const atts  = attachMap[entryId] || [];
   const total = atts.reduce((s, a) => s + (a.size_bytes || 0), 0);
   const pct   = Math.round(total / MAX_TOTAL_BYTES * 100);
-  const barColor = pct > 90 ? '#f85149' : pct > 70 ? '#f0b429' : '#3fb950';
 
   const chips = atts.map(a => `
-    <span class="attach-chip" style="background:rgba(63,185,80,.12);color:#3fb950">
+    <span class="attach-chip saved">
       ${fileIcon(a.ext)} ${esc(a.filename)}
-      <span style="color:var(--text-muted);font-size:.7rem">(${formatBytes(a.size_bytes||0)})</span>
-      <button onclick="removeExistingAtt('${a.id}')">×</button>
+      <span class="chip-size">(${formatBytes(a.size_bytes||0)})</span>
+      <button onclick="removeExistingAtt('${esc(a.id)}')" title="حذف المرفق">×</button>
     </span>`).join('');
 
   const summary = atts.length
-    ? `<div style="margin-top:6px;font-size:.76rem;color:var(--text-muted)">
-        محفوظ: ${atts.length}/${MAX_FILES_ENTRY} ·
-        <span style="color:${barColor}">${formatBytes(total)} / ${formatBytes(MAX_TOTAL_BYTES)}</span>
-       </div>`
+    ? `<div class="attach-meter">${meterHtml({
+        label: `محفوظ: ${atts.length} / ${MAX_FILES_ENTRY} مرفق`,
+        valueTxt: `${formatBytes(total)} / ${formatBytes(MAX_TOTAL_BYTES)}`,
+        pct,
+        state: fillState(pct),
+      })}</div>`
     : '';
 
   el.innerHTML = chips + summary;
@@ -508,7 +566,18 @@ async function exportSelected() {
 function renderDueBadge() {
   const el = document.getElementById('rl-due-banner');
   if (!el) return;
-  if (!holdingsList.length) { el.style.display = 'none'; return; }
+
+  // AUDIT-FIX (2026-08): إزالة تكرار الرمز واستبعاد المراكز المصفّاة —
+  // صف حيازة مكرر أو بكمية صفر كان يضخّم عدّاد «مستحق للمراجعة».
+  const owned = new Map();
+  holdingsList.forEach(h => {
+    const tk = (h.ticker || '').trim().toUpperCase();
+    if (!tk) return;
+    if (h.shares != null && !(+h.shares > 0)) return;   // مركز مصفّى — ليس مملوكاً
+    if (!owned.has(tk)) owned.set(tk, h);
+  });
+
+  if (!owned.size) { el.style.display = 'none'; el.innerHTML = ''; return; }
 
   const lastByTicker = {};
   entries.forEach(e => {
@@ -518,55 +587,156 @@ function renderDueBadge() {
   });
 
   const now = Date.now();
-  const due = holdingsList.filter(h => {
+  const all = [...owned.values()];
+  const due = [], never = [];
+  all.forEach(h => {
     const tk = (h.ticker || '').trim().toUpperCase();
     const last = lastByTicker[tk];
-    if (!last) return true;                       // لم يُراجع قط → مستحق
+    if (!last) { never.push(h); due.push(h); return; }   // لم يُراجع قط → مستحق
     const t = new Date(last).getTime();
-    return !isFinite(t) || (now - t) > REVIEW_DUE_DAYS * 86400000;
+    if (!isFinite(t) || (now - t) > REVIEW_DUE_DAYS * 86400000) due.push(h);
   });
 
+  const total   = all.length;
+  const current = total - due.length;
+  const pct     = total > 0 ? current / total * 100 : 0;
+
   el.style.display = 'block';
+
+  const meter = meterHtml({
+    label: 'أسهم مملوكة ضمن الدورة',
+    valueTxt: `${current} / ${total}`,
+    pct,
+    state: due.length === 0 ? 'good' : pct >= 60 ? 'warn' : 'bad',
+    foot: `الدورة الروتينية ${REVIEW_DUE_DAYS} يوماً (الدستور §5) — سهم بلا مراجعة مسجّلة يُعدّ مستحقاً`,
+  });
+
   if (!due.length) {
-    el.innerHTML = `<div class="card" style="border-right:3px solid #3fb950;padding:12px 16px;margin-bottom:18px">
-      <span class="small" style="color:#3fb950">✅ كل أسهمك المملوكة رُوجعت خلال آخر ${REVIEW_DUE_DAYS} يوماً — الدورة النصف سنوية (الدستور §5) مكتملة.</span>
-    </div>`;
+    el.innerHTML =
+      `<div class="card rl-due-card">
+        ${cardHead('🗓️ دورة المراجعة النصف سنوية', `${total} سهم مملوك`, tagHtml('✅', 'الدورة مكتملة', 'good'))}
+        <div class="stack">
+          ${meter}
+          ${noteHtml('✅', `كل أسهمك المملوكة رُوجعت خلال آخر ${REVIEW_DUE_DAYS} يوماً.`, 'good')}
+        </div>
+      </div>`;
     return;
   }
-  const chips = due.map(h =>
-    `<span class="ticker-badge" style="cursor:pointer" title="${esc(h.name || '')} — انقر لتعبئة النموذج"
-       onclick="document.getElementById('rl-ticker').value='${esc(h.ticker)}';onTickerInput();document.getElementById('rl-ticker').focus()">${esc(h.ticker)}</span>`
-  ).join(' ');
-  el.innerHTML = `<div class="card" style="border-right:3px solid #f0b429;padding:12px 16px;margin-bottom:18px">
-    <div class="small" style="font-weight:700;color:#f0b429;margin-bottom:6px">
-      ⏰ ${due.length} من أسهمك المملوكة مستحقة للمراجعة — آخر مراجعة أقدم من ${REVIEW_DUE_DAYS} يوماً أو لا مراجعة مسجّلة (الدورة النصف سنوية — الدستور §5)
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px">${chips}</div>
-  </div>`;
+
+  const chips = due.map(h => {
+    const tk = esc(h.ticker);
+    const neverSeen = !lastByTicker[(h.ticker || '').trim().toUpperCase()];
+    return `<button type="button" class="rl-due-chip" data-ticker="${tk}"
+      onclick="fillTickerFromChip(this)"
+      title="${esc(h.name || '')} — ${neverSeen ? 'لا مراجعة مسجّلة' : 'آخر مراجعة أقدم من ' + REVIEW_DUE_DAYS + ' يوماً'}. انقر لتعبئة النموذج">
+      ${neverSeen ? '🆕' : '⏰'} ${tk}</button>`;
+  }).join('');
+
+  el.innerHTML =
+    `<div class="card rl-due-card">
+      ${cardHead('🗓️ دورة المراجعة النصف سنوية', `${total} سهم مملوك`,
+        tagHtml('⏰', `${due.length} مستحق`, 'warn'))}
+      <div class="stack">
+        <div>
+          <div class="hero-num">${due.length}<span class="unit">من ${total}</span></div>
+          <div class="hero-cap">أسهم مملوكة مستحقة للمراجعة الآن</div>
+        </div>
+        ${meter}
+        ${never.length ? noteHtml('🆕',
+          `<b>${never.length} سهم بلا أي مراجعة مسجّلة</b> — ابدأ بها، فهي أعلى الفجوات خطراً في الدستور §5.`, 'warn') : ''}
+        <div class="rl-due-chips">${chips}</div>
+      </div>
+    </div>`;
+}
+
+// نقل الرمز من الشارة إلى النموذج — البيانات عبر data-* لا داخل نص onclick
+function fillTickerFromChip(btn) {
+  const t = btn?.dataset?.ticker || '';
+  const input = document.getElementById('rl-ticker');
+  if (!input) return;
+  input.value = t;
+  onTickerInput();
+  input.focus();
+}
+
+// ── Filters ────────────────────────────────────────────────────────────────
+// تصفية عرضية بحتة على المصفوفة المحمّلة — لا استعلام جديد ولا تعديل بيانات
+function getFilteredEntries() {
+  const q = (document.getElementById('rl-q')?.value || '').trim().toLowerCase();
+  const tk = (document.getElementById('rl-flt-ticker')?.value || '').trim().toUpperCase();
+  return entries.filter(e => {
+    if (tk && (e.ticker || '').trim().toUpperCase() !== tk) return false;
+    if (!q) return true;
+    return [e.ticker, e.name, e.sector, e.notes]
+      .some(v => String(v || '').toLowerCase().includes(q));
+  });
+}
+
+function buildTickerFilter() {
+  const sel = document.getElementById('rl-flt-ticker');
+  if (!sel) return;
+  const cur  = sel.value;
+  const list = [...new Set(entries.map(e => (e.ticker || '').trim().toUpperCase()).filter(Boolean))].sort();
+  sel.innerHTML = '<option value="">كل الرموز</option>' +
+    list.map(t => `<option value="${esc(t)}"${t === cur ? ' selected' : ''}>${esc(t)}</option>`).join('');
+}
+
+function applyRlFilter() { renderTable(); }
+
+function clearRlFilter() {
+  const q = document.getElementById('rl-q');   if (q) q.value = '';
+  const s = document.getElementById('rl-flt-ticker'); if (s) s.value = '';
+  renderTable();
 }
 
 // ── Render ─────────────────────────────────────────────────────────────────
 function renderTable() {
   renderDueBadge();   // الشارة تُحدَّث مع كل إعادة رسم (إضافة/تعديل/حذف مراجعة)
+  buildTickerFilter();
   const wrap = document.getElementById('rl-table-wrap');
   if (!entries.length) {
     wrap.innerHTML = `<div class="empty-rl"><div class="e-icon">📒</div>
       <p>لا توجد مراجعات بعد — أضف أول تقييم من النموذج أعلاه</p></div>`;
+    updateSelectedCount();
     return;
   }
 
-  const rows = entries.map(e => {
+  const list = getFilteredEntries();
+  const filterInfo = document.getElementById('rl-filter-info');
+  if (filterInfo) {
+    filterInfo.innerHTML = list.length === entries.length
+      ? `<span class="small text-muted">${entries.length} مراجعة</span>`
+      : tagHtml('🔍', `${list.length} من ${entries.length} مراجعة`, '');
+  }
+
+  if (!list.length) {
+    wrap.innerHTML = `<div class="empty-rl"><div class="e-icon">🔍</div>
+      <p>لا مراجعة تطابق التصفية — <button class="btn btn-secondary btn-sm" onclick="clearRlFilter()">مسح التصفية</button></p></div>`;
+    updateSelectedCount();
+    return;
+  }
+
+  // آخر مراجعة لكل رمز — لتمييز الصف الأحدث ووسم قِدم المراجعة
+  const lastByTicker = {};
+  entries.forEach(e => {
+    const tk = (e.ticker || '').trim().toUpperCase();
+    if (!tk || !e.review_date) return;
+    if (!lastByTicker[tk] || e.review_date > lastByTicker[tk]) lastByTicker[tk] = e.review_date;
+  });
+  const now = Date.now();
+
+  const rows = list.map(e => {
+    const id   = esc(e.id);
     const atts = attachMap[e.id] || [];
     const attChips = atts.map(a =>
-      `<button class="rl-att-chip" onclick="downloadAtt('${a.id}')"
+      `<button class="rl-att-chip" onclick="downloadAtt('${esc(a.id)}')"
                title="تنزيل ${esc(a.filename)}">
         ${fileIcon(a.ext)} ${esc(a.filename)}
       </button>`).join('');
 
     // زر "تنزيل الكل" يظهر فقط عند وجود أكثر من مرفق
     const dlAllBtn = atts.length > 1
-      ? `<button class="rl-att-chip" onclick="downloadAllForEntry('${e.id}')"
-           style="background:rgba(63,185,80,.15);color:#3fb950;font-weight:600"
+      ? `<button class="rl-att-chip all" onclick="downloadAllForEntry('${id}')"
            title="تنزيل جميع المرفقات دفعة واحدة (${atts.length} ملفات)">
            ⬇ الكل (${atts.length})
          </button>`
@@ -577,24 +747,33 @@ function renderTable() {
       ? `<div class="rl-notes-preview" title="${esc(e.notes||'')}">${esc(notesTrim.slice(0,80))}${notesTrim.length>80?'…':''}</div>`
       : '<span class="text-muted small">—</span>';
 
+    // وسم عُمر المراجعة مقابل دورة الدستور §5 — أيقونة + نص، لا لون وحده
+    const t   = new Date(e.review_date).getTime();
+    const age = isFinite(t) ? Math.floor((now - t) / 86400000) : null;
+    const isLatest = lastByTicker[(e.ticker || '').trim().toUpperCase()] === e.review_date;
+    const ageTag = age == null ? ''
+      : !isLatest ? tagHtml('🗂️', 'مراجعة سابقة', '')
+      : age > REVIEW_DUE_DAYS ? tagHtml('⏰', `مضى ${age} يوماً`, 'warn')
+      : tagHtml('✅', `مضى ${age} يوماً`, 'good');
+
     return `<tr>
-      <td><input type="checkbox" class="rl-row-check" data-id="${e.id}" onchange="updateSelectedCount()"></td>
+      <td><input type="checkbox" class="rl-row-check" data-id="${id}" onchange="updateSelectedCount()"></td>
       <td><span class="ticker-badge">${esc(e.ticker)}</span></td>
-      <td style="white-space:nowrap">${esc(e.name||'—')}</td>
+      <td class="rl-nowrap">${esc(e.name||'—')}</td>
       <td><span class="small text-muted">${esc(e.sector||'—')}</span></td>
-      <td style="white-space:nowrap">${fmtDate(e.review_date)}</td>
-      <td style="min-width:130px">${attChips || '<span class="small text-muted">لا يوجد</span>'}${dlAllBtn}</td>
+      <td class="rl-nowrap">${fmtDate(e.review_date)}<div class="rl-agetag">${ageTag}</div></td>
+      <td class="rl-attcell">${attChips || '<span class="small text-muted">لا يوجد</span>'}${dlAllBtn}</td>
       <td>${notesHtml}</td>
-      <td style="white-space:nowrap">
-        <button class="btn btn-secondary btn-sm" onclick="openEdit('${e.id}')">✏️ تعديل</button>
-        <button class="btn btn-danger btn-sm"   onclick="deleteEntry('${e.id}')">🗑 حذف</button>
+      <td class="rl-nowrap">
+        <button class="btn btn-secondary btn-sm" onclick="openEdit('${id}')">✏️ تعديل</button>
+        <button class="btn btn-danger btn-sm"   onclick="deleteEntry('${id}')">🗑 حذف</button>
       </td>
     </tr>`;
   }).join('');
 
   wrap.innerHTML = `<table class="rl-table">
     <thead><tr>
-      <th style="width:32px"></th>
+      <th class="rl-checkcol"></th>
       <th>الرمز</th><th>الشركة</th><th>القطاع</th>
       <th>تاريخ المراجعة</th><th>المرفقات</th>
       <th>الملاحظات</th><th>إجراءات</th>
@@ -606,9 +785,9 @@ function renderTable() {
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
-function esc(s) {
-  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
+// AUDIT-FIX (2026-08): أُزيلت نسخة esc() المحلية — كانت لا تهرّب الاقتباس
+// المفرد (') وهي تُحقن داخل نصوص onclick، فتُستخدم الآن esc() المشتركة من
+// utils.js (محمَّلة قبل هذا الملف) وهي تهرّب & " ' < >.
 function fmtDate(d) {
   if (!d) return '—';
   try { return new Date(d).toLocaleDateString('ar-SA',{year:'numeric',month:'short',day:'numeric'}); }

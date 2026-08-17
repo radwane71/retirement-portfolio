@@ -24,6 +24,75 @@ let _baseDiv     = null;  // تنويع المحفظة الحالية (computeDi
 let _livePrices  = {};    // ticker → سعر اليوم اللحظي (من Yahoo عبر Edge Function)
 let _livePricesLoading = false;
 
+// حجم المحفظة المستهدف (CLAUDE.md §1) — عرض فقط، لا يدخل أي حكم
+const WL_SIZE_MIN = 18;
+const WL_SIZE_MAX = 25;
+
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم — منسوخ حرفياً من أعلى js/dashboard.js
+// (هذه الصفحة لا تحمّل dashboard.js). أي تعديل هناك يجب أن ينعكس هنا.
+// قاعدة ثابتة: لا لون مكتوب يدوياً — كل لون يُقرأ من متغيّر CSS.
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون سلسلة بيانات بالترتيب الثابت (1..6) — لا تُدوَّر عشوائياً
+function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// صف وزن في قائمة (.brow)
+function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
+  const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
+  const dColor = diffState ? stateColorOf(diffState) : cssVar('--text-2');
+  return `<div class="brow"${title ? ` title="${title}"` : ''}>
+      <div class="br-k"><span class="dot" style="background:${color}"></span><span>${name}</span>${sub ? `<span class="small text-muted num">${sub}</span>` : ''}</div>
+      <div class="br-track"><div class="br-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="br-v">${valueTxt}${diffTxt ? `<span class="d" style="color:${dColor}">${diffTxt}</span>` : ''}</div>
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
+// حالة منطقة التنويع مشتقّة من gaugePos — نفس عتبات computeDiversification
+// في utils.js، لكن كوسم حالة (good/warn/bad) بدل لون سداسي مباشر.
+function wlZoneState(gaugePos) {
+  return gaugePos >= 60 ? 'good' : gaugePos >= 40 ? 'warn' : 'bad';
+}
+
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
 window.CARD_INFO = {
   'watchlist': {
@@ -87,18 +156,18 @@ function livePriceCell(w) {
       ? '<span class="small text-muted">⏳</span>'
       : '<span class="small text-muted">—</span>';
   }
-  // تلوين مقارنةً بسعر الدخول المستهدف: عند/تحت الهدف = فرصة (أخضر)
-  let color = 'var(--text)';
-  let hint  = '';
-  if (w.target_price > 0) {
-    if (p <= w.target_price) { color = '#10b981'; hint = ' title="السعر عند هدف الدخول أو أقل"'; }
-    else {
-      const gap = (p - w.target_price) / w.target_price * 100;
-      color = '#f59e0b';
-      hint  = ` title="أعلى من هدف الدخول بـ ${gap.toFixed(1)}%"`;
-    }
+  // مقارنةً بسعر الدخول المستهدف: عند/تحت الهدف = فرصة. أيقونة + نص لا لون وحده.
+  if (!(w.target_price > 0)) {
+    return `<span class="num bold">${formatSAR(p)}</span>`;
   }
-  return `<span style="color:${color};font-weight:700"${hint}>${formatSAR(p)}</span>`;
+  if (p <= w.target_price) {
+    const disc = (w.target_price - p) / w.target_price * 100;
+    return `<span class="num bold text-success" title="السعر عند هدف الدخول أو أقل">${formatSAR(p)}</span>
+            <div class="lp-sub">✅ عند الهدف${disc >= 0.05 ? ` −${disc.toFixed(1)}%` : ''}</div>`;
+  }
+  const gap = (p - w.target_price) / w.target_price * 100;
+  return `<span class="num bold text-accent" title="أعلى من هدف الدخول بـ ${gap.toFixed(1)}%">${formatSAR(p)}</span>
+          <div class="lp-sub">▲ فوق الهدف +${gap.toFixed(1)}%</div>`;
 }
 
 async function loadAll() {
@@ -161,13 +230,17 @@ function analyzeWatchImpact(w) {
 
   // ── بناء مراكز المحاكاة ──────────────────────────────────────
   let simPositions, addVal;
+  // AUDIT (2026-08): عَلَم إفصاح فقط — يُرفع حين تُهمَل النسبة المخططة لأنها
+  // أقل من الوزن الحالي فيُستبدَل بها شريحة متساوية. لا يغيّر أي رقم؛ يمنع
+  // فقط أن يكون الاستبدال صامتاً (CLAUDE.md §8: لا تقدير بيانات بصمت).
+  let substituted = false;
   if (held) {
     // سهم مملوك بالفعل → تجميع: نرفع وزنه إلى الهدف المخطط
     const curVal   = +held.shares * +held.current_price;
     const other    = V - curVal;
     const finalVal = p * other / (1 - p);          // قيمة تجعل وزنه النهائي = p
     addVal = Math.max(0, finalVal - curVal);
-    if (addVal <= 0) addVal = V / _baseDiv.n;       // الوزن المخطط أقل من الحالي → افترض شريحة متساوية
+    if (addVal <= 0) { addVal = V / _baseDiv.n; substituted = true; }   // الوزن المخطط أقل من الحالي → شريحة متساوية
     simPositions = holdings.map(h => ({
       value:  +h.shares * +h.current_price + (h.ticker === w.ticker ? addVal : 0),
       sector: h.sector, label: h.ticker,
@@ -216,24 +289,26 @@ function analyzeWatchImpact(w) {
   if (overSectorCap)        reasons.push({ t: 'neg', txt: `يكسر سقف القطاع الدستوري: قطاع «${sec}» سيصبح ${secWeightAfter.toFixed(1)}% متجاوزاً ${WL_CAP_SECTOR}% + منطقة السماح ${WL_SECTOR_BUFFER}% (CLAUDE.md §1)` });
   if (bigPosition)          reasons.push({ t: 'neg', txt: `مركز كبير: وزنه المخطط ${posWeightAfter.toFixed(1)}% يتجاوز 15% — قد يصبح من أكبر مراكزك ويرفع التركيز` });
   if (held)                 reasons.push({ t: 'neu', txt: `هذا السهم موجود في محفظتك — التحليل يفترض رفع وزنه إلى ${posWeightAfter.toFixed(1)}%` });
+  if (substituted)          reasons.push({ t: 'neu', txt: `النسبة المخططة (${rawPct.toFixed(1)}%) أقل من وزنه الحالي، فلا تعني إضافة — استبدلها التحليل بشريحة متساوية وصار الوزن المحسوب ${posWeightAfter.toFixed(1)}%` });
 
   // ── الحكم النهائي ────────────────────────────────────────────
-  let verdict, label, color, icon;
+  // اللون صار حالة (good/warn/bad) تُقرأ من رموز التصميم بدل قيمة سداسية.
+  let verdict, label, state, icon;
   if (overTarget || bigPosition || overCap || overSectorCap || deltaGauge <= -2) {
     if (isNewSector && deltaGauge >= 0 && !bigPosition && !overCap && !overSectorCap) {
-      verdict = 'caution'; label = 'إضافة بتحفّظ'; color = '#f97316'; icon = '⚠️';
+      verdict = 'caution'; label = 'إضافة بتحفّظ'; state = 'warn'; icon = '⚠️';
     } else {
-      verdict = 'negative'; label = 'يزيد التركيز'; color = '#ef4444'; icon = '🔻';
+      verdict = 'negative'; label = 'يزيد التركيز'; state = 'bad'; icon = '🔻';
     }
   } else if (isNewSector || deltaGauge >= 2) {
-    verdict = 'positive'; label = 'يحسّن التنويع'; color = '#10b981'; icon = '✅';
+    verdict = 'positive'; label = 'يحسّن التنويع'; state = 'good'; icon = '✅';
   } else {
-    verdict = 'neutral'; label = 'أثر محايد'; color = '#84cc16'; icon = '➖';
+    verdict = 'neutral'; label = 'أثر محايد'; state = ''; icon = '➖';
   }
 
   return {
-    verdict, label, color, icon, deltaGauge,
-    assumed, plannedPct: p * 100, posWeightAfter,
+    verdict, label, state, icon, deltaGauge,
+    assumed, substituted, rawPct, plannedPct: p * 100, posWeightAfter,
     sec, isNewSector, secTarget, secWeightBefore, secWeightAfter, overTarget, bigPosition, held: !!held,
     blueChip, singleCap, overCap, overSectorCap,
     before: _baseDiv, after, reasons,
@@ -241,15 +316,17 @@ function analyzeWatchImpact(w) {
 }
 
 // ── شارة الأثر المختصرة (داخل الجدول) ────────────────────────
+// وسم .tag قابل للنقر — نفس مفردات الحالة في بقية اللوحة.
 function impactBadge(w) {
   const a = analyzeWatchImpact(w);
   if (!a) return '<span class="small text-muted">—</span>';
   const deltaStr = `${a.deltaGauge >= 0 ? '+' : ''}${a.deltaGauge}`;
-  return `<button onclick="openImpactModal('${esc(w.id)}')" title="اضغط لعرض التحليل المفصّل"
-            style="cursor:pointer;border:1px solid ${a.color}55;background:${a.color}1a;color:${a.color};
-                   border-radius:8px;padding:4px 9px;font-size:0.74rem;font-weight:700;font-family:inherit;white-space:nowrap">
-            ${a.icon} ${a.label} <span style="opacity:.8;font-weight:500">· Δ${deltaStr}</span>
-          </button>`;
+  const caps = (a.overCap || a.overSectorCap)
+    ? `<div class="mini-warn" title="الوزن المتوقع بعد الشراء يكسر سقفاً دستورياً (CLAUDE.md §1)">⛔ يكسر سقفاً دستورياً</div>` : '';
+  return `<button type="button" class="tag tag-btn"${a.state ? ` data-state="${a.state}"` : ''}
+            onclick="openImpactModal('${esc(w.id)}')" title="اضغط لعرض التحليل المفصّل">
+            ${a.icon} ${a.label} <span class="tag-d">· Δ${deltaStr}</span>
+          </button>${caps}`;
 }
 
 // ── بطاقة سياق المحفظة الحالية (أعلى الجدول) ─────────────────
@@ -257,31 +334,35 @@ function renderContext() {
   const el = document.getElementById('wl-context');
   if (!el) return;
   if (!_baseDiv) {
-    el.innerHTML = `<div class="card" style="border-right:3px solid var(--text-muted)">
-      <p class="small text-muted" style="margin:0;line-height:1.7">
-        💡 لا توجد أسهم في محفظتك بعد — أضف معاملات في
-        <a href="transactions.html" style="color:var(--accent)">سجل المعاملات</a>
-        لتفعيل تحليل أثر كل سهم مراقَب على تنويع محفظتك.
-      </p></div>`;
+    el.innerHTML = `<div class="card mb-4">
+      ${cardHead('🧩 تنويع محفظتك الحالية', 'مرجع المقارنة')}
+      ${noteHtml('💡', 'لا توجد أسهم في محفظتك بعد — أضف معاملات في <a href="transactions.html" class="link-accent">سجل المعاملات</a> لتفعيل تحليل أثر كل سهم مراقَب على تنويع محفظتك.', '')}
+    </div>`;
     return;
   }
-  const d = _baseDiv;
-  el.innerHTML = `<div class="card" style="border-right:3px solid ${d.zoneColor}">
-    <div class="section-header" style="margin-bottom:10px">
-      <span class="section-title">🧩 تنويع محفظتك الحالية — مرجع المقارنة</span>
-      <a href="dashboard.html" class="small" style="color:var(--accent)">المقياس الكامل ←</a>
+  const d      = _baseDiv;
+  const zState = wlZoneState(d.gaugePos);
+  const nState = d.n >= WL_SIZE_MIN && d.n <= WL_SIZE_MAX ? 'good' : 'warn';
+  el.innerHTML = `<div class="card mb-4">
+    ${cardHead('🧩 تنويع محفظتك الحالية', 'مرجع المقارنة لكل سهم في القائمة',
+      '<a href="dashboard.html" class="small link-accent">المقياس الكامل ←</a>')}
+    <div class="wl-ctx">
+      <div class="wl-ctx-hero">
+        <div class="hero-num">${d.gaugePos}<span class="unit">/100</span></div>
+        <div class="hero-cap">مؤشر التنويع</div>
+        <div class="mt-2">${tagHtml(zState === 'good' ? '✅' : zState === 'warn' ? '⚠️' : '🔴', d.zoneLabel, zState)}</div>
+      </div>
+      <div class="wl-ctx-kv">
+        ${kvsHtml([
+          ['عدد فعّال (N فعّال)', d.effectiveN],
+          ['عدد الأسهم', `${d.n}`],
+          ['القطاعات', d.sectorCount],
+          ['أكبر مركز', `${d.top1Pct.toFixed(1)}% — ${esc(d.top1Name)}`],
+        ])}
+        <div class="mt-2">${tagHtml(nState === 'good' ? '✅' : '⚠️', `حجم المحفظة ${d.n} سهم (المستهدف ${WL_SIZE_MIN}–${WL_SIZE_MAX})`, nState)}</div>
+      </div>
     </div>
-    <div style="display:flex;flex-wrap:wrap;gap:18px;align-items:center;direction:rtl">
-      <div style="font-weight:800;color:${d.zoneColor};font-size:1.05rem">${d.zoneLabel}</div>
-      <div class="small text-muted">المؤشر: <strong style="color:var(--text)">${d.gaugePos}/100</strong></div>
-      <div class="small text-muted">عدد فعّال: <strong style="color:var(--text)">${d.effectiveN}</strong></div>
-      <div class="small text-muted">الأسهم: <strong style="color:var(--text)">${d.n}</strong></div>
-      <div class="small text-muted">القطاعات: <strong style="color:var(--text)">${d.sectorCount}</strong></div>
-      <div class="small text-muted">أكبر مركز: <strong style="color:var(--text)">${d.top1Pct.toFixed(1)}% (${esc(d.top1Name)})</strong></div>
-    </div>
-    <p class="small text-muted" style="margin:10px 0 0;line-height:1.7">
-      كل سهم في القائمة يُحلَّل بمحاكاة إضافته بوزنه المخطط — والنتيجة تقارن بمقياس التنويع نفسه الموجود في لوحة التحكم.
-    </p>
+    ${noteHtml('ℹ️', 'كل سهم في القائمة يُحلَّل بمحاكاة إضافته بوزنه المخطط، ثم يُقارن بمقياس التنويع نفسه الموجود في لوحة التحكم — ومعه فحص الأسقف الدستورية (سهم 7% · قيادي 12% · قطاع 25%).', '')}
   </div>`;
 }
 
@@ -299,8 +380,11 @@ function renderTable() {
   }
 
   tbody.innerHTML = watchlist.map(w => {
-    const tpStr = w.target_price > 0 ? formatSAR(w.target_price) : '—';
-    const ppStr = w.planned_pct  > 0 ? w.planned_pct.toFixed(1) + '%' : '—';
+    const tpStr = +w.target_price > 0 ? formatSAR(w.target_price) : '<span class="text-muted">—</span>';
+    // النسبة المخططة بلا قيمة تعني «وزن متساوٍ مفترَض» في تحليل الأثر — نُعلنها
+    const ppStr = +w.planned_pct  > 0
+      ? `${(+w.planned_pct).toFixed(1)}%`
+      : '<span class="text-muted">—</span><div class="lp-sub">وزن متساوٍ مفترَض</div>';
     return `<tr>
       <td><strong class="text-accent">${esc(w.ticker)}</strong></td>
       <td>${esc(w.name)}</td>
@@ -308,9 +392,9 @@ function renderTable() {
       <td class="num">${tpStr}</td>
       <td class="num">${livePriceCell(w)}</td>
       <td class="num text-accent">${ppStr}</td>
-      <td>${impactBadge(w)}</td>
-      <td class="small text-muted">${esc(w.notes || '—')}</td>
-      <td class="small text-muted">${w.created_at ? new Date(w.created_at).toLocaleDateString('ar-SA-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'}</td>
+      <td class="impact-cell">${impactBadge(w)}</td>
+      <td class="small text-muted notes-cell" title="${esc(w.notes || '')}">${esc(w.notes || '—')}</td>
+      <td class="small text-muted num">${w.created_at ? new Date(w.created_at).toLocaleDateString('ar-SA-u-nu-latn', { year: 'numeric', month: '2-digit', day: '2-digit' }) : '—'}</td>
       <td>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" onclick="openModal('${esc(w.id)}')">تعديل</button>
@@ -329,76 +413,92 @@ function openImpactModal(id) {
   if (!a) { showToast('لا توجد محفظة حالية لتحليل الأثر', 'error'); return; }
 
   const reasonRow = r => {
-    const c = r.t === 'pos' ? '#10b981' : r.t === 'neg' ? '#ef4444' : '#8b94a8';
+    const st = r.t === 'pos' ? 'good' : r.t === 'neg' ? 'bad' : '';
     const ic = r.t === 'pos' ? '▲' : r.t === 'neg' ? '▼' : '•';
-    return `<li style="display:flex;gap:8px;align-items:flex-start;margin-bottom:7px;line-height:1.6">
-      <span style="color:${c};font-weight:700;flex-shrink:0">${ic}</span>
+    return `<li class="rsn"><span class="rsn-i"${st ? ` data-state="${st}"` : ''}>${ic}</span>
       <span>${esc(r.txt)}</span></li>`;
   };
 
-  const metric = (lbl, before, after, sameGood) => `
-    <div style="background:var(--bg-2);border-radius:8px;padding:9px 8px;text-align:center">
-      <div style="font-size:0.68rem;color:var(--text-muted);margin-bottom:3px">${lbl}</div>
-      <div style="font-size:0.92rem;font-weight:700">
-        <span style="color:var(--text-muted)">${before}</span>
-        <span style="color:var(--text-muted)"> → </span>
-        <span style="color:var(--text)">${after}</span>
-      </div>
-    </div>`;
-
   const secTargetStr = a.secTarget > 0 ? `هدفك ${a.secTarget.toFixed(1)}%` : 'لا هدف محدّد';
   const assumedNote  = a.assumed
-    ? `<div style="background:rgba(240,180,41,0.1);border-right:3px solid #f0b429;border-radius:0 8px 8px 0;padding:8px 11px;font-size:0.76rem;color:var(--text);line-height:1.6;margin-bottom:12px;direction:rtl">
-         ℹ️ لم تحدّد «النسبة المخططة» لهذا السهم — افترض التحليل وزناً متساوياً (${a.plannedPct.toFixed(1)}%). حدّد النسبة في التعديل لتحليل أدق.
-       </div>`
+    ? noteHtml('ℹ️', `لم تحدّد «النسبة المخططة» لهذا السهم — افترض التحليل وزناً متساوياً (${a.plannedPct.toFixed(1)}%). حدّد النسبة في التعديل لتحليل أدق.`, 'warn')
     : '';
+  // إفصاح: النسبة المخططة أقل من الوزن الحالي فلا تعني إضافة — استُبدلت بشريحة متساوية
+  const substNote = a.substituted
+    ? noteHtml('⚠️', `النسبة المخططة (${a.rawPct.toFixed(1)}%) <strong>أقل من وزن السهم الحالي</strong> فلا تمثّل إضافة. استبدلها التحليل بشريحة متساوية، والوزن المعروض أدناه (${a.posWeightAfter.toFixed(1)}%) ناتج عن هذا الافتراض لا عن نسبتك.`, 'warn')
+    : '';
+
+  // ── الأسقف الدستورية: مقياس الوزن المتوقع مقابل سقف السهم ──
+  const capScale = Math.max(a.singleCap + WL_CAP_BUFFER + 2, a.posWeightAfter * 1.15);
+  const secScale = Math.max(WL_CAP_SECTOR + WL_SECTOR_BUFFER + 3, a.secWeightAfter * 1.15);
+  const capMeter = meterHtml({
+    label: `وزن ${esc(w.ticker)} بعد الشراء`, valueTxt: `${a.posWeightAfter.toFixed(1)}%`,
+    pct: a.posWeightAfter / capScale * 100, state: a.overCap ? 'bad' : 'good',
+    markPct: a.singleCap / capScale * 100,
+    foot: `العلامة = السقف الدستوري ${a.singleCap}%${a.blueChip ? ' (قيادي)' : ''} + سماح ${WL_CAP_BUFFER}%`,
+  });
+  const secMeter = meterHtml({
+    label: `وزن قطاع «${esc(a.sec)}» بعد الشراء`, valueTxt: `${a.secWeightAfter.toFixed(1)}%`,
+    pct: a.secWeightAfter / secScale * 100, state: a.overSectorCap ? 'bad' : a.overTarget ? 'warn' : 'good',
+    markPct: WL_CAP_SECTOR / secScale * 100,
+    foot: `العلامة = سقف القطاع ${WL_CAP_SECTOR}% + سماح ${WL_SECTOR_BUFFER}% · ${secTargetStr} · قبل: ${a.secWeightBefore.toFixed(1)}%`,
+  });
+
+  const sizeAfter = a.after.n;
+  const sizeState = sizeAfter >= WL_SIZE_MIN && sizeAfter <= WL_SIZE_MAX ? 'good' : 'warn';
 
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
   overlay.innerHTML = `
-    <div style="background:var(--bg);border:1px solid var(--border);border-radius:14px;max-width:540px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.5)">
-      <div style="padding:15px 18px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--bg);z-index:1">
-        <span style="font-weight:700;font-size:.95rem">🧠 تحليل أثر إضافة ${esc(w.ticker)} — ${esc(w.name)}</span>
-        <button onclick="this.closest('.modal-overlay').remove()" style="background:none;border:none;font-size:1.3rem;cursor:pointer;color:var(--text-muted);padding:0 4px">✕</button>
+    <div class="modal-card wl-modal">
+      <div class="wl-modal-head">
+        <span class="modal-title">🧠 أثر إضافة ${esc(w.ticker)} — ${esc(w.name)}</span>
+        <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">✕</button>
       </div>
-      <div style="padding:18px">
+      <div class="wl-modal-body stack-4">
 
-        <!-- الحكم -->
-        <div style="background:${a.color}1a;border:1px solid ${a.color}55;border-radius:10px;padding:13px 15px;margin-bottom:16px;text-align:center">
-          <div style="font-size:1.15rem;font-weight:800;color:${a.color}">${a.icon} ${a.label}</div>
-          <div class="small text-muted" style="margin-top:4px">المؤشر: ${a.before.gaugePos} → ${a.after.gaugePos} (${a.deltaGauge >= 0 ? '+' : ''}${a.deltaGauge}) · المنطقة: ${a.before.zoneLabel} → ${a.after.zoneLabel}</div>
+        <!-- الحكم: الرقم القائد = تغيّر المؤشر -->
+        <div class="wl-verdict">
+          <div class="hero-num">${a.deltaGauge >= 0 ? '+' : ''}${a.deltaGauge}<span class="unit">نقطة</span></div>
+          <div class="hero-cap">تغيّر مؤشر التنويع: ${a.before.gaugePos} → ${a.after.gaugePos} · ${esc(a.before.zoneLabel)} → ${esc(a.after.zoneLabel)}</div>
+          <div class="mt-2">${tagHtml(a.icon, a.label, a.state)}</div>
         </div>
 
         ${assumedNote}
+        ${substNote}
 
-        <!-- مقاييس قبل/بعد -->
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px;direction:rtl">
-          ${metric('المؤشر', a.before.gaugePos, a.after.gaugePos)}
-          ${metric('عدد فعّال', a.before.effectiveN, a.after.effectiveN)}
-          ${metric('الأسهم', a.before.n, a.after.n)}
-          ${metric('القطاعات', a.before.sectorCount, a.after.sectorCount)}
-        </div>
-
-        <!-- القطاع -->
-        <div style="background:var(--bg-2);border-radius:9px;padding:11px 13px;margin-bottom:16px;direction:rtl">
-          <div class="small" style="font-weight:700;margin-bottom:5px">📊 قطاع «${esc(a.sec)}»${a.isNewSector ? ' <span style="color:#10b981">— قطاع جديد!</span>' : ''}</div>
-          <div class="small text-muted" style="line-height:1.7">
-            الوزن: ${a.secWeightBefore.toFixed(1)}% → <strong style="color:${a.overTarget ? '#ef4444' : 'var(--text)'}">${a.secWeightAfter.toFixed(1)}%</strong> · ${secTargetStr}
+        <!-- الأسقف الدستورية أولاً: هي القيد الصلب -->
+        <div>
+          <div class="wl-sec-t">⚖️ الأسقف الدستورية — CLAUDE.md §1</div>
+          <div class="stack-2">${capMeter}${secMeter}</div>
+          <div class="mt-2 wl-tags">
+            ${tagHtml(a.overCap ? '⛔' : '✅', a.overCap ? `فوق سقف السهم ${a.singleCap}%` : `ضمن سقف السهم ${a.singleCap}%`, a.overCap ? 'bad' : 'good')}
+            ${tagHtml(a.overSectorCap ? '⛔' : '✅', a.overSectorCap ? `فوق سقف القطاع ${WL_CAP_SECTOR}%` : `ضمن سقف القطاع ${WL_CAP_SECTOR}%`, a.overSectorCap ? 'bad' : 'good')}
+            ${tagHtml(sizeState === 'good' ? '✅' : '⚠️', `حجم المحفظة بعد الإضافة ${sizeAfter} سهم (${WL_SIZE_MIN}–${WL_SIZE_MAX})`, sizeState)}
+            ${a.isNewSector ? tagHtml('🆕', 'قطاع جديد', 'good') : ''}
           </div>
         </div>
 
-        <!-- الأسباب -->
-        <div style="direction:rtl">
-          <div class="small" style="font-weight:700;margin-bottom:9px">لماذا هذا الحكم؟</div>
-          <ul style="list-style:none;padding:0;margin:0;font-size:0.84rem;color:var(--text)">
-            ${a.reasons.map(reasonRow).join('')}
-          </ul>
-        </div>
+        <!-- التفاصيل خلف طيّة -->
+        <details class="wl-det">
+          <summary>مقاييس التنويع قبل/بعد وتفصيل الحكم</summary>
+          <div class="stack mt-2">
+            ${kvsHtml([
+              ['مؤشر التنويع', `${a.before.gaugePos} → ${a.after.gaugePos}`],
+              ['عدد فعّال (N فعّال)', `${a.before.effectiveN} → ${a.after.effectiveN}`],
+              ['عدد الأسهم', `${a.before.n} → ${a.after.n}`],
+              ['عدد القطاعات', `${a.before.sectorCount} → ${a.after.sectorCount}`],
+              [`وزن قطاع «${esc(a.sec)}»`, `${a.secWeightBefore.toFixed(1)}% → ${a.secWeightAfter.toFixed(1)}%`],
+              ['هدف القطاع', secTargetStr],
+            ])}
+            <div>
+              <div class="wl-sec-t">لماذا هذا الحكم؟</div>
+              <ul class="rsn-ul">${a.reasons.map(reasonRow).join('')}</ul>
+            </div>
+          </div>
+        </details>
 
-        <p class="small text-muted" style="margin-top:16px;line-height:1.7;direction:rtl;border-top:1px solid var(--border);padding-top:12px">
-          المقياس مبني على HHI (Evans & Archer 1968) ومعامل تنويع القطاعات — نفس منهجية لوحة التحكم. هذا تحليل حسابي للتنويع فقط، وليس توصية بالشراء.
-        </p>
+        ${noteHtml('📐', 'المقياس مبني على HHI (Evans &amp; Archer 1968) ومعامل تنويع القطاعات — نفس منهجية لوحة التحكم. هذا تحليل حسابي للتنويع والأسقف فقط، وليس توصية بالشراء.', '')}
       </div>
     </div>`;
   document.body.appendChild(overlay);

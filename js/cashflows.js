@@ -15,6 +15,69 @@ window.CARD_INFO = {
   },
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم + مولّدات المكوّنات
+// ──────────────────────────────────────────────────────────────────────
+// ربط: نسخة طبق الأصل من مولّدات js/dashboard.js (أعلى الملف) — هذه الصفحة
+// لا تُحمّل dashboard.js، فتُنسخ هنا بنفس التوقيعات بالضبط. أي تعديل هناك
+// يجب أن يُنسخ هنا (والعكس). المكوّنات معرَّفة في css/style.css تحت
+// «نظام مكوّنات اللوحة»: .card-head .hero-num .tag .meter .brow .kvs .note .stack .dot
+// قاعدة ثابتة: لا لون سداسي مكتوب يدوياً في هذا الملف — رموز التصميم فقط،
+// واللون وحده لا يحمل معنى (كل حالة معها أيقونة ونص).
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
+// وسم نوع الحركة — أيقونة + نص، لا لون وحده
+const CF_TYPE_META = {
+  deposit:    { icon: '⬆️', state: 'good' },
+  withdrawal: { icon: '⬇️', state: 'bad'  },
+  dividend:   { icon: '💰', state: 'good' },
+};
+function cfTypeTag(type) {
+  const m = CF_TYPE_META[type] || { icon: '❔', state: '' };
+  return tagHtml(m.icon, esc(TYPE_AR[type] || type || '—'), m.state);
+}
+
 function edCf(rowId, field, type, raw, extraCls = '', selectKey = '') {
   return `class="editable${type==='number'?' num':''}${extraCls?' '+extraCls:''}" ` +
     `data-table="cashflow_entries" data-id="${esc(rowId)}" data-field="${field}" ` +
@@ -88,6 +151,8 @@ function filterYear() {
   renderTable();
 }
 
+// ملخص واحد يقوده رقم واحد: صافي التدفق. المجاميع على كل السنوات ولا
+// تتأثر بفلتر الجدول — مصرَّح به نصاً في رأس البطاقة.
 function renderSummary() {
   const totalDep  = cfEntries.filter(e => e.type === 'deposit').reduce((s,e) => s + +e.amount, 0);
   const totalWith = cfEntries.filter(e => e.type === 'withdrawal').reduce((s,e) => s + +e.amount, 0);
@@ -100,18 +165,105 @@ function renderSummary() {
   const yearDiv   = divEntries.filter(e => _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
   const yearNet   = yearDep - yearWith;
 
-  const el = id => document.getElementById(id);
-  if (el('cf-total-dep'))  el('cf-total-dep').textContent  = formatSAR(totalDep);
-  if (el('cf-total-with')) el('cf-total-with').textContent = formatSAR(totalWith);
-  if (el('cf-total-div'))  el('cf-total-div').textContent  = formatSAR(totalDiv);
-  if (el('cf-year-div'))   { el('cf-year-div').textContent = formatSAR(yearDiv); }
+  const el = document.getElementById('cf-summary');
+  if (!el) return;
 
-  const netEl = el('cf-net');
-  if (netEl) { netEl.textContent = formatSAR(net, true); netEl.className = 'value num ' + (net >= 0 ? 'text-success' : 'text-danger'); }
+  if (!cfEntries.length && !divEntries.length) {
+    el.innerHTML = cardHead('💸 ملخص التدفقات النقدية', '', cfInfoBtn()) +
+      `<div class="empty-state"><div class="icon">📈</div><p>لا توجد حركات مسجّلة بعد</p></div>`;
+    return;
+  }
 
-  const yrEl = el('cf-this-year');
-  if (yrEl) { yrEl.textContent = formatSAR(yearNet, true); yrEl.className = 'value num ' + (yearNet >= 0 ? 'text-success' : 'text-danger'); }
-  if (el('cf-this-year-lbl')) el('cf-this-year-lbl').textContent = `صافي ${curYear}: إيداع ${formatSAR(yearDep)} / سحب ${formatSAR(yearWith)}`;
+  // نسبة ما سُحب من مجموع ما أُودع — كلما ارتفعت قلّ رأس المال الصافي المضخوخ
+  const withPct = totalDep > 0 ? totalWith / totalDep * 100 : 0;
+  const netState = net > 0 ? 'good' : net < 0 ? 'bad' : '';
+  const netIcon  = net > 0 ? '⬆️' : net < 0 ? '⬇️' : '➖';
+  const netWord  = net > 0 ? 'ضخّ صافٍ' : net < 0 ? 'سحب صافٍ' : 'متعادل';
+
+  el.innerHTML =
+    cardHead('💸 ملخص التدفقات النقدية',
+      'كل السنوات — لا يتأثر بفلتر السنة في جدول الحركات', cfInfoBtn()) +
+    `<div class="stack">
+      <div class="cf-hero">
+        <div>
+          <div class="hero-num">${formatSAR(net, true)}</div>
+          <div class="hero-cap">صافي التدفق = إجمالي الإيداعات − إجمالي السحوبات</div>
+        </div>
+        <div class="cf-tagrow">
+          ${tagHtml(netIcon, netWord, netState)}
+          ${tagHtml('🗓️', `صافي ${curYear}: ${formatSAR(yearNet, true)}`, yearNet >= 0 ? 'good' : 'bad')}
+        </div>
+      </div>
+      ${meterHtml({
+        label: 'ما سُحب من مجموع ما أُودع',
+        valueTxt: formatNum(withPct, 1) + '%',
+        pct: withPct,
+        state: withPct >= 50 ? 'warn' : '',
+        foot: `إيداعات ${formatSAR(totalDep)} · سحوبات ${formatSAR(totalWith)}`,
+      })}
+      ${kvsHtml([
+        ['إجمالي الإيداعات', formatSAR(totalDep)],
+        ['إجمالي السحوبات', formatSAR(totalWith)],
+        [`إيداعات ${curYear}`, formatSAR(yearDep)],
+        [`سحوبات ${curYear}`, formatSAR(yearWith)],
+        ['الأرباح الموزعة (كل السنوات)', formatSAR(totalDiv)],
+        [`أرباح ${curYear}`, formatSAR(yearDiv)],
+      ])}
+      ${noteHtml('💰',
+        `<b>الأرباح الموزعة خارج صافي التدفق عمداً.</b> صافي التدفق يقيس ما ضخّته من جيبك،
+         والأرباح مالٌ ولّدته المحفظة نفسها — إدخالها هنا يحتسبها مرتين. تُقرأ تلقائياً من
+         <a href="dividends.html">صفحة الأرباح</a> وتُصنَّف بتاريخ الاستلام (أساس نقدي) لا بالسنة المالية.`, '')}
+      ${renderYearBreakdown()}
+    </div>`;
+}
+
+function cfInfoBtn() {
+  return `<button class="info-btn info-inline" type="button" onclick="showCardInfo('cashflow-summary')"
+    title="ما هي التدفقات النقدية ولماذا تهم؟">ⓘ</button>`;
+}
+
+// تصنيف حسب السنة — عرض مشتق من نفس البيانات، لا حساب جديد
+function renderYearBreakdown() {
+  const byYear = {};
+  const touch = y => (byYear[y] = byYear[y] || { dep: 0, wit: 0, div: 0 });
+  cfEntries.forEach(e => {
+    const y = _cfYear(e.date); if (y == null) return;
+    const b = touch(y);
+    if (e.type === 'deposit') b.dep += +e.amount || 0;
+    else if (e.type === 'withdrawal') b.wit += +e.amount || 0;
+  });
+  divEntries.forEach(e => {
+    const y = _cfYear(e.date); if (y == null) return;
+    touch(y).div += +e.amount || 0;
+  });
+
+  const years = Object.keys(byYear).map(Number).sort((a, b) => b - a);
+  if (!years.length) return '';
+
+  const rows = years.map(y => {
+    const b = byYear[y];
+    const n = b.dep - b.wit;
+    return `<tr>
+      <td>${y}</td>
+      <td class="num">${formatSAR(b.dep)}</td>
+      <td class="num">${formatSAR(b.wit)}</td>
+      <td class="num">${formatSAR(n, true)}</td>
+      <td class="num">${formatSAR(b.div)}</td>
+    </tr>`;
+  }).join('');
+
+  return `<details class="cf-details">
+      <summary>📅 التصنيف حسب السنة (${years.length} ${years.length === 1 ? 'سنة' : 'سنوات'})</summary>
+      <div class="dt-body">
+        <div class="table-wrapper">
+          <table class="cf-year-table">
+            <thead><tr><th>السنة</th><th>إيداعات</th><th>سحوبات</th><th>الصافي</th><th>أرباح موزعة</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+        <p class="small text-muted mt-2">السنة تُستخرج من التاريخ بالتقويم المحلي — قيد 1 يناير أو 31 ديسمبر لا ينزلق لسنة مجاورة.</p>
+      </div>
+    </details>`;
 }
 
 function renderTable() {
@@ -130,9 +282,7 @@ function renderTable() {
   // صفوف الحركات اليدوية (قابلة للتعديل)
   const manualRows = cfFiltered.map(e => `<tr>
     <td ${edCf(e.id,'date','date',e.date)}>${formatDate(e.date)}</td>
-    <td ${edCf(e.id,'type','text',e.type,'','cftype')}>
-      <span class="badge badge-${e.type}">${TYPE_AR[e.type] || e.type}</span>
-    </td>
+    <td ${edCf(e.id,'type','text',e.type,'','cftype')}>${cfTypeTag(e.type)}</td>
     <td ${edCf(e.id,'amount','number',e.amount,'num ' + (e.type==='deposit'?'text-success':'text-danger'),'')}>
       ${e.type === 'deposit' ? '+' : '−'}${formatSAR(e.amount)}
     </td>
@@ -141,15 +291,15 @@ function renderTable() {
   </tr>`).join('');
 
   // فاصل + صفوف الأرباح الموزعة (للعرض فقط — مرتبطة بجدول الأرباح)
-  const divHeader = hasDiv ? `<tr style="background:var(--bg-3)">
-    <td colspan="5" class="small bold" style="padding:8px 12px;color:var(--success)">
-      💰 الأرباح الموزعة — مرتبطة تلقائياً من صفحة الأرباح (للعرض فقط)
+  const divHeader = hasDiv ? `<tr class="cf-divider">
+    <td colspan="5" class="small bold">
+      💰 الأرباح الموزعة — مرتبطة تلقائياً من صفحة الأرباح (للعرض فقط، وخارج صافي التدفق)
     </td>
   </tr>` : '';
 
-  const divRows = divFiltered.map(e => `<tr style="opacity:0.85">
+  const divRows = divFiltered.map(e => `<tr class="cf-div-row">
     <td class="text-muted small">${formatDate(e.date)}</td>
-    <td><span class="badge" style="background:rgba(63,185,80,0.15);color:#3fb950">💰 أرباح موزعة</span></td>
+    <td>${cfTypeTag('dividend')}</td>
     <td class="num text-success">+${formatSAR(e.amount)}</td>
     <td class="text-muted small">${esc(e.notes || '—')}</td>
     <td><a href="dividends.html" class="btn btn-secondary btn-sm">→ جدول الأرباح</a></td>
@@ -218,9 +368,18 @@ function exportCashflowsCSV() {
   const divData    = divFiltered;
   const combined   = [...manualData, ...divData].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   if (!combined.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
+  // AUDIT-FIX: عمود «الأثر على الصافي» مُضاف — «المبلغ» يبقى كما هو (قيمة مطلقة)
+  // حتى لا تنكسر جداول المستخدم القديمة، لكن جمع العمود القديم كان يعطي
+  // إيداعات+سحوبات بدل الصافي. الأرباح الموزعة أثرها صفر لأنها خارج الصافي.
   exportCSV(`تدفقات_نقدية_${todayISO()}.csv`,
-    ['التاريخ', 'النوع', 'المبلغ', 'ملاحظات'],
-    combined.map(e => [e.date, TYPE_AR[e.type] || e.type, e.amount, e.notes || ''])
+    ['التاريخ', 'النوع', 'المبلغ', 'الأثر على الصافي', 'ملاحظات'],
+    combined.map(e => [
+      e.date,
+      TYPE_AR[e.type] || e.type,
+      e.amount,
+      e.type === 'deposit' ? +e.amount : e.type === 'withdrawal' ? -(+e.amount) : 0,
+      e.notes || ''
+    ])
   );
   showToast(`✓ تم تصدير ${combined.length} حركة (${manualData.length} يدوي + ${divData.length} أرباح)`, 'success');
 }

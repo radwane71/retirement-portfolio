@@ -45,13 +45,79 @@ function qtyOf(i) {
   return isNaN(q) ? 1 : q;
 }
 
-const COND_CLASS = {
-  'جيد':        'cond-good',
-  'مستعمل':     'cond-worn',
-  'متضرر':      'cond-damaged',
-  'للاستبدال':  'cond-replace',
-  'مفقود':      'cond-missing'
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم + مولّدات المكوّنات
+// ──────────────────────────────────────────────────────────────────────
+// ربط: نسخة طبق الأصل من مولّدات js/dashboard.js (أعلى الملف) — هذه الصفحة
+// لا تُحمّل dashboard.js، فتُنسخ هنا بنفس التوقيعات بالضبط. أي تعديل هناك
+// يجب أن يُنسخ هنا (والعكس). المكوّنات معرَّفة في css/style.css تحت
+// «نظام مكوّنات اللوحة»: .card-head .hero-num .tag .meter .brow .kvs .note .stack .dot
+// قاعدة ثابتة: لا لون سداسي مكتوب يدوياً في هذا الملف — رموز التصميم فقط،
+// واللون وحده لا يحمل معنى (كل حالة معها أيقونة ونص).
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// صف وزن في قائمة (.brow)
+function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
+  const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
+  const dColor = diffState ? stateColorOf(diffState) : cssVar('--text-2');
+  return `<div class="brow"${title ? ` title="${title}"` : ''}>
+      <div class="br-k"><span class="dot" style="background:${color}"></span><span>${name}</span>${sub ? `<span class="small text-muted num">${sub}</span>` : ''}</div>
+      <div class="br-track"><div class="br-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="br-v">${valueTxt}${diffTxt ? `<span class="d" style="color:${dColor}">${diffTxt}</span>` : ''}</div>
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
+// ─── دلالة الحالة: أيقونة + حالة تصميمية (لا لون وحده) ────────────────────────
+const COND_META = {
+  'جيد':       { icon: '✅', state: 'good' },
+  'مستعمل':    { icon: '🔧', state: ''     },
+  'متضرر':     { icon: '⚠️', state: 'warn' },
+  'للاستبدال': { icon: '🔁', state: 'warn' },
+  'مفقود':     { icon: '❌', state: 'bad'  },
 };
+const COND_ORDER = ['جيد', 'مستعمل', 'متضرر', 'للاستبدال', 'مفقود'];
+function condMeta(c) { return COND_META[c] || { icon: '❔', state: '' }; }
+function condTag(c)  { const m = condMeta(c); return tagHtml(m.icon, esc(c || 'بدون حالة'), m.state); }
 
 document.addEventListener('DOMContentLoaded', async () => {
   const user = await requireAuth();
@@ -82,19 +148,122 @@ function fillSelect(id, values, current) {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
+// بطاقة واحدة يقودها رقم واحد: القيمة الإجمالية. الحالات الخمس كلها ظاهرة
+// (كانت ثلاث فقط فلا تجتمع على المجموع)، والتفصيل خلف <details>.
 function renderDash() {
-  const total    = items.length;
-  const good     = items.filter(i => i.cond === 'جيد').length;
-  const replace  = items.filter(i => i.cond === 'للاستبدال').length;
-  const missing  = items.filter(i => i.cond === 'مفقود').length;
-  const totalVal = items.reduce((s,i) => s + ((+i.value||0) * qtyOf(i)), 0);
+  const total  = items.length;
+  const units  = items.reduce((s, i) => s + qtyOf(i), 0);
+  const valOf  = i => (+i.value || 0) * qtyOf(i);
+  const totalVal = items.reduce((s, i) => s + valOf(i), 0);
 
-  document.getElementById('inv-dash').innerHTML = `
-    <div class="inv-card"><div class="lbl">إجمالي العناصر</div><div class="val">${total}</div></div>
-    <div class="inv-card" style="border-color:var(--success)"><div class="lbl">حالة جيدة</div><div class="val" style="color:#4ade80">${good}</div></div>
-    <div class="inv-card" style="border-color:#a855f7"><div class="lbl">للاستبدال</div><div class="val" style="color:#c084fc">${replace}</div></div>
-    <div class="inv-card" style="border-color:var(--danger)"><div class="lbl">مفقودة</div><div class="val" style="color:#f87171">${missing}</div></div>
-    <div class="inv-card" style="border-color:var(--accent)"><div class="lbl">القيمة الإجمالية</div><div class="val" style="font-size:1rem">${formatSAR(totalVal)}</div></div>`;
+  // تفصيل الحالات — العدّ والقيمة لكل حالة، وأي حالة خارج القائمة تُجمع في «أخرى»
+  const byCond = {};
+  COND_ORDER.forEach(c => (byCond[c] = { n: 0, val: 0, units: 0 }));
+  let otherN = 0, otherVal = 0;
+  items.forEach(i => {
+    const b = byCond[i.cond];
+    if (b) { b.n++; b.val += valOf(i); b.units += qtyOf(i); }
+    else   { otherN++; otherVal += valOf(i); }
+  });
+
+  const good      = byCond['جيد'].n;
+  const missingN  = byCond['مفقود'].n;
+  const missingV  = byCond['مفقود'].val;
+  const attention = byCond['متضرر'].n + byCond['للاستبدال'].n + missingN;
+  const goodPct   = total > 0 ? good / total * 100 : 0;
+  const outOfStock= items.filter(i => qtyOf(i) === 0).length;
+
+  const el = document.getElementById('inv-dash');
+  if (!el) return;
+
+  if (!total) {
+    el.innerHTML = cardHead('📦 ملخص المخزون', '', '') +
+      `<div class="empty-state"><div class="big">📦</div>لا توجد عناصر — أضف أول عنصر!</div>`;
+    return;
+  }
+
+  const tags = [
+    tagHtml('📦', `${total} صنف`, ''),
+    tagHtml('🔢', `${units} قطعة`, ''),
+    attention ? tagHtml('⚠️', `${attention} تحتاج انتباهاً`, missingN ? 'bad' : 'warn') : '',
+    outOfStock ? tagHtml('🕳️', `${outOfStock} نفد`, 'warn') : '',
+  ].filter(Boolean).join(' ');
+
+  const condRows = COND_ORDER.map((c, idx) => {
+    const b = byCond[c];
+    if (!b.n) return '';
+    const m = condMeta(c);
+    return browHtml({
+      name: `${m.icon} ${esc(c)}`,
+      color: stateColorOf(m.state),
+      pct: total > 0 ? b.n / total * 100 : 0,
+      valueTxt: `${b.n}`,
+      diffTxt: formatSAR(b.val),
+      title: `${esc(c)}: ${b.n} صنف · ${b.units} قطعة · ${formatSAR(b.val)}`,
+    });
+  }).join('') + (otherN ? browHtml({
+    name: '❔ حالات أخرى',
+    color: stateColorOf(''),
+    pct: total > 0 ? otherN / total * 100 : 0,
+    valueTxt: `${otherN}`,
+    diffTxt: formatSAR(otherVal),
+  }) : '');
+
+  el.innerHTML =
+    cardHead('📦 ملخص المخزون', `${total} صنف · ${units} قطعة`, '') +
+    `<div class="stack">
+      <div class="inv-hero">
+        <div>
+          <div class="hero-num">${formatSAR(totalVal)}</div>
+          <div class="hero-cap">القيمة التقديرية الإجمالية = Σ (قيمة الوحدة × الكمية)</div>
+        </div>
+        <div class="inv-tagrow">${tags}</div>
+      </div>
+      ${meterHtml({
+        label: 'أصناف بحالة جيدة',
+        valueTxt: `${good} / ${total}`,
+        pct: goodPct,
+        state: goodPct >= 70 ? 'good' : goodPct >= 40 ? 'warn' : 'bad',
+        foot: `${formatNum(goodPct, 1)}% من الأصناف — البقية مستعملة أو تحتاج إجراءً`,
+      })}
+      ${missingN ? noteHtml('❌',
+        `<b>${missingN} صنف مفقود بقيمة ${formatSAR(missingV)}</b> — القيمة الإجمالية أعلاه تشملها.
+         اطرحها إن أردت قيمة ما تملكه فعلياً: ${formatSAR(totalVal - missingV)}.`, 'bad') : ''}
+      ${outOfStock ? noteHtml('🕳️',
+        `<b>${outOfStock} صنف بكمية صفر</b> — مسجَّل ونفد مخزونه، وقيمته تُحتسب صفراً.`, 'warn') : ''}
+      <details class="inv-details">
+        <summary>🔎 تفصيل الحالات والفئات والمواقع</summary>
+        <div class="dt-body stack-2">
+          <div class="inv-sub">حسب الحالة — العدد على الشريط والقيمة بجانبه</div>
+          ${condRows}
+          <div class="inv-sub">حسب الفئة</div>
+          ${groupRows('cat', totalVal)}
+          <div class="inv-sub">حسب الموقع</div>
+          ${groupRows('loc', totalVal)}
+        </div>
+      </details>
+    </div>`;
+}
+
+// تجميع القيمة حسب حقل نصّي (فئة/موقع) — عرض مشتق، لا حساب جديد
+function groupRows(field, totalVal) {
+  const map = new Map();
+  items.forEach(i => {
+    const k = (i[field] || '').trim() || 'غير محدّد';
+    const cur = map.get(k) || { n: 0, val: 0 };
+    cur.n++; cur.val += (+i.value || 0) * qtyOf(i);
+    map.set(k, cur);
+  });
+  const rows = [...map.entries()].sort((a, b) => b[1].val - a[1].val);
+  if (!rows.length) return '';
+  return rows.map(([k, v], idx) => browHtml({
+    name: esc(k),
+    color: cssVar('--series-' + ((idx % 6) + 1)),
+    pct: totalVal > 0 ? v.val / totalVal * 100 : 0,
+    valueTxt: formatSAR(v.val),
+    diffTxt: `${v.n}`,
+    title: `${esc(k)}: ${v.n} صنف · ${formatSAR(v.val)}`,
+  })).join('');
 }
 
 // ─── Table ────────────────────────────────────────────────────────────────────
@@ -120,22 +289,26 @@ function renderTable() {
     return;
   }
   tbody.innerHTML = list.map(i => {
-    const condC = COND_CLASS[i.cond] || 'cond-good';
-    const qty   = qtyOf(i);
-    const val   = i.value ? formatSAR((+i.value) * qty) : '—';
-    const note  = i.notes && i.notes.trim()
+    const qty  = qtyOf(i);
+    const id   = esc(i.id);
+    const val  = i.value ? formatSAR((+i.value) * qty) : '—';
+    const note = i.notes && i.notes.trim()
       ? `<button class="notes-badge" data-note="${esc(i.notes)}" onclick="showNotePopup(this)" title="ملاحظات">💬</button>` : '';
+    // الكمية صفر حالة لا لون: رقم + وسم «نفد» بأيقونة ونص
+    const qtyCell = qty === 0
+      ? `<span class="qty-num">0</span> ${tagHtml('🕳️', 'نفد', 'warn')}`
+      : `<span class="qty-num">${qty}</span>`;
     return `<tr>
-      <td style="font-weight:600">${esc(i.name)}</td>
+      <td class="inv-name">${esc(i.name)}</td>
       <td><span class="loc-badge">${esc(i.cat||'—')}</span></td>
       <td><span class="loc-badge">${esc(i.loc||'—')}</span></td>
-      <td><span class="cond-badge ${condC}">${esc(i.cond)}</span></td>
-      <td style="text-align:center"><span class="qty-num ${qty === 0 ? 'qty-low':''}">${qty}</span></td>
+      <td>${condTag(i.cond)}</td>
+      <td class="inv-center">${qtyCell}</td>
       <td class="num">${val}</td>
-      <td style="text-align:center">${note}</td>
+      <td class="inv-center">${note}</td>
       <td class="actions-cell">
-        <button class="btn-icon" onclick="openEditModal('${i.id}')" title="تعديل">✏️</button>
-        <button class="btn-icon danger" onclick="openDelModal('${i.id}')" title="حذف">🗑️</button>
+        <button class="btn-icon" onclick="openEditModal('${id}')" title="تعديل">✏️</button>
+        <button class="btn-icon danger" onclick="openDelModal('${id}')" title="حذف">🗑️</button>
       </td>
     </tr>`;
   }).join('');

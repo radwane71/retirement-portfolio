@@ -15,12 +15,28 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
   <style>
-    .inv-dash { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:14px; margin-bottom:24px; }
-    .inv-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:16px 18px; }
-    .inv-card .lbl { font-size:0.73rem; color:var(--text-2); margin-bottom:5px; }
-    .inv-card .val { font-size:1.4rem; font-weight:700; }
+    /* لوحة الملخص يبنيها js/inventory.js من نظام مكوّنات اللوحة في css/style.css:
+       .card-head .hero-num .tag .meter .brow .kvs .note .stack .dot */
+    #inv-dash { margin-bottom:24px; }
+    .inv-hero { display:flex; align-items:flex-start; justify-content:space-between; gap:var(--sp-4); flex-wrap:wrap; }
+    .inv-tagrow { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+    .inv-sub { font-size:.74rem; font-weight:700; color:var(--text-2); margin-top:var(--sp-2); }
+
+    /* التفاصيل المطويّة — «لا تحذف معلومة، أعِد ترتيبها» */
+    .inv-details { border:1px solid var(--border); border-radius:var(--radius); background:var(--bg-2); }
+    .inv-details > summary {
+      cursor:pointer; list-style:none; padding:9px 13px;
+      font-size:.8rem; font-weight:600; color:var(--text-2);
+      display:flex; align-items:center; gap:var(--sp-2);
+    }
+    .inv-details > summary::-webkit-details-marker { display:none; }
+    .inv-details > summary::after { content:'▾'; margin-inline-start:auto; transition:transform .18s; }
+    .inv-details[open] > summary::after { transform:rotate(180deg); }
+    .inv-details > summary:hover { color:var(--text); }
+    .inv-details[open] > summary { border-bottom:1px solid var(--border); }
+    .inv-details .dt-body { padding:12px 13px; }
 
     .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
     .filter-bar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:14px; }
@@ -35,14 +51,12 @@
     .inv-table th { background:var(--bg-3); color:var(--text-2); font-weight:600; padding:10px 12px; text-align:right; border-bottom:2px solid var(--border); white-space:nowrap; }
     .inv-table td { padding:10px 12px; border-bottom:1px solid var(--border); vertical-align:middle; }
     .inv-table tr:last-child td { border-bottom:none; }
-    .inv-table tr:hover td { background:rgba(255,255,255,0.02); }
+    .inv-table tr:hover td { background:var(--bg-3); }
+    .inv-table .inv-name   { font-weight:600; }
+    .inv-table .inv-center { text-align:center; }
+    .inv-table .num        { text-align:left; font-variant-numeric:tabular-nums; }
 
-    .cond-badge { display:inline-block; padding:3px 9px; border-radius:12px; font-size:0.72rem; font-weight:700; white-space:nowrap; }
-    .cond-good    { background:rgba(34,197,94,0.15);  color:#4ade80; border:1px solid rgba(34,197,94,0.3); }
-    .cond-worn    { background:rgba(240,180,41,0.15); color:#fbbf24; border:1px solid rgba(240,180,41,0.3); }
-    .cond-damaged { background:rgba(239,68,68,0.15);  color:#f87171; border:1px solid rgba(239,68,68,0.3); }
-    .cond-replace { background:rgba(168,85,247,0.15); color:#c084fc; border:1px solid rgba(168,85,247,0.3); }
-    .cond-missing { background:rgba(107,114,128,0.15);color:#9ca3af; border:1px solid rgba(107,114,128,0.3); }
+    /* حالة العنصر تُعرض بوسم .tag (أيقونة + نص) من نظام المكوّنات — لا فئات لونية هنا */
 
     .loc-badge { display:inline-block; padding:2px 8px; border-radius:10px; font-size:0.7rem; background:var(--bg-3); border:1px solid var(--border); color:var(--text-2); }
 
@@ -62,7 +76,6 @@
 
     /* qty badge */
     .qty-num { font-weight:700; font-variant-numeric:tabular-nums; }
-    .qty-low  { color:var(--danger); }
   </style>
 </head>
 <body>
@@ -157,8 +170,8 @@
       </div>
     </div>
 
-    <!-- Dashboard -->
-    <div class="inv-dash" id="inv-dash"></div>
+    <!-- لوحة الملخص — يبنيها js/inventory.js بالكامل -->
+    <div class="card" id="inv-dash"></div>
 
     <!-- Filters -->
     <div class="filter-bar">
@@ -241,8 +254,8 @@
           </select>
         </div>
         <div class="form-row">
-          <label>الكمية</label>
-          <input type="number" id="i-qty" min="1" step="1" value="1">
+          <label>الكمية <span class="small text-muted">(0 = نفد المخزون)</span></label>
+          <input type="number" id="i-qty" min="0" step="1" value="1">
         </div>
       </div>
       <div class="form-row">
@@ -274,9 +287,9 @@
 
   <div id="toast" class="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>  <script src="js/inventory.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>  <script src="js/inventory.js?v=20260817h"></script>
   <script>setActiveNav('nav-inventory');</script>
 </body>
 </html>

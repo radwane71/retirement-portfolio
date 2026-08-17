@@ -15,31 +15,114 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
   <style>
-    .alert-row-yellow { background: rgba(240,180,41,0.07); }
-    .alert-row-red    { background: rgba(248,81,73,0.07); }
-    .planned-row      { background: rgba(88,166,255,0.04); border-right: 3px solid rgba(88,166,255,0.3); }
-    .alert-icon       { font-size: 1rem; }
+    /* ══ صفحة الأهداف — كل لون من رموز التصميم، لا قيم سداسية مكتوبة يدوياً ══ */
+
+    /* ── تظليل صفوف الحالة ── */
+    .alert-row-yellow { background: color-mix(in srgb, var(--st-warn) 7%, transparent); }
+    .alert-row-red    { background: color-mix(in srgb, var(--st-bad)  7%, transparent); }
+    .planned-row      { background: color-mix(in srgb, var(--series-2) 5%, transparent);
+                        border-right: 3px solid color-mix(in srgb, var(--series-2) 40%, transparent); }
+
+    /* ── حقل الهدف ── */
     .target-input {
       width: 80px; padding: 4px 8px; text-align: center;
       background: var(--bg-3); border: 1px solid var(--border);
       border-radius: var(--radius); color: var(--text);
       font-family: inherit; font-size: 0.88rem;
+      font-variant-numeric: tabular-nums;
     }
     .target-input:focus { outline: none; border-color: var(--accent); }
-    .pct-bar-wrap { width: 100px; height: 8px; background: var(--bg-3); border-radius: 4px; display:inline-block; vertical-align:middle; }
-    .pct-bar      { height: 8px; border-radius: 4px; transition: width 0.3s; }
-    .legend { display:flex; gap:16px; flex-wrap:wrap; font-size:0.78rem; color:var(--text-2); margin-bottom:12px; }
-    .legend span { display:flex; align-items:center; gap:6px; }
-    .legend-dot { width:10px; height:10px; border-radius:50%; }
-    .task-badge {
-      display: inline-block;
-      padding: 2px 8px;
-      border-radius: 12px;
-      font-size: 0.72rem;
-      font-weight: 700;
-      white-space: nowrap;
+    .mini-warn { font-size: .63rem; font-weight: 700; color: var(--st-bad); margin-top: 4px; white-space: nowrap; }
+    /* زر ⓘ داخل عنوان القسم (لا في زاوية البطاقة) */
+    .info-inline { position: static; opacity: .7; }
+    /* سطر شرح تحت عنوان القسم مباشرةً */
+    .sect-sub { margin-top: -8px; line-height: 1.7; }
+    .src-tag   { font-size: .6rem; color: var(--text-2); opacity: .85; }
+    .link-accent { color: var(--accent); }
+
+    /* ── خلية الوزن: رقم قائد + مقياس عليه علامة الهدف وخط السقف ──
+       هذه هي فكرة الصفحة: الانحراف وكسر السقف يُقرآن بالنظر لا بالمقارنة الذهنية. */
+    .wcell      { min-width: 178px; }
+    .wcell-num  { white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .wcell-tgt  { font-weight: 400; }
+    .wmeter     { margin-top: 6px; min-width: 130px; }
+    .meter-mark[data-k="tgt"] { background: var(--text); opacity: .7; }
+    .meter-mark[data-k="cap"] { background: var(--st-bad); opacity: .9; height: 16px; top: -4px; }
+
+    /* ── خلية الحالة: وسوم متتابعة ── */
+    .stcell { white-space: normal; }
+    .stcell .tag + .tag { margin-top: 4px; }
+    .tag-xs { font-size: .62rem; padding: 1px 6px; }
+
+    /* ── صف الإجمالي ── */
+    .tfoot-row { border-top: 2px solid var(--border); background: var(--bg-3); }
+
+    /* ── سكة موقع السعر من التقييم (مصغّرة داخل خلية جدول) ──
+       RTL عمداً: اليمين = متضخم، اليسار = تجميع — نفس اتجاه قراءة الصفحة. */
+    .valcol { min-width: 190px; }
+    .vhead  { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+    .vrail  {
+      position: relative; height: 8px; border-radius: 999px; direction: rtl; margin: 8px 3px 3px;
+      background: linear-gradient(270deg,
+        color-mix(in srgb, var(--st-bad)  52%, transparent),
+        color-mix(in srgb, var(--st-warn) 48%, transparent),
+        color-mix(in srgb, var(--st-good) 48%, transparent));
+    }
+    .vrail-now { position: absolute; top: -4px; width: 2px; height: 16px; margin-right: -1px;
+                 border-radius: 1px; background: var(--text); }
+    .vrail-lbls { display: flex; justify-content: space-between; direction: rtl;
+                  font-size: .6rem; color: var(--text-2); margin: 0 3px 5px; }
+    .vreason { line-height: 1.5; }
+
+    /* ── بطاقة الانضباط ── */
+    .sum-grid { display: flex; flex-wrap: wrap; gap: var(--sp-5); align-items: flex-start; justify-content: space-between; }
+    .sum-tags { display: flex; flex-wrap: wrap; gap: var(--sp-2); max-width: 460px; }
+    .sum-more { margin-top: var(--sp-4); font-size: .8rem; }
+    .sum-more > summary { cursor: pointer; color: var(--text-2); padding: 6px 0; }
+    .sum-more > summary:hover { color: var(--text); }
+    .sum-det   { margin-top: var(--sp-3); }
+    .sum-det-t { font-weight: 700; font-size: .78rem; margin-bottom: 4px; }
+    .sum-ul    { margin: 4px 0 0; padding-inline-start: 20px; line-height: 1.9; font-size: .8rem; }
+
+    /* ── محرّك التوازن ── */
+    .reb-hero { display: flex; flex-wrap: wrap; gap: var(--sp-5); align-items: flex-start;
+                justify-content: space-between; padding: var(--sp-4);
+                background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+    .reb-hero > div:first-child { flex: 1 1 260px; min-width: 240px; }
+    .reb-hero > div:first-child .meter { margin-top: var(--sp-3); }
+    .reb-hero-kv { flex: 1 1 280px; min-width: 240px; }
+    .reb-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+                  gap: var(--sp-4); margin-bottom: var(--sp-4); padding: var(--sp-4);
+                  background: var(--bg-3); border-radius: var(--radius-lg); border: 1px solid var(--border); }
+    .reb-inputs label.fld { font-size: .78rem; color: var(--text-2); display: block; margin-bottom: 5px; }
+    .reb-inputs .ctl { width: 100%; background: var(--bg-2); border: 1px solid var(--border);
+                       border-radius: var(--radius); color: var(--text); font-family: inherit;
+                       font-size: .9rem; padding: 8px 10px; }
+    .reb-inputs .chk { display: flex; align-items: flex-end; }
+    .reb-inputs .chk label { display: flex; align-items: center; gap: 7px; font-size: .82rem;
+                             color: var(--text-2); cursor: pointer; padding-bottom: 9px; }
+    .reb-inputs .chk input { accent-color: var(--accent); width: 15px; height: 15px; }
+    .reb-info-body { white-space: pre-wrap; font-size: .85rem; color: var(--text-2);
+                     line-height: 1.75; margin-bottom: var(--sp-4); }
+    .reb-info-foot { display: flex; justify-content: flex-end; }
+
+    /* ── مفتاح الألوان ── */
+    .legend { display: flex; gap: var(--sp-4); flex-wrap: wrap; font-size: .78rem;
+              color: var(--text-2); margin-bottom: var(--sp-3); }
+    .legend span { display: flex; align-items: center; gap: 6px; }
+    .legend .dot { border-radius: 50%; width: 10px; height: 10px; }
+    .legend .dot[data-k="good"]    { background: var(--st-good); }
+    .legend .dot[data-k="warn"]    { background: var(--st-warn); }
+    .legend .dot[data-k="bad"]     { background: var(--st-bad); }
+    .legend .dot[data-k="planned"] { background: color-mix(in srgb, var(--series-2) 60%, transparent); }
+    .legend .mk-tgt { display: inline-block; width: 2px; height: 13px; background: var(--text); opacity: .7; }
+    .legend .mk-cap { display: inline-block; width: 2px; height: 13px; background: var(--st-bad); }
+
+    @media (max-width: 640px) {
+      .sum-grid, .reb-hero { flex-direction: column; gap: var(--sp-4); }
+      .sum-tags { max-width: none; }
     }
   </style>
 </head>
@@ -130,46 +213,51 @@
       </div>
     </div>
 
+    <!-- بطاقة الانضباط — الرقم القائد للصفحة -->
+    <div id="targets-summary" class="mb-4"></div>
+
     <div class="legend">
-      <span><span class="legend-dot" style="background:#22c55e"></span> ضمن الهدف</span>
-      <span><span class="legend-dot" style="background:#f0b429"></span> تنبيه (±1-3% من الهدف)</span>
-      <span><span class="legend-dot" style="background:#f85149"></span> خارج الهدف (±3%+)</span>
-      <span><span class="legend-dot" style="background:rgba(88,166,255,0.5)"></span> 📌 مخطط — موجود في قاعدة بياناتك وليس في المحفظة بعد (وزن حالي = 0%)</span>
+      <span><span class="dot" data-k="good"></span> ✅ ضمن الهدف</span>
+      <span><span class="dot" data-k="warn"></span> ⚠️ تنبيه (±1–3% من الهدف)</span>
+      <span><span class="dot" data-k="bad"></span> 🔴 خارج الهدف (±3%+)</span>
+      <span><span class="dot" data-k="planned"></span> 📌 مخطط — في قاعدة بياناتك وليس في المحفظة بعد (وزن حالي = 0%)</span>
+      <span><span class="mk-tgt"></span> علامة الهدف على المقياس</span>
+      <span><span class="mk-cap"></span> السقف الدستوري (7% · 12% للقيادي · 25% للقطاع)</span>
     </div>
 
     <!-- أهداف الأسهم -->
-    <div class="card" style="margin-bottom:20px">
+    <div class="card mb-6">
       <div class="section-header">
         <span class="section-title">📌 أهداف الأسهم الفردية
-          <button class="info-btn" type="button" onclick="showCardInfo('stock-targets')" title="ما فائدة أهداف الأسهم؟" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('stock-targets')" title="ما فائدة أهداف الأسهم؟">ⓘ</button>
         </span>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" onclick="exportTargetsCSV()">⬇ تصدير CSV</button>
           <button class="btn btn-primary btn-sm" onclick="saveAllTargets()">حفظ الأهداف</button>
         </div>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">
-        الأسهم مُستوردة من <a href="userdb.html" style="color:var(--accent)">قاعدة بياناتك</a> — الوزن الحالي يُحسب من محفظتك
+      <p class="small text-muted mb-4 sect-sub">
+        الأسهم مُستوردة من <a href="userdb.html" class="link-accent">قاعدة بياناتك</a> — الوزن الحالي يُحسب من قيمة الأسهم المملوكة.
+        عمود الوزن يعرض الرقم ومعه مقياس: التعبئة = الوزن الحالي · العلامة الداكنة = هدفك · الخط الأحمر = السقف الدستوري.
       </p>
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
               <th>المهمة</th>
-              <th class="sortable" onclick="sortStockTargets('ticker')"  style="cursor:pointer;user-select:none">الرمز    <span id="st-arr-ticker"  class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('name')"    style="cursor:pointer;user-select:none">الاسم    <span id="st-arr-name"    class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('sector')"  style="cursor:pointer;user-select:none">القطاع   <span id="st-arr-sector"  class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('entry')"   style="cursor:pointer;user-select:none">منطقة الشراء ≤ <span id="st-arr-entry"  class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('trim')"    style="cursor:pointer;user-select:none">التخفيف <span id="st-arr-trim" class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('exit')"    style="cursor:pointer;user-select:none">منطقة البيع ≥  <span id="st-arr-exit"   class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('target')"  style="cursor:pointer;user-select:none">الهدف %  <span id="st-arr-target"  class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortStockTargets('current')" style="cursor:pointer;user-select:none">الحالي % <span id="st-arr-current" class="sort-arrow">↕</span></th>
-              <th>الشريط</th>
-              <th class="sortable" onclick="sortStockTargets('status')"  style="cursor:pointer;user-select:none">الحالة   <span id="st-arr-status"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('ticker')">الرمز    <span id="st-arr-ticker"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('name')">الاسم    <span id="st-arr-name"    class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('sector')">القطاع   <span id="st-arr-sector"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('entry')">شراء ≤ <span id="st-arr-entry"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('trim')">تخفيف <span id="st-arr-trim" class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('exit')">بيع ≥  <span id="st-arr-exit"   class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('target')">الهدف %  <span id="st-arr-target"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('current')">الوزن الحالي ↔ الهدف ↔ السقف <span id="st-arr-current" class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortStockTargets('status')">الحالة   <span id="st-arr-status"  class="sort-arrow">↕</span></th>
             </tr>
           </thead>
           <tbody id="stock-targets-tbody">
-            <tr><td colspan="11"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+            <tr><td colspan="10"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -191,24 +279,25 @@
     <div class="card">
       <div class="section-header">
         <span class="section-title">🏷️ أهداف القطاعات
-          <button class="info-btn" type="button" onclick="showCardInfo('sector-targets')" title="ما فائدة أهداف القطاعات؟" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('sector-targets')" title="ما فائدة أهداف القطاعات؟">ⓘ</button>
         </span>
         <button class="btn btn-primary btn-sm" onclick="saveSectorTargets()">حفظ الأهداف</button>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">نسبة كل قطاع محسوبة من إجمالي المحفظة</p>
+      <p class="small text-muted mb-4 sect-sub">
+        نسبة كل قطاع محسوبة من إجمالي قيمة الأسهم المملوكة — والخط الأحمر على المقياس هو سقف القطاع الدستوري 25%.
+      </p>
       <div class="table-wrapper">
         <table>
           <thead>
             <tr>
-              <th class="sortable" onclick="sortSectorTargets('sector')"  style="cursor:pointer;user-select:none">القطاع   <span id="sec-arr-sector"  class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortSectorTargets('target')"  style="cursor:pointer;user-select:none">الهدف %  <span id="sec-arr-target"  class="sort-arrow">↕</span></th>
-              <th class="sortable" onclick="sortSectorTargets('current')" style="cursor:pointer;user-select:none">الحالي % <span id="sec-arr-current" class="sort-arrow">↕</span></th>
-              <th>الشريط</th>
-              <th class="sortable" onclick="sortSectorTargets('status')"  style="cursor:pointer;user-select:none">الحالة   <span id="sec-arr-status"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortSectorTargets('sector')">القطاع   <span id="sec-arr-sector"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortSectorTargets('target')">الهدف %  <span id="sec-arr-target"  class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortSectorTargets('current')">الوزن الحالي ↔ الهدف ↔ السقف <span id="sec-arr-current" class="sort-arrow">↕</span></th>
+              <th class="sortable" onclick="sortSectorTargets('status')">الحالة   <span id="sec-arr-status"  class="sort-arrow">↕</span></th>
             </tr>
           </thead>
           <tbody id="sector-targets-tbody">
-            <tr><td colspan="6"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+            <tr><td colspan="4"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -227,43 +316,40 @@
     </div>
 
     <!-- ══ محرك إعادة التوازن ══ -->
-    <div class="card" id="rebalancing-card" style="margin-top:24px">
-      <div class="section-header" style="margin-bottom:16px">
+    <div class="card mt-6" id="rebalancing-card">
+      <div class="section-header mb-4">
         <span class="section-title">⚖️ محرك إعادة التوازن <span class="eng-label">Rebalancing Engine</span></span>
         <button class="info-btn" onclick="showRebInfo()">ⓘ</button>
       </div>
-      <p class="small text-muted" style="margin-bottom:16px">
+      <p class="small text-muted mb-4">
         أدخل المبلغ المتاح للاستثمار — يحسب لك أي الأسهم تشتري وكم سهم لتقريب محفظتك من الأوزان المستهدفة.
+        <strong>يعمل على الأسهم المملوكة فقط</strong> (الأسهم المخطّطة بلا سعر ولا وزن مستبعدة).
       </p>
 
       <!-- المدخلات -->
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:16px;margin-bottom:16px;padding:16px;background:var(--bg-3);border-radius:var(--radius-lg);border:1px solid var(--border)">
+      <div class="reb-inputs">
         <div>
-          <label style="font-size:0.78rem;color:var(--text-2);display:block;margin-bottom:5px">المبلغ المتاح (ر.س) *</label>
-          <input type="number" id="reb-budget" min="0" step="100" placeholder="مثال: 6000"
-            style="width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Tajawal;font-size:0.9rem;padding:8px 10px"
+          <label class="fld" for="reb-budget">المبلغ المتاح (ر.س) *</label>
+          <input class="ctl" type="number" id="reb-budget" min="0" step="100" placeholder="مثال: 6000"
             oninput="runRebalancing()">
         </div>
         <div>
-          <label style="font-size:0.78rem;color:var(--text-2);display:block;margin-bottom:5px">طريقة التوزيع</label>
-          <select id="reb-method" onchange="runRebalancing()"
-            style="width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:Tajawal;font-size:0.88rem;padding:8px 10px">
+          <label class="fld" for="reb-method">طريقة التوزيع</label>
+          <select class="ctl" id="reb-method" onchange="runRebalancing()">
             <option value="gap">بالتناسب مع الفجوة</option>
             <option value="equal">توزيع متساوٍ بين الناقص</option>
             <option value="top1">الأولى بالأولوية فقط</option>
           </select>
         </div>
-        <div style="display:flex;align-items:flex-end;gap:8px;padding-bottom:2px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text-2);cursor:pointer">
-            <input type="checkbox" id="reb-entry-filter" onchange="runRebalancing()"
-              style="accent-color:var(--accent);width:15px;height:15px">
+        <div class="chk">
+          <label>
+            <input type="checkbox" id="reb-entry-filter" onchange="runRebalancing()">
             فقط ضمن منطقة الشراء
           </label>
         </div>
-        <div style="display:flex;align-items:flex-end;gap:8px;padding-bottom:2px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:0.82rem;color:var(--text-2);cursor:pointer">
-            <input type="checkbox" id="reb-valuation-aware" checked onchange="runRebalancing()"
-              style="accent-color:var(--accent);width:15px;height:15px">
+        <div class="chk">
+          <label>
+            <input type="checkbox" id="reb-valuation-aware" checked onchange="runRebalancing()">
             مراعاة موقع السعر من التقييم
           </label>
         </div>
@@ -271,7 +357,7 @@
 
       <!-- النتائج -->
       <div id="reb-result">
-        <div class="empty-state" style="padding:32px">
+        <div class="empty-state">
           <div class="icon">⚖️</div>
           <p>أدخل المبلغ المتاح لبدء الحساب</p>
         </div>
@@ -287,10 +373,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/tickerdb.js?v=20260817c"></script>
-  <script src="js/targets.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/tickerdb.js?v=20260817h"></script>
+  <script src="js/targets.js?v=20260817h"></script>
 </body>
 </html>

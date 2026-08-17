@@ -15,7 +15,35 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
+  <style>
+    /* ── تخطيط الصفحة فقط — بلا ألوان: كل الألوان من رموز التصميم في style.css ── */
+    /* السمة hidden يجب أن تغلب أي display في الأنماط أدناه (grid/flex) */
+    [hidden] { display: none !important; }
+    .nw-grid-2      { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+    .nw-comp-grid   { display:grid; grid-template-columns:minmax(0,320px) 1fr; gap:24px; align-items:center; }
+    .nw-comp-canvas { max-width:320px; margin:auto; width:100%; }
+    .nw-comp-legend { display:flex; flex-direction:column; gap:10px; }
+    .nw-chart-box   { height:300px; position:relative; }
+    .nw-hero-row    { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .info-inline    { position:static; opacity:.75; }
+    /* كاشف التفاصيل الموحّد — التفاصيل خلف طيّة بدل حشرها في البطاقة */
+    .nw-det > summary {
+      cursor:pointer; list-style:none; font-size:.78rem; color:var(--text-2);
+      padding:7px 0; display:flex; align-items:center; gap:6px; user-select:none;
+    }
+    .nw-det > summary::-webkit-details-marker { display:none; }
+    .nw-det > summary::before { content:'▾'; display:inline-block; transition:transform .18s; }
+    .nw-det[open] > summary::before { transform:rotate(180deg); }
+    .nw-det > summary:hover { color:var(--text); }
+    .span-2         { grid-column:span 2; }
+    .snap-modal     { max-width:520px; max-height:80vh; overflow-y:auto; }
+    #snap-detail-body { padding:16px 0; display:flex; flex-direction:column; gap:8px; }
+    @media (max-width: 900px) {
+      .nw-grid-2    { grid-template-columns:1fr; }
+      .nw-comp-grid { grid-template-columns:1fr; }
+    }
+  </style>
 </head>
 <body>
 
@@ -110,161 +138,137 @@
       <button class="btn btn-secondary" onclick="deduplicateSnapshots()" title="يُبقي لقطة واحدة لكل شهر ويحذف الباقي">🧹 تنظيف (لقطة/شهر)</button>
     </div>
 
-    <!-- Wealth composition chart -->
-    <div class="card" style="margin-bottom:20px">
-      <div class="section-header" style="flex-wrap:wrap;gap:8px">
-        <div>
-          <span class="section-title">📊 مصادر الثروة — الأصول مقابل الالتزامات
-            <button class="info-btn" type="button" onclick="showCardInfo('composition')" title="شرح هذا الرسم" style="position:static;opacity:.7">ⓘ</button>
-          </span>
-          <div class="small text-muted" id="nw-comp-subtitle" style="margin-top:2px">—</div>
+    <!-- ① الرقم القائد: صافي الثروة -->
+    <div class="card mb-6">
+      <div class="card-head">
+        <span class="ttl">🏦 صافي الثروة
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('networth-bar')" title="ما معنى صافي الثروة؟">ⓘ</button>
+        </span>
+        <div class="acts"><span class="small text-muted">الأصول − الالتزامات</span></div>
+      </div>
+      <div id="nw-hero"></div>
+    </div>
+
+    <!-- ② الأصول · الالتزامات -->
+    <div class="nw-grid-2">
+
+      <!-- ASSETS -->
+      <div class="card">
+        <div class="card-head">
+          <span class="ttl">✅ الأصول <span class="sub">أسهم وعقارات تلقائياً + ما تضيفه يدوياً</span></span>
+          <div class="acts"><button class="btn btn-primary btn-sm" onclick="openAssetModal()">+ إضافة أصل</button></div>
         </div>
-        <div class="chart-mode-btns">
+        <div class="stack">
+          <div id="nw-assets-hero"></div>
+          <div id="nw-assets-rows"></div>
+          <details class="nw-det">
+            <summary>تفصيل الأصول اليدوية وتعديلها</summary>
+            <p class="small text-muted mb-2">📈 الأسهم = عدد الأسهم × السعر الحالي (لوحة التحكم) · 🏠 العقارات = القيمة الحالية للعقارات غير المباعة. كلاهما يُسحب تلقائياً ولا يُعدَّل هنا.</p>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>التصنيف</th><th>الاسم</th><th>القيمة</th><th></th></tr></thead>
+                <tbody id="assets-tbody">
+                  <tr><td colspan="4"><div class="empty-state"><div class="icon">⏳</div></div></td></tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="2"><strong class="small">إجمالي الأصول اليدوية</strong></td>
+                    <td class="num bold" id="assets-subtotal">—</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <!-- LIABILITIES -->
+      <div class="card">
+        <div class="card-head">
+          <span class="ttl">🔴 الالتزامات <span class="sub">كل ما عليك من قروض وبطاقات</span></span>
+          <div class="acts"><button class="btn btn-primary btn-sm" onclick="openLiabModal()">+ إضافة التزام</button></div>
+        </div>
+        <div class="stack">
+          <div id="nw-liab-hero"></div>
+          <div id="nw-liab-rows"></div>
+          <details class="nw-det">
+            <summary>تفصيل الالتزامات وتعديلها</summary>
+            <div class="table-wrapper">
+              <table>
+                <thead><tr><th>التصنيف</th><th>الاسم</th><th>المبلغ</th><th></th></tr></thead>
+                <tbody id="liab-tbody">
+                  <tr><td colspan="4"><div class="empty-state"><div class="icon">⏳</div></div></td></tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colspan="2"><strong class="small">إجمالي الالتزامات</strong></td>
+                    <td class="num bold" id="liab-subtotal">—</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </details>
+        </div>
+      </div>
+    </div>
+
+    <!-- ③ مصادر الثروة -->
+    <div class="card mb-6">
+      <div class="card-head">
+        <span class="ttl">📊 مصادر الثروة
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('composition')" title="شرح هذا الرسم">ⓘ</button>
+          <span class="sub" id="nw-comp-subtitle">—</span>
+        </span>
+        <div class="acts chart-mode-btns">
           <button class="chart-mode-btn active" onclick="setCompMode('donut')" id="cm-donut">دائري</button>
           <button class="chart-mode-btn"         onclick="setCompMode('bars')"  id="cm-bars">أشرطة</button>
           <button class="chart-mode-btn"         onclick="setCompMode('cards')" id="cm-cards">بطاقات</button>
         </div>
       </div>
-      <div id="nw-comp-chart-area" style="display:grid;grid-template-columns:1fr 1fr;gap:24px;align-items:center">
-        <div style="max-width:320px;margin:auto">
-          <canvas id="nwCompChart" height="300"></canvas>
-        </div>
-        <div id="nw-comp-legend" style="display:flex;flex-direction:column;gap:10px;font-size:0.85rem"></div>
+      <div id="nw-comp-chart-area" class="nw-comp-grid">
+        <div class="nw-comp-canvas"><canvas id="nwCompChart" height="300"></canvas></div>
+        <div id="nw-comp-legend" class="nw-comp-legend"></div>
       </div>
-      <div id="nw-comp-alt-area" style="display:none"></div>
+      <div id="nw-comp-alt-area" hidden></div>
     </div>
 
-    <!-- Net worth summary bar -->
-    <div class="section-header" style="margin:0 0 6px">
-      <span class="section-title">🏦 معادلة صافي الثروة</span>
-      <button class="info-btn" type="button" onclick="showCardInfo('networth-bar')" title="ما معنى صافي الثروة؟" style="position:static;opacity:.7">ⓘ</button>
-    </div>
-    <div class="nw-total-bar">
-      <div class="nw-item">
-        <div class="lbl">إجمالي الأصول</div>
-        <div class="val text-success" id="nw-total-assets">—</div>
-      </div>
-      <div class="nw-eq">−</div>
-      <div class="nw-item">
-        <div class="lbl">إجمالي الالتزامات</div>
-        <div class="val text-danger" id="nw-total-liab">—</div>
-      </div>
-      <div class="nw-eq">=</div>
-      <div class="nw-item">
-        <div class="lbl">صافي الثروة</div>
-        <div class="val text-accent num bold" id="nw-net" style="font-size:1.65rem">—</div>
-      </div>
-    </div>
-
-    <!-- Assets & Liabilities grids -->
-    <div class="nw-assets-grid">
-
-      <!-- ASSETS -->
-      <div>
-        <div class="nw-section-label nw-assets-label">✅ الأصول</div>
-
-        <!-- Auto-pulled: stocks -->
-        <div class="card" style="margin-bottom:12px">
-          <div class="section-header">
-            <span class="section-title small">📈 الأسهم <span class="small text-muted">(تلقائي)</span></span>
-            <span class="num text-success bold" id="auto-stocks">—</span>
-          </div>
-          <p class="small text-muted">قيمة الأسهم = عدد الأسهم × السعر الحالي من صفحة لوحة التحكم</p>
-        </div>
-
-        <!-- Auto-pulled: real estate -->
-        <div class="card" style="margin-bottom:12px">
-          <div class="section-header">
-            <span class="section-title small">🏠 العقارات <span class="small text-muted">(تلقائي)</span></span>
-            <span class="num text-success bold" id="auto-realestate">—</span>
-          </div>
-          <p class="small text-muted">قيمة العقارات الحالية من صفحة العقارات (المملوكة والمؤجرة فقط)</p>
-        </div>
-
-        <!-- Manual assets table -->
-        <div class="card">
-          <div class="section-header">
-            <span class="section-title small">➕ أصول أخرى</span>
-            <button class="btn btn-primary btn-sm" onclick="openAssetModal()">+ إضافة</button>
-          </div>
-          <div class="table-wrapper">
-            <table>
-              <thead><tr><th>التصنيف</th><th>الاسم</th><th>القيمة</th><th></th></tr></thead>
-              <tbody id="assets-tbody">
-                <tr><td colspan="4"><div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div></td></tr>
-              </tbody>
-              <tfoot>
-                <tr style="border-top:2px solid var(--border)">
-                  <td colspan="2"><strong class="small">إجمالي الأصول الأخرى</strong></td>
-                  <td class="num bold text-success" id="assets-subtotal">—</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- LIABILITIES -->
-      <div>
-        <div class="nw-section-label nw-liab-label">🔴 الالتزامات</div>
-
-        <div class="card">
-          <div class="section-header">
-            <span class="section-title small">➕ الالتزامات</span>
-            <button class="btn btn-primary btn-sm" onclick="openLiabModal()">+ إضافة</button>
-          </div>
-          <div class="table-wrapper">
-            <table>
-              <thead><tr><th>التصنيف</th><th>الاسم</th><th>المبلغ</th><th></th></tr></thead>
-              <tbody id="liab-tbody">
-                <tr><td colspan="4"><div class="empty-state" style="padding:20px"><div class="icon">⏳</div></div></td></tr>
-              </tbody>
-              <tfoot>
-                <tr style="border-top:2px solid var(--border)">
-                  <td colspan="2"><strong class="small">إجمالي الالتزامات</strong></td>
-                  <td class="num bold text-danger" id="liab-subtotal">—</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Historical chart + snapshots -->
-    <div class="card">
-      <div class="section-header" style="flex-wrap:wrap;gap:8px">
-        <span class="section-title">📉 مسار صافي الثروة عبر الزمن
-          <button class="info-btn" type="button" onclick="showCardInfo('nw-history')" title="شرح هذا الرسم" style="position:static;opacity:.7">ⓘ</button>
+    <!-- ④ المسار التاريخي -->
+    <div class="card mb-6">
+      <div class="card-head">
+        <span class="ttl">📉 مسار صافي الثروة عبر الزمن
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('nw-history')" title="شرح هذا الرسم">ⓘ</button>
+          <span class="sub" id="nw-hist-sub">—</span>
         </span>
-        <div class="chart-mode-btns">
+        <div class="acts chart-mode-btns">
           <button class="chart-mode-btn active" onclick="setNwChartMode('line')"    id="nwm-line">خط</button>
           <button class="chart-mode-btn"         onclick="setNwChartMode('bar')"     id="nwm-bar">أشرطة</button>
           <button class="chart-mode-btn"         onclick="setNwChartMode('compare')" id="nwm-compare">مقارنة</button>
           <button class="chart-mode-btn"         onclick="setNwChartMode('table')"   id="nwm-table">جدول</button>
         </div>
       </div>
-      <div id="nwChart-wrap" class="chart-container" style="height:300px"><canvas id="nwChart"></canvas></div>
-      <div id="nwChart-table" style="display:none;overflow-x:auto"></div>
+      <div id="nwChart-wrap" class="nw-chart-box"><canvas id="nwChart"></canvas></div>
+      <div id="nwChart-table" class="table-wrapper" hidden></div>
+      <div id="nw-hist-note" class="mt-4"></div>
     </div>
 
+    <!-- ⑤ اللقطات -->
     <div class="card">
-      <div class="section-header">
-        <span class="section-title">اللقطات التاريخية
-          <button class="info-btn" type="button" onclick="showCardInfo('snapshots')" title="ما هي اللقطة؟" style="position:static;opacity:.7">ⓘ</button>
+      <div class="card-head">
+        <span class="ttl">📸 اللقطات التاريخية
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('snapshots')" title="ما هي اللقطة؟">ⓘ</button>
+          <span class="sub">انقر أي خلية لتعديلها مباشرة</span>
         </span>
-        <button class="btn btn-secondary btn-sm" onclick="exportNetworthCSV()">⬇ تصدير CSV</button>
+        <div class="acts"><button class="btn btn-secondary btn-sm" onclick="exportNetworthCSV()">⬇ تصدير CSV</button></div>
       </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">انقر على أي خلية لتعديلها مباشرة</p>
       <div class="table-wrapper">
         <table>
           <thead>
-            <tr><th>التاريخ</th><th>صافي الثروة</th><th>التغيير</th><th>ملاحظات</th><th>تفاصيل</th><th></th></tr>
+            <tr><th>المصدر</th><th>التاريخ</th><th>القيمة المسجَّلة</th><th>التغيير</th><th>ملاحظات</th><th>تفاصيل</th><th></th></tr>
           </thead>
           <tbody id="nw-tbody">
-            <tr><td colspan="6"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
+            <tr><td colspan="7"><div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div></td></tr>
           </tbody>
         </table>
       </div>
@@ -296,9 +300,9 @@
           </div>
           <div class="form-group"><label>الاسم *</label><input type="text" id="a-name" placeholder="مثال: حساب بنك الراجحي" required></div>
           <div class="form-group"><label>القيمة (ر.س) *</label><input type="number" id="a-value" step="0.01" min="0" placeholder="0.00" required></div>
-          <div class="form-group" style="grid-column:span 2"><label>ملاحظات</label><input type="text" id="a-notes" placeholder="اختياري"></div>
+          <div class="form-group span-2"><label>ملاحظات</label><input type="text" id="a-notes" placeholder="اختياري"></div>
         </div>
-        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+        <div class="mt-4 flex-end gap-3">
           <button type="button" class="btn btn-secondary" onclick="closeAssetModal()">إلغاء</button>
           <button type="submit" class="btn btn-primary">حفظ</button>
         </div>
@@ -326,9 +330,9 @@
           </div>
           <div class="form-group"><label>الاسم *</label><input type="text" id="l-name" placeholder="مثال: قرض السيارة" required></div>
           <div class="form-group"><label>المبلغ المتبقي (ر.س) *</label><input type="number" id="l-value" step="0.01" min="0" placeholder="0.00" required></div>
-          <div class="form-group" style="grid-column:span 2"><label>ملاحظات</label><input type="text" id="l-notes" placeholder="اختياري"></div>
+          <div class="form-group span-2"><label>ملاحظات</label><input type="text" id="l-notes" placeholder="اختياري"></div>
         </div>
-        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+        <div class="mt-4 flex-end gap-3">
           <button type="button" class="btn btn-secondary" onclick="closeLiabModal()">إلغاء</button>
           <button type="submit" class="btn btn-primary">حفظ</button>
         </div>
@@ -338,12 +342,12 @@
 
   <!-- Snapshot Detail Modal -->
   <div class="modal-overlay" id="snap-detail-modal" style="display:none" onclick="if(event.target===this)closeSnapshotDetail()">
-    <div class="modal" style="max-width:520px;max-height:80vh;overflow-y:auto">
+    <div class="modal snap-modal">
       <div class="modal-header">
         <span class="modal-title">📋 تفاصيل اللقطة</span>
         <button class="modal-close" onclick="closeSnapshotDetail()">✕</button>
       </div>
-      <div id="snap-detail-body" style="padding:16px 0;display:flex;flex-direction:column;gap:8px"></div>
+      <div id="snap-detail-body"></div>
     </div>
   </div>
 
@@ -351,9 +355,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/networth.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/networth.js?v=20260817h"></script>
 </body>
 </html>

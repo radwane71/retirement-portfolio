@@ -60,25 +60,78 @@ let pendingDeleteOppId  = null;
 let pendingDeleteDistId = null;
 let pendingDeleteDistOppId = null;
 
-// ─── Status colors ────────────────────────────────────────────────────────────
-const OPP_STATUS_COLORS = {
-  'مشترك':     { bg: '#3fb95018', border: '#3fb950', text: '#3fb950' },
-  'مغلق':      { bg: '#8b949e18', border: '#8b949e', text: '#8b949e' },
-  'متعثر':     { bg: '#f8514918', border: '#f85149', text: '#f85149' },
-  'مخطط له':   { bg: '#3b82f618', border: '#3b82f6', text: '#3b82f6' },
-};
-const DIST_STATUS_COLORS = {
-  'لم يسدد':   { bg: '#f8514918', text: '#f85149' },
-  'تم السداد': { bg: '#3fb95018', text: '#3fb950' },
-};
-
-function oppStatusStyle(s) {
-  const c = OPP_STATUS_COLORS[s] || { bg:'#f0b42918', border:'#f0b429', text:'#f0b429' };
-  return `background:${c.bg};border:1px solid ${c.border};color:${c.text}`;
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم + مولّدات المكوّنات
+// ──────────────────────────────────────────────────────────────────────
+// ربط: نسخة طبق الأصل من مولّدات js/dashboard.js (أعلى الملف) — صفحة الصكوك
+// لا تُحمّل dashboard.js، فتُنسخ هنا بنفس التوقيعات بالضبط. أي تعديل هناك
+// يجب أن يُنسخ هنا (والعكس). المكوّنات معرَّفة في css/style.css تحت
+// «نظام مكوّنات اللوحة»: .card-head .hero-num .tag .meter .brow .kvs .note .stack .dot
+// قاعدة ثابتة: لا لون سداسي مكتوب يدوياً في هذا الملف — رموز التصميم فقط،
+// واللون وحده لا يحمل معنى (كل حالة معها أيقونة ونص).
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
 }
-function distStatusStyle(s) {
-  const c = DIST_STATUS_COLORS[s] || { bg:'#f0b42918', text:'#f0b429' };
-  return `background:${c.bg};color:${c.text}`;
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
+// ─── دلالة الحالة: أيقونة + حالة تصميمية (لا لون وحده) ────────────────────────
+const OPP_STATE = {
+  'مشترك':   { icon: '✅', state: 'good' },
+  'مغلق':    { icon: '🏁', state: ''     },
+  'متعثر':   { icon: '⚠️', state: 'bad'  },
+  'مخطط له': { icon: '📋', state: ''     },
+};
+const DIST_STATE = {
+  'تم السداد': { icon: '✅', state: 'good' },
+  'لم يسدد':   { icon: '⏳', state: 'warn' },
+};
+function oppMeta(s)  { return OPP_STATE[s]  || { icon: '❔', state: '' }; }
+function distMeta(s) { return DIST_STATE[s] || { icon: '❔', state: '' }; }
+function oppTag(s)   { const m = oppMeta(s);  return tagHtml(m.icon, esc(s || 'بدون حالة'), m.state); }
+function distTag(s)  { const m = distMeta(s); return tagHtml(m.icon, esc(s || 'بدون حالة'), m.state); }
+
+// شهر عربي آمن — بيانات مستوردة قد تحمل شهراً خارج 1..12
+function monthName(m) {
+  const i = (parseInt(m, 10) || 0) - 1;
+  return MONTHS_AR[i] || '—';
 }
 
 // ─── Calculations ─────────────────────────────────────────────────────────────
@@ -87,6 +140,19 @@ function calcOpp(o) {
   const totalReturnSAR = (o.amount || 0) * (1 + totalReturnPct / 100);
   const netProfit      = totalReturnSAR - (o.amount || 0);
   return { totalReturnPct, totalReturnSAR, netProfit };
+}
+
+// مجاميع توزيعات فرصة واحدة — المحصّل والمعلّق وأي حالة مخصّصة (غير مصنّفة)
+function distTotals(o) {
+  let paid = 0, unpaid = 0, other = 0, n = 0;
+  (o.distributions || []).forEach(d => {
+    const v = +d.amount || 0;
+    n++;
+    if (d.status === 'تم السداد')   paid   += v;
+    else if (d.status === 'لم يسدد') unpaid += v;
+    else                             other  += v;
+  });
+  return { paid, unpaid, other, count: n, recorded: paid + unpaid + other };
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -106,6 +172,8 @@ async function init() {
 }
 
 // ─── Dashboard ────────────────────────────────────────────────────────────────
+// بطاقة واحدة يقودها رقم واحد: رأس المال المشترك. البقية مقاييس مساندة
+// ثم تفاصيل مطويّة — «لا تحذف معلومة، أعِد ترتيبها».
 function renderDashboard() {
   const opps = store.opportunities;
 
@@ -129,48 +197,120 @@ function renderDashboard() {
     ? (totalNetProfit / totalInvested * 100)
     : 0;
 
+  // مقياس مُضاف (لا يغيّر أي رقم قائم): متوسط العائد السنوي مرجّحاً بالمبلغ.
+  // «متوسط العائد الكلي» أعلاه يخلط مُدداً مختلفة فلا يُقارَن بين الفرص؛
+  // هذا الرقم قابل للمقارنة لأنه على أساس سنوي موحّد.
+  const weightedAnnualPct = totalInvested > 0
+    ? active.reduce((s, o) => s + (+o.amount || 0) * (+o.annualReturn || 0), 0) / totalInvested
+    : 0;
+  const weightedMonths = totalInvested > 0
+    ? active.reduce((s, o) => s + (+o.amount || 0) * (+o.duration || 0), 0) / totalInvested
+    : 0;
+
   // paid distributions — نقد فعلي/مستحق: تبقى على كل الفرص بغض النظر عن الحالة
-  const totalPaid = opps.reduce((s, o) =>
-    s + (o.distributions || []).filter(d => d.status === 'تم السداد')
-        .reduce((ss, d) => ss + (+d.amount || 0), 0), 0);
-  const totalUnpaid = opps.reduce((s, o) =>
-    s + (o.distributions || []).filter(d => d.status === 'لم يسدد')
-        .reduce((ss, d) => ss + (+d.amount || 0), 0), 0);
+  let totalPaid = 0, totalUnpaid = 0, totalOther = 0;
+  opps.forEach(o => {
+    const t = distTotals(o);
+    totalPaid += t.paid; totalUnpaid += t.unpaid; totalOther += t.other;
+  });
+  // تفصيل المعلّق حسب حالة الفرصة — معلّق على «متعثر» ذمّة مشكوك فيها
+  const unpaidDistressed = opps.filter(o => o.status === 'متعثر')
+    .reduce((s, o) => s + distTotals(o).unpaid, 0);
 
-  set('dash-count',      subscribedCount);
-  set('dash-invested',   formatSAR(totalInvested));
-  set('dash-sukuk',      totalSukuk);
-  set('dash-avg-pct',    formatNum(avgReturnPct, 2) + '%');
-  set('dash-return-sar', formatSAR(totalReturnSAR));
-  set('dash-net',        formatSAR(totalNetProfit));
-  set('dash-paid',       formatSAR(totalPaid));
-  set('dash-unpaid',     formatSAR(totalUnpaid));
+  const planned   = opps.filter(o => o.status === 'مخطط له');
+  const distressed= opps.filter(o => o.status === 'متعثر');
+  const closed    = opps.filter(o => o.status === 'مغلق');
+  const sum = list => list.reduce((s, o) => s + (+o.amount || 0), 0);
+  const plannedTotal = sum(planned), distressedTotal = sum(distressed), closedTotal = sum(closed);
 
-  // بطاقة «مخطط له» — مبالغ مرصودة لم تُستثمر بعد (تُنشأ ديناميكياً عند الحاجة)
-  const planned      = opps.filter(o => o.status === 'مخطط له');
-  const plannedTotal = planned.reduce((s, o) => s + (+o.amount || 0), 0);
-  renderPlannedCard(planned.length, plannedTotal);
-}
+  // فرص بحالة خارج القائمة المعرّفة (أضافها المالك من إدارة الحالات)
+  const known  = new Set(['مشترك', 'مغلق', 'متعثر', 'مخطط له']);
+  const custom = opps.filter(o => !known.has(o.status));
 
-function renderPlannedCard(count, total) {
-  const dash = document.querySelector('.sukuk-dash');
-  if (!dash) return;
-  let card = document.getElementById('dash-planned-card');
-  if (!count) { if (card) card.remove(); return; }
-  if (!card) {
-    card = document.createElement('div');
-    card.id = 'dash-planned-card';
-    card.className = 'sk-card';
-    dash.appendChild(card);
+  const collectPct = (totalPaid + totalUnpaid) > 0
+    ? totalPaid / (totalPaid + totalUnpaid) * 100 : 0;
+
+  const el = document.getElementById('sk-summary');
+  if (!el) return;
+
+  if (!opps.length) {
+    el.innerHTML = cardHead('📜 ملخص الصكوك والتمويل الجماعي', '', infoBtn()) +
+      `<div class="empty-state">لا توجد فرص بعد — أضف فرصتك الأولى لتظهر المجاميع</div>`;
+    return;
   }
-  card.innerHTML = `
-    <div class="sk-label" title="فرص بحالة «مخطط له» — مبالغ مرصودة لم تُستثمر بعد ولا تدخل في المجاميع">مخطط له (${count})</div>
-    <div class="sk-val" style="color:#3b82f6">${formatSAR(total)}</div>`;
+
+  const statusTags = [
+    subscribedCount ? tagHtml('✅', `مشترك: ${subscribedCount}`, 'good') : '',
+    distressed.length ? tagHtml('⚠️', `متعثر: ${distressed.length}`, 'bad') : '',
+    planned.length ? tagHtml('📋', `مخطط له: ${planned.length}`, '') : '',
+    closed.length ? tagHtml('🏁', `مغلق: ${closed.length}`, '') : '',
+    custom.length ? tagHtml('❔', `حالات أخرى: ${custom.length}`, '') : '',
+  ].filter(Boolean).join(' ');
+
+  const notes = [
+    distressed.length ? noteHtml('⚠️',
+      `<b>متعثر:</b> ${distressed.length} فرصة برأس مال ${formatSAR(distressedTotal)} — مستثناة من المجاميع والعائد المتوقع، ورأس مالها في خطر.`, 'bad') : '',
+    planned.length ? noteHtml('📋',
+      `<b>مخطط له:</b> ${planned.length} فرصة بمبلغ مرصود ${formatSAR(plannedTotal)} — لم يُستثمر بعد ولا يدخل في أي مجموع أعلاه.`, '') : '',
+    totalOther > 0 ? noteHtml('❔',
+      `<b>توزيعات غير مصنّفة:</b> ${formatSAR(totalOther)} بحالة خارج «تم السداد / لم يسدد» — لا تدخل في المحصّل ولا في المعلّق.`, 'warn') : '',
+    noteHtml('ℹ️',
+      `<b>المدة الجزئية غير متوفرة:</b> لا يوجد حقل «تاريخ بدء» في بيانات الفرصة، فكل أرقام العائد أعلاه <em>كاملة عند الاستحقاق</em> لا مستحقة حتى اليوم. المحصّل فعلياً هو ${formatSAR(totalPaid)} من التوزيعات المسجّلة.`, ''),
+  ].filter(Boolean).join('');
+
+  el.innerHTML =
+    cardHead('📜 ملخص الصكوك والتمويل الجماعي',
+      `${subscribedCount} فرصة مشتركة · ${totalSukuk} صك`, infoBtn()) +
+    `<div class="stack">
+      <div class="sk-hero">
+        <div>
+          <div class="hero-num">${formatSAR(totalInvested)}</div>
+          <div class="hero-cap">رأس المال المشترك حالياً — الحالة «مشترك» فقط</div>
+        </div>
+        <div class="sk-tagrow">${statusTags}</div>
+      </div>
+      ${meterHtml({
+        label: 'تحصيل التوزيعات المسجّلة',
+        valueTxt: formatNum(collectPct, 1) + '%',
+        pct: collectPct,
+        foot: `محصّل ${formatSAR(totalPaid)} · معلّق ${formatSAR(totalUnpaid)}` +
+              (unpaidDistressed > 0 ? ` — منها ${formatSAR(unpaidDistressed)} على فرص متعثرة` : ''),
+      })}
+      ${kvsHtml([
+        ['صافي الربح المتوقع', formatSAR(totalNetProfit)],
+        ['الإجمالي عند الاستحقاق', formatSAR(totalReturnSAR)],
+        ['متوسط العائد السنوي (مرجّح)', formatNum(weightedAnnualPct, 2) + '%'],
+        ['متوسط العائد على كامل المدة', formatNum(avgReturnPct, 2) + '%'],
+        ['متوسط المدة (مرجّح)', formatNum(weightedMonths, 1) + ' شهر'],
+        ['محصّل من التوزيعات', formatSAR(totalPaid)],
+        ['معلّق من التوزيعات', formatSAR(totalUnpaid)],
+        totalOther > 0 ? ['توزيعات غير مصنّفة', formatSAR(totalOther)] : null,
+      ])}
+      ${notes}
+      <details class="sk-details">
+        <summary>🔎 تفصيل الحالات ومعنى كل رقم</summary>
+        <div class="dt-body stack-2">
+          ${kvsHtml([
+            ['مشترك — رأس المال', formatSAR(totalInvested)],
+            ['متعثر — رأس المال', formatSAR(distressedTotal)],
+            ['مخطط له — مرصود', formatSAR(plannedTotal)],
+            ['مغلق — رأس مال مسترد', formatSAR(closedTotal)],
+          ])}
+          <p class="small text-muted">
+            العائد هنا <b>بسيط غير مركّب</b>: العائد الكلي% = العائد السنوي% × (المدة ÷ 12)،
+            والإجمالي عند الاستحقاق = المبلغ × (1 + العائد الكلي%) فهو <b>رأس المال + الربح</b> لا الربح وحده.
+            «متوسط العائد على كامل المدة» يجمع مُدداً مختلفة فلا يصلح للمقارنة بين الفرص —
+            استخدم «متوسط العائد السنوي (مرجّح)» لذلك.
+            المحصّل والمعلّق يشملان كل الفرص مهما كانت حالتها لأنهما نقد فعلي/مستحق.
+          </p>
+        </div>
+      </details>
+    </div>`;
 }
 
-function set(id, val) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = val;
+function infoBtn() {
+  return `<button class="info-btn info-inline" type="button" onclick="showCardInfo('sukuk-summary')"
+    title="ما هي الصكوك وكيف تُحسب؟">ⓘ</button>`;
 }
 
 // ─── Opportunities ────────────────────────────────────────────────────────────
@@ -186,83 +326,79 @@ function renderOpportunities() {
 
 function renderOppCard(o) {
   const { totalReturnPct, totalReturnSAR, netProfit } = calcOpp(o);
+  const t  = distTotals(o);
+  const id = esc(o.id);
 
   const distRows = (o.distributions || [])
     .slice()
     .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
     .map(d => `
       <tr>
-        <td>${MONTHS_AR[(+d.month || 1) - 1]} ${d.year}</td>
+        <td>${monthName(d.month)} ${esc(d.year)}</td>
         <td class="num">${formatSAR(+d.amount || 0)}</td>
-        <td><span class="dist-badge" style="${distStatusStyle(d.status)}">${esc(d.status)}</span></td>
+        <td>${distTag(d.status)}</td>
         <td class="dist-actions">
-          <button class="btn-icon-sm" onclick="openEditDist('${o.id}','${d.id}')" title="تعديل">✏️</button>
-          <button class="btn-icon-sm danger" onclick="confirmDeleteDist('${o.id}','${d.id}')" title="حذف">🗑️</button>
+          <button class="btn-icon-sm" onclick="openEditDist('${id}','${esc(d.id)}')" title="تعديل">✏️</button>
+          <button class="btn-icon-sm danger" onclick="confirmDeleteDist('${id}','${esc(d.id)}')" title="حذف">🗑️</button>
         </td>
       </tr>`).join('');
 
-  const paidTotal   = (o.distributions||[]).filter(d=>d.status==='تم السداد').reduce((s,d)=>s+(+d.amount||0),0);
-  const unpaidTotal = (o.distributions||[]).filter(d=>d.status==='لم يسدد').reduce((s,d)=>s+(+d.amount||0),0);
+  // نسبة ما تحصّل من التوزيعات المسجّلة على هذه الفرصة (لا علاقة لها بالعائد المتوقع)
+  const denom      = t.paid + t.unpaid;
+  const collectPct = denom > 0 ? t.paid / denom * 100 : 0;
+
+  const isDistressed = o.status === 'متعثر';
+  const isPlanned    = o.status === 'مخطط له';
+  const amountCap    = isPlanned ? 'مبلغ مرصود — لم يُستثمر بعد'
+                     : isDistressed ? 'رأس مال في خطر — فرصة متعثرة'
+                     : 'رأس المال المستثمر';
+
+  const acts =
+    oppTag(o.status) +
+    `<button class="btn-icon-sm" onclick="openAddDist('${id}')" title="إضافة توزيعة">＋</button>` +
+    `<button class="btn-icon-sm" onclick="openEditOpp('${id}')" title="تعديل">✏️</button>` +
+    `<button class="btn-icon-sm danger" onclick="confirmDeleteOpp('${id}')" title="حذف">🗑️</button>`;
+
+  const body = t.count
+    ? meterHtml({
+        label: 'تحصيل التوزيعات المسجّلة',
+        valueTxt: formatNum(collectPct, 1) + '%',
+        pct: collectPct,
+        foot: `محصّل ${formatSAR(t.paid)} · معلّق ${formatSAR(t.unpaid)}` +
+              (t.other > 0 ? ` · غير مصنّف ${formatSAR(t.other)}` : ''),
+      })
+    : noteHtml('📭', 'لا توجد توزيعات مسجّلة بعد على هذه الفرصة.', '');
 
   return `
-    <div class="opp-card" id="card-${o.id}">
-      <div class="opp-card-header">
-        <div class="opp-name-block">
-          <span class="opp-name">${esc(o.name || 'بدون اسم')}</span>
-          <span class="opp-platform">${esc(o.platform || '')}</span>
+    <div class="opp-card card" id="card-${id}">
+      ${cardHead(esc(o.name || 'بدون اسم'), esc(o.platform || ''), acts)}
+      <div class="stack">
+        <div>
+          <div class="hero-num">${formatSAR(+o.amount || 0)}</div>
+          <div class="hero-cap">${amountCap} · ${+o.sukukCount || 0} صك · ${+o.duration || 0} شهر</div>
         </div>
-        <div class="opp-header-actions">
-          <span class="opp-status-badge" style="${oppStatusStyle(o.status)}">${esc(o.status)}</span>
-          <button class="btn-icon-sm" onclick="openEditOpp('${o.id}')" title="تعديل">✏️</button>
-          <button class="btn-icon-sm danger" onclick="confirmDeleteOpp('${o.id}')" title="حذف">🗑️</button>
-        </div>
-      </div>
-
-      <div class="opp-metrics">
-        <div class="metric-row">
-          <span class="metric-label">عدد الصكوك</span>
-          <span class="metric-val">${+o.sukukCount || 0}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">المدة</span>
-          <span class="metric-val">${+o.duration || 0} شهر</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">المبلغ المستثمر</span>
-          <span class="metric-val accent">${formatSAR(+o.amount || 0)}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">العائد السنوي%</span>
-          <span class="metric-val">${formatNum(+o.annualReturn || 0, 2)}%</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">العائد الكلي%</span>
-          <span class="metric-val success">${formatNum(totalReturnPct, 2)}%</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">العائد الكلي "ريال"</span>
-          <span class="metric-val success">${formatSAR(totalReturnSAR)}</span>
-        </div>
-        <div class="metric-row">
-          <span class="metric-label">صافي الربح</span>
-          <span class="metric-val ${netProfit >= 0 ? 'success' : 'danger'}">${formatSAR(netProfit)}</span>
-        </div>
-      </div>
-
-      <div class="dist-section">
-        <div class="dist-header">
-          <span class="dist-title">التوزيعات</span>
-          <div class="dist-totals">
-            <span class="dist-badge" style="${distStatusStyle('تم السداد')}">محصّل: ${formatSAR(paidTotal)}</span>
-            <span class="dist-badge" style="${distStatusStyle('لم يسدد')}">معلّق: ${formatSAR(unpaidTotal)}</span>
+        ${body}
+        ${kvsHtml([
+          ['صافي الربح المتوقع', formatSAR(netProfit)],
+          ['العائد السنوي', formatNum(+o.annualReturn || 0, 2) + '%'],
+          ['العائد على كامل المدة', formatNum(totalReturnPct, 2) + '%'],
+          ['الإجمالي عند الاستحقاق', formatSAR(totalReturnSAR)],
+        ])}
+        ${isDistressed ? noteHtml('⚠️',
+          'فرصة متعثرة — لا تدخل في مجاميع اللوحة، وتوزيعاتها المعلّقة ذمّة مشكوك في تحصيلها.', 'bad') : ''}
+        ${isPlanned ? noteHtml('📋',
+          'فرصة مخطط لها — المبلغ مرصود ولم يُستثمر، فهي خارج كل مجاميع اللوحة.', '') : ''}
+        <details class="sk-details"${t.count ? '' : ' open'}>
+          <summary>💵 التوزيعات (${t.count}) — محصّل ${formatSAR(t.paid)} · معلّق ${formatSAR(t.unpaid)}</summary>
+          <div class="dt-body">
+            ${t.count ? `
+            <table class="dist-table">
+              <thead><tr><th>الشهر</th><th>المبلغ</th><th>الحالة</th><th></th></tr></thead>
+              <tbody>${distRows}</tbody>
+            </table>` : `<div class="dist-empty">لا توجد توزيعات بعد</div>`}
+            <button class="btn-sm mt-2" onclick="openAddDist('${id}')">+ إضافة توزيعة</button>
           </div>
-          <button class="btn-sm" onclick="openAddDist('${o.id}')">+ توزيعة</button>
-        </div>
-        ${(o.distributions||[]).length ? `
-        <table class="dist-table">
-          <thead><tr><th>الشهر</th><th>المبلغ</th><th>الحالة</th><th></th></tr></thead>
-          <tbody>${distRows}</tbody>
-        </table>` : `<div class="dist-empty">لا توجد توزيعات بعد</div>`}
+        </details>
       </div>
     </div>`;
 }
@@ -483,7 +619,7 @@ function confirmDeleteDist(oppId, distId) {
   const o = store.opportunities.find(x => x.id === oppId);
   const d = o && (o.distributions || []).find(x => x.id === distId);
   if (!d) return;
-  const month = MONTHS_AR[(+d.month || 1) - 1];
+  const month = monthName(d.month);
   document.getElementById('del-dist-name').textContent = `توزيعة ${month} ${d.year}`;
   document.getElementById('del-dist-modal').classList.add('open');
 }

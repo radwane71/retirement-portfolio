@@ -15,7 +15,51 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
+  <style>
+    /* لوحة الملخص يبنيها js/cashflows.js من نظام مكوّنات اللوحة في css/style.css:
+       .card-head .hero-num .tag .meter .kvs .note .stack */
+    .cf-hero {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: var(--sp-4); flex-wrap: wrap;
+    }
+    .cf-tagrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    /* ⓘ داخل .card-head — تُخرَج من التموضع المطلق الافتراضي */
+    .info-btn.info-inline { position: static; opacity: .7; }
+
+    /* التفاصيل المطويّة — «لا تحذف معلومة، أعِد ترتيبها» */
+    .cf-details { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+    .cf-details > summary {
+      cursor: pointer; list-style: none; padding: 9px 13px;
+      font-size: .8rem; font-weight: 600; color: var(--text-2);
+      display: flex; align-items: center; gap: var(--sp-2);
+    }
+    .cf-details > summary::-webkit-details-marker { display: none; }
+    .cf-details > summary::after { content: '▾'; margin-inline-start: auto; transition: transform .18s; }
+    .cf-details[open] > summary::after { transform: rotate(180deg); }
+    .cf-details > summary:hover { color: var(--text); }
+    .cf-details[open] > summary { border-bottom: 1px solid var(--border); }
+    .cf-details .dt-body { padding: 12px 13px; }
+
+    .cf-year-table { width: 100%; border-collapse: collapse; font-size: .83rem; }
+    .cf-year-table th {
+      text-align: right; padding: 7px 10px; font-size: .74rem; font-weight: 600;
+      color: var(--text-2); border-bottom: 1px solid var(--border); white-space: nowrap;
+    }
+    .cf-year-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .cf-year-table tr:last-child td { border-bottom: none; }
+    .cf-year-table .num { text-align: left; font-variant-numeric: tabular-nums; }
+
+    /* صفوف الأرباح داخل جدول الحركات — تمييز بنيوي لا لوني وحده */
+    .cf-divider td { background: var(--bg-3); padding: 8px 12px; color: var(--text-2); }
+    .cf-div-row td { opacity: .9; }
+
+    .cf-filter-select {
+      padding: 5px 10px; background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--text);
+      font-family: inherit; font-size: 0.85rem;
+    }
+  </style>
 </head>
 <body>
 
@@ -108,53 +152,9 @@
       </div>
     </div>
 
-    <!-- Summary cards -->
-    <div class="section-header" style="margin:0 0 8px">
-      <span class="section-title">💸 ملخص التدفقات النقدية</span>
-      <button class="info-btn" type="button" onclick="showCardInfo('cashflow-summary')" title="ما هي التدفقات النقدية ولماذا تهم؟" style="position:static;opacity:.7">ⓘ</button>
-    </div>
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div class="label">إجمالي الإيداعات</div>
-        <div class="value num text-success" id="cf-total-dep">—</div>
-        <div class="sub">جميع العمليات</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">إجمالي السحوبات</div>
-        <div class="value num text-danger" id="cf-total-with">—</div>
-        <div class="sub">جميع العمليات</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">صافي التدفق</div>
-        <div class="value num" id="cf-net">—</div>
-        <div class="sub">الإيداعات − السحوبات</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">هذا العام</div>
-        <div class="value num text-accent" id="cf-this-year">—</div>
-        <div class="sub" id="cf-this-year-lbl">—</div>
-      </div>
-    </div>
-
-    <!-- Dividends summary card (auto-linked) -->
-    <div class="card" style="border-color:rgba(63,185,80,0.3);background:rgba(63,185,80,0.04)">
-      <div class="section-header">
-        <span class="section-title">💰 الأرباح الموزعة — مرتبطة تلقائياً</span>
-        <a href="dividends.html" class="btn btn-secondary btn-sm">→ صفحة الأرباح</a>
-      </div>
-      <p class="small text-muted mb-4" style="margin-top:-8px">هذه الأرباح مسحوبة تلقائياً من سجل الأرباح الموزعة — لا تُسجَّل يدوياً هنا لتجنّب الازدواجية</p>
-      <div class="stats-grid" style="margin-bottom:0">
-        <div class="stat-card" style="background:var(--bg-2)">
-          <div class="label">إجمالي الأرباح (كل السنوات)</div>
-          <div class="value num text-success" id="cf-total-div">—</div>
-          <div class="sub">من جدول الأرباح الموزعة</div>
-        </div>
-        <div class="stat-card" style="background:var(--bg-2)">
-          <div class="label">أرباح هذا العام</div>
-          <div class="value num text-success" id="cf-year-div">—</div>
-          <div class="sub">الأرباح المستلمة في السنة الجارية</div>
-        </div>
-      </div>
+    <!-- لوحة الملخص — يبنيها js/cashflows.js بالكامل -->
+    <div class="card" id="cf-summary">
+      <div class="empty-state"><div class="icon">⏳</div><p>جارٍ التحميل…</p></div>
     </div>
 
     <!-- Add entry form -->
@@ -187,7 +187,7 @@
         <div class="flex gap-2 align-items-center">
           <button class="btn btn-secondary btn-sm" onclick="exportCashflowsCSV()">⬇ تصدير CSV</button>
           <label class="small text-muted">تصفية بالسنة:</label>
-          <select id="cf-year-filter" onchange="filterYear()" style="padding:5px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.85rem">
+          <select id="cf-year-filter" class="cf-filter-select" onchange="filterYear()">
             <option value="">كل السنوات</option>
           </select>
         </div>
@@ -216,9 +216,9 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/cashflows.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/cashflows.js?v=20260817h"></script>
 </body>
 </html>

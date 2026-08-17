@@ -15,7 +15,59 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
+  <style>
+    /* ══ صفحة المراقبة — كل لون من رموز التصميم، لا قيم سداسية مكتوبة يدوياً ══ */
+    .link-accent { color: var(--accent); }
+    .upper  { text-transform: uppercase; }
+    .span-2 { grid-column: span 2; }
+    /* زر ⓘ داخل عنوان القسم (لا في زاوية البطاقة) */
+    .info-inline { position: static; opacity: .7; }
+    /* سطر شرح تحت عنوان القسم مباشرةً */
+    .sect-sub { margin-top: -8px; line-height: 1.7; }
+
+    /* ── بطاقة سياق التنويع ── */
+    .wl-ctx       { display: flex; flex-wrap: wrap; gap: var(--sp-5); align-items: flex-start; }
+    .wl-ctx-hero  { flex: 0 0 auto; min-width: 170px; }
+    .wl-ctx-kv    { flex: 1 1 320px; min-width: 260px; }
+
+    /* ── خلايا الجدول ── */
+    .lp-sub      { font-size: .64rem; color: var(--text-2); margin-top: 2px; white-space: nowrap; }
+    .notes-cell  { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .impact-cell { white-space: normal; }
+    .mini-warn   { font-size: .63rem; font-weight: 700; color: var(--st-bad); margin-top: 4px; }
+
+    /* وسم الحالة كزرّ — نفس مظهر .tag بالضبط مع إمكانية النقر */
+    .tag-btn { cursor: pointer; font-family: inherit; }
+    .tag-btn:hover { filter: brightness(1.12); }
+    .tag-d { opacity: .8; font-weight: 500; }
+
+    /* ── نافذة تحليل الأثر ── */
+    .wl-modal      { max-width: 560px; padding: 0; }
+    .wl-modal-head { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3);
+                     padding: 14px 18px; border-bottom: 1px solid var(--border);
+                     position: sticky; top: 0; background: var(--bg-2); z-index: 1; }
+    .wl-modal-head .modal-title { font-size: .95rem; }
+    .wl-modal-body { padding: 18px; }
+    .wl-verdict    { text-align: center; padding: var(--sp-4);
+                     background: var(--bg-3); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+    .wl-sec-t      { font-size: .8rem; font-weight: 700; margin-bottom: var(--sp-2); }
+    .wl-tags       { display: flex; flex-wrap: wrap; gap: 6px; }
+    .wl-det > summary { cursor: pointer; color: var(--text-2); font-size: .8rem; padding: 6px 0; }
+    .wl-det > summary:hover { color: var(--text); }
+
+    /* ── قائمة الأسباب ── */
+    .rsn-ul { list-style: none; padding: 0; margin: 0; font-size: .83rem; color: var(--text); }
+    .rsn    { display: flex; gap: var(--sp-2); align-items: flex-start; margin-bottom: 7px; line-height: 1.6; }
+    .rsn-i  { font-weight: 700; flex-shrink: 0; color: var(--text-2); }
+    .rsn-i[data-state="good"] { color: var(--st-good); }
+    .rsn-i[data-state="bad"]  { color: var(--st-bad); }
+
+    @media (max-width: 640px) {
+      .wl-ctx { flex-direction: column; gap: var(--sp-4); }
+      .notes-cell { max-width: 150px; }
+    }
+  </style>
 </head>
 <body>
 
@@ -111,10 +163,14 @@
     <div class="card">
       <div class="section-header">
         <span class="section-title">قائمة المراقبة
-          <button class="info-btn" type="button" onclick="showCardInfo('watchlist')" title="ما فائدة هذه القائمة وعمود الأثر؟" style="position:static;opacity:.7">ⓘ</button>
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('watchlist')" title="ما فائدة هذه القائمة وعمود الأثر؟">ⓘ</button>
         </span>
         <button class="btn btn-secondary btn-sm" onclick="exportWatchlistCSV()">⬇ تصدير CSV</button>
       </div>
+      <p class="small text-muted mb-4 sect-sub">
+        عمود «الأثر» يحاكي إضافة السهم بنسبته المخططة ثم يقيس تغيّر التنويع ويفحص الأسقف الدستورية
+        (سهم 7% · قيادي 12% · قطاع 25%). اضغط الوسم لعرض التحليل المفصّل.
+      </p>
       <div class="table-wrapper">
         <table>
           <thead>
@@ -156,7 +212,7 @@
           <div class="form-group">
             <label>رمز السهم *</label>
             <input type="text" id="wl-ticker" placeholder="مثال: 2222" required
-                   oninput="onTickerInput()" style="text-transform:uppercase">
+                   oninput="onTickerInput()" class="upper">
           </div>
           <div class="form-group">
             <label>اسم السهم *</label>
@@ -174,12 +230,12 @@
             <label>النسبة المخططة من المحفظة (%)</label>
             <input type="number" id="wl-planned-pct" step="0.1" min="0" max="100" placeholder="0.0">
           </div>
-          <div class="form-group" style="grid-column:span 2">
+          <div class="form-group span-2">
             <label>ملاحظات</label>
             <input type="text" id="wl-notes" placeholder="اختياري — سبب المراقبة، مستهدف السعر…">
           </div>
         </div>
-        <div class="mt-4 flex gap-3" style="justify-content:flex-end">
+        <div class="mt-4 flex gap-3 flex-end">
           <button type="button" class="btn btn-secondary" onclick="closeModal()">إلغاء</button>
           <button type="submit" class="btn btn-primary">حفظ</button>
         </div>
@@ -190,10 +246,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/tickerdb.js?v=20260817c"></script>
-  <script src="js/watchlist.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/tickerdb.js?v=20260817h"></script>
+  <script src="js/watchlist.js?v=20260817h"></script>
 </body>
 </html>

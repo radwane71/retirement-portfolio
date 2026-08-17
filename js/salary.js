@@ -1,28 +1,127 @@
 // ─── Storage — Supabase (primary) + localStorage (cache/fallback) ─────────────
 const STORE_KEY = 'salary_planner_v1';
 
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم — نسخة محلية من مولّدات js/dashboard.js
+// هذه الصفحة لا تُحمّل dashboard.js، فنُسِخت الدوال كما هي حرفياً:
+//   cssVar · seriesColor · stateColorOf · tint · chartTheme · chartTooltipStyle
+//   cardHead · tagHtml · meterHtml · browHtml · noteHtml · kvsHtml
+// المصدر الأصلي: js/dashboard.js (أعلى الملف). أي تعديل هناك يُنقل هنا يدوياً.
+// قاعدة ملزمة: لا لون سداسي مكتوب يدوياً في هذا الملف — الرموز فقط.
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون سلسلة بيانات بالترتيب الثابت (1..6) — لا تُدوَّر عشوائياً
+function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// شفافية على رمز تصميم: #rrggbb + قناة ألفا سِتّ‌عشرية (لا لون جديد يُخترع)
+function tint(color, aa) {
+  const c = String(color || '').trim();
+  return /^#[0-9a-fA-F]{6}$/.test(c) ? c + aa : c;
+}
+// ثيم Chart.js المشتق من رموز التصميم (يتحدّث مع الوضع الفاتح)
+function chartTheme() {
+  return {
+    text:    cssVar('--text'),
+    muted:   cssVar('--text-2'),
+    surface: cssVar('--bg-2'),
+    border:  cssVar('--border'),
+    grid:    tint(cssVar('--border'), 'aa'),
+    accent:  cssVar('--accent'),
+    font:    'Tajawal',
+  };
+}
+// إعدادات tooltip موحّدة
+function chartTooltipStyle() {
+  const t = chartTheme();
+  return {
+    backgroundColor: t.surface, titleColor: t.text, bodyColor: t.muted,
+    borderColor: t.border, borderWidth: 1,
+    titleFont: { family: t.font }, bodyFont: { family: t.font },
+  };
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// صف وزن في قائمة (.brow)
+function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
+  const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
+  const dColor = diffState ? stateColorOf(diffState) : cssVar('--text-2');
+  return `<div class="brow"${title ? ` title="${title}"` : ''}>
+      <div class="br-k"><span class="dot" style="background:${color}"></span><span>${name}</span>${sub ? `<span class="small text-muted num">${sub}</span>` : ''}</div>
+      <div class="br-track"><div class="br-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="br-v">${valueTxt}${diffTxt ? `<span class="d" style="color:${dColor}">${diffTxt}</span>` : ''}</div>
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
 // ─── Category Types ────────────────────────────────────────────────────────────
-// ثلاثة أنواع فقط — كل فئة تنتمي لأحدها
+// ثلاثة أنواع فقط — كل فئة تنتمي لأحدها.
+// اللون هوية لا حالة ⇒ يُقرأ من سلاسل التصميم (--series-*) لا من قيم مكتوبة.
 const CAT_TYPES = {
-  expense: { label: 'مصاريف',  icon: '💸', color: '#f85149', desc: 'ما يُصرف ويختفي' },
-  savings: { label: 'ادخار',   icon: '💰', color: '#3fb950', desc: 'يُحفظ كاحتياطي' },
-  asset:   { label: 'أصول',    icon: '📈', color: '#3b82f6', desc: 'يتراكم ويكبر' },
+  expense: { label: 'مصاريف', icon: '💸', sIdx: 4, desc: 'ما يُصرف ويختفي' },
+  savings: { label: 'ادخار',  icon: '💰', sIdx: 2, desc: 'يُحفظ كاحتياطي' },
+  asset:   { label: 'أصول',   icon: '📈', sIdx: 1, desc: 'يتراكم ويكبر' },
 };
 const CAT_TYPE_ORDER = ['expense', 'savings', 'asset'];
+
+function catTypeOf(c)    { return (c && c.type) || 'expense'; }
+function catTypeMeta(id) { return CAT_TYPES[id] || CAT_TYPES.expense; }
+function typeColor(id)   { return seriesColor(catTypeMeta(id).sIdx); }
+// لون الفئة = لون سلسلة حسب ترتيبها الثابت في القائمة (لا لون مخزَّن يدوياً)
+function catColor(catId) {
+  const i = store.categories.findIndex(c => c.id === catId);
+  return seriesColor(i < 0 ? 0 : i);
+}
 
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
 window.CARD_INFO = {
   'salary-summary': {
     title: '💵 توزيع الراتب',
     body: `
-      <p>هذه الأداة تساعدك على توزيع دخلك الشهري بوعي بدل أن «يختفي» المال دون أثر. ثلاثة أرقام رئيسية:</p>
+      <p>هذه الأداة تساعدك على توزيع دخلك الشهري بوعي بدل أن «يختفي» المال دون أثر. الأرقام الرئيسية:</p>
       <div class="info-math">
+        • <strong>معدّل الادخار والاستثمار:</strong> (ادخار + أصول) ÷ إجمالي الدخل — الرقم الوحيد الذي يبني ثروتك.<br>
         • <strong>إجمالي الرواتب:</strong> مجموع كل ما أدخلته من دخل في الفترة المختارة.<br>
         • <strong>إجمالي المُوزَّع:</strong> مجموع ما خصّصته للفئات (مصاريف، ادخار، أصول).<br>
         • <strong>المتبقي غير الموزّع:</strong> = إجمالي الرواتب − إجمالي المُوزَّع. الأفضل أن يقترب من الصفر (كل ريال له وجهة).
       </div>
       <div class="info-formula">قاعدة إرشادية شائعة (50/30/20): ~50% احتياجات · ~30% رغبات · ~20% ادخار/استثمار. عدّلها حسب وضعك.</div>
-      <p>كل فئة لها <strong>نوع</strong>: <span style="color:#f85149">مصاريف</span> (تُصرف وتختفي) · <span style="color:#3fb950">ادخار</span> (احتياطي سائل) · <span style="color:#3b82f6">أصول</span> (تتراكم وتنمو كاستثمار).</p>
+      <p>كل فئة لها <strong>نوع</strong>: مصاريف (تُصرف وتختفي) · ادخار (احتياطي سائل) · أصول (تتراكم وتنمو كاستثمار). النوع هو ما يحدّد المؤشر — تأكّد أن كل فئة مصنّفة صحيحاً من «إدارة الفئات».</p>
       <p class="info-note">💡 ارفع نسبة «الأصول» تدريجياً — هي وحدها التي تبني ثروتك على المدى الطويل، عكس المصاريف.</p>`
   },
 };
@@ -84,16 +183,14 @@ function saveStore(data) {
 function defaultStore() {
   return {
     categories: [
-      { id: 'cat_expenses',   name: 'مصاريف',        color: '#f85149', type: 'expense' },
-      { id: 'cat_savings',    name: 'ادخار / طارئ',  color: '#3fb950', type: 'savings' },
-      { id: 'cat_assets',     name: 'أصول',          color: '#3b82f6', type: 'asset'   },
-      { id: 'cat_retirement', name: 'محفظة التقاعد', color: '#a855f7', type: 'asset'   },
+      { id: 'cat_expenses',   name: 'مصاريف',        type: 'expense' },
+      { id: 'cat_savings',    name: 'ادخار / طارئ',  type: 'savings' },
+      { id: 'cat_assets',     name: 'أصول',          type: 'asset'   },
+      { id: 'cat_retirement', name: 'محفظة التقاعد', type: 'asset'   },
     ],
     entries: []
   };
 }
-
-function uid() { return 'id_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7); }
 
 // ─── State ────────────────────────────────────────────────────────────────────
 let store     = getStore();
@@ -109,9 +206,6 @@ let chart1 = null, chart2 = null, chart3 = null, chart4 = null;
 
 // chart modes
 let c1Mode = 'stacked', c2Mode = 'donut', c3Mode = 'bars', c4Mode = 'bars';
-
-// chart colours
-const CC = ['#f0b429','#3fb950','#3b82f6','#a855f7','#f85149','#06b6d4','#f97316','#ec4899','#84cc16','#8b5cf6'];
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
@@ -139,13 +233,19 @@ function renderAll() {
 }
 
 // ─── Filtered entries (respects date range) ───────────────────────────────────
+// AUDIT-FIX (2026-08): سنة بلا شهر كانت تُتجاهَل في الحساب بينما عنوان الفترة
+// يقول «من 2025» — الرقم والعنوان يتناقضان. الآن: سنة وحدها = السنة كاملة
+// (من = يناير، إلى = ديسمبر)، فيتطابق ما يُحسب مع ما يُكتب.
+function rangeBounds() {
+  const from = filterFromYear ? (+filterFromYear * 100 + (+filterFromMonth || 1))   : 0;
+  const to   = filterToYear   ? (+filterToYear   * 100 + (+filterToMonth   || 12))  : 999999;
+  return { from, to };
+}
+
 function getFiltered() {
+  const { from, to } = rangeBounds();
   return store.entries.filter(e => {
-    const ym = e.year * 100 + e.month;
-    const from = (filterFromYear && filterFromMonth)
-      ? +filterFromYear * 100 + +filterFromMonth : 0;
-    const to   = (filterToYear && filterToMonth)
-      ? +filterToYear * 100 + +filterToMonth : 999999;
+    const ym = (+e.year || 0) * 100 + (+e.month || 0);
     return ym >= from && ym <= to;
   });
 }
@@ -155,31 +255,37 @@ function buildYearSelects() {
   const years = [...new Set(store.entries.map(e => e.year))].sort((a, b) => a - b);
   ['from-year', 'to-year'].forEach(id => {
     const sel = document.getElementById(id);
+    if (!sel) return;
     const cur = sel.value;
     sel.innerHTML = '<option value="">— سنة</option>' +
       years.map(y => `<option value="${y}" ${y == cur ? 'selected' : ''}>${y}</option>`).join('');
   });
+  // AUDIT-FIX (2026-08): إن اختفت السنة المختارة (حذف/ريست) يُعاد ضبط الفلتر
+  // من قيم القوائم الفعلية بدل بقاء فلتر شبح يخفي كل السجلات.
+  syncFilterVars();
 }
 
-function applyDateRange() {
-  filterFromYear  = document.getElementById('from-year').value;
-  filterFromMonth = document.getElementById('from-month').value;
-  filterToYear    = document.getElementById('to-year').value;
-  filterToMonth   = document.getElementById('to-month').value;
-  renderAll();
+function syncFilterVars() {
+  const val = id => document.getElementById(id)?.value || '';
+  filterFromYear  = val('from-year');
+  filterFromMonth = val('from-month');
+  filterToYear    = val('to-year');
+  filterToMonth   = val('to-month');
 }
+
+function applyDateRange() { syncFilterVars(); renderAll(); }
 
 function clearDateRange() {
-  filterFromYear = filterFromMonth = filterToYear = filterToMonth = '';
   ['from-year','from-month','to-year','to-month'].forEach(id => {
-    document.getElementById(id).value = '';
+    const el = document.getElementById(id); if (el) el.value = '';
   });
+  syncFilterVars();
   renderAll();
 }
 
-// ─── Dashboard ────────────────────────────────────────────────────────────────
-function renderDashboard() {
-  const entries = getFiltered();
+// ─── حساب مركزي واحد: مصدر الحقيقة لكل أرقام الصفحة ──────────────────────────
+function computeSummary() {
+  const entries     = getFiltered();
   const totalSalary = entries.reduce((s, e) => s + (+e.salary || 0), 0);
 
   const catTotals = {};
@@ -193,105 +299,139 @@ function renderDashboard() {
   const totalAllocated = Object.values(catTotals).reduce((s, v) => s + v, 0);
   const totalRemaining = totalSalary - totalAllocated;
 
-  const label = buildRangeLabel();
+  // مبالغ كل نوع — الفئات المصنّفة فقط
+  const typeAmt = {};
+  CAT_TYPE_ORDER.forEach(t => {
+    typeAmt[t] = store.categories
+      .filter(c => catTypeOf(c) === t)
+      .reduce((s, c) => s + (catTotals[c.id] || 0), 0);
+  });
+  // مبالغ يتيمة: تخصيصات تشير لفئة محذوفة — تدخل «المُوزَّع» ولا نوع لها.
+  const classified = CAT_TYPE_ORDER.reduce((s, t) => s + typeAmt[t], 0);
+  const orphanAmt  = totalAllocated - classified;
 
-  document.getElementById('dash-salary').textContent    = formatSAR(totalSalary);
-  document.getElementById('dash-allocated').textContent = formatSAR(totalAllocated);
-  document.getElementById('dash-remaining').textContent = formatSAR(totalRemaining);
-  document.getElementById('dash-label').textContent     = label;
-  document.getElementById('dash-months').textContent    = entries.length + ' شهر';
+  const investAmt   = typeAmt.savings + typeAmt.asset;
+  const pct         = v => (totalSalary > 0 ? v / totalSalary * 100 : null);
+  const zeroSalaryMonths = entries.filter(e => !(+e.salary > 0)).length;
 
-  // ── معدّل الادخار والاستثمار — أهم مؤشر لبناء الثروة (ادخار + أصول ÷ الراتب) ──
-  const typeAmt = tId => store.categories
-    .filter(c => (c.type || 'expense') === tId)
-    .reduce((s, c) => s + (catTotals[c.id] || 0), 0);
-  const investAmt  = typeAmt('savings') + typeAmt('asset');
-  const investRate = totalSalary > 0 ? investAmt / totalSalary * 100 : 0;
-  const expenseRate = totalSalary > 0 ? typeAmt('expense') / totalSalary * 100 : 0;
+  return {
+    entries, totalSalary, catTotals, totalAllocated, totalRemaining,
+    typeAmt, orphanAmt, investAmt,
+    investRate:  pct(investAmt),
+    expenseRate: pct(typeAmt.expense),
+    avgSalary:   entries.length ? totalSalary / entries.length : 0,
+    months: entries.length, zeroSalaryMonths, pct,
+  };
+}
 
-  const savRateEl = document.getElementById('dash-savings-rate');
-  const savSubEl  = document.getElementById('dash-savings-sub');
-  const savCardEl = document.getElementById('dash-savings-card');
-  if (savRateEl) {
-    savRateEl.textContent = totalSalary > 0 ? investRate.toFixed(1) + '%' : '—';
-    savSubEl.textContent  = totalSalary > 0
-      ? `مصاريف ${expenseRate.toFixed(0)}% · ادخار+أصول ${investRate.toFixed(0)}%`
-      : 'ادخار + أصول ÷ الراتب';
-    // معيار 50/30/20: ≥20% صحّي، 10-20% مقبول، <10% ضعيف
-    savCardEl.className = 'salary-card' +
-      (totalSalary <= 0 ? '' : investRate >= 20 ? ' success' : investRate >= 10 ? '' : ' danger');
-  }
+// ─── ① الرقم القائد + الملخص ──────────────────────────────────────────────────
+function renderDashboard() {
+  const S = computeSummary();
+  const setHtml = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
 
-  // ── بطاقة المتبقي — تأطير محاسبة صفرية: الهدف صفر، لا «فائض أخضر» دائم ──
-  const remCardEl = document.getElementById('dash-remaining-card');
-  const remSubEl  = document.getElementById('dash-remaining-sub');
-  if (remCardEl) {
-    if (totalSalary <= 0) {
-      remCardEl.className = 'salary-card';
-      remSubEl.textContent = 'الأفضل أن يقترب من الصفر';
-    } else if (totalRemaining < 0) {
-      remCardEl.className = 'salary-card danger';
-      remSubEl.textContent = 'التوزيعات تتجاوز الدخل';
-    } else if (totalRemaining <= totalSalary * 0.02) {
-      remCardEl.className = 'salary-card success';
-      remSubEl.textContent = 'ممتاز — كل ريال موجّه';
-    } else {
-      remCardEl.className = 'salary-card accent';
-      remSubEl.textContent = 'مبلغ غير موجّه — خصّصه';
-    }
-  }
+  // ── معدّل الادخار والاستثمار: الرقم الذي يبني الثروة ──
+  // معيار 50/30/20: ≥20% صحّي · 10–20% مقبول · <10% ضعيف
+  const r     = S.investRate;
+  const state = r == null ? '' : r >= 20 ? 'good' : r >= 10 ? 'warn' : 'bad';
+  const tag   = r == null ? tagHtml('•', 'لا دخل مسجَّل في هذه الفترة', '')
+              : state === 'good' ? tagHtml('✅', 'معدّل صحّي', 'good')
+              : state === 'warn' ? tagHtml('⚠️', 'مقبول — ارفعه إلى 20%', 'warn')
+              : tagHtml('🔻', 'ضعيف — أقل من 10%', 'bad');
 
-  // ── ملخص النوع: مصاريف / ادخار / أصول ─────────────────────────────────────
-  const typeSumEl = document.getElementById('type-summary');
-  if (typeSumEl) {
-    typeSumEl.innerHTML = CAT_TYPE_ORDER.map(typeId => {
-      const t        = CAT_TYPES[typeId];
-      const typeCats = store.categories.filter(c => (c.type || 'expense') === typeId);
-      const typeAmt  = typeCats.reduce((s, c) => s + (catTotals[c.id] || 0), 0);
-      const typePct  = totalSalary > 0 ? (typeAmt / totalSalary * 100).toFixed(1) : '0.0';
-      const barW     = totalSalary > 0 ? Math.min(100, typeAmt / totalSalary * 100) : 0;
-      const catNames = typeCats.map(c => esc(c.name)).join(' · ') || '—';
-      return `<div class="type-summary-item" style="border-right:3px solid ${t.color}">
-        <div class="type-summary-head">
-          <span class="type-summary-icon">${t.icon}</span>
-          <span class="type-summary-label">${t.label}</span>
-          <span class="type-summary-pct" style="color:${t.color}">${typePct}%</span>
-        </div>
-        <div class="type-summary-amt" style="color:${t.color}">${formatSAR(typeAmt)}</div>
-        <div class="type-summary-bar-track">
-          <div class="type-summary-bar-fill" style="width:${barW.toFixed(1)}%;background:${t.color}88"></div>
-        </div>
-        <div class="type-summary-cats">${catNames}</div>
-      </div>`;
-    }).join('');
-  }
+  const remState = S.totalSalary <= 0 ? ''
+    : S.totalRemaining < 0 ? 'bad'
+    : S.totalRemaining <= S.totalSalary * 0.02 ? 'good' : 'warn';
+  const remNote = S.totalSalary <= 0
+    ? noteHtml('ℹ️', 'أضف سجلاً شهرياً واحداً على الأقل ليبدأ الحساب.', '')
+    : S.totalRemaining < 0
+      ? noteHtml('🔻', `<b>التوزيعات تتجاوز الدخل بـ ${formatSAR(Math.abs(S.totalRemaining))}</b> — راجع مبالغ الفئات أو الدخل المسجَّل.`, 'bad')
+      : S.totalRemaining <= S.totalSalary * 0.02
+        ? noteHtml('✅', 'ممتاز — كل ريال تقريباً له وجهة محدّدة (محاسبة صفرية).', 'good')
+        : noteHtml('⚠️', `<b>${formatSAR(S.totalRemaining)} غير موجّهة</b> (${formatNum(S.totalRemaining / S.totalSalary * 100, 1)}% من الدخل) — خصّصها لفئة حتى لا تتسرّب.`, 'warn');
 
-  // ── تفصيل الفئات الفردية ────────────────────────────────────────────────────
-  const bd = document.getElementById('cat-breakdown');
-  bd.innerHTML = store.categories.map(c => {
-    const amt   = catTotals[c.id] || 0;
-    const pct   = totalSalary > 0 ? (amt / totalSalary * 100).toFixed(1) : 0;
-    const t     = CAT_TYPES[c.type || 'expense'];
-    return `<div class="dash-cat-card">
-      <div class="dash-cat-dot" style="background:${c.color}"></div>
-      <div class="dash-cat-info">
-        <span class="dash-cat-name">
-          ${esc(c.name)}
-          <span class="cat-type-chip" style="background:${t.color}18;color:${t.color};border-color:${t.color}33">${t.icon} ${t.label}</span>
-        </span>
-        <span class="dash-cat-amt">${formatSAR(amt)}</span>
+  setHtml('salary-hero', `<div class="stack">
+    <div class="sal-hero-row">
+      <div>
+        <div class="hero-num num" style="color:${r == null ? '' : stateColorOf(state)}">${r == null ? '—' : formatNum(r, 1) + '<span class="unit">%</span>'}</div>
+        <div class="hero-cap">معدّل الادخار والاستثمار = (ادخار + أصول) ÷ إجمالي الدخل · ${esc(buildRangeLabel())}</div>
       </div>
-      <span class="dash-cat-pct">${pct}%</span>
-    </div>`;
+      <div>${tag}</div>
+    </div>
+    ${meterHtml({
+      label: 'من كل 100 ريال دخل',
+      valueTxt: r == null ? '—' : `${formatNum(r, 0)} ريال للادخار والأصول`,
+      pct: r || 0, state, markPct: 20,
+      foot: r == null ? 'لا دخل مسجَّل — النسبة غير محسوبة (قسمة على صفر)'
+        : `العلامة عند 20% (معيار 50/30/20) · مصاريف ${formatNum(S.expenseRate, 0)}% · ادخار+أصول ${formatNum(r, 0)}%`,
+    })}
+    ${kvsHtml([
+      ['إجمالي الدخل', formatSAR(S.totalSalary)],
+      ['إجمالي المُوزَّع', formatSAR(S.totalAllocated)],
+      ['المتبقي غير الموجّه', formatSAR(S.totalRemaining, true)],
+      ['عدد الأشهر', `${S.months} شهر`],
+      ['متوسط الدخل الشهري', formatSAR(S.avgSalary)],
+      ['ادخار + أصول', formatSAR(S.investAmt)],
+    ])}
+    ${remNote}
+    ${S.zeroSalaryMonths ? noteHtml('⚠️', `<b>${S.zeroSalaryMonths} شهر بلا دخل مسجَّل</b> ضمن الفترة — النِّسب محسوبة على الدخل المسجَّل فقط، وقد تبدو مرتفعة.`, 'warn') : ''}
+  </div>`);
+
+  renderTypeSummary(S);
+  renderCatBreakdown(S);
+}
+
+function renderTypeSummary(S) {
+  const el = document.getElementById('type-summary');
+  if (!el) return;
+  el.innerHTML = CAT_TYPE_ORDER.map(typeId => {
+    const t        = catTypeMeta(typeId);
+    const typeCats = store.categories.filter(c => catTypeOf(c) === typeId);
+    const amt      = S.typeAmt[typeId];
+    const p        = S.pct(amt);
+    const names    = typeCats.map(c => esc(c.name)).join(' · ') || 'لا فئات من هذا النوع';
+    return `<div class="type-cell">${meterHtml({
+      label: `${t.icon} ${t.label}`,
+      valueTxt: (p == null ? '—' : formatNum(p, 1) + '%') + ` · ${formatSAR(amt)}`,
+      pct: p || 0, fillColor: typeColor(typeId),
+      foot: names,
+    })}</div>`;
   }).join('');
+
+  const orphanEl = document.getElementById('type-orphan-note');
+  if (orphanEl) {
+    // مبالغ لفئات محذوفة: تُحسب في «المُوزَّع» فلا تُهمَل، ويُعلَن عنها صراحة
+    orphanEl.innerHTML = Math.abs(S.orphanAmt) > 0.005
+      ? noteHtml('⚠️', `<b>${formatSAR(S.orphanAmt)}</b> موزّعة على فئات لم تعد موجودة — محسوبة ضمن «إجمالي المُوزَّع» لكنها بلا نوع، فلا تظهر في النِّسب الثلاث أعلاه.`, 'warn')
+      : '';
+  }
+}
+
+function renderCatBreakdown(S) {
+  const bd = document.getElementById('cat-breakdown');
+  if (!bd) return;
+  if (!store.categories.length) {
+    bd.innerHTML = noteHtml('📭', 'لا توجد فئات — أضف فئة من «إدارة الفئات» في أسفل الصفحة.', '');
+    return;
+  }
+  bd.innerHTML = store.categories.map(c => {
+    const amt = S.catTotals[c.id] || 0;
+    const p   = S.pct(amt);
+    const t   = catTypeMeta(catTypeOf(c));
+    return browHtml({
+      name: esc(c.name), sub: `${t.icon} ${t.label}`, color: catColor(c.id),
+      pct: p || 0, valueTxt: formatSAR(amt),
+      diffTxt: p == null ? '—' : formatNum(p, 1) + '%',
+      title: `${c.name} — ${t.label} · النسبة من إجمالي الدخل`,
+    });
+  }).join('') + `<div class="meter-foot mt-2">النِّسب من <strong>إجمالي الدخل</strong> في الفترة (${formatSAR(S.totalSalary)})</div>`;
 }
 
 function buildRangeLabel() {
   const fy = filterFromYear, fm = filterFromMonth;
   const ty = filterToYear,   tm = filterToMonth;
   if (!fy && !ty) return 'الإجمالي الكلي';
-  const fromStr = (fm && fy) ? `${MONTHS_AR[+fm-1]} ${fy}` : (fy || '');
-  const toStr   = (tm && ty) ? `${MONTHS_AR[+tm-1]} ${ty}` : (ty || '');
+  const fromStr = fy ? (fm ? `${MONTHS_AR[+fm-1]} ${fy}` : `يناير ${fy}`) : '';
+  const toStr   = ty ? (tm ? `${MONTHS_AR[+tm-1]} ${ty}` : `ديسمبر ${ty}`) : '';
   if (fromStr && toStr) return `${fromStr} — ${toStr}`;
   if (fromStr) return `من ${fromStr}`;
   if (toStr)   return `حتى ${toStr}`;
@@ -301,24 +441,25 @@ function buildRangeLabel() {
 // ─── Category Management ──────────────────────────────────────────────────────
 function renderCategoryBadges() {
   const container = document.getElementById('cat-list');
+  if (!container) return;
   container.innerHTML = store.categories.map(c => {
-    const t = CAT_TYPES[c.type || 'expense'];
-    return `<div class="cat-badge" style="border-color:${c.color}30;background:${c.color}0f">
-      <span class="cat-dot" style="background:${c.color}"></span>
+    const t = catTypeMeta(catTypeOf(c));
+    return `<div class="cat-badge">
+      <span class="dot" style="background:${catColor(c.id)}"></span>
       <span class="cat-badge-name" ondblclick="startRenameCategory('${c.id}', this)">${esc(c.name)}</span>
-      <button class="cat-type-btn" onclick="cycleType('${c.id}')"
-        style="background:${t.color}18;color:${t.color};border:1px solid ${t.color}33"
-        title="النوع: ${t.label} — انقر للتغيير">${t.icon} ${t.label}</button>
+      <button class="cat-type-btn" onclick="cycleType('${c.id}')" title="النوع: ${t.label} — انقر للتغيير">
+        <span class="dot" style="background:${typeColor(catTypeOf(c))}"></span>${t.icon} ${t.label}
+      </button>
       <button class="cat-del-btn" onclick="confirmDeleteCategory('${c.id}')" title="حذف الفئة">×</button>
     </div>`;
-  }).join('');
+  }).join('') || `<span class="small text-muted">لا فئات بعد — أضف واحدة بالأسفل</span>`;
 }
 
 // تبديل نوع الفئة دورياً: مصاريف ← ادخار ← أصول ← مصاريف
 function cycleType(catId) {
   const cat = store.categories.find(c => c.id === catId);
   if (!cat) return;
-  const cur  = CAT_TYPE_ORDER.indexOf(cat.type || 'expense');
+  const cur  = CAT_TYPE_ORDER.indexOf(catTypeOf(cat));
   cat.type   = CAT_TYPE_ORDER[(cur + 1) % CAT_TYPE_ORDER.length];
   saveStore(store);
   renderCategoryBadges();
@@ -332,10 +473,7 @@ function addCategory() {
   const type   = typSel?.value || 'expense';
   if (!name) { showToast('أدخل اسم الفئة', 'error'); return; }
   if (store.categories.some(c => c.name === name)) { showToast('الفئة موجودة مسبقاً', 'error'); return; }
-  // لون افتراضي حسب النوع إن لم يُختر لون
-  const typeColor = CAT_TYPES[type]?.color;
-  const color     = typeColor || CC[store.categories.length % CC.length];
-  store.categories.push({ id: uid(), name, color, type });
+  store.categories.push({ id: uid(), name, type });
   saveStore(store);
   inp.value = '';
   renderCategoryBadges();
@@ -390,29 +528,32 @@ function renderCharts() {
 }
 
 // ── helpers ──
+// إظهار/إخفاء عبر السمة hidden بدل النمط السطري (القاعدة: لا أنماط سطرية غير محسوبة)
 function showCanvas(wrapId, altId) {
-  document.getElementById(wrapId).style.display = '';
-  document.getElementById(altId).style.display  = 'none';
+  const w = document.getElementById(wrapId), a = document.getElementById(altId);
+  if (w) w.hidden = false;
+  if (a) a.hidden = true;
 }
 function showAlt(wrapId, altId, html) {
-  document.getElementById(wrapId).style.display = 'none';
-  const a = document.getElementById(altId);
-  a.style.display = '';
-  a.innerHTML = html;
+  const w = document.getElementById(wrapId), a = document.getElementById(altId);
+  if (w) w.hidden = true;
+  if (a) { a.hidden = false; a.innerHTML = html; }
 }
 function destroyChart(ref) { if (ref) { ref.destroy(); } return null; }
-function chartDefaults() {
+function emptyBox(msg) { return `<div class="empty-state"><div class="icon">📭</div><p>${msg}</p></div>`; }
+
+// إعدادات Chart.js مشتقة من رموز التصميم (بديل chartDefaults المحلية القديمة)
+function salaryChartOpts() {
+  const th = chartTheme();
   return {
     responsive: true, maintainAspectRatio: false,
     plugins: {
-      legend: { labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, usePointStyle: true, padding: 10 } },
-      tooltip: { backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#8b949e', borderColor: '#30363d', borderWidth: 1,
-        titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' } }
+      legend: { labels: { color: th.muted, font: { family: th.font, size: 11 }, usePointStyle: true, padding: 10 } },
+      tooltip: chartTooltipStyle(),
     },
     scales: {
-      x: { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 } }, grid: { color: '#30363d' } },
-      y: { ticks: { color: '#8b949e', font: { family: 'Tajawal', size: 10 },
-        callback: v => formatNum(v, 0) }, grid: { color: '#30363d' } }
+      x: { ticks: { color: th.muted, font: { family: th.font, size: 10 } }, grid: { color: th.grid } },
+      y: { ticks: { color: th.muted, font: { family: th.font, size: 10 }, callback: v => formatNum(v, 0) }, grid: { color: th.grid } }
     }
   };
 }
@@ -440,45 +581,49 @@ function renderChart1() {
       const allocated = (e.allocations||[]).reduce((s,a)=>s+(+a.amount||0),0);
       const rem       = salary - allocated;
       return `<tr>
-        <td>${e.year}</td><td>${MONTHS_AR[e.month-1]}</td>
+        <td>${e.year}</td><td>${MONTHS_AR[(+e.month||1)-1]}</td>
         <td class="num">${formatSAR(salary)}</td>
         <td class="num">${formatSAR(allocated)}</td>
-        <td class="num ${rem<0?'neg':rem>0?'pos':''}">${formatSAR(rem)}</td>
+        <td class="num" style="color:${stateColorOf(rem<0?'bad':rem>0?'warn':'good')}">${formatSAR(rem, true)}</td>
       </tr>`;
     }).join('');
     showAlt('c1-canvas-wrap','c1-alt',
-      `<div style="overflow-x:auto"><table class="tbl-alt">
+      `<div class="table-wrap"><table class="tbl-alt">
         <thead><tr><th>السنة</th><th>الشهر</th><th>الراتب</th><th>الموزّع</th><th>المتبقي</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:var(--text-2);padding:20px">لا توجد بيانات</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="5">'+emptyBox('لا توجد بيانات')+'</td></tr>'}</tbody>
       </table></div>`);
     return;
   }
 
-  if (!entries.length) { showAlt('c1-canvas-wrap','c1-alt','<div style="text-align:center;color:var(--text-2);padding:40px">لا توجد بيانات</div>'); return; }
+  if (!entries.length) { showAlt('c1-canvas-wrap','c1-alt', emptyBox('لا توجد بيانات في هذه الفترة')); return; }
 
   showCanvas('c1-canvas-wrap','c1-alt');
-  const labels = entries.map(e => `${MONTHS_AR[e.month-1].slice(0,3)} ${String(e.year).slice(2)}`);
+  const labels = entries.map(e => `${MONTHS_AR[(+e.month||1)-1].slice(0,3)} ${String(e.year).slice(2)}`);
 
-  // one dataset per category + remaining
-  const catDatasets = store.categories.map((c, i) => ({
-    label: c.name,
-    data: entries.map(e => {
-      const a = (e.allocations||[]).find(x => x.catId === c.id);
-      return a ? +a.amount || 0 : 0;
-    }),
-    backgroundColor: c.color + (c1Mode === 'stacked' ? 'cc' : '99'),
-    borderColor: c.color,
-    borderWidth: c1Mode === 'line' ? 2 : 0,
-    fill: c1Mode === 'line' ? false : true,
-    tension: 0.3,
-    pointRadius: c1Mode === 'line' ? 3 : 0,
-  }));
+  // one dataset per category + salary line
+  const catDatasets = store.categories.map(c => {
+    const color = catColor(c.id);
+    return {
+      label: c.name,
+      data: entries.map(e => {
+        const a = (e.allocations||[]).find(x => x.catId === c.id);
+        return a ? +a.amount || 0 : 0;
+      }),
+      backgroundColor: tint(color, c1Mode === 'stacked' ? 'cc' : '99'),
+      borderColor: color,
+      borderWidth: c1Mode === 'line' ? 2 : 0,
+      fill: c1Mode !== 'line',
+      tension: 0.3,
+      pointRadius: c1Mode === 'line' ? 3 : 0,
+    };
+  });
 
+  const accent = cssVar('--accent');
   const salaryDs = {
     label: 'الراتب',
     data: entries.map(e => +e.salary || 0),
-    backgroundColor: '#f0b42933',
-    borderColor: '#f0b429',
+    backgroundColor: tint(accent, '33'),
+    borderColor: accent,
     borderWidth: 2,
     borderDash: [4, 3],
     type: 'line',
@@ -491,7 +636,7 @@ function renderChart1() {
   const ctx = document.getElementById('chart1')?.getContext('2d');
   if (!ctx) return;
 
-  const opts = chartDefaults();
+  const opts = salaryChartOpts();
   if (c1Mode === 'stacked') {
     opts.scales.x.stacked = true;
     opts.scales.y.stacked = true;
@@ -517,66 +662,72 @@ function setChart2Mode(m) {
 
 function renderChart2() {
   chart2 = destroyChart(chart2);
-  const entries = getFiltered();
-  const totalSalary = entries.reduce((s, e) => s + (+e.salary || 0), 0);
+  const S = computeSummary();
 
-  const catData = store.categories.map((c, i) => {
-    const amt = entries.reduce((s, e) => {
-      const a = (e.allocations||[]).find(x => x.catId === c.id);
-      return s + (a ? +a.amount||0 : 0);
-    }, 0);
-    return { name: c.name, color: c.color, amt };
-  }).filter(d => d.amt > 0);
-
+  const all = store.categories.map(c => ({
+    name: c.name, color: catColor(c.id), amt: S.catTotals[c.id] || 0,
+    type: catTypeOf(c),
+  }));
+  // الدائري لا يمثّل السالب — نُظهر الموجب ونُعلن عن السالب صراحةً بدل إخفائه
+  const catData  = all.filter(d => d.amt > 0).sort((a, b) => b.amt - a.amt);
+  const negData  = all.filter(d => d.amt < 0);
   const totalAmt = catData.reduce((s, d) => s + d.amt, 0);
 
+  const noteEl = document.getElementById('c2-note');
+  if (noteEl) {
+    noteEl.innerHTML = negData.length
+      ? noteHtml('⚠️', `مبالغ سالبة غير معروضة في هذا الرسم: ${negData.map(d => `${esc(d.name)} (${formatSAR(d.amt)})`).join(' · ')} — لكنها محسوبة في «إجمالي المُوزَّع».`, 'warn')
+      : `<div class="meter-foot">النِّسب من إجمالي المُوزَّع الموجب (${formatSAR(totalAmt)})</div>`;
+  }
+
   if (c2Mode === 'bars') {
-    showAlt('c2-canvas-wrap','c2-alt',
-      '<div style="padding:8px 4px">' +
-      catData.sort((a,b)=>b.amt-a.amt).map(d => {
-        const pct = totalAmt > 0 ? (d.amt / totalAmt * 100) : 0;
-        return `<div class="bars-alt-row">
-          <div class="bars-alt-label" title="${esc(d.name)}">${esc(d.name)}</div>
-          <div class="bars-alt-track"><div class="bars-alt-fill" style="width:${pct.toFixed(1)}%;background:${d.color}"></div></div>
-          <div class="bars-alt-pct">${pct.toFixed(1)}%</div>
-          <div class="bars-alt-val">${formatSAR(d.amt)}</div>
-        </div>`;
-      }).join('') + '</div>');
+    showAlt('c2-canvas-wrap','c2-alt', !catData.length ? emptyBox('لا توجد توزيعات') :
+      `<div class="stack-2 mt-2">` + catData.map(d => browHtml({
+        name: esc(d.name), sub: catTypeMeta(d.type).icon, color: d.color,
+        pct: totalAmt > 0 ? d.amt / totalAmt * 100 : 0,
+        valueTxt: formatSAR(d.amt),
+        diffTxt: totalAmt > 0 ? formatNum(d.amt / totalAmt * 100, 1) + '%' : '—',
+      })).join('') + `</div>`);
     return;
   }
 
   if (c2Mode === 'cards') {
-    showAlt('c2-canvas-wrap','c2-alt',
-      `<div class="cards-alt-grid">` +
-      catData.sort((a,b)=>b.amt-a.amt).map(d => {
-        const pct = totalAmt > 0 ? (d.amt / totalAmt * 100).toFixed(1) : 0;
+    showAlt('c2-canvas-wrap','c2-alt', !catData.length ? emptyBox('لا توجد توزيعات') :
+      `<div class="cards-alt-grid">` + catData.map(d => {
+        const pct = totalAmt > 0 ? d.amt / totalAmt * 100 : 0;
         return `<div class="cards-alt-item" style="border-top-color:${d.color}">
-          <div class="cards-alt-name">${esc(d.name)}</div>
-          <div class="cards-alt-val" style="color:${d.color}">${formatSAR(d.amt)}</div>
-          <div class="cards-alt-pct">${pct}% من الإجمالي</div>
+          ${meterHtml({
+            label: `${catTypeMeta(d.type).icon} ${esc(d.name)}`,
+            valueTxt: formatNum(pct, 1) + '%',
+            pct, fillColor: d.color, foot: formatSAR(d.amt),
+          })}
         </div>`;
-      }).join('') + '</div>');
+      }).join('') + `</div>`);
     return;
   }
 
   // donut
-  if (!catData.length) { showAlt('c2-canvas-wrap','c2-alt','<div style="text-align:center;color:var(--text-2);padding:40px">لا توجد بيانات</div>'); return; }
+  if (!catData.length) { showAlt('c2-canvas-wrap','c2-alt', emptyBox('لا توجد توزيعات')); return; }
   showCanvas('c2-canvas-wrap','c2-alt');
   const ctx = document.getElementById('chart2')?.getContext('2d');
   if (!ctx) return;
+  const th = chartTheme();
   chart2 = new Chart(ctx, {
     type: 'doughnut',
     data: {
       labels: catData.map(d => d.name),
-      datasets: [{ data: catData.map(d => d.amt), backgroundColor: catData.map(d => d.color), borderColor: '#1c2128', borderWidth: 2, hoverOffset: 6 }]
+      datasets: [{ data: catData.map(d => d.amt), backgroundColor: catData.map(d => d.color), borderColor: th.surface, borderWidth: 2, hoverOffset: 6 }]
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false, cutout: '58%',
       plugins: {
-        legend: { position: 'bottom', labels: { color: '#8b949e', font: { family: 'Tajawal', size: 11 }, padding: 10, usePointStyle: true } },
-        tooltip: { backgroundColor: '#1c2128', titleColor: '#e6edf3', bodyColor: '#8b949e', borderColor: '#30363d', borderWidth: 1,
-          titleFont: { family: 'Tajawal' }, bodyFont: { family: 'Tajawal' },
-          callbacks: { label: c => { const pct = totalAmt>0?(c.parsed/totalAmt*100).toFixed(1):0; return ` ${formatSAR(c.parsed)}  (${pct}%)`; } } }
+        legend: { position: 'bottom', labels: { color: th.muted, font: { family: th.font, size: 11 }, padding: 10, usePointStyle: true } },
+        tooltip: Object.assign(chartTooltipStyle(), {
+          callbacks: { label: c => {
+            const pct = totalAmt > 0 ? formatNum(c.parsed / totalAmt * 100, 1) : '0.0';
+            return ` ${formatSAR(c.parsed)}  (${pct}%)`;
+          } }
+        })
       }
     }
   });
@@ -590,35 +741,46 @@ function setChart3Mode(m) {
   renderChart3();
 }
 
+function entryRemaining(e) {
+  return (+e.salary || 0) - (e.allocations || []).reduce((s, a) => s + (+a.amount || 0), 0);
+}
+
 function renderChart3() {
   chart3 = destroyChart(chart3);
   const entries = sortedEntries();
 
   if (c3Mode === 'table') {
     const rows = entries.map(e => {
-      const rem = (+e.salary||0) - (e.allocations||[]).reduce((s,a)=>s+(+a.amount||0),0);
-      return `<tr><td>${e.year}</td><td>${MONTHS_AR[e.month-1]}</td>
-        <td class="num ${rem<0?'neg':rem>0?'pos':''}">${formatSAR(rem)}</td></tr>`;
+      const rem = entryRemaining(e);
+      return `<tr><td>${e.year}</td><td>${MONTHS_AR[(+e.month||1)-1]}</td>
+        <td class="num" style="color:${stateColorOf(rem<0?'bad':rem>0?'warn':'good')}">${formatSAR(rem, true)}</td></tr>`;
     }).join('');
     showAlt('c3-canvas-wrap','c3-alt',
-      `<div style="overflow-x:auto"><table class="tbl-alt">
+      `<div class="table-wrap"><table class="tbl-alt">
         <thead><tr><th>السنة</th><th>الشهر</th><th>المتبقي</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="3" style="text-align:center;color:var(--text-2);padding:20px">لا توجد بيانات</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="3">'+emptyBox('لا توجد بيانات')+'</td></tr>'}</tbody>
       </table></div>`);
     return;
   }
 
-  if (!entries.length) { showAlt('c3-canvas-wrap','c3-alt','<div style="text-align:center;color:var(--text-2);padding:40px">لا توجد بيانات</div>'); return; }
+  if (!entries.length) { showAlt('c3-canvas-wrap','c3-alt', emptyBox('لا توجد بيانات في هذه الفترة')); return; }
 
   showCanvas('c3-canvas-wrap','c3-alt');
-  const labels  = entries.map(e => `${MONTHS_AR[e.month-1].slice(0,3)} ${String(e.year).slice(2)}`);
-  const remData = entries.map(e => (+e.salary||0) - (e.allocations||[]).reduce((s,a)=>s+(+a.amount||0),0));
-  const colors  = remData.map(v => v >= 0 ? '#3fb950cc' : '#f85149cc');
+  const labels  = entries.map(e => `${MONTHS_AR[(+e.month||1)-1].slice(0,3)} ${String(e.year).slice(2)}`);
+  const remData = entries.map(entryRemaining);
+  const cOver   = stateColorOf('warn');   // متبقٍ موجب = مال غير موجّه
+  const cUnder  = stateColorOf('bad');    // متبقٍ سالب = تجاوز الدخل
   const ctx     = document.getElementById('chart3')?.getContext('2d');
   if (!ctx) return;
 
-  const opts = chartDefaults();
-  opts.plugins.tooltip.callbacks = { label: c => ` المتبقي: ${formatSAR(c.parsed.y ?? c.parsed)}` };
+  const opts = salaryChartOpts();
+  opts.plugins.legend.display = false;
+  opts.plugins.tooltip.callbacks = {
+    label: c => {
+      const v = c.parsed.y ?? c.parsed;
+      return ` ${v < 0 ? '🔻 تجاوز الدخل' : v > 0 ? '⚠️ غير موجّه' : '✅ صفر'}: ${formatSAR(v, true)}`;
+    }
+  };
 
   chart3 = new Chart(ctx, {
     type: c3Mode === 'line' ? 'line' : 'bar',
@@ -627,13 +789,13 @@ function renderChart3() {
       datasets: [{
         label: 'المتبقي',
         data: remData,
-        backgroundColor: c3Mode === 'line' ? '#3fb95033' : colors,
-        borderColor: c3Mode === 'line' ? '#3fb950' : colors.map(c => c.slice(0,7)),
+        backgroundColor: c3Mode === 'line' ? tint(cOver, '33') : remData.map(v => tint(v >= 0 ? cOver : cUnder, 'cc')),
+        borderColor:     c3Mode === 'line' ? cOver : remData.map(v => v >= 0 ? cOver : cUnder),
         borderWidth: c3Mode === 'line' ? 2 : 0,
         fill: c3Mode === 'line',
         tension: 0.3,
         pointRadius: c3Mode === 'line' ? 3 : 0,
-        pointBackgroundColor: '#3fb950',
+        pointBackgroundColor: cOver,
       }]
     },
     options: opts
@@ -669,49 +831,55 @@ function renderChart4() {
       <td>${y}</td>
       <td class="num">${formatSAR(salaries[i])}</td>
       <td class="num">${formatSAR(allocs[i])}</td>
-      <td class="num ${rems[i]<0?'neg':rems[i]>0?'pos':''}">${formatSAR(rems[i])}</td>
+      <td class="num" style="color:${stateColorOf(rems[i]<0?'bad':rems[i]>0?'warn':'good')}">${formatSAR(rems[i], true)}</td>
     </tr>`).join('');
     showAlt('c4-canvas-wrap','c4-alt',
-      `<div style="overflow-x:auto"><table class="tbl-alt">
+      `<div class="table-wrap"><table class="tbl-alt">
         <thead><tr><th>السنة</th><th>الراتب</th><th>الموزّع</th><th>المتبقي</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" style="text-align:center;color:var(--text-2);padding:20px">لا توجد بيانات</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="4">'+emptyBox('لا توجد بيانات')+'</td></tr>'}</tbody>
       </table></div>`);
     return;
   }
 
   if (c4Mode === 'cards') {
     const totalSalary = salaries.reduce((s,v)=>s+v,0);
-    showAlt('c4-canvas-wrap','c4-alt',
+    showAlt('c4-canvas-wrap','c4-alt', !years.length ? emptyBox('لا توجد بيانات') :
       `<div class="cards-alt-grid">` +
       years.map((y,i) => {
-        const pct = totalSalary>0?(salaries[i]/totalSalary*100).toFixed(1):0;
+        const pct = totalSalary > 0 ? salaries[i] / totalSalary * 100 : 0;
         const rem = rems[i];
-        return `<div class="cards-alt-item" style="border-top-color:${CC[i%CC.length]}">
-          <div class="cards-alt-name">${y}</div>
-          <div class="cards-alt-val" style="color:${CC[i%CC.length]}">${formatSAR(salaries[i])}</div>
-          <div class="cards-alt-pct ${rem<0?'neg':rem>0?'pos':''}">متبقي: ${formatSAR(rem)}</div>
+        return `<div class="cards-alt-item" style="border-top-color:${seriesColor(i)}">
+          ${meterHtml({
+            label: `📅 ${y}`,
+            valueTxt: formatSAR(salaries[i]),
+            pct, fillColor: seriesColor(i),
+            foot: `${formatNum(pct,1)}% من دخل الفترة · متبقٍ ${formatSAR(rem, true)}`,
+          })}
         </div>`;
-      }).join('') + '</div>');
+      }).join('') + `</div>`);
     return;
   }
 
   // bars
-  if (!years.length) { showAlt('c4-canvas-wrap','c4-alt','<div style="text-align:center;color:var(--text-2);padding:40px">لا توجد بيانات</div>'); return; }
+  if (!years.length) { showAlt('c4-canvas-wrap','c4-alt', emptyBox('لا توجد بيانات')); return; }
   showCanvas('c4-canvas-wrap','c4-alt');
   const ctx  = document.getElementById('chart4')?.getContext('2d');
   if (!ctx) return;
-  const opts = chartDefaults();
+  const opts = salaryChartOpts();
   opts.plugins.tooltip.callbacks = { label: c => ` ${c.dataset.label}: ${formatSAR(c.parsed.y)}` };
 
+  const accent = cssVar('--accent');
+  const cAlloc = seriesColor(1);
   chart4 = new Chart(ctx, {
     type: 'bar',
     data: {
       labels: years,
       datasets: [
-        { label: 'الراتب',   data: salaries, backgroundColor: '#f0b42999', borderColor: '#f0b429', borderWidth: 1 },
-        { label: 'الموزّع',  data: allocs,   backgroundColor: '#3b82f699', borderColor: '#3b82f6', borderWidth: 1 },
-        { label: 'المتبقي',  data: rems,     backgroundColor: rems.map(v=>v>=0?'#3fb95099':'#f8514999'),
-          borderColor: rems.map(v=>v>=0?'#3fb950':'#f85149'), borderWidth: 1 }
+        { label: 'الراتب',  data: salaries, backgroundColor: tint(accent, '99'), borderColor: accent, borderWidth: 1 },
+        { label: 'الموزّع', data: allocs,   backgroundColor: tint(cAlloc, '99'), borderColor: cAlloc, borderWidth: 1 },
+        { label: 'المتبقي', data: rems,
+          backgroundColor: rems.map(v => tint(stateColorOf(v >= 0 ? 'warn' : 'bad'), '99')),
+          borderColor:     rems.map(v => stateColorOf(v >= 0 ? 'warn' : 'bad')), borderWidth: 1 }
       ]
     },
     options: opts
@@ -723,14 +891,16 @@ function renderTable() {
   const entries = getFiltered()
     .slice().sort((a,b) => a.year!==b.year ? b.year-a.year : b.month-a.month);
 
-  const catCols = store.categories.map(c => `<th style="color:${c.color}">${esc(c.name)}</th>`).join('');
+  // اللون في رأس العمود يُحمَل على نقطة بجانب الاسم — لا على النص وحده
+  const catCols = store.categories.map(c =>
+    `<th><span class="dot" style="background:${catColor(c.id)}"></span> ${esc(c.name)}</th>`).join('');
   document.getElementById('salary-thead').innerHTML = `<tr>
     <th>السنة</th><th>الشهر</th><th>الراتب</th>${catCols}<th>المتبقي</th><th>ملاحظات</th><th>إجراءات</th>
   </tr>`;
 
   if (!entries.length) {
     document.getElementById('salary-tbody').innerHTML =
-      `<tr><td colspan="${store.categories.length + 6}" class="empty-state">لا توجد سجلات</td></tr>`;
+      `<tr><td colspan="${store.categories.length + 6}">${emptyBox('لا توجد سجلات في هذه الفترة')}</td></tr>`;
     return;
   }
 
@@ -740,16 +910,16 @@ function renderTable() {
     const remaining = salary - allocated;
     const catCells  = store.categories.map(c => {
       const a = (e.allocations||[]).find(x => x.catId === c.id);
-      const v = a ? +a.amount : 0;
-      return `<td class="num ${v<0?'neg':''}">${v!==0?formatSAR(v):'<span class="text-dim">—</span>'}</td>`;
+      const v = a ? +a.amount || 0 : 0;
+      return `<td class="num">${v!==0?formatSAR(v):'<span class="text-dim">—</span>'}</td>`;
     }).join('');
     return `<tr>
       <td>${e.year}</td>
       <td>${MONTHS_AR[(+e.month||1)-1]}</td>
       <td class="num">${formatSAR(salary)}</td>
       ${catCells}
-      <td class="num ${remaining<0?'neg':remaining>0?'pos':''}">${formatSAR(remaining)}</td>
-      <td class="notes-cell" style="text-align:center">${e.notes && e.notes.trim() ? `<button class="notes-badge" data-note="${esc(e.notes)}" onclick="showNotePopup(this)" title="عرض الملاحظة">💬</button>` : ''}</td>
+      <td class="num" style="color:${stateColorOf(remaining<0?'bad':remaining>0?'warn':'good')}">${formatSAR(remaining, true)}</td>
+      <td class="notes-cell">${e.notes && e.notes.trim() ? `<button class="notes-badge" data-note="${esc(e.notes)}" onclick="showNotePopup(this)" title="عرض الملاحظة">💬</button>` : ''}</td>
       <td class="actions-cell">
         <button class="btn-icon" onclick="openEditModal('${e.id}')" title="تعديل">✏️</button>
         <button class="btn-icon danger" onclick="confirmDelete('${e.id}')" title="حذف">🗑️</button>
@@ -791,26 +961,27 @@ function buildAllocationsForm(existing) {
   // جمّع الفئات حسب النوع مع عناوين فاصلة
   let html = '';
   CAT_TYPE_ORDER.forEach(typeId => {
-    const typeCats = store.categories.filter(c => (c.type || 'expense') === typeId);
+    const typeCats = store.categories.filter(c => catTypeOf(c) === typeId);
     if (!typeCats.length) return;
-    const t = CAT_TYPES[typeId];
-    html += `<div class="alloc-group-header" style="color:${t.color};border-color:${t.color}33;background:${t.color}0a">
+    const t = catTypeMeta(typeId);
+    html += `<div class="alloc-group-header">
+      <span class="dot" style="background:${typeColor(typeId)}"></span>
       ${t.icon} ${t.label}
-      <span style="font-size:.72rem;opacity:.7;font-weight:400">${t.desc}</span>
+      <span class="alloc-group-desc">${t.desc}</span>
     </div>`;
     html += typeCats.map(c => {
       const a   = existing.find(x => x.catId === c.id);
       const val = a ? a.amount : '';
       return `<div class="alloc-row">
         <label class="alloc-label">
-          <span class="cat-dot" style="background:${c.color}"></span>${esc(c.name)}
+          <span class="dot" style="background:${catColor(c.id)}"></span>${esc(c.name)}
         </label>
-        <input type="number" class="alloc-input" data-cat="${c.id}"
+        <input type="number" class="alloc-input num" data-cat="${c.id}"
           value="${val}" placeholder="0" min="0" step="0.01">
       </div>`;
     }).join('');
   });
-  container.innerHTML = html;
+  container.innerHTML = html || `<p class="small text-muted">لا توجد فئات — أضف فئة من «إدارة الفئات».</p>`;
 
   const salaryInp = document.getElementById('entry-salary');
   function updateRemaining() {
@@ -819,8 +990,9 @@ function buildAllocationsForm(existing) {
       .reduce((s, inp) => s + (parseFloat(inp.value) || 0), 0);
     const rem = salary - allocated;
     const el  = document.getElementById('modal-remaining');
-    el.textContent = 'المتبقي: ' + formatSAR(rem);
-    el.className   = 'modal-remaining ' + (rem < 0 ? 'neg' : rem > 0 ? 'pos' : '');
+    el.innerHTML = `<span class="k">المتبقي غير الموجّه</span>
+      <b class="num" style="color:${stateColorOf(rem < 0 ? 'bad' : rem > 0 ? 'warn' : 'good')}">${formatSAR(rem, true)}</b>
+      <span class="small text-muted">${rem < 0 ? '🔻 التوزيع تجاوز الدخل' : rem > 0 ? '⚠️ لم يُوجَّه بالكامل' : '✅ كل ريال موجَّه'}</span>`;
   }
   // AUDIT-FIX: oninput مباشر بدل addEventListener — يمنع تراكم المستمعين مع كل فتح للمودال
   salaryInp.oninput  = updateRemaining;
@@ -998,12 +1170,7 @@ function parseAndImportCSV(text) {
   allocCols.forEach(ac => {
     if (!store.categories.find(c => c.name === ac.name)) {
       // AUDIT-FIX: تحديد النوع لحظة الاستيراد — وإلا يظهر مؤشر الادخار 0% حتى إعادة التحميل
-      store.categories.push({
-        id:    uid(),
-        name:  ac.name,
-        color: CC[store.categories.length % CC.length],
-        type:  _guessCatType(ac.name),
-      });
+      store.categories.push({ id: uid(), name: ac.name, type: _guessCatType(ac.name) });
     }
   });
 
@@ -1016,11 +1183,20 @@ function parseAndImportCSV(text) {
     const salary = parseNum(row[colSalary]);
     const notes  = colNotes >= 0 ? (row[colNotes] || '').trim().replace(/\r/g, '') : '';
     if (store.entries.find(e => e.year === year && e.month === month)) { skipped++; continue; }
-    const allocations = allocCols.map(ac => {
+
+    // AUDIT-FIX (2026-08): عمودان بنفس اسم الفئة كانا يُنتجان تخصيصين لنفس catId؛
+    // الجدول والتصدير يقرآن الأول فقط ⇒ فرق صامت بين «الموزّع» وما يُعرض.
+    // الآن تُجمَع المبالغ لكل فئة في تخصيص واحد.
+    const sumByCat = {};
+    allocCols.forEach(ac => {
       const cat = store.categories.find(c => c.name === ac.name);
-      const amt = parseNum(row[ac.col]);
-      return { catId: cat.id, amount: amt };
-    }).filter(a => a.amount !== 0);
+      if (!cat) return;
+      sumByCat[cat.id] = (sumByCat[cat.id] || 0) + parseNum(row[ac.col]);
+    });
+    const allocations = Object.keys(sumByCat)
+      .map(catId => ({ catId, amount: sumByCat[catId] }))
+      .filter(a => a.amount !== 0);
+
     store.entries.push({ id: uid(), year, month, salary, notes, allocations });
     imported++;
   }
@@ -1044,8 +1220,9 @@ function exportCSV() {
   const rows = entries.map(e => {
     const salary   = +e.salary || 0;
     const catAmts  = store.categories.map(c => {
-      const a = (e.allocations || []).find(x => x.catId === c.id);
-      return a ? (+a.amount || 0) : 0;
+      // مجموع كل التخصيصات لهذه الفئة (لا الأول فقط) — يطابق «إجمالي المُوزَّع»
+      return (e.allocations || []).filter(x => x.catId === c.id)
+        .reduce((s, x) => s + (+x.amount || 0), 0);
     });
     const allocated = catAmts.reduce((s, v) => s + v, 0);
     const remaining = salary - allocated;
@@ -1069,16 +1246,16 @@ function exportCSV() {
   const url  = URL.createObjectURL(blob);
   const a    = document.createElement('a');
   a.href     = url;
-  a.download = `salary_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `salary_${todayISO()}.csv`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 100);
   showToast(`تم تصدير ${entries.length} سجل`, 'success');
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// esc() المشتركة من utils.js (محمَّلة قبل هذا الملف) — أُزيلت النسخة المحلية الناقصة
+// esc() و uid() المشتركتان من utils.js (محمَّلة قبل هذا الملف) — أُزيلت النسخ المحلية
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape') { closeModal(); closeDeleteModal(); closeResetModal(); }

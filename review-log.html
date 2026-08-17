@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
   <style>
     /* ── Review Log Page Styles ── */
     .rl-form-grid {
@@ -47,19 +47,23 @@
       background: var(--bg-2);
     }
     .attach-zone:hover { border-color: var(--accent); }
-    .attach-zone.dragover { border-color: var(--accent); background: rgba(59,130,246,.07); }
+    .attach-zone.dragover { border-color: var(--accent); background: var(--accent-dim); }
     .attach-zone input[type=file] { display:none; }
     .attach-zone .attach-icon { font-size: 1.6rem; }
     .attach-zone .attach-hint  { font-size: 0.78rem; color: var(--text-muted); margin-top: 4px; }
     .attach-file-list { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
     .attach-chip {
       display:inline-flex; align-items:center; gap:4px;
-      background: rgba(59,130,246,.12); color: #3b82f6;
+      background: var(--bg-3); color: var(--text);
+      border: 1px solid var(--border);
       border-radius: 6px; padding: 3px 8px; font-size: 0.78rem;
     }
+    .attach-chip.saved { border-color: color-mix(in srgb, var(--st-good) 40%, transparent); background: var(--st-good-dim); }
+    .attach-chip .chip-size { color: var(--text-muted); font-size: .7rem; }
     .attach-chip button {
-      background:none; border:none; color:#f85149; cursor:pointer; padding:0 2px; font-size:0.85rem; line-height:1;
+      background:none; border:none; color:var(--danger); cursor:pointer; padding:0 2px; font-size:0.85rem; line-height:1;
     }
+    .attach-meter { flex-basis:100%; margin-top:8px; }
 
     /* Toolbar */
     .rl-toolbar {
@@ -81,15 +85,46 @@
     }
     .rl-att-chip {
       display:inline-flex; align-items:center; gap:3px; cursor:pointer;
-      background: rgba(59,130,246,.10); color:#3b82f6;
+      background: var(--bg-3); color: var(--text);
+      border: 1px solid var(--border);
       border-radius:5px; padding:2px 7px; font-size:.76rem; margin:2px;
-      border: none;
+      font-family: inherit;
     }
-    .rl-att-chip:hover { background: rgba(59,130,246,.2); }
+    .rl-att-chip:hover { border-color: var(--accent); }
+    .rl-att-chip.all {
+      background: var(--st-good-dim); color: var(--st-good); font-weight:600;
+      border-color: color-mix(in srgb, var(--st-good) 40%, transparent);
+    }
+    .rl-nowrap   { white-space:nowrap; }
+    .rl-checkcol { width:32px; }
+    .rl-attcell  { min-width:130px; }
+    .rl-agetag   { margin-top:4px; }
     .ticker-badge {
-      background: rgba(240,180,41,.12); color:#f0b429;
+      background: var(--accent-dim); color: var(--accent);
       border-radius:5px; padding:2px 8px; font-weight:700; font-size:.86rem;
+      font-variant-numeric: tabular-nums;
     }
+
+    /* بطاقة دورة المراجعة — مبنية من نظام مكوّنات اللوحة في css/style.css */
+    .rl-due-card { margin-bottom:18px; }
+    .rl-due-chips { display:flex; flex-wrap:wrap; gap:6px; }
+    .rl-due-chip {
+      cursor:pointer; font-family:inherit; font-size:.8rem; font-weight:700;
+      background: var(--st-warn-dim); color: var(--st-warn);
+      border: 1px solid color-mix(in srgb, var(--st-warn) 34%, transparent);
+      border-radius: 999px; padding:3px 10px;
+      font-variant-numeric: tabular-nums;
+    }
+    .rl-due-chip:hover { border-color: var(--st-warn); }
+
+    /* شريط التصفية */
+    .rl-filter-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+    .rl-filter-bar input, .rl-filter-bar select {
+      background:var(--bg-2); border:1px solid var(--border); color:var(--text);
+      font-family:inherit; font-size:.83rem; border-radius:var(--radius); padding:6px 10px;
+    }
+    .rl-filter-bar input:focus, .rl-filter-bar select:focus { outline:none; border-color:var(--accent); }
+    .rl-filter-bar #rl-filter-info { margin-inline-start:auto; }
 
     /* Modal */
     .rl-modal-backdrop {
@@ -275,6 +310,13 @@
 
     <!-- ── الجدول ── -->
     <div class="card">
+      <div class="rl-filter-bar">
+        <input type="text" id="rl-q" placeholder="بحث في الرمز/الشركة/القطاع/الملاحظات…"
+               oninput="applyRlFilter()" style="min-width:230px">
+        <select id="rl-flt-ticker" onchange="applyRlFilter()"><option value="">كل الرموز</option></select>
+        <button class="btn btn-secondary btn-sm" onclick="clearRlFilter()">مسح</button>
+        <span id="rl-filter-info"></span>
+      </div>
       <div class="table-wrapper" id="rl-table-wrap">
         <div class="empty-rl">
           <div class="e-icon">📒</div>
@@ -337,10 +379,10 @@
   <div id="toast-container" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;align-items:center"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/tickerdb.js?v=20260817c"></script>
-  <script src="js/review-log.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/tickerdb.js?v=20260817h"></script>
+  <script src="js/review-log.js?v=20260817h"></script>
 </body>
 </html>

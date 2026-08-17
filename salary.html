@@ -15,40 +15,40 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
   <style>
-    /* ── Dashboard Cards ─────────────────────────────────────── */
-    .salary-dash {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 14px;
-      margin-bottom: 24px;
-    }
-    .salary-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; }
-    .salary-card .card-label { font-size:0.75rem; color:var(--text-2); margin-bottom:6px; }
-    .salary-card .card-value { font-size:1.3rem; font-weight:700; color:var(--text); }
-    .salary-card .card-sub   { font-size:0.72rem; color:var(--text-2); margin-top:4px; }
-    .salary-card.accent  { border-color:var(--accent); }
-    .salary-card.success { border-color:var(--success); }
-    .salary-card.danger  { border-color:var(--danger); }
+    /* ═══════════════════════════════════════════════════════════
+       أنماط الصفحة — تخطيط فقط. كل لون من رموز التصميم في css/style.css
+       (--series-*, --st-good/warn/bad, --text, --text-2, --bg-2, --border,
+       --accent). لا لون سداسي مكتوب هنا.
+       ═══════════════════════════════════════════════════════════ */
+
+    /* السمة hidden يجب أن تغلب أي display في الأنماط أدناه (grid/flex) */
+    [hidden] { display: none !important; }
 
     /* ── Section Box ─────────────────────────────────────────── */
-    .section-box { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:20px; margin-bottom:20px; }
-    .section-box h3 { font-size:0.9rem; font-weight:600; color:var(--text-2); margin-bottom:14px; text-transform:uppercase; letter-spacing:0.05em; }
 
-    /* ── Category Breakdown ──────────────────────────────────── */
-    .cat-breakdown-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; }
-    .dash-cat-card { display:flex; align-items:center; gap:10px; background:var(--bg-3); border-radius:var(--radius); padding:10px 14px; border:1px solid var(--border); }
-    .dash-cat-dot  { width:10px; height:10px; border-radius:50%; flex-shrink:0; }
-    .dash-cat-info { flex:1; min-width:0; }
-    .dash-cat-name { display:block; font-size:0.82rem; color:var(--text-2); }
-    .dash-cat-amt  { display:block; font-size:0.95rem; font-weight:600; color:var(--text); }
-    .dash-cat-pct  { font-size:0.78rem; color:var(--text-2); flex-shrink:0; }
+    /* ── الرقم القائد ────────────────────────────────────────── */
+    .sal-hero-row { display:flex; align-items:flex-end; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+    .info-inline  { position:static; opacity:.75; }
+
+    /* ── ملخّص الأنواع الثلاثة ───────────────────────────────── */
+    .type-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }
+    .type-cell { background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); padding:12px 14px; }
+
+    /* ── كاشف التفاصيل الموحّد ───────────────────────────────── */
+    .sal-det > summary {
+      cursor:pointer; list-style:none; font-size:.78rem; color:var(--text-2);
+      padding:7px 0; display:flex; align-items:center; gap:6px; user-select:none;
+    }
+    .sal-det > summary::-webkit-details-marker { display:none; }
+    .sal-det > summary::before { content:'▾'; display:inline-block; transition:transform .18s; }
+    .sal-det[open] > summary::before { transform:rotate(180deg); }
+    .sal-det > summary:hover { color:var(--text); }
 
     /* ── Category Management ─────────────────────────────────── */
     .cat-manager { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:10px; }
     .cat-badge { display:inline-flex; align-items:center; gap:6px; padding:5px 10px 5px 8px; border-radius:20px; border:1px solid var(--border); background:var(--bg-3); font-size:0.83rem; }
-    .cat-dot   { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
     .cat-badge-name { cursor:default; }
     .cat-del-btn { background:none; border:none; color:var(--text-2); cursor:pointer; font-size:1rem; line-height:1; padding:0 2px; transition:color .15s; }
     .cat-del-btn:hover { color:var(--danger); }
@@ -57,19 +57,11 @@
     .add-cat-row input { flex:1; max-width:220px; background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-family:inherit; font-size:0.88rem; padding:8px 12px; }
     .add-cat-row input:focus { outline:none; border-color:var(--accent); }
 
+    .page-actions { display:flex; gap:10px; flex-wrap:wrap; }
+    .sub-label    { font-weight:400; font-size:.75rem; color:var(--text-2); }
+
     /* ── Charts ──────────────────────────────────────────────── */
     .charts-grid-salary { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px; margin-bottom:20px; }
-    .chart-card { background:var(--bg-2); border:1px solid var(--border); border-radius:var(--radius-lg); padding:18px 20px; }
-    .chart-header { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
-    .chart-title  { font-size:0.88rem; font-weight:600; color:var(--text); }
-    .chart-mode-btns { display:flex; gap:4px; }
-    .chart-mode-btn {
-      padding:4px 10px; font-size:0.75rem; font-family:inherit;
-      background:var(--bg-3); border:1px solid var(--border);
-      border-radius:5px; color:var(--text-2); cursor:pointer; transition:all .15s;
-    }
-    .chart-mode-btn.active { background:var(--accent); border-color:var(--accent); color:#000; font-weight:600; }
-    .chart-mode-btn:hover:not(.active) { background:var(--border); color:var(--text); }
     .chart-container-salary { height:260px; position:relative; }
     .chart-alt { padding:4px 0; }
 
@@ -89,17 +81,13 @@
     .range-sep { color:var(--text-2); font-size:0.8rem; }
 
     /* ── Table ───────────────────────────────────────────────── */
-    .table-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px; }
     .table-wrap { overflow-x:auto; }
     .salary-table { width:100%; border-collapse:collapse; font-size:0.875rem; }
     .salary-table th { background:var(--bg-3); padding:10px 12px; text-align:right; font-size:0.78rem; font-weight:600; color:var(--text-2); border-bottom:1px solid var(--border); white-space:nowrap; }
     .salary-table td { padding:9px 12px; border-bottom:1px solid var(--border); color:var(--text); white-space:nowrap; }
-    .salary-table tr:hover td { background:rgba(255,255,255,.02); }
+    .salary-table tr:hover td { background:color-mix(in srgb, var(--text-2) 7%, transparent); }
     .salary-table .num { text-align:right; font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:embed; }
-    .salary-table .neg { color:var(--danger); }
-    .salary-table .pos { color:var(--success); }
-    .salary-table .notes-cell { max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--text-2); font-size:0.8rem; }
-    .empty-state { text-align:center; color:var(--text-2); padding:40px; font-size:0.9rem; }
+    .salary-table .notes-cell { max-width:200px; text-align:center; color:var(--text-2); font-size:0.8rem; }
     .text-dim { color:var(--text-2); }
     .actions-cell { display:flex; gap:4px; }
     .btn-icon { background:none; border:1px solid var(--border); border-radius:6px; padding:4px 8px; cursor:pointer; font-size:0.85rem; transition:background .15s,border-color .15s; }
@@ -122,9 +110,10 @@
     .alloc-label { display:flex; align-items:center; gap:6px; font-size:0.85rem; color:var(--text); min-width:130px; flex-shrink:0; }
     .alloc-input { flex:1; background:var(--bg-3); border:1px solid var(--border); border-radius:var(--radius); color:var(--text); font-family:inherit; font-size:0.9rem; padding:7px 10px; text-align:left; }
     .alloc-input:focus { outline:none; border-color:var(--accent); }
-    .modal-remaining { font-size:0.92rem; font-weight:600; padding:10px 14px; border-radius:var(--radius); background:var(--bg-3); border:1px solid var(--border); margin:12px 0; text-align:center; }
-    .modal-remaining.neg { color:var(--danger); border-color:var(--danger); }
-    .modal-remaining.pos { color:var(--success); border-color:var(--success); }
+    .modal-remaining { display:flex; align-items:baseline; justify-content:space-between; gap:10px; flex-wrap:wrap;
+      font-size:0.92rem; padding:10px 14px; border-radius:var(--radius); background:var(--bg-3); border:1px solid var(--border); margin:12px 0; }
+    .modal-remaining .k { color:var(--text-2); font-size:.8rem; }
+    .modal-remaining b  { font-size:1.05rem; }
     .modal-actions { display:flex; gap:10px; justify-content:flex-end; margin-top:20px; }
 
     /* ── Confirm Modals ──────────────────────────────────────── */
@@ -135,87 +124,32 @@
     .confirm-box .modal-actions { justify-content:center; }
 
     /* ── Alt chart helpers ───────────────────────────────────── */
-    .bars-alt-row { display:flex; align-items:center; gap:10px; margin-bottom:9px; }
-    .bars-alt-label { width:88px; font-size:0.8rem; color:var(--text); text-align:right; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; flex-shrink:0; }
-    .bars-alt-track { flex:1; height:16px; background:rgba(255,255,255,.06); border-radius:3px; position:relative; }
-    .bars-alt-fill  { height:100%; border-radius:3px; min-width:2px; }
-    .bars-alt-pct   { width:40px; font-size:0.8rem; font-weight:600; color:var(--text); text-align:left; }
-    .bars-alt-val   { width:100px; font-size:0.76rem; color:var(--text-2); text-align:left; }
-
-    .cards-alt-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(140px,1fr)); gap:8px; padding:4px 0; }
+    .cards-alt-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:8px; padding:4px 0; }
     .cards-alt-item { background:var(--bg-3); border-radius:var(--radius); padding:10px 12px; border-top:3px solid var(--border); }
-    .cards-alt-name { font-size:0.78rem; color:var(--text-2); margin-bottom:4px; }
-    .cards-alt-val  { font-size:1rem; font-weight:700; color:var(--text); }
-    .cards-alt-pct  { font-size:0.72rem; color:var(--text-2); margin-top:2px; }
 
     .tbl-alt { width:100%; border-collapse:collapse; font-size:0.82rem; }
     .tbl-alt th { background:var(--bg-3); padding:7px 10px; text-align:right; font-size:0.75rem; color:var(--text-2); border-bottom:1px solid var(--border); }
     .tbl-alt td { padding:7px 10px; border-bottom:1px solid var(--border); color:var(--text); }
-    .tbl-alt .num { text-align:left; }
-    .tbl-alt .neg { color:var(--danger); }
-    .tbl-alt .pos { color:var(--success); }
-
-    /* ── Type Summary Bar ────────────────────────────────────── */
-    .type-summary-bar {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 10px;
-      margin-bottom: 16px;
-    }
-    .type-summary-item {
-      background: var(--bg-3);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 12px 14px;
-    }
-    .type-summary-head {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-bottom: 4px;
-    }
-    .type-summary-icon  { font-size: 1rem; line-height: 1; }
-    .type-summary-label { font-size: 0.8rem; font-weight: 600; color: var(--text-2); flex: 1; }
-    .type-summary-pct   { font-size: 0.82rem; font-weight: 700; }
-    .type-summary-amt   { font-size: 1.05rem; font-weight: 700; margin-bottom: 6px; }
-    .type-summary-bar-track {
-      height: 5px;
-      background: rgba(255,255,255,.07);
-      border-radius: 3px;
-      overflow: hidden;
-      margin-bottom: 5px;
-    }
-    .type-summary-bar-fill { height: 100%; border-radius: 3px; transition: width .4s; }
-    .type-summary-cats  { font-size: 0.72rem; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-    /* ── Category Type Chip (in breakdown cards) ─────────────── */
-    .cat-type-chip {
-      display: inline-block;
-      font-size: 0.67rem;
-      font-weight: 600;
-      padding: 1px 6px;
-      border-radius: 10px;
-      border: 1px solid transparent;
-      margin-right: 5px;
-      vertical-align: middle;
-      white-space: nowrap;
-    }
+    .tbl-alt .num { text-align:left; font-variant-numeric:tabular-nums; }
 
     /* ── Type Toggle Button (in category badges) ─────────────── */
     .cat-type-btn {
       display: inline-flex;
       align-items: center;
-      gap: 3px;
+      gap: 4px;
       font-size: 0.7rem;
       font-weight: 600;
-      padding: 2px 7px;
+      padding: 2px 8px;
       border-radius: 10px;
       cursor: pointer;
       font-family: inherit;
-      transition: opacity .15s;
+      color: var(--text-2);
+      background: color-mix(in srgb, var(--text-2) 10%, transparent);
+      border: 1px solid var(--border);
+      transition: color .15s, border-color .15s;
       white-space: nowrap;
     }
-    .cat-type-btn:hover { opacity: .75; }
+    .cat-type-btn:hover { color: var(--text); border-color: var(--accent); }
 
     /* ── Alloc Group Header ──────────────────────────────────── */
     .alloc-group-header {
@@ -224,13 +158,16 @@
       gap: 7px;
       font-size: 0.78rem;
       font-weight: 700;
+      color: var(--text);
       padding: 7px 10px;
       border-radius: var(--radius);
-      border: 1px solid transparent;
-      margin: 10px 0 6px;
+      background: var(--bg-3);
+      border: 1px solid var(--border);
+      margin: 12px 0 8px;
       letter-spacing: .02em;
     }
     .alloc-group-header:first-child { margin-top: 0; }
+    .alloc-group-desc { font-size:.72rem; font-weight:400; color:var(--text-2); margin-inline-start:auto; }
 
     /* ── Type Select in add-cat row ──────────────────────────── */
     .add-cat-type-sel {
@@ -245,8 +182,17 @@
     }
     .add-cat-type-sel:focus { outline: none; border-color: var(--accent); }
 
-    @media (max-width: 600px) {
-      .type-summary-bar { grid-template-columns: 1fr; }
+    /* ── بانر قاعدة التسجيل ──────────────────────────────────── */
+    .conv-banner { position:relative; margin-bottom:20px; }
+    .conv-banner .conv-close {
+      position:absolute; inset-inline-end:10px; top:8px;
+      background:none; border:none; color:var(--text-2); cursor:pointer; font-size:1rem; line-height:1;
+    }
+    .conv-banner .conv-close:hover { color:var(--text); }
+    .conv-ex { display:flex; gap:16px; flex-wrap:wrap; margin-top:8px; font-size:.8rem; }
+
+    @media (max-width: 700px) {
+      .type-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -339,65 +285,41 @@
         <h1>مقسّم الراتب</h1>
         <p>توزيع الراتب الشهري الفعلي — مستقل عن باقي الصفحات</p>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="onCSVFileSelected(event)">
+      <div class="page-actions">
+        <input type="file" id="csv-file-input" accept=".csv" hidden onchange="onCSVFileSelected(event)">
         <button class="btn btn-secondary" onclick="triggerImport()">📥 استيراد CSV</button>
-        <button class="btn btn-secondary" style="border-color:var(--danger);color:var(--danger)" onclick="openResetModal()">🗑️ ريست</button>
+        <button class="btn btn-danger" onclick="openResetModal()">🗑️ ريست</button>
         <button class="btn btn-primary"   onclick="openAddModal()">+ إضافة سجل</button>
       </div>
     </div>
 
     <!-- ── قاعدة التسجيل ──────────────────────────────────────── -->
-    <div id="salary-convention-banner" style="
-      background:rgba(240,180,41,.07);
-      border:1px solid rgba(240,180,41,.3);
-      border-radius:var(--radius-lg);
-      padding:14px 18px;
-      margin-bottom:20px;
-      display:flex;
-      gap:14px;
-      align-items:flex-start;
-      flex-wrap:wrap;
-    ">
-      <span style="font-size:1.3rem;line-height:1;flex-shrink:0;padding-top:2px">📌</span>
-      <div style="flex:1;min-width:220px">
-        <div style="font-weight:700;font-size:.9rem;color:var(--text-1);margin-bottom:6px">
-          قاعدة التسجيل: سمّ الراتب بشهر نزوله في حسابك
-        </div>
-        <div style="font-size:.83rem;color:var(--text-2);line-height:1.75">
-          <strong style="color:var(--text-1)">مثال عملي:</strong>
-          راتبك ينزل كل <strong style="color:var(--accent)">27 من الشهر</strong> —
-          الراتب الذي نزل <strong style="color:var(--accent)">27 يناير 2026</strong>
-          يُسجَّل كـ <strong style="color:var(--accent)">يناير 2026</strong>،
-          وهو الذي تصرف منه طوال الفترة من 27 يناير حتى 26 فبراير.
-        </div>
-        <div style="margin-top:8px;font-size:.8rem;color:var(--text-2);line-height:1.7">
-          <strong style="color:var(--text-1)">لماذا هذه القاعدة؟</strong>
-          في المالية الشخصية المعيار هو <em>المحاسبة النقدية</em> — تُسجِّل المال لحظة
-          <strong>دخوله</strong> حسابك، لا لحظة صرفه.
-          هذا يطابق كشف حسابك البنكي تمامًا ويمنع الخلط بين الأشهر.
-          <br>
-          <span style="color:var(--text-muted)">
-            المرجع: منهجية Zero-Based Budgeting (YNAB) — "خصّص كل ريال فور وصوله".
-          </span>
-        </div>
-        <div style="margin-top:10px;display:flex;gap:16px;flex-wrap:wrap;font-size:.8rem">
-          <span style="display:flex;align-items:center;gap:5px;color:var(--success)">
-            ✅ <span><strong>صح:</strong> راتب 27 يناير → سجّله "يناير 2026"</span>
-          </span>
-          <span style="display:flex;align-items:center;gap:5px;color:var(--danger)">
-            ❌ <span><strong>خطأ:</strong> راتب 27 يناير → تسجّله "ديسمبر 2025" لأنك تصرفه في فبراير</span>
-          </span>
+    <div id="salary-convention-banner" class="conv-banner">
+      <div class="note" data-state="warn">
+        <span class="ic">📌</span>
+        <div>
+          <strong>قاعدة التسجيل: سمّ الراتب بشهر نزوله في حسابك.</strong>
+          راتبك ينزل 27 من الشهر؟ الراتب الذي نزل 27 يناير 2026 يُسجَّل «يناير 2026».
+          <details class="sal-det">
+            <summary>لماذا هذه القاعدة؟ ومثال الصح والخطأ</summary>
+            <p>في المالية الشخصية المعيار هو <em>المحاسبة النقدية</em> — تُسجِّل المال لحظة <strong>دخوله</strong> حسابك، لا لحظة صرفه.
+            هذا يطابق كشف حسابك البنكي تمامًا ويمنع الخلط بين الأشهر. راتب 27 يناير هو ما تصرف منه من 27 يناير حتى 26 فبراير،
+            ومع ذلك يبقى مسجَّلاً في يناير.</p>
+            <p class="small text-muted">المرجع: منهجية Zero-Based Budgeting (YNAB) — «خصّص كل ريال فور وصوله».</p>
+            <div class="conv-ex">
+              <span class="tag" data-state="good">✅ صح: راتب 27 يناير → «يناير 2026»</span>
+              <span class="tag" data-state="bad">❌ خطأ: راتب 27 يناير → «ديسمبر 2025»</span>
+            </div>
+          </details>
         </div>
       </div>
-      <button onclick="document.getElementById('salary-convention-banner').style.display='none';localStorage.setItem('hide-salary-convention','1')"
-        title="إخفاء هذا الشرح"
-        style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:1.1rem;padding:0;flex-shrink:0;line-height:1;margin-top:2px">✕</button>
+      <button class="conv-close" title="إخفاء هذا الشرح"
+        onclick="document.getElementById('salary-convention-banner').hidden=true;localStorage.setItem('hide-salary-convention','1')">✕</button>
     </div>
     <script>
       // أخفِ البانر إذا أغلقه المستخدم من قبل
       if (localStorage.getItem('hide-salary-convention') === '1') {
-        document.getElementById('salary-convention-banner').style.display = 'none';
+        document.getElementById('salary-convention-banner').hidden = true;
       }
     </script>
 
@@ -426,113 +348,102 @@
         <option value="11">نوفمبر</option><option value="12">ديسمبر</option>
       </select>
       <select id="to-year" onchange="applyDateRange()"><option value="">— سنة</option></select>
-      <button class="btn btn-secondary" style="padding:5px 12px;font-size:0.82rem" onclick="clearDateRange()">مسح الفلتر</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearDateRange()">مسح الفلتر</button>
     </div>
 
-    <!-- Summary Cards -->
-    <div class="section-header" style="margin:0 0 8px">
-      <span class="section-title">💵 ملخص توزيع الراتب</span>
-      <button class="info-btn" type="button" onclick="showCardInfo('salary-summary')" title="كيف أوزّع راتبي؟" style="position:static;opacity:.7">ⓘ</button>
-    </div>
-    <div class="salary-dash">
-      <div class="salary-card accent">
-        <div class="card-label">إجمالي الرواتب</div>
-        <div class="card-value" id="dash-salary">—</div>
-        <div class="card-sub" id="dash-label">الإجمالي الكلي</div>
+    <!-- ① الرقم القائد: معدّل الادخار والاستثمار -->
+    <div class="card mb-6">
+      <div class="card-head">
+        <span class="ttl">💵 معدّل الادخار والاستثمار
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('salary-summary')" title="كيف أوزّع راتبي؟">ⓘ</button>
+        </span>
+        <div class="acts"><span class="small text-muted">الرقم الوحيد الذي يبني الثروة</span></div>
       </div>
-      <div class="salary-card">
-        <div class="card-label">إجمالي المُوزَّع</div>
-        <div class="card-value" id="dash-allocated">—</div>
-        <div class="card-sub" id="dash-months">0 شهر</div>
-      </div>
-      <div class="salary-card" id="dash-savings-card">
-        <div class="card-label">معدّل الادخار والاستثمار</div>
-        <div class="card-value" id="dash-savings-rate">—</div>
-        <div class="card-sub" id="dash-savings-sub">ادخار + أصول ÷ الراتب</div>
-      </div>
-      <div class="salary-card" id="dash-remaining-card">
-        <div class="card-label">المتبقي غير الموزع</div>
-        <div class="card-value" id="dash-remaining">—</div>
-        <div class="card-sub" id="dash-remaining-sub">الأفضل أن يقترب من الصفر</div>
-      </div>
+      <div id="salary-hero"></div>
     </div>
 
-    <!-- Type Summary + Category Breakdown -->
-    <div class="section-box">
-      <h3>توزيع الراتب حسب النوع</h3>
-      <!-- ملخص الأنواع الثلاثة -->
-      <div class="type-summary-bar" id="type-summary"></div>
-      <!-- تفصيل الفئات الفردية -->
-      <div style="font-size:0.75rem;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px">تفصيل الفئات</div>
-      <div class="cat-breakdown-grid" id="cat-breakdown"></div>
+    <!-- ② إلى أين يذهب دخلك؟ -->
+    <div class="card mb-6">
+      <div class="card-head">
+        <span class="ttl">🎯 إلى أين يذهب دخلك؟ <span class="sub">كل فئة تنتمي لأحد ثلاثة أنواع</span></span>
+      </div>
+      <div class="stack">
+        <div class="type-grid" id="type-summary"></div>
+        <div id="type-orphan-note"></div>
+        <details class="sal-det">
+          <summary>تفصيل كل فئة على حدة</summary>
+          <div id="cat-breakdown"></div>
+        </details>
+      </div>
     </div>
 
     <!-- Charts -->
     <div class="charts-grid-salary">
 
       <!-- Chart 1: Salary vs Allocations over time -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">الراتب والتوزيعات</span>
-          <div class="chart-mode-btns">
+      <div class="card">
+        <div class="card-head">
+          <span class="ttl">📊 الراتب والتوزيعات <span class="sub">شهراً بشهر</span></span>
+          <div class="acts chart-mode-btns">
             <button class="chart-mode-btn active" id="c1-stacked" onclick="setChart1Mode('stacked')">مكدّس</button>
             <button class="chart-mode-btn"        id="c1-line"    onclick="setChart1Mode('line')">خطي</button>
             <button class="chart-mode-btn"        id="c1-table"   onclick="setChart1Mode('table')">جدول</button>
           </div>
         </div>
         <div id="c1-canvas-wrap" class="chart-container-salary"><canvas id="chart1"></canvas></div>
-        <div id="c1-alt" class="chart-alt" style="display:none"></div>
+        <div id="c1-alt" class="chart-alt" hidden></div>
       </div>
 
       <!-- Chart 2: Category distribution -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">توزيع الفئات</span>
-          <div class="chart-mode-btns">
+      <div class="card">
+        <div class="card-head">
+          <span class="ttl">🥧 توزيع الفئات <span class="sub">من إجمالي المُوزَّع</span></span>
+          <div class="acts chart-mode-btns">
             <button class="chart-mode-btn active" id="c2-donut"  onclick="setChart2Mode('donut')">دائري</button>
             <button class="chart-mode-btn"        id="c2-bars"   onclick="setChart2Mode('bars')">أشرطة</button>
             <button class="chart-mode-btn"        id="c2-cards"  onclick="setChart2Mode('cards')">بطاقات</button>
           </div>
         </div>
         <div id="c2-canvas-wrap" class="chart-container-salary"><canvas id="chart2"></canvas></div>
-        <div id="c2-alt" class="chart-alt" style="display:none"></div>
+        <div id="c2-alt" class="chart-alt" hidden></div>
+        <div id="c2-note" class="mt-2"></div>
       </div>
 
       <!-- Chart 3: Monthly remaining -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">المتبقي الشهري</span>
-          <div class="chart-mode-btns">
+      <div class="card">
+        <div class="card-head">
+          <span class="ttl">⚖️ المتبقي الشهري <span class="sub">الهدف صفر — كل ريال موجَّه</span></span>
+          <div class="acts chart-mode-btns">
             <button class="chart-mode-btn active" id="c3-bars"  onclick="setChart3Mode('bars')">أشرطة</button>
             <button class="chart-mode-btn"        id="c3-line"  onclick="setChart3Mode('line')">خطي</button>
             <button class="chart-mode-btn"        id="c3-table" onclick="setChart3Mode('table')">جدول</button>
           </div>
         </div>
         <div id="c3-canvas-wrap" class="chart-container-salary"><canvas id="chart3"></canvas></div>
-        <div id="c3-alt" class="chart-alt" style="display:none"></div>
+        <div id="c3-alt" class="chart-alt" hidden></div>
       </div>
 
       <!-- Chart 4: Annual comparison -->
-      <div class="chart-card">
-        <div class="chart-header">
-          <span class="chart-title">المقارنة السنوية</span>
-          <div class="chart-mode-btns">
+      <div class="card">
+        <div class="card-head">
+          <span class="ttl">📅 المقارنة السنوية <span class="sub">دخل مقابل موزّع لكل سنة</span></span>
+          <div class="acts chart-mode-btns">
             <button class="chart-mode-btn active" id="c4-bars"  onclick="setChart4Mode('bars')">أشرطة</button>
             <button class="chart-mode-btn"        id="c4-cards" onclick="setChart4Mode('cards')">بطاقات</button>
             <button class="chart-mode-btn"        id="c4-table" onclick="setChart4Mode('table')">جدول</button>
           </div>
         </div>
         <div id="c4-canvas-wrap" class="chart-container-salary"><canvas id="chart4"></canvas></div>
-        <div id="c4-alt" class="chart-alt" style="display:none"></div>
+        <div id="c4-alt" class="chart-alt" hidden></div>
       </div>
 
     </div>
 
     <!-- Table -->
-    <div class="section-box">
-      <div class="table-toolbar">
-        <h3 style="margin:0">السجلات الشهرية</h3>
-        <button class="btn btn-secondary" onclick="exportCSV()" style="margin-right:auto">📤 تصدير CSV</button>
+    <div class="card mb-6">
+      <div class="card-head">
+        <span class="ttl">🗓️ السجلات الشهرية <span class="sub">حسب الفترة المختارة أعلاه</span></span>
+        <div class="acts"><button class="btn btn-secondary btn-sm" onclick="exportCSV()">📤 تصدير CSV</button></div>
       </div>
       <div class="table-wrap">
         <table class="salary-table">
@@ -543,24 +454,28 @@
     </div>
 
     <!-- Category Management (إعدادات — في الأسفل بعيداً عن التدفق التحليلي) -->
-    <div class="section-box">
-      <h3>
-        إدارة الفئات
-        <small style="font-weight:400;text-transform:none;color:var(--text-2);font-size:0.75rem">
-          (انقر مرتين على الاسم لتعديله · انقر الشارة الملونة لتغيير النوع)
-        </small>
-      </h3>
-      <div class="cat-manager" id="cat-list"></div>
-      <div class="add-cat-row" style="flex-wrap:wrap">
-        <input type="text" id="new-cat-name" placeholder="اسم الفئة الجديدة..."
-          onkeydown="if(event.key==='Enter') addCategory()" style="flex:1;min-width:160px">
-        <select id="new-cat-type" class="add-cat-type-sel" title="نوع الفئة">
-          <option value="expense">💸 مصاريف</option>
-          <option value="savings">💰 ادخار</option>
-          <option value="asset">📈 أصول</option>
-        </select>
-        <button class="btn btn-secondary" onclick="addCategory()">+ إضافة فئة</button>
+    <div class="card">
+      <div class="card-head">
+        <span class="ttl">⚙️ إدارة الفئات <span class="sub">انقر مرتين على الاسم لتعديله · انقر شارة النوع لتغييره</span></span>
       </div>
+      <details class="sal-det" open>
+        <summary>الفئات الحالية وإضافة فئة جديدة</summary>
+        <div class="cat-manager" id="cat-list"></div>
+        <div class="add-cat-row">
+          <input type="text" id="new-cat-name" placeholder="اسم الفئة الجديدة..."
+            onkeydown="if(event.key==='Enter') addCategory()">
+          <select id="new-cat-type" class="add-cat-type-sel" title="نوع الفئة">
+            <option value="expense">💸 مصاريف</option>
+            <option value="savings">💰 ادخار</option>
+            <option value="asset">📈 أصول</option>
+          </select>
+          <button class="btn btn-secondary" onclick="addCategory()">+ إضافة فئة</button>
+        </div>
+        <div class="note mt-4"><span class="ic">💡</span><div>
+          <strong>النوع يحدّد المؤشر:</strong> «ادخار» و«أصول» يدخلان في معدّل الادخار والاستثمار، و«مصاريف» لا يدخل.
+          فئة مصنّفة خطأً تُفسد الرقم القائد — راجع التصنيف بعد كل استيراد CSV.
+        </div></div>
+      </details>
     </div>
   </main>
 
@@ -590,7 +505,7 @@
         <input type="number" id="entry-salary" min="0" step="0.01" placeholder="0.00">
       </div>
       <div class="alloc-section">
-        <h3>توزيع المبالغ <small style="font-weight:400;font-size:.75rem;color:var(--text-2)">مُجمَّعة حسب النوع</small></h3>
+        <h3>توزيع المبالغ <small class="sub-label">مُجمَّعة حسب النوع</small></h3>
         <div id="allocations-form"></div>
         <div class="modal-remaining" id="modal-remaining">المتبقي: —</div>
       </div>
@@ -613,7 +528,7 @@
       <p id="delete-msg"></p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeDeleteModal()">إلغاء</button>
-        <button class="btn" style="background:var(--danger);color:#fff" onclick="executeDelete()">حذف نهائياً</button>
+        <button class="btn btn-danger" onclick="executeDelete()">حذف نهائياً</button>
       </div>
     </div>
   </div>
@@ -626,17 +541,17 @@
       <p>سيتم حذف جميع السجلات الشهرية نهائياً.\nالفئات لن تُحذف — فقط البيانات.\nلا يمكن التراجع عن هذا الإجراء.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeResetModal()">إلغاء</button>
-        <button class="btn" style="background:var(--danger);color:#fff" onclick="executeReset()">نعم، احذف كل شيء</button>
+        <button class="btn btn-danger" onclick="executeReset()">نعم، احذف كل شيء</button>
       </div>
     </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/salary.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/salary.js?v=20260817h"></script>
   <script>init();</script>
 </body>
 </html>

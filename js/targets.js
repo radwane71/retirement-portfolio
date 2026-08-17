@@ -34,6 +34,89 @@ window.CARD_INFO = {
   },
 };
 
+// ══════════════════════════════════════════════════════════════════════
+// جسر رموز التصميم — منسوخ حرفياً من أعلى js/dashboard.js
+// (هذه الصفحة لا تحمّل dashboard.js). أي تعديل هناك يجب أن ينعكس هنا.
+// قاعدة ثابتة: لا لون مكتوب يدوياً — كل لون يُقرأ من متغيّر CSS.
+// ══════════════════════════════════════════════════════════════════════
+function cssVar(name) {
+  // الثيم الفاتح يُعرَّف على body.light-mode لا على :root — نقرأ من body أولاً
+  const host = document.body || document.documentElement;
+  return getComputedStyle(host).getPropertyValue(name).trim();
+}
+// لون سلسلة بيانات بالترتيب الثابت (1..6) — لا تُدوَّر عشوائياً
+function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
+// لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
+function stateColorOf(state) {
+  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+    : state === 'bad' ? '--st-bad' : '--text-2');
+}
+// رأس بطاقة موحّد (.card-head)
+function cardHead(title, sub, acts) {
+  return `<div class="card-head"><span class="ttl">${title}` +
+    (sub ? ` <span class="sub">${sub}</span>` : '') +
+    `</span>` + (acts ? `<div class="acts">${acts}</div>` : '') + `</div>`;
+}
+// وسم حالة (.tag) — أيقونة + نص إلزاماً
+function tagHtml(icon, text, state) {
+  return `<span class="tag"${state ? ` data-state="${state}"` : ''}>${icon} ${text}</span>`;
+}
+// مقياس (.meter) — علامة الهدف اختيارية
+function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null, fillColor = '' }) {
+  const w = Math.max(0, Math.min(100, +pct || 0)).toFixed(1);
+  return `<div class="meter"${state ? ` data-state="${state}"` : ''}>
+      <div class="meter-head"><span class="k">${label}</span><span class="v">${valueTxt}</span></div>
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${w}%${fillColor ? `;background:${fillColor}` : ''}"></div></div>
+        ${markPct != null ? `<div class="meter-mark" style="left:${Math.max(0, Math.min(100, markPct)).toFixed(1)}%"></div>` : ''}
+      </div>
+      ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
+    </div>`;
+}
+// صف وزن في قائمة (.brow)
+function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
+  const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
+  const dColor = diffState ? stateColorOf(diffState) : cssVar('--text-2');
+  return `<div class="brow"${title ? ` title="${title}"` : ''}>
+      <div class="br-k"><span class="dot" style="background:${color}"></span><span>${name}</span>${sub ? `<span class="small text-muted num">${sub}</span>` : ''}</div>
+      <div class="br-track"><div class="br-fill" style="width:${w}%;background:${color}"></div></div>
+      <div class="br-v">${valueTxt}${diffTxt ? `<span class="d" style="color:${dColor}">${diffTxt}</span>` : ''}</div>
+    </div>`;
+}
+// ملاحظة داخل بطاقة (.note)
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+// لوحة مفاتيح/قيم (.kvs) — items: [[label, value], …]
+function kvsHtml(items) {
+  return `<div class="kvs">${items.filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// الأسقف الدستورية (CLAUDE.md §1) — نفس ثوابت decision-engine.js و watchlist.js
+// ⚠️ تُستخدم هنا للعرض والتنبيه فقط: لا تدخل في أي معادلة حفظ أو توزيع.
+// ══════════════════════════════════════════════════════════════════════
+const TG_CAP_SINGLE    = 7;     // سقف السهم الواحد
+const TG_CAP_BLUECHIP  = 12;    // سقف السهم القيادي
+const TG_CAP_BUFFER    = 0.75;  // منطقة سماح السهم/القيادي
+const TG_CAP_SECTOR    = 25;    // سقف القطاع
+const TG_SECTOR_BUFFER = 1.25;  // منطقة سماح القطاع
+const TG_SIZE_MIN      = 18;    // أدنى حجم محفظة مستهدف
+const TG_SIZE_MAX      = 25;    // أقصى حجم محفظة مستهدف
+
+let engineCfg = {};   // ticker → مدخلات محرّك القرار (منها علم «قيادي» blueChip)
+
+// هل السهم قيادي؟ — نفس منطق decision-engine.js/watchlist.js:
+// علم blueChip اليدوي من إعدادات المحرّك، وأرامكو 2222 قيادية افتراضياً.
+function tgIsBlueChip(ticker) {
+  const cfg = engineCfg[ticker] || {};
+  if (cfg.blueChip === true)  return true;
+  if (cfg.blueChip === false) return false;
+  return ticker === '2222';
+}
+function tgCapOf(ticker) { return tgIsBlueChip(ticker) ? TG_CAP_BLUECHIP : TG_CAP_SINGLE; }
+
 // ── معرّف DOM موحّد لحقل هدف السهم (تناظر كتابة/قراءة) ─────────
 // تُستخدم في التوليد (render) والقراءة (save/validate) معاً — أي محرف خاص
 // في الرمز يتحول لنفس الشكل في الطرفين بدل esc() عند الكتابة والخام عند القراءة
@@ -64,7 +147,7 @@ async function init() {
 }
 
 async function loadAll() {
-  const [usRes, hRes, stRes, secRes, taskRes] = await Promise.all([
+  const [usRes, hRes, stRes, secRes, taskRes, engRes] = await Promise.all([
     supabaseClient.from('user_stocks').select('*').order('ticker'),
     supabaseClient.from('holdings').select('*'),
     supabaseClient.from('stock_targets').select('*'),
@@ -72,10 +155,13 @@ async function loadAll() {
     // الترتيب إجباري: منطق «أول مهمة نصادفها لكل رمز هي الأحدث» يفترض الأحدث أولاً،
     // وبدون order يرجع Supabase ترتيباً غير مضمون
     supabaseClient.from('portfolio_tasks').select('type,ticker,status,accumulate_at,trim_from,liquidate_above').eq('status','active').order('created_at', { ascending: false }),
+    // أعلام «قيادي» — نفس مصدر محرّك القرار؛ تُستخدم لعرض السقف الصحيح (7% أو 12%)
+    loadUserSetting('decision_engine_v1').catch(() => ({})),
   ]);
 
   userStocks = usRes.data || [];
   holdings   = hRes.data || [];
+  engineCfg  = (engRes && typeof engRes === 'object') ? engRes : {};
 
   // حساب إجمالي قيمة المحفظة
   totalValue = holdings.reduce((s, h) => s + (+h.shares * +h.current_price), 0);
@@ -168,13 +254,15 @@ function getAlertThresholds() {
   };
 }
 
+// ملاحظة: حقل state أُضيف للعرض فقط (وسم .tag ومقياس .meter) وهو اشتقاق حرفي
+// من cls القائم — لا يغيّر أي عتبة ولا أي رقم.
 function alertStatus(current, target) {
-  if (!target) return { cls: '', icon: '—', label: '—' };
+  if (!target) return { cls: '', state: '', icon: '—', label: '—' };
   const diff = current - target;
   const { green, yellow } = getAlertThresholds();
-  if (Math.abs(diff) <= green)  return { cls: 'text-success', icon: '✅', label: 'ضمن الهدف' };
-  if (Math.abs(diff) <= yellow) return { cls: 'text-accent',  icon: '⚠️', label: diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`, rowCls: 'alert-row-yellow' };
-  return { cls: 'text-danger', icon: '🔴', label: diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`, rowCls: 'alert-row-red' };
+  if (Math.abs(diff) <= green)  return { cls: 'text-success', state: 'good', icon: '✅', label: 'ضمن الهدف' };
+  if (Math.abs(diff) <= yellow) return { cls: 'text-accent',  state: 'warn', icon: '⚠️', label: diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`, rowCls: 'alert-row-yellow' };
+  return { cls: 'text-danger', state: 'bad', icon: '🔴', label: diff > 0 ? `+${diff.toFixed(1)}%` : `${diff.toFixed(1)}%`, rowCls: 'alert-row-red' };
 }
 
 // ── حساب ومراقبة إجمالي أهداف الأسهم ──────────────────────
@@ -288,21 +376,43 @@ function attachSectorListeners() {
 }
 
 // ── badge المهمة ─────────────────────────────────────────────
+// اللون صار من رموز الحالة (.tag[data-state]) بدل أكواد سداسية مكتوبة يدوياً.
 const TASK_BADGE = {
-  liquidation:  { label: 'تصفية',    icon: '🔴', style: 'background:rgba(248,81,73,0.15);color:#f85149' },
-  reduction:    { label: 'تخفيف',    icon: '⚖️', style: 'background:rgba(240,180,41,0.15);color:#f0b429' },
-  monitoring:   { label: 'مراقبة',   icon: '👁️', style: 'background:rgba(139,148,158,0.15);color:#8b949e' },
-  accumulation: { label: 'تجميع',    icon: '🟢', style: 'background:rgba(63,185,80,0.15);color:#3fb950'  },
-  hold:         { label: 'احتفاظ',   icon: '🔵', style: 'background:rgba(59,130,246,0.15);color:#3b82f6'  },
+  liquidation:  { label: 'تصفية',    icon: '🔴', state: 'bad'  },
+  reduction:    { label: 'تخفيف',    icon: '⚖️', state: 'warn' },
+  monitoring:   { label: 'مراقبة',   icon: '👁️', state: ''     },
+  accumulation: { label: 'تجميع',    icon: '🟢', state: 'good' },
+  hold:         { label: 'احتفاظ',   icon: '🔵', state: ''     },
 };
 
 function taskBadgeHtml(ticker) {
   const type = taskMap[ticker];
   if (!type) return '<span class="small text-muted">—</span>';
-  const b = TASK_BADGE[type] || {};
+  const b = TASK_BADGE[type];
   // نوع غير معروف (خارج TASK_BADGE) يأتي من DB — يُهرَّب قبل الحقن في HTML
-  const label = b.label || esc(type);
-  return `<span class="task-badge" style="${b.style||''}" title="مهمة فعّالة: ${label}">${b.icon || ''} ${label}</span>`;
+  const label = b ? b.label : esc(type);
+  const icon  = b ? b.icon  : '•';
+  return `<span class="tag"${b && b.state ? ` data-state="${b.state}"` : ''} title="مهمة فعّالة: ${label}">${icon} ${label}</span>`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// مقياس الوزن في صفّ الجدول — الفكرة المركزية للصفحة
+// شريط واحد يحمل ثلاث حقائق على سلّم واحد مشترك بين كل الصفوف:
+//   • التعبئة  = الوزن الحالي
+//   • علامة داكنة = الهدف الذي حدّدته
+//   • خط أحمر  = السقف الدستوري (CLAUDE.md §1)
+// فيُقرأ الانحراف وكسر السقف بالنظر بدل مقارنة رقمين ذهنياً.
+// السلّم موحّد (0..scale%) كي يعني الشريط الأطول وزناً أكبر فعلاً.
+// ══════════════════════════════════════════════════════════════════════
+function weightMeterHtml({ current, target, cap, scale, state, title }) {
+  const p = v => Math.max(0, Math.min(100, (+v || 0) / scale * 100)).toFixed(1);
+  return `<div class="meter wmeter"${state ? ` data-state="${state}"` : ''} title="${esc(title || '')}">
+      <div class="meter-wrap">
+        <div class="meter-track"><div class="meter-fill" style="width:${p(current)}%"></div></div>
+        ${target > 0 ? `<div class="meter-mark" data-k="tgt" style="left:${p(target)}%"></div>` : ''}
+        ${cap  > 0 && cap  <= scale ? `<div class="meter-mark" data-k="cap" style="left:${p(cap)}%"></div>` : ''}
+      </div>
+    </div>`;
 }
 
 // ── ترتيب جدول الأسهم ──────────────────────────────────────
@@ -390,9 +500,9 @@ function renderStockTargets() {
   }
 
   if (!allStocks.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state">
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state">
       <div class="icon">📋</div>
-      <p>لا توجد أسهم — أضف معاملات أو أضف أسهماً لـ<a href="userdb.html" style="color:var(--accent)">قاعدة بياناتك</a></p>
+      <p>لا توجد أسهم — أضف معاملات أو أضف أسهماً لـ<a href="userdb.html" class="link-accent">قاعدة بياناتك</a></p>
     </div></td></tr>`;
     return;
   }
@@ -400,23 +510,42 @@ function renderStockTargets() {
   // الإجمالي الحالي من الأسهم الفعلية فقط (المخطط = 0)
   const totalCurrentPct = activeStocks.reduce((s, st) => s + getStockWeight(st.ticker), 0);
 
+  // ── سلّم مشترك لكل الصفوف ──────────────────────────────────
+  // يبدأ من سقف القيادي + هامش كي تظهر خطوط السقف دائماً، ويتمدّد فقط إذا
+  // تجاوزه وزن أو هدف فعلي. سلّم واحد ⇒ الشريط الأطول = وزن أكبر حقيقةً.
+  const _stScaleMax = Math.max(
+    TG_CAP_BLUECHIP + 3,
+    ...allStocks.map(s => Math.max(getStockWeight(s.ticker), stockTargets[s.ticker] || 0) * 1.12)
+  );
+
   tbody.innerHTML = allStocks.map(s => {
     const target   = stockTargets[s.ticker] || 0;
     const tz       = taskZonesMap[s.ticker] || {};
     const zone     = stockZones[s.ticker]   || {};   // المدمج: مهام + قيم DB القديمة
     const current  = getStockWeight(s.ticker);   // 0 للمخطط
-    const al       = s.planned ? { cls: 'text-muted', icon: '📌', label: 'مخطط', rowCls: 'planned-row' }
+    const al       = s.planned ? { cls: 'text-muted', state: '', icon: '📌', label: 'مخطط', rowCls: 'planned-row' }
                                 : alertStatus(current, target);
-    const barPct   = s.planned ? 0 : Math.min(current / (target || 1) * 100, 200);
-    const barColor = al.cls === 'text-success' ? '#22c55e' : al.cls === 'text-accent' ? '#f0b429' : '#f85149';
+    const cap      = tgCapOf(s.ticker);
+    const capLimit = cap + TG_CAP_BUFFER;
+    // تنبيه عرضي فقط (لا يمنع الحفظ ولا يغيّر أي حساب) — الفلتر 4 في CLAUDE.md
+    const capBreachNow = !s.planned && current > capLimit;
+    const capBreachTgt = target > capLimit;
 
     const fmtZone = v => v ? `<span class="num small">${formatSAR(v)}</span>` : `<span class="text-muted small">—</span>`;
     // نعرض القيمة المدمجة نفسها التي يستخدمها محرك إعادة التوازن، مع وسم مصدرها:
     // «مهمة» = من مهمة نشطة في صفحة التقييمات · «محفوظ» = قيمة سابقة في stock_targets
-    const srcTag = fromTask => `<span class="small text-muted" style="font-size:.6rem;opacity:.8"
+    const srcTag = fromTask => `<span class="src-tag"
       title="${fromTask ? 'المصدر: مهمة نشطة في صفحة التقييمات' : 'المصدر: قيمة محفوظة سابقاً في أهداف الأسهم — لا مهمة نشطة'}">${fromTask ? 'مهمة' : 'محفوظ'}</span>`;
     const zoneCell = (mergedVal, taskVal) =>
       mergedVal ? `${fmtZone(mergedVal)} ${srcTag(!!taskVal)}` : fmtZone(mergedVal);
+
+    const capNote = tgIsBlueChip(s.ticker) ? 'قيادي — السقف 12%' : 'السقف 7%';
+    const meterCell = s.planned
+      ? '<div class="small text-muted">لم يُشترَ بعد — لا وزن</div>'
+      : weightMeterHtml({
+          current, target, cap, scale: _stScaleMax, state: al.state,
+          title: `الوزن الحالي ${current.toFixed(2)}% · الهدف ${target || 0}% · ${capNote} (+${TG_CAP_BUFFER} سماح)`,
+        });
 
     return `<tr class="${al.rowCls || ''}">
       <td>${taskBadgeHtml(s.ticker)}</td>
@@ -424,33 +553,31 @@ function renderStockTargets() {
       <td>${esc(s.name)}</td>
       <td class="small text-muted">${esc(s.sector)}</td>
       <td>${zoneCell(zone.entry_price, tz.accumulate_at)}</td>
-      <td style="color:var(--accent)">${fmtZone(tz.trim_from)}</td>
+      <td class="text-accent">${fmtZone(tz.trim_from)}</td>
       <td>${zoneCell(zone.exit_price, tz.liquidate_above)}</td>
       <td>
         <input class="target-input" type="number" min="0" max="100" step="0.1"
                id="${stInputId(s.ticker)}" value="${target || ''}" placeholder="0">
         <span class="small text-muted"> %</span>
+        ${capBreachTgt ? `<div class="mini-warn" title="الهدف المحفوظ يتجاوز السقف الدستوري ${cap}% + سماح ${TG_CAP_BUFFER}%">⛔ هدف فوق السقف</div>` : ''}
       </td>
-      <td class="num bold ${al.cls}">${s.planned ? '<span class="small">مخطط</span>' : current.toFixed(2) + '%'}</td>
-      <td>
-        ${s.planned ? '<span class="small text-muted">—</span>' : `<div class="pct-bar-wrap" title="${current.toFixed(2)}% من ${target}%">
-          <div class="pct-bar" style="width:${Math.min(barPct,100)}%;background:${barColor}"></div>
-        </div>`}
+      <td class="wcell">
+        <div class="wcell-num num bold ${al.cls}">${s.planned ? '<span class="small">مخطط</span>' : current.toFixed(2) + '%'}<span class="wcell-tgt small text-muted"> / هدف ${target ? target + '%' : '—'}</span></div>
+        ${meterCell}
       </td>
-      <td class="small ${al.cls}">${al.icon} ${al.label}</td>
+      <td class="stcell">${tagHtml(al.icon, al.label, al.state || '')}${capBreachNow ? tagHtml('⛔', `فوق سقف ${cap}%`, 'bad') : ''}</td>
     </tr>`;
   }).join('');
 
-  // صف الإجمالي
+  // صف الإجمالي — 10 أعمدة بالضبط مطابقةً للترويسة
   const currCls = Math.abs(totalCurrentPct - 100) < 0.5 ? 'text-success' : 'text-accent';
   const tfoot = tbody.closest('table').querySelector('tfoot') || tbody.closest('table').createTFoot();
-  tfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
-    <td></td>
-    <td colspan="3"><strong class="small">إجمالي الأوزان الحالية</strong></td>
+  tfoot.innerHTML = `<tr class="tfoot-row">
+    <td colspan="4"><strong class="small">إجمالي الأوزان الحالية</strong></td>
     <td colspan="3"></td>
     <td class="small text-muted">الهدف الإجمالي: <span id="stock-target-sum">—</span></td>
     <td class="num bold ${currCls}">${totalCurrentPct.toFixed(2)}%</td>
-    <td colspan="2"><span class="small text-muted">${Math.abs(totalCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalCurrentPct - 100) < 1 ? '≈ 100%' : totalCurrentPct < 100 ? 'بقي ' + (100 - totalCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalCurrentPct - 100).toFixed(2) + '%'}</span></td>
+    <td><span class="small text-muted">${Math.abs(totalCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalCurrentPct - 100) < 1 ? '≈ 100%' : totalCurrentPct < 100 ? 'بقي ' + (100 - totalCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalCurrentPct - 100).toFixed(2) + '%'}</span></td>
   </tr>`;
 
   // تحديث سهام الترتيب في الهيدر
@@ -461,6 +588,7 @@ function renderStockTargets() {
 
   attachStockListeners();
   updateStockTargetSumInFooter();
+  renderTargetsSummary();
 }
 
 // ── رسم جدول القطاعات ──────────────────────────────────────
@@ -497,7 +625,8 @@ function renderSectorTargets() {
   }
 
   if (!sectors.length) {
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="icon">🏷️</div><p>لا توجد قطاعات بعد</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="icon">🏷️</div><p>لا توجد قطاعات بعد</p></div></td></tr>`;
+    _sectorIdMap = {};   // لا تُبقِ خريطة قديمة تشير لعناصر DOM لم تعد موجودة
     return;
   }
 
@@ -506,12 +635,19 @@ function renderSectorTargets() {
   _sectorIdMap = {};
   sectors.forEach((sec, i) => { _sectorIdMap[sec] = i; });
 
+  // سلّم مشترك: يبدأ من سقف القطاع + هامش كي يظهر خط الـ25% دائماً
+  const _secScaleMax = Math.max(
+    TG_CAP_SECTOR + 5,
+    ...sectors.map(sec => Math.max(getSectorWeight(sec), sectorTargets[sec] || 0) * 1.12)
+  );
+
   tbody.innerHTML = sectors.map(sec => {
     const target       = sectorTargets[sec] || 0;
     const current      = getSectorWeight(sec);
     const al           = alertStatus(current, target);
-    const barPct       = Math.min(current / (target || 1) * 100, 200);
-    const barColor     = al.cls === 'text-success' ? '#22c55e' : al.cls === 'text-accent' ? '#f0b429' : '#f85149';
+    const capLimit     = TG_CAP_SECTOR + TG_SECTOR_BUFFER;
+    const capBreachNow = current > capLimit;    // تنبيه عرضي (الفلتر 4) — لا يغيّر حساباً
+    const capBreachTgt = target  > capLimit;
 
     return `<tr class="${al.rowCls || ''}">
       <td><strong>${esc(sec)}</strong></td>
@@ -519,28 +655,29 @@ function renderSectorTargets() {
         <input class="target-input" type="number" min="0" max="100" step="0.1"
                id="${secInputId(sec)}" value="${target || ''}" placeholder="0">
         <span class="small text-muted"> %</span>
+        ${capBreachTgt ? `<div class="mini-warn" title="هدف القطاع يتجاوز السقف الدستوري ${TG_CAP_SECTOR}% + سماح ${TG_SECTOR_BUFFER}%">⛔ هدف فوق السقف</div>` : ''}
       </td>
-      <td class="num bold ${al.cls}">${current.toFixed(2)}%</td>
-      <td>
-        <div class="pct-bar-wrap">
-          <div class="pct-bar" style="width:${Math.min(barPct,100)}%;background:${barColor}"></div>
-        </div>
+      <td class="wcell">
+        <div class="wcell-num num bold ${al.cls}">${current.toFixed(2)}%<span class="wcell-tgt small text-muted"> / هدف ${target ? target + '%' : '—'}</span></div>
+        ${weightMeterHtml({
+          current, target, cap: TG_CAP_SECTOR, scale: _secScaleMax, state: al.state,
+          title: `وزن القطاع ${current.toFixed(2)}% · الهدف ${target || 0}% · السقف الدستوري ${TG_CAP_SECTOR}% (+${TG_SECTOR_BUFFER} سماح)`,
+        })}
       </td>
-      <td class="small ${al.cls}">${al.icon} ${al.label}</td>
+      <td class="stcell">${tagHtml(al.icon, al.label, al.state || '')}${capBreachNow ? tagHtml('⛔', `فوق سقف ${TG_CAP_SECTOR}%`, 'bad') : ''}</td>
     </tr>`;
   }).join('');
 
-  // صف الإجمالي للقطاعات
+  // صف الإجمالي للقطاعات — 4 أعمدة بالضبط مطابقةً للترويسة
   // AUDIT-FIX: totalSecCurrentPct was undefined — compute it from sector weights
   const totalSecCurrentPct = sectors.reduce((s, sec) => s + getSectorWeight(sec), 0);
   const secCurrCls = Math.abs(totalSecCurrentPct - 100) < 0.5 ? 'text-success' : 'text-accent';
   const stfoot = tbody.closest('table').querySelector('tfoot') || tbody.closest('table').createTFoot();
-  stfoot.innerHTML = `<tr style="border-top:2px solid var(--border);background:var(--bg-3)">
+  stfoot.innerHTML = `<tr class="tfoot-row">
     <td><strong class="small">الإجمالي</strong></td>
     <td class="small text-muted">الهدف: <span id="sector-target-sum">—</span></td>
     <td class="num bold ${secCurrCls}">${totalSecCurrentPct.toFixed(2)}%</td>
-    <td class="small text-muted" title="أهداف الأسهم / هدف القطاع">أسهم / قطاع</td>
-    <td colspan="2"><span class="small text-muted">${Math.abs(totalSecCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalSecCurrentPct - 100) < 1 ? '≈ 100%' : totalSecCurrentPct < 100 ? 'بقي ' + (100 - totalSecCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalSecCurrentPct - 100).toFixed(2) + '%'}</span></td>
+    <td><span class="small text-muted">${Math.abs(totalSecCurrentPct - 100) < 0.1 ? '✅ يساوي 100%' : Math.abs(totalSecCurrentPct - 100) < 1 ? '≈ 100%' : totalSecCurrentPct < 100 ? 'بقي ' + (100 - totalSecCurrentPct).toFixed(2) + '%' : 'تجاوز بـ ' + (totalSecCurrentPct - 100).toFixed(2) + '%'}</span></td>
   </tr>`;
 
   // تحديث سهام الترتيب في الهيدر
@@ -552,6 +689,96 @@ function renderSectorTargets() {
   // ربط المستمعات للقطاعات
   attachSectorListeners();
   updateSectorTargetSumInFooter();
+  renderTargetsSummary();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// 🧭 بطاقة الانضباط — الرقم القائد للصفحة
+// عرض فقط: تقرأ نفس الأوزان والأهداف المحفوظة وتلخّص حالتها مقابل دستور
+// CLAUDE.md §1 (سقف السهم/القيادي/القطاع + حجم المحفظة 18–25).
+// لا تحسب شيئاً جديداً ولا تؤثر على الحفظ أو محرك التوازن.
+// ══════════════════════════════════════════════════════════════════════
+function renderTargetsSummary() {
+  const el = document.getElementById('targets-summary');
+  if (!el) return;
+
+  const holdingTickers = new Set(holdings.map(h => h.ticker));
+  const owned = holdings.map(h => h.ticker);
+  const plannedCount = userStocks.filter(s => !holdingTickers.has(s.ticker)).length;
+
+  if (!owned.length) {
+    el.innerHTML = `<div class="card">${cardHead('🧭 انضباط الأوزان', 'مقابل دستور المحفظة')}
+      ${noteHtml('💡', 'لا توجد أسهم مملوكة بعد — أضف معاملات في <a href="transactions.html" class="link-accent">سجل المعاملات</a> ليُحسب الوزن الحالي وتظهر مقارنته بالهدف والسقف.', '')}</div>`;
+    return;
+  }
+
+  // ── تصنيف كل سهم مملوك ──────────────────────────────────────
+  let inTarget = 0, withTarget = 0;
+  const capBreaks = [], tgtCapBreaks = [], farOff = [];
+  owned.forEach(t => {
+    const target = stockTargets[t] || 0;
+    const cur    = getStockWeight(t);
+    const limit  = tgCapOf(t) + TG_CAP_BUFFER;
+    if (cur > limit)    capBreaks.push({ t, cur, cap: tgCapOf(t) });
+    if (target > limit) tgtCapBreaks.push({ t, target, cap: tgCapOf(t) });
+    if (target > 0) {
+      withTarget++;
+      const al = alertStatus(cur, target);
+      if (al.state === 'good') inTarget++;
+      else if (al.state === 'bad') farOff.push({ t, cur, target });
+    }
+  });
+
+  // ── القطاعات ────────────────────────────────────────────────
+  const secSet = new Set([...holdings.map(h => (h.sector || '').trim() || 'غير مصنف'), ...Object.keys(sectorTargets)]);
+  const secBreaks = [];
+  [...secSet].forEach(sec => {
+    const w = getSectorWeight(sec);
+    if (w > TG_CAP_SECTOR + TG_SECTOR_BUFFER) secBreaks.push({ sec, w });
+  });
+
+  const disciplinePct = withTarget > 0 ? inTarget / withTarget * 100 : 0;
+  const dState = withTarget === 0 ? '' : disciplinePct >= 80 ? 'good' : disciplinePct >= 50 ? 'warn' : 'bad';
+  const n = owned.length;
+  const sizeState = n >= TG_SIZE_MIN && n <= TG_SIZE_MAX ? 'good' : 'warn';
+  const sizeIcon  = n >= TG_SIZE_MIN && n <= TG_SIZE_MAX ? '✅' : n < TG_SIZE_MIN ? '⚠️' : '⚠️';
+
+  const savedTargetSum = owned.concat(userStocks.filter(s => !holdingTickers.has(s.ticker)).map(s => s.ticker))
+    .reduce((s, t) => s + (stockTargets[t] || 0), 0);
+  const sumState = savedTargetSum > 100.05 ? 'bad' : savedTargetSum >= 99.9 ? 'good' : 'warn';
+
+  const detailList = (title, items) => items.length
+    ? `<div class="sum-det"><div class="sum-det-t">${title}</div><ul class="sum-ul">${items.join('')}</ul></div>` : '';
+
+  el.innerHTML = `<div class="card">
+    ${cardHead('🧭 انضباط الأوزان', 'مقابل دستور المحفظة — CLAUDE.md §1')}
+    <div class="sum-grid">
+      <div>
+        <div class="hero-num">${disciplinePct.toFixed(0)}<span class="unit">%</span></div>
+        <div class="hero-cap">${inTarget} من ${withTarget} سهماً لها هدف محدَّد وهي ضمنه${plannedCount ? ` · ${plannedCount} سهماً مخطّطاً بلا وزن` : ''}</div>
+      </div>
+      <div class="sum-tags">
+        ${tagHtml(sizeIcon, `حجم المحفظة ${n} سهم (المستهدف ${TG_SIZE_MIN}–${TG_SIZE_MAX})`, sizeState)}
+        ${tagHtml(capBreaks.length ? '⛔' : '✅', `وزن فوق سقف السهم: ${capBreaks.length}`, capBreaks.length ? 'bad' : 'good')}
+        ${tagHtml(secBreaks.length ? '⛔' : '✅', `قطاع فوق ${TG_CAP_SECTOR}%: ${secBreaks.length}`, secBreaks.length ? 'bad' : 'good')}
+        ${tagHtml(tgtCapBreaks.length ? '⚠️' : '✅', `هدف فوق السقف: ${tgtCapBreaks.length}`, tgtCapBreaks.length ? 'warn' : 'good')}
+        ${tagHtml(sumState === 'good' ? '✅' : sumState === 'bad' ? '⛔' : '⚠️', `مجموع الأهداف المحفوظة ${savedTargetSum.toFixed(1)}%`, sumState)}
+      </div>
+    </div>
+    ${capBreaks.length || secBreaks.length || tgtCapBreaks.length || farOff.length ? `
+    <details class="sum-more">
+      <summary>تفصيل ما يحتاج إجراء (${capBreaks.length + secBreaks.length + tgtCapBreaks.length + farOff.length})</summary>
+      ${detailList('⛔ وزن حالي فوق سقف السهم — الفلتر 4: خفّف لإرجاعه للسقف',
+        capBreaks.map(b => `<li><strong>${esc(b.t)}</strong> — ${b.cur.toFixed(2)}% مقابل سقف ${b.cap}% (+${TG_CAP_BUFFER} سماح)</li>`))}
+      ${detailList(`⛔ قطاع فوق ${TG_CAP_SECTOR}% — تركيز قطاعي`,
+        secBreaks.map(b => `<li><strong>${esc(b.sec)}</strong> — ${b.w.toFixed(2)}%</li>`))}
+      ${detailList('⚠️ هدف محفوظ يتجاوز السقف الدستوري — راجع الهدف نفسه',
+        tgtCapBreaks.map(b => `<li><strong>${esc(b.t)}</strong> — الهدف ${b.target}% مقابل سقف ${b.cap}%</li>`))}
+      ${detailList('🔴 انحراف كبير عن الهدف',
+        farOff.map(b => `<li><strong>${esc(b.t)}</strong> — ${b.cur.toFixed(2)}% مقابل هدف ${b.target}%</li>`))}
+    </details>` : ''}
+    ${noteHtml('ℹ️', `الأوزان محسوبة من قيمة الأسهم المملوكة فقط (${formatSAR(totalValue)}) — النقد غير المستثمر والأصول الأخرى خارج هذا المقام.`, '')}
+  </div>`;
 }
 
 // ── تحقق: أهداف الأسهم داخل القطاع لا تتجاوز هدف القطاع ─
@@ -795,26 +1022,19 @@ function valuationScore(ticker, price) {
 // score: 0 = متضخم (يمين) · 1 = تجميع (يسار). تُحسب من valuationScore().
 function valScaleHtml(val) {
   if (!val || val.source === 'none') {
-    return `<div style="font-size:0.8rem">⚪ بلا تقييم</div>
+    return `${tagHtml('⚪', 'بلا تقييم', '')}
             <div class="small text-muted">لا توجد أسعار تقييم لهذا السهم</div>`;
   }
-  const pos = Math.max(0, Math.min(100, val.score * 100));   // % من اليمين (متضخم)
+  const pos   = Math.max(0, Math.min(100, val.score * 100));   // % من اليمين (متضخم)
+  const state = val.score >= 0.66 ? 'good' : val.score >= 0.33 ? 'warn' : 'bad';
+  // val.label يبدأ بأيقونة أصلاً — نفصلها عن النص كي يبقى الوسم «أيقونة + نص»
+  const icon  = val.label.slice(0, 2).trim();
+  const text  = val.label.slice(2).trim() || val.label;
   return `
-    <div style="font-size:0.8rem;margin-bottom:5px">${val.label} <span class="text-muted">· ${pos.toFixed(0)}%</span></div>
-    <div style="direction:rtl;position:relative;margin:7px 3px 2px">
-      <div style="display:flex;height:8px;border-radius:5px;overflow:hidden">
-        <div style="flex:1;background:#f85149"></div>
-        <div style="flex:1;background:#f0b429"></div>
-        <div style="flex:1;background:#3fb950"></div>
-      </div>
-      <div style="position:absolute;top:-4px;right:${pos.toFixed(1)}%;transform:translateX(50%)">
-        <div style="width:2px;height:16px;background:var(--text);margin:0 auto"></div>
-      </div>
-    </div>
-    <div style="display:flex;justify-content:space-between;font-size:.6rem;color:var(--text-muted);direction:rtl;margin:0 3px 4px">
-      <span>متضخم</span><span>تخفيف</span><span>تجميع</span>
-    </div>
-    <div class="small text-muted" style="line-height:1.5">${esc(val.reason)}</div>
+    <div class="vhead">${tagHtml(icon, text, state)}<span class="small text-muted num">${pos.toFixed(0)}%</span></div>
+    <div class="vrail"><span class="vrail-now" style="right:${pos.toFixed(1)}%"></span></div>
+    <div class="vrail-lbls"><span>متضخم</span><span>تخفيف</span><span>تجميع</span></div>
+    <div class="small text-muted vreason">${esc(val.reason)}</div>
     ${val.range ? `<div class="small text-muted">عادلة: ${esc(val.range)}${val.valDate ? ` · ${esc(val.valDate)}` : ''}${_staleValBadge(val.valTs)}</div>` : ''}`;
 }
 
@@ -823,7 +1043,7 @@ function valScaleHtml(val) {
 function _staleValBadge(ts) {
   if (!ts || (Date.now() - ts) <= 90 * 86400000) return '';
   const days = Math.round((Date.now() - ts) / 86400000);
-  return ` <span style="background:rgba(248,81,73,0.15);color:#f85149;border-radius:4px;padding:0 5px;font-size:.62rem;font-weight:700"
+  return ` <span class="tag tag-xs" data-state="bad"
     title="عمر هذا التقييم ${days} يوماً — تجاوز حدّ الحداثة 90 يوماً (§2). أعد تقييم السهم في حاسبة القيمة العادلة">⚠️ قديم</span>`;
 }
 
@@ -838,15 +1058,28 @@ function runRebalancing() {
   if (!resultEl) return;
 
   if (budget <= 0) {
-    resultEl.innerHTML = `<div class="empty-state" style="padding:32px">
+    resultEl.innerHTML = `<div class="empty-state">
       <div class="icon">⚖️</div><p>أدخل المبلغ المتاح لبدء الحساب</p></div>`;
     return;
   }
   if (!holdings.length || !totalValue) {
-    resultEl.innerHTML = `<div class="empty-state" style="padding:24px">
+    resultEl.innerHTML = `<div class="empty-state">
       <div class="icon">📋</div><p>لا توجد أسهم في المحفظة</p></div>`;
     return;
   }
+
+  // ── إفصاح نطاق المحرّك (عرض فقط) ────────────────────────────
+  // قرار مؤكَّد من المالك: التوزيع على المملوك فقط. نُعلنه صراحةً مع عدّ
+  // المستبعَدين حتى لا يظنّ المستخدم أن سهماً «اختفى» بلا سبب.
+  const _hTickers   = new Set(holdings.map(h => h.ticker));
+  const _exPlanned  = userStocks.filter(s => !_hTickers.has(s.ticker)).length;
+  const _exNoPrice  = holdings.filter(h => !(+h.current_price > 0)).length;
+  const _exNoTarget = holdings.filter(h => +h.current_price > 0 && !(stockTargets[h.ticker] > 0)).length;
+  const scopeNote = noteHtml('ℹ️',
+    `<strong>نطاق المحرّك: الأسهم المملوكة فقط.</strong> يوزّع على ما له وزن حالي قابل للقياس وهدف محدَّد وسعر حالي > 0.`
+    + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`
+    + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي.`
+    + ` السهم بلا وزن حالي وبلا سعر لا فجوة له تُقاس، فلا يدخل التوزيع.`, '');
 
   // ── بناء قائمة المرشحين ─────────────────────────────────────
   // فقط الأسهم الفعلية (ليس المخطط) ذات الهدف المحدد والسعر الموجود
@@ -873,7 +1106,7 @@ function runRebalancing() {
     const msg = entryFilter
       ? 'لا توجد أسهم ناقصة عن هدفها <strong>ضمن منطقة الشراء</strong> حالياً — حاول رفع الفلتر'
       : 'المحفظة متوازنة — لا توجد أسهم ناقصة عن أوزانها المستهدفة';
-    resultEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--success)">✅ ${msg}</div>`;
+    resultEl.innerHTML = `<div class="stack">${noteHtml('✅', msg, 'good')}${scopeNote}</div>`;
     return;
   }
 
@@ -893,13 +1126,15 @@ function runRebalancing() {
   if (valAware && candidates_.every(c => c.effScore <= 0.05)) {
     const list = candidates_
       .sort((a, b) => b.gap - a.gap)
-      .map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — فجوة ${c.gap.toFixed(1)}% · ${c.val.label} <span class="text-muted small">(${esc(c.val.reason)})</span></li>`)
+      .map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — فجوة ${c.gap.toFixed(1)}% · ${esc(c.val.label)} <span class="text-muted small">(${esc(c.val.reason)})</span></li>`)
       .join('');
-    resultEl.innerHTML = `<div style="padding:18px 20px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-3)">
-      <div style="color:var(--accent);font-weight:600;margin-bottom:8px">⚠️ لا شراء مُوصى به الآن</div>
-      <p class="small text-muted" style="margin-bottom:10px">كل الأسهم الناقصة عن هدفها سعرها الحالي قريب من منطقة التخفيف/المتضخم أو فوق قيمته العادلة. الفجوة وحدها لا تبرّر الشراء عند سعر مرتفع.</p>
-      <ul class="small" style="margin:0;padding-inline-start:18px;line-height:1.9">${list}</ul>
-      <p class="small text-muted" style="margin-top:10px">💡 أوقف «مراعاة موقع السعر من التقييم» لتجاهل التقييم والتوزيع بالفجوة فقط، أو انتظر نزول الأسعار لمناطق التجميع.</p>
+    resultEl.innerHTML = `<div class="stack">
+      ${noteHtml('⚠️', `<strong>لا شراء مُوصى به الآن.</strong>
+        كل الأسهم الناقصة عن هدفها سعرها الحالي قريب من منطقة التخفيف/المتضخم أو فوق قيمته العادلة.
+        الفجوة وحدها لا تبرّر الشراء عند سعر مرتفع.
+        <ul class="sum-ul">${list}</ul>
+        <div class="small text-muted mt-2">💡 أوقف «مراعاة موقع السعر من التقييم» لتجاهل التقييم والتوزيع بالفجوة فقط، أو انتظر نزول الأسعار لمناطق التجميع.</div>`, 'warn')}
+      ${scopeNote}
     </div>`;
     return;
   }
@@ -957,39 +1192,45 @@ function runRebalancing() {
 
   // ── رسم الجدول ──────────────────────────────────────────────
   if (!rows.length) {
-    resultEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--text-muted)">
-      ⚠️ المبلغ غير كافٍ لشراء ولو سهم واحد من الأسهم المرشحة
-      <br><span class="small">أدنى سعر: ${formatSAR(Math.min(...candidates_.map(c => +c.current_price)))}</span>
+    resultEl.innerHTML = `<div class="stack">
+      ${noteHtml('⚠️', `المبلغ غير كافٍ لشراء ولو سهم واحد من الأسهم المرشحة.
+        <div class="small text-muted">أدنى سعر بين المرشحين: ${formatSAR(Math.min(...candidates_.map(c => +c.current_price)))}</div>`, 'warn')}
+      ${scopeNote}
     </div>`;
     return;
   }
 
-  const totalCostFmt   = formatSAR(totalSpent);
-  const leftoverFmt    = formatSAR(leftover);
-  const leftoverCls    = leftover > 0 ? 'text-accent' : 'text-success';
+  const leftoverState = leftover > 0.005 ? 'warn' : 'good';
+  const spentPct      = budget > 0 ? totalSpent / budget * 100 : 0;
 
-  resultEl.innerHTML = `
-    <!-- ملخص الإجراء -->
-    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:16px;padding:14px 16px;background:var(--bg-3);border-radius:var(--radius);border:1px solid var(--border)">
-      <div style="display:flex;flex-direction:column;gap:3px">
-        <span class="small text-muted">المبلغ المتاح</span>
-        <span class="num bold">${formatSAR(budget)}</span>
+  // تنبيه دستوري عرضي: هل تدفع أي توصية وزن سهم فوق سقفه؟ (لا يغيّر التوزيع)
+  const capHits = rows.filter(r => r.newPct > tgCapOf(r.ticker) + TG_CAP_BUFFER);
+
+  resultEl.innerHTML = `<div class="stack-4">
+    <!-- الرقم القائد: ما ستنفقه فعلاً -->
+    <div class="reb-hero">
+      <div>
+        <div class="hero-num">${formatSAR(totalSpent)}</div>
+        <div class="hero-cap">إجمالي التكلفة على ${rows.length} سهماً — من أصل ${formatSAR(budget)} متاح</div>
+        ${meterHtml({
+          label: 'المستخدَم من الميزانية', valueTxt: `${spentPct.toFixed(1)}%`,
+          pct: spentPct, state: leftoverState,
+          foot: `المتبقي نقداً ${formatSAR(leftover)} — لا يكفي لسهم كامل بعد تقريب الكميات للأسفل`,
+        })}
       </div>
-      <div style="color:var(--border);align-self:center">→</div>
-      <div style="display:flex;flex-direction:column;gap:3px">
-        <span class="small text-muted">إجمالي التكلفة</span>
-        <span class="num bold text-accent">${totalCostFmt}</span>
-      </div>
-      <div style="color:var(--border);align-self:center">=</div>
-      <div style="display:flex;flex-direction:column;gap:3px">
-        <span class="small text-muted">المتبقي نقداً</span>
-        <span class="num bold ${leftoverCls}">${leftoverFmt}</span>
-      </div>
-      <div style="margin-right:auto;display:flex;flex-direction:column;gap:3px;text-align:left">
-        <span class="small text-muted">عدد الأسهم المختلفة</span>
-        <span class="num bold">${rows.length} سهم</span>
+      <div class="reb-hero-kv">
+        ${kvsHtml([
+          ['المبلغ المتاح', formatSAR(budget)],
+          ['إجمالي التكلفة', formatSAR(totalSpent)],
+          ['المتبقي نقداً', formatSAR(leftover)],
+          ['عدد الأسهم المختلفة', `${rows.length} سهم`],
+        ])}
       </div>
     </div>
+
+    ${capHits.length ? noteHtml('⛔', `<strong>تنبيه دستوري (الفلتر 4):</strong>
+      ${capHits.map(r => `<strong>${esc(r.ticker)}</strong> سيصل وزنه ${r.newPct.toFixed(2)}% متجاوزاً سقفه ${tgCapOf(r.ticker)}% + سماح ${TG_CAP_BUFFER}%`).join(' · ')}.
+      المحرّك يوزّع نحو <em>هدفك المحفوظ</em> ولا يقصّه عند السقف الدستوري — راجع الهدف نفسه أو خفّض المبلغ.`, 'bad') : ''}
 
     <!-- جدول التوصيات -->
     <div class="table-wrapper">
@@ -1001,20 +1242,21 @@ function runRebalancing() {
             <th>السعر الحالي</th>
             <th>أسهم تشتري</th>
             <th>التكلفة</th>
-            <th>الوزن قبل</th>
-            <th>الوزن بعد</th>
+            <th>الوزن: قبل ← بعد (مقابل الهدف والسقف)</th>
             <th>الفجوة المتبقية</th>
-            ${valAware ? '<th>موقع السعر من التقييم</th>' : ''}
+            ${valAware ? '<th class="valcol">موقع السعر من التقييم</th>' : ''}
             <th>منطقة الشراء</th>
           </tr>
         </thead>
         <tbody>
           ${rows.map(r => {
-            const gapAfterCls = Math.abs(r.gapAfter) <= 1 ? 'text-success' : Math.abs(r.gapAfter) <= 3 ? 'text-accent' : 'text-muted';
+            const gapAfterCls  = Math.abs(r.gapAfter) <= 1 ? 'text-success' : Math.abs(r.gapAfter) <= 3 ? 'text-accent' : 'text-muted';
+            const cap    = tgCapOf(r.ticker);
+            const rScale = Math.max(cap + TG_CAP_BUFFER + 2, r.targetPct * 1.15, r.newPct * 1.15);
             const zoneEl = r.inZone
-              ? '<span style="color:var(--success)">✅ ضمن النطاق</span>'
+              ? tagHtml('✅', 'ضمن النطاق', 'good')
               : (stockZones[r.ticker]?.entry_price
-                  ? `<span style="color:var(--text-muted);font-size:0.78rem">فوق ${formatSAR(stockZones[r.ticker].entry_price)}</span>`
+                  ? tagHtml('▲', `فوق ${formatSAR(stockZones[r.ticker].entry_price)}`, 'warn')
                   : '<span class="text-muted small">—</span>');
             return `<tr>
               <td><strong class="text-accent">${esc(r.ticker)}</strong></td>
@@ -1022,12 +1264,18 @@ function runRebalancing() {
               <td class="num">${formatSAR(r.current_price)}</td>
               <td class="num bold text-accent">${r.sharesToBuy.toLocaleString()}</td>
               <td class="num bold">${formatSAR(r.cost)}</td>
-              <td class="num text-muted">${r.currentPct.toFixed(2)}%</td>
-              <td class="num bold">${r.newPct.toFixed(2)}%
-                <span class="small" style="color:var(--success)">↑${(r.newPct - r.currentPct).toFixed(2)}%</span>
+              <td class="wcell">
+                <div class="wcell-num num"><span class="text-muted">${r.currentPct.toFixed(2)}%</span>
+                  <span class="text-muted"> ← </span><strong>${r.newPct.toFixed(2)}%</strong>
+                  <span class="small text-success">↑${(r.newPct - r.currentPct).toFixed(2)}%</span></div>
+                ${weightMeterHtml({
+                  current: r.newPct, target: r.targetPct, cap, scale: rScale,
+                  state: r.newPct > cap + TG_CAP_BUFFER ? 'bad' : 'good',
+                  title: `بعد الشراء ${r.newPct.toFixed(2)}% · الهدف ${r.targetPct}% · السقف ${cap}%`,
+                })}
               </td>
               <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>
-              ${valAware ? `<td style="min-width:170px">${valScaleHtml(r.val)}</td>` : ''}
+              ${valAware ? `<td class="valcol">${valScaleHtml(r.val)}</td>` : ''}
               <td>${zoneEl}</td>
             </tr>`;
           }).join('')}
@@ -1035,11 +1283,11 @@ function runRebalancing() {
       </table>
     </div>
 
-    ${rows.some(r => !r.inZone && entryFilter === false && stockZones[r.ticker]?.entry_price) ? `
-    <p class="small text-muted" style="margin-top:10px">
-      💡 بعض الأسهم فوق منطقة الشراء المحددة — فعّل "فقط ضمن منطقة الشراء" لتصفيتها
-    </p>` : ''}
-  `;
+    ${rows.some(r => !r.inZone && entryFilter === false && stockZones[r.ticker]?.entry_price)
+      ? noteHtml('💡', 'بعض الأسهم فوق منطقة الشراء المحددة — فعّل «فقط ضمن منطقة الشراء» لتصفيتها.', '') : ''}
+
+    ${scopeNote}
+  </div>`;
 }
 
 function showRebInfo() {
@@ -1064,14 +1312,22 @@ function showRebInfo() {
     '',
     'عدد الأسهم يُقرَّب للأسفل دائماً (floor) — لا كسور في السهم.',
     'المتبقي = ما لم يُنفق بعد التقريب.',
+    '',
+    '🔒 النطاق: الأسهم المملوكة فقط. السهم المخطّط (في قاعدة بياناتك ولم',
+    'يُشترَ بعد) لا وزن حالي له ولا سعر، فلا فجوة تُقاس له — مستبعَد عمداً.',
+    'كذلك أي سهم بلا هدف محدَّد أو بلا سعر حالي.',
+    '',
+    '⚠️ الأسقف الدستورية: المحرّك يوزّع نحو هدفك المحفوظ لا نحو السقف.',
+    'إن كان هدفك أعلى من 7% (أو 12% للقيادي) فقد يدفع الوزن فوق السقف —',
+    'تظهر لك عندها لافتة تنبيه حمراء فوق الجدول.',
   ];
   const overlay = document.createElement('div');
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.className = 'modal-overlay';
   overlay.innerHTML = `
-    <div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:440px;width:100%;padding:24px 20px;box-shadow:0 8px 32px rgba(0,0,0,.5)">
-      <div style="white-space:pre-wrap;font-size:.85rem;color:var(--text-2);line-height:1.7;margin-bottom:16px">${lines.join('\n')}</div>
-      <div style="display:flex;justify-content:flex-end">
-        <button id="_reb-info-close" class="btn btn-secondary" style="min-width:80px">إغلاق</button>
+    <div class="modal-card">
+      <div class="reb-info-body">${lines.join('\n')}</div>
+      <div class="reb-info-foot">
+        <button id="_reb-info-close" class="btn btn-secondary">إغلاق</button>
       </div>
     </div>`;
   document.body.appendChild(overlay);

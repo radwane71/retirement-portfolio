@@ -15,30 +15,33 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260817c">
+  <link rel="stylesheet" href="css/style.css?v=20260817h">
   <style>
-    /* ── Dashboard ────────────────────────────────────────────── */
-    .sukuk-dash {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-      gap: 12px;
-      margin-bottom: 24px;
+    /* ── لوحة الملخص ──────────────────────────────────────────── */
+    /* البطاقة يبنيها js/sukuk.js من نظام مكوّنات اللوحة في css/style.css:
+       .card-head .hero-num .tag .meter .kvs .note .stack */
+    #sk-summary { margin-bottom: 24px; }
+    .sk-hero {
+      display: flex; align-items: flex-start; justify-content: space-between;
+      gap: var(--sp-4); flex-wrap: wrap;
     }
-    .sk-card {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 16px 18px;
+    .sk-tagrow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    /* ⓘ داخل .card-head — تُخرَج من التموضع المطلق الافتراضي */
+    .info-btn.info-inline { position: static; opacity: .7; }
+
+    /* ── التفاصيل المطويّة — «لا تحذف معلومة، أعِد ترتيبها» ────── */
+    .sk-details { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); }
+    .sk-details > summary {
+      cursor: pointer; list-style: none; padding: 9px 13px;
+      font-size: .8rem; font-weight: 600; color: var(--text-2);
+      display: flex; align-items: center; gap: var(--sp-2);
     }
-    .sk-card .sk-label { font-size: 0.72rem; color: var(--text-2); margin-bottom: 5px; }
-    .sk-card .sk-val   { font-size: 1.2rem; font-weight: 700; }
-    .sk-card.c-accent  { border-color: var(--accent);  }
-    .sk-card.c-success { border-color: var(--success); }
-    .sk-card.c-danger  { border-color: var(--danger);  }
-    .sk-card.c-blue    { border-color: #3b82f6; }
-    .sk-val.accent  { color: var(--accent); }
-    .sk-val.success { color: var(--success); }
-    .sk-val.danger  { color: var(--danger); }
+    .sk-details > summary::-webkit-details-marker { display: none; }
+    .sk-details > summary::after { content: '▾'; margin-inline-start: auto; transition: transform .18s; }
+    .sk-details[open] > summary::after { transform: rotate(180deg); }
+    .sk-details > summary:hover { color: var(--text); }
+    .sk-details[open] > summary { border-bottom: 1px solid var(--border); }
+    .sk-details .dt-body { padding: 12px 13px; }
 
     /* ── Opportunities Grid ───────────────────────────────────── */
     .opps-grid {
@@ -53,60 +56,12 @@
     }
 
     /* ── Opportunity Card ─────────────────────────────────────── */
-    .opp-card {
-      background: var(--bg-2);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-    }
-    .opp-card-header {
-      display: flex; align-items: flex-start; justify-content: space-between;
-      gap: 10px;
-      padding: 14px 16px 12px;
-      background: var(--bg-3);
-      border-bottom: 1px solid var(--border);
-    }
-    .opp-name-block { display: flex; flex-direction: column; gap: 3px; }
-    .opp-name     { font-size: 0.95rem; font-weight: 700; color: var(--text); }
-    .opp-platform { font-size: 0.75rem; color: var(--text-2); }
-    .opp-header-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-    .opp-status-badge {
-      font-size: 0.72rem; font-weight: 600;
-      padding: 3px 9px; border-radius: 12px; white-space: nowrap;
-    }
-
-    /* ── Metrics ──────────────────────────────────────────────── */
-    .opp-metrics {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 0;
-      padding: 4px 0;
-    }
-    .metric-row {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 7px 16px;
-      border-bottom: 1px solid var(--border);
-      font-size: 0.84rem;
-    }
-    .metric-row:nth-child(odd)  { border-left: 1px solid var(--border); }
-    .metric-label { color: var(--text-2); }
-    .metric-val   { font-weight: 600; color: var(--text); }
-    .metric-val.accent  { color: var(--accent); }
-    .metric-val.success { color: var(--success); }
-    .metric-val.danger  { color: var(--danger); }
+    /* ترث .card الخلفية والحدّ والحشو — لا تكرار هنا */
+    .opp-card { margin-bottom: 0; background: var(--bg-2); }
+    .opp-card .card-head .ttl { font-size: .92rem; }
+    .opp-card .hero-num { font-size: 1.7rem; }
 
     /* ── Distributions ────────────────────────────────────────── */
-    .dist-section { padding: 12px 16px 14px; }
-    .dist-header  {
-      display: flex; align-items: center; gap: 8px;
-      flex-wrap: wrap; margin-bottom: 10px;
-    }
-    .dist-title   { font-size: 0.8rem; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: .05em; flex: 1; }
-    .dist-totals  { display: flex; gap: 6px; }
-    .dist-badge   {
-      font-size: 0.72rem; font-weight: 600;
-      padding: 2px 8px; border-radius: 10px;
-    }
     .dist-table   { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
     .dist-table th {
       background: var(--bg-3); padding: 6px 10px;
@@ -295,44 +250,9 @@
       </div>
     </div>
 
-    <!-- Dashboard -->
-    <div class="section-header" style="margin:0 0 8px">
-      <span class="section-title">📜 ملخص الصكوك والتمويل الجماعي</span>
-      <button class="info-btn" type="button" onclick="showCardInfo('sukuk-summary')" title="ما هي الصكوك وكيف تُحسب؟" style="position:static;opacity:.7">ⓘ</button>
-    </div>
-    <div class="sukuk-dash">
-      <div class="sk-card c-blue">
-        <div class="sk-label">عدد الفرص المشتركة</div>
-        <div class="sk-val" id="dash-count">—</div>
-      </div>
-      <div class="sk-card c-accent">
-        <div class="sk-label">إجمالي المبلغ المستثمر</div>
-        <div class="sk-val accent" id="dash-invested">—</div>
-      </div>
-      <div class="sk-card">
-        <div class="sk-label">إجمالي عدد الصكوك</div>
-        <div class="sk-val" id="dash-sukuk">—</div>
-      </div>
-      <div class="sk-card">
-        <div class="sk-label">متوسط العائد الكلي %</div>
-        <div class="sk-val" id="dash-avg-pct">—</div>
-      </div>
-      <div class="sk-card c-success">
-        <div class="sk-label" title="رأس المال + الربح — القيمة الإجمالية عند الاستحقاق">الإجمالي عند الاستحقاق</div>
-        <div class="sk-val success" id="dash-return-sar">—</div>
-      </div>
-      <div class="sk-card c-success">
-        <div class="sk-label">صافي الربح "ريال"</div>
-        <div class="sk-val success" id="dash-net">—</div>
-      </div>
-      <div class="sk-card">
-        <div class="sk-label">محصّل من التوزيعات</div>
-        <div class="sk-val success" id="dash-paid">—</div>
-      </div>
-      <div class="sk-card c-danger">
-        <div class="sk-label">معلّق من التوزيعات</div>
-        <div class="sk-val danger" id="dash-unpaid">—</div>
-      </div>
+    <!-- لوحة الملخص — يبنيها js/sukuk.js بالكامل -->
+    <div class="card" id="sk-summary">
+      <div class="empty-state">جارٍ التحميل…</div>
     </div>
 
     <!-- Opportunities -->
@@ -387,7 +307,7 @@
           <div class="cv success" id="calc-total-pct">—</div>
         </div>
         <div class="calc-item">
-          <div class="cl">العائد الكلي ر.س</div>
+          <div class="cl">الإجمالي عند الاستحقاق</div>
           <div class="cv success" id="calc-total-sar">—</div>
         </div>
         <div class="calc-item">
@@ -452,7 +372,7 @@
       <p>سيتم حذف "<span id="del-opp-name"></span>" وجميع توزيعاتها نهائياً. لا يمكن التراجع.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeDelOppModal()">إلغاء</button>
-        <button class="btn" style="background:var(--danger);color:#fff" onclick="executeDeleteOpp()">حذف نهائياً</button>
+        <button class="btn btn-danger" onclick="executeDeleteOpp()">حذف نهائياً</button>
       </div>
     </div>
   </div>
@@ -465,7 +385,7 @@
       <p>سيتم حذف <span id="del-dist-name"></span> نهائياً.</p>
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeDelDistModal()">إلغاء</button>
-        <button class="btn" style="background:var(--danger);color:#fff" onclick="executeDeleteDist()">حذف</button>
+        <button class="btn btn-danger" onclick="executeDeleteDist()">حذف</button>
       </div>
     </div>
   </div>
@@ -502,10 +422,10 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260817c"></script>
-  <script src="js/utils.js?v=20260817c"></script>
-  <script src="js/auth.js?v=20260817c"></script>
-  <script src="js/sukuk.js?v=20260817c"></script>
+  <script src="js/supabase.js?v=20260817h"></script>
+  <script src="js/utils.js?v=20260817h"></script>
+  <script src="js/auth.js?v=20260817h"></script>
+  <script src="js/sukuk.js?v=20260817h"></script>
   <script>init();</script>
 </body>
 </html>
