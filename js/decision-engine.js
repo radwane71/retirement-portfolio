@@ -801,9 +801,12 @@ function renderSummaryStrip(totalValue) {
   // سطر دخل بسيط: أين أنت من هدف 5000 ر.س شهرياً بحلول 2045 (الدستور §1)
   const incomeEl = document.getElementById('de-income-line');
   if (incomeEl) {
-    const cutoff = Date.now() - 365 * 86400000;
+    // نافذة مغلقة عند اليوم: التوزيع المُعلَن بتاريخ صرف قادم لم يُستلَم بعد
+    const cutoff = Date.now() - 365 * 86400000, nowTs = Date.now();
     let ttm = 0;
-    Object.values(divByTicker).forEach(arr => arr.forEach(d => { if (d.date.getTime() >= cutoff) ttm += (d.amount || 0); }));
+    Object.values(divByTicker).forEach(arr => arr.forEach(d => {
+      const t = d.date.getTime(); if (t >= cutoff && t <= nowTs) ttm += (d.amount || 0);
+    }));
     const monthly = ttm / 12;
     const goal = 5000;
     const pct = goal > 0 ? Math.min(100, monthly / goal * 100) : 0;
@@ -962,15 +965,24 @@ function stockFinancials(ticker) {
   const unrealPct = costBasis > 0 ? unreal / costBasis * 100 : 0;
   const realized  = avgCost > 0 ? sellRev - avgCost * sellShares : sellRev;
   const divs      = divByTicker[ticker] || [];
-  const divTotal  = divs.reduce((s, d) => s + (d.amount || 0), 0);
+  // المستلَم فعلاً ≠ المُعلَن القادم: نافذة TTM مغلقة عند اليوم، والمُعلَن يُفصَل
+  const nowTs     = Date.now();
+  const received  = divs.filter(d => d.date.getTime() <= nowTs);
+  const declared  = divs.filter(d => d.date.getTime() >  nowTs);
+  const divTotal  = received.reduce((s, d) => s + (d.amount || 0), 0);
+  const declaredTotal = declared.reduce((s, d) => s + (d.amount || 0), 0);
   const yoc       = costBasis > 0 ? divTotal / costBasis * 100 : 0;
-  const cutoff    = Date.now() - 365 * 86400000;
-  const ttmDiv    = divs.reduce((s, d) => s + (d.date.getTime() >= cutoff ? (d.amount || 0) : 0), 0);
+  const cutoff    = nowTs - 365 * 86400000;
+  const ttmDiv    = received.reduce((s, d) => s + (d.date.getTime() >= cutoff ? (d.amount || 0) : 0), 0);
   const fwdYoc    = costBasis > 0 ? ttmDiv / costBasis * 100 : 0;
   const byYear    = {};
-  divs.forEach(d => { const y = d.date.getFullYear(); byYear[y] = (byYear[y] || 0) + d.amount; });
-  const xirr = positionXIRR(tx, divs, mktVal);
-  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, ttmDiv, fwdYoc, byYear, divCount: divs.length, buyShares, sellShares, grantShares, xirr };
+  received.forEach(d => { const y = d.date.getFullYear(); byYear[y] = (byYear[y] || 0) + d.amount; });
+  // XIRR على المستلَم فقط — تدفق موجب بتاريخ مستقبلي يشوّه معدّل العائد
+  const xirr = positionXIRR(tx, received, mktVal);
+  return { shares, avgCost, costBasis, mktVal, unreal, unrealPct, realized, divTotal, yoc, ttmDiv, fwdYoc,
+           byYear, divCount: received.length, declaredTotal, declaredCount: declared.length,
+           nextDeclared: declared.length ? declared.reduce((m, d) => (d.date < m.date ? d : m), declared[0]) : null,
+           buyShares, sellShares, grantShares, xirr };
 }
 
 // العائد الفعلي السنوي المعدَّل بالزمن (XIRR) — نفس منطق صفحة «الأداء التاريخي» (js/performance.js)
@@ -1521,7 +1533,10 @@ function openDetailCard(ticker) {
 
   // عدسة الدخل — مساهمة المركز في دخل المحفظة وفي هدف الدخل الشهري (§1)
   let portfolioTTM = 0;
-  Object.values(divByTicker).forEach(arr => arr.forEach(d => { if (d.date.getTime() >= Date.now() - 365 * 86400000) portfolioTTM += (d.amount || 0); }));
+  Object.values(divByTicker).forEach(arr => arr.forEach(d => {
+    const t = d.date.getTime();
+    if (t >= Date.now() - 365 * 86400000 && t <= Date.now()) portfolioTTM += (d.amount || 0);
+  }));
   const incomeShare = portfolioTTM > 0 ? fin.ttmDiv / portfolioTTM * 100 : 0;
   const monthlyFromStock = fin.ttmDiv / 12;
   const goalShare = incomeGoalMonthly > 0 ? monthlyFromStock / incomeGoalMonthly * 100 : 0;

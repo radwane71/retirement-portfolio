@@ -699,9 +699,13 @@ async function loadAllData() {
       // أي تعديل هنا يجب أن يُطبَّق هناك (وإلا اختلف رقم اللوحة عن صفحة الأرباح).
       let dps, lastDivDate;
       if (dpsSeries.length) {
-        const cutoff = Date.now() - 365 * 86400000;
+        // AUDIT-FIX (2026-08-18): النافذة كانت مفتوحة من الأعلى، فتوزيع مُعلَن
+        // ومُسجَّل بتاريخ صرف قادم (يُسجَّل في أغسطس ويُصرف في سبتمبر) كان يدخل
+        // «آخر 12 شهراً» قبل أن يُستلَم — أي 13 شهراً من التوزيعات في نافذة 12.
+        // النافذة الآن مغلقة عند اليوم، والمُعلَن القادم يُعرض على حدة.
+        const cutoff = Date.now() - 365 * 86400000, nowTs = Date.now();
         const ttmDps = dpsSeries
-          .filter(p => tsOf(p.date) >= cutoff)
+          .filter(p => { const t = tsOf(p.date); return t >= cutoff && t <= nowTs; })
           .reduce((s, p) => s + p.dps, 0);
         if (ttmDps > 0) {
           dps = ttmDps / freq;              // يُضرب بـ freq لاحقاً → المجموع كما هو

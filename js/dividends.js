@@ -281,9 +281,11 @@ function _projectedAnnualIncome() {
     // مجموع آخر دورة كاملة (آخر freq دفعة).
     let dps, lastDivDate, sharesAtRefDiv, usedFallback = false, dpsTrend = 'ttm';
     if (dpsSeries.length) {
-      const cutoff = Date.now() - 365 * 86400000;
+      // AUDIT-FIX (2026-08-18): النافذة كانت مفتوحة من الأعلى فيدخلها التوزيع
+      // المُعلَن المسجَّل بتاريخ صرف قادم قبل استلامه (نفس الإصلاح في dashboard.js).
+      const cutoff = Date.now() - 365 * 86400000, nowTs = Date.now();
       const ttmDps = dpsSeries
-        .filter(p => parseDateLocal(p.date).getTime() >= cutoff)
+        .filter(p => { const t = parseDateLocal(p.date).getTime(); return t >= cutoff && t <= nowTs; })
         .reduce((s, p) => s + p.dps, 0);
       if (ttmDps > 0) {
         dps = ttmDps / freq;              // يُضرب بـ freq لاحقاً → المجموع كما هو

@@ -32,6 +32,31 @@ window.DecisionIntel = (function () {
   const FUND_KEY = 'stock_fundamentals_v1';
   const FUND_MAX_AGE_DAYS = 7;    // أقدم من ذلك → تُجدَّد تلقائياً في الخلفية
 
+  // ── مهلة الحكم — تقويم الإفصاح السعودي (بطلب المالك) ────────────────
+  // الشركات لا تُعلن نتائج الربع في نهايته: الربع الثاني 2026 (انتهى 30 يونيو)
+  // اكتملت إعلاناته حوالي 15 أغسطس — أي ~46 يوماً. ثم يحتاج التوزيع وقتاً حتى
+  // يُقرّ ويُصرف، ثم يحتاج المالك وقتاً ليسجّله. فالحكم على سهم بأنه «قطع
+  // توزيعه» قبل انقضاء هذه المهل حكمٌ على تأخّر إداري لا على تدهور مالي.
+  const ANNOUNCE_DAYS = 45;   // من نهاية الربع حتى اكتمال إعلانات النتائج
+  const PAY_LAG_DAYS  = 30;   // من الإعلان حتى الصرف الفعلي
+  const RECORD_LAG_DAYS = 15; // مهلة تسجيلك أنت في التراكر
+  const JUDGMENT_GRACE_DAYS = ANNOUNCE_DAYS + PAY_LAG_DAYS + RECORD_LAG_DAYS; // 90
+
+  // نهاية آخر ربع مكتمل، وهل ما زلنا داخل نافذة إعلاناته؟
+  function quarterWindow(now) {
+    const d = now || new Date();
+    const qEndMonth = Math.floor(d.getMonth() / 3) * 3;        // بداية الربع الحالي
+    const lastQEnd = new Date(d.getFullYear(), qEndMonth, 0);  // آخر يوم في الربع السابق
+    const q = Math.floor((lastQEnd.getMonth()) / 3) + 1;
+    const deadline = new Date(lastQEnd.getTime() + ANNOUNCE_DAYS * DAY);
+    return {
+      quarter: `الربع ${['الأول','الثاني','الثالث','الرابع'][q - 1]} ${lastQEnd.getFullYear()}`,
+      end: isoOf(lastQEnd), deadline: isoOf(deadline),
+      inside: d.getTime() <= deadline.getTime() + (PAY_LAG_DAYS + RECORD_LAG_DAYS) * DAY,
+      daysLeft: Math.max(0, daysBetween(d.getTime(), deadline.getTime() + (PAY_LAG_DAYS + RECORD_LAG_DAYS) * DAY)),
+    };
+  }
+
   const DAY = 86400000;
   const MONTH_MS = 30.44 * DAY;
   const YEAR_MS  = 365.25 * DAY;
@@ -257,10 +282,16 @@ window.DecisionIntel = (function () {
       else if (t.type === 'grant') grantShares += t.shares;
     });
 
-    const cutoff = Date.now() - 365 * DAY;
-    let divTotal = 0, divTTM = 0, divCount = 0;
+    // المستلَم فعلاً ≠ المُعلَن القادم. توزيع سجّلته بتاريخ صرفه القادم (تُعلن
+    // في أغسطس ويُصرف في سبتمبر) لم يدخل جيبك بعد: لا يُحتسب في «آخر 12 شهراً»
+    // ولا يدخل XIRR كتدفق، بل يُعرَض على حدة كدخل مؤكَّد قادم.
+    const nowTs = Date.now();
+    const cutoff = nowTs - 365 * DAY;
+    let divTotal = 0, divTTM = 0, divCount = 0, declaredTotal = 0;
+    const declared = [];
     const divYearsSet = new Set();
     Object.values(D.divByTicker || {}).forEach(arr => arr.forEach(d => {
+      if (d.date.getTime() > nowTs) { declared.push(d); declaredTotal += d.amount; return; }
       flows.push({ date: d.date, amount: d.amount });
       divTotal += d.amount; divCount++;
       divYearsSet.add(d.date.getFullYear());
@@ -282,7 +313,7 @@ window.DecisionIntel = (function () {
     return {
       xirr, buys, sells, netInvested, mkt, divTotal, divTTM, divCount, grantShares,
       divYears: [...divYearsSet].sort(), totalGain, totalPct, deposits, withdrawals,
-      flows,
+      flows, declared, declaredTotal,
     };
   }
 
@@ -458,13 +489,18 @@ window.DecisionIntel = (function () {
   // الدخل الأمامي = مجموع DPS آخر 12 شهراً × أسهمك الحالية — وهو نفس
   // التعريف المعتمد في لوحة التحكم وصفحة الأرباح (قرار المالك 2026-08).
   // ══════════════════════════════════════════════════════════════════
+  // سلسلة DPS المستلَمة فعلاً (بتاريخ ≤ اليوم). المُعلَن القادم يُعاد منفصلاً.
   function dpsSeriesOf(ticker) {
+    const nowTs = Date.now();
     const recs = (D.divByTicker[ticker] || []).slice().sort((a, b) => a.date - b.date);
-    const out = [];
+    const out = [], declared = [];
     recs.forEach(r => {
       const sh = D.sharesAt(ticker, r.date);
-      if (sh > 0.001 && r.amount > 0) out.push({ dps: r.amount / sh, date: r.date, amount: r.amount });
+      if (!(r.amount > 0)) return;
+      if (r.date.getTime() > nowTs) { declared.push({ date: r.date, amount: r.amount }); return; }
+      if (sh > 0.001) out.push({ dps: r.amount / sh, date: r.date, amount: r.amount });
     });
+    out.declared = declared;
     return out;
   }
 
@@ -479,7 +515,12 @@ window.DecisionIntel = (function () {
 
   function forwardOf(r) {
     const s = dpsSeriesOf(r.ticker);
-    if (!s.length) return { dps: 0, freq: 1, basis: 'none', income: 0, payments: 0 };
+    const declared = s.declared || [];
+    const declaredTotal = declared.reduce((a, d) => a + d.amount, 0);
+    const nextDeclared = declared.length
+      ? declared.reduce((m, d) => (d.date < m.date ? d : m), declared[0]) : null;
+    if (!s.length) return { dps: 0, freq: 1, basis: 'none', income: 0, payments: 0,
+                            declared, declaredTotal, nextDeclared };
     const freq = freqOf(s);
     const cutoff = Date.now() - 365 * DAY;
     const ttm = s.filter(p => p.date.getTime() >= cutoff).reduce((a, p) => a + p.dps, 0);
@@ -491,6 +532,11 @@ window.DecisionIntel = (function () {
     return {
       dps, freq, basis, payments: s.length, series: s, lastDate, daysSince,
       staleAfter: Math.round(staleAfter), stale: daysSince > staleAfter,
+      // مهلة الحكم: التأخّر وحده لا يكفي للحكم بالقطع قبل انقضاء تقويم الإفصاح
+      // السعودي، ولا يُحكم إطلاقاً على سهم له توزيع مُعلَن قادم.
+      lateForJudgment: daysSince > staleAfter + JUDGMENT_GRACE_DAYS && !declared.length,
+      inGrace: daysSince > staleAfter && daysSince <= staleAfter + JUDGMENT_GRACE_DAYS,
+      declared, declaredTotal, nextDeclared,
       income: dps * r.shares,
       yieldOnPrice: r.price > 0 ? dps / r.price : null,
     };
@@ -524,9 +570,10 @@ window.DecisionIntel = (function () {
     if (sus === 'fail') {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`بوابة الاستدامة سقطت: ${r.sustain.reason}`);
-    } else if (fwd.stale && fwd.payments > 0) {
+    } else if (fwd.lateForJudgment && fwd.payments > 0) {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
-      ev.push(`آخر توزيع قبل ${fwd.daysSince} يوماً — تجاوز المتوقَّع لدوريته (${fwd.staleAfter} يوماً)`);
+      ev.push(`آخر توزيع قبل ${fwd.daysSince} يوماً — تجاوز دوريته المتوقَّعة (${fwd.staleAfter} يوماً) `
+        + `وتجاوز معها مهلة الإفصاح الكاملة (${JUDGMENT_GRACE_DAYS} يوماً)`);
     } else if (govTrend && (govTrend.signal === 'cut' || govTrend.signal === 'stopped')) {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`${govTrend.external ? 'سياسة الشركة (مصدر خارجي)' : 'سجل أرباحك'}: ${govTrend.note}`);
@@ -575,6 +622,16 @@ window.DecisionIntel = (function () {
     if (payout != null && payout <= 1.0 && bucket !== 'risk') {
       ev.push(`التوزيع مغطّى: ${formatNum(payout * 100, 0)}% من ${payoutBase}`);
     }
+    // توزيع مُعلَن ومُسجَّل بتاريخ صرف قادم = أقوى دليل ممكن على الاستمرار
+    if (fwd.nextDeclared) {
+      ev.push(`✅ توزيع مُعلَن ومسجَّل عندك للصرف في ${isoOf(fwd.nextDeclared.date)} بمبلغ ${formatNum(fwd.nextDeclared.amount)} ر.س — دليل مؤكَّد لا استنتاج`);
+    }
+    // تأخّر داخل مهلة الإفصاح: يُذكر ولا يُحكم به (تقويم السوق السعودي)
+    if (fwd.inGrace) {
+      const qw = quarterWindow();
+      ev.push(`⏳ آخر توزيع قبل ${fwd.daysSince} يوماً — متأخّر عن دوريته لكنه <b>داخل مهلة الإفصاح</b>: `
+        + `${qw.quarter} انتهى ${qw.end} ومهلة إعلانه حتى ${qw.deadline}، ثم الصرف والتسجيل. لا حكم قبل انقضائها.`);
+    }
     if (fwd.payments) ev.push(`${fwd.payments} دفعة مسجّلة · ${fullYears} سنة كاملة · دورية ${({12:'شهرية',4:'ربعية',2:'نصف سنوية',1:'سنوية'})[fwd.freq]}`);
 
     // ── ثقة التنبؤ: محسوبة من كثافة الدليل لا من الانطباع ──
@@ -599,6 +656,8 @@ window.DecisionIntel = (function () {
     const cfg = (D.engineCfg || {})[r.ticker] || {};
     if (cfg.divCoverage || cfg.fundamentals || cfg.divSignal) c += 10;
     else why.push('تأكيدك اليدوي للاستدامة من ⚙️ (+10)');
+    // توزيع مُعلَن قادم دليل مؤكَّد لا مُستنتَج — يرفع الثقة كما يرفعها إدخالك اليدوي
+    if (fwd.nextDeclared) c += 10;
     const confidence = Math.min(100, Math.round(c));
 
     return { bucket, headline, evidence: ev, confidence, raise: why, payout, payoutBase,
@@ -841,7 +900,10 @@ window.DecisionIntel = (function () {
 
     cards.push(statCard('🧾 توزيعات وصلتك فعلاً',
       `${formatNum(perf.divTotal)} ر.س`,
-      `${perf.divCount} دفعة · آخر 12 شهراً ${formatNum(perf.divTTM)} ر.س`,
+      `${perf.divCount} دفعة · آخر 12 شهراً ${formatNum(perf.divTTM)} ر.س`
+      + (perf.declaredTotal > 0
+        ? `<br><b style="color:var(--st-good)">＋ ${formatNum(perf.declaredTotal)} ر.س مُعلَنة ولم تُصرف بعد</b> (${perf.declared.length} دفعة) — غير محتسبة هنا لأنها لم تدخل جيبك`
+        : ''),
       { cls: 'text-success' }));
 
     cards.push(statCard('💧 ضخّك وسحوباتك',
