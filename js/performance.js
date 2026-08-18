@@ -201,7 +201,8 @@ async function init() {
     supabaseClient.from('holdings').select('*').limit(10000),
     supabaseClient.from('dividends').select('*').eq('is_archived', false).order('date').limit(100000),
     supabaseClient.from('cashflow_entries').select('date,type,amount').eq('is_archived', false).order('date').limit(100000),
-    supabaseClient.from('net_worth_snapshots').select('date,total_value,notes').order('date').limit(10000),
+    // snapshot_json يحمل auto_stocks — قيمة الأسهم وحدها داخل اللقطة اليدوية
+    supabaseClient.from('net_worth_snapshots').select('date,total_value,notes,snapshot_json').order('date').limit(10000),
   ]);
 
   // AUDIT-FIX (2026-08): افحص .error لكل استعلام — الفشل الصامت كان يعرض محفظة فارغة
@@ -1730,6 +1731,53 @@ function _deduplicateSnapsByDay(snapshots) {
 // AUDIT-FIX (2026-08): تحذير (مرة واحدة) بعدد فترات TWR المُسقطة لمقام ≤ 0
 let _twrDropWarned = false;
 
+// ══════════════════════════════════════════════════════════════════════
+// 📐 سلسلة قيمة الأسهم وحدها — أساس مقارنة المؤشر بعد إعادة التأطير
+// ----------------------------------------------------------------------
+// كان خطّ «محفظتك» في المقارنة يُبنى من total_value، وهو ليس محفظة أسهم:
+// اللقطة التلقائية = أسهم + نقد مكتوب يدوياً + عقارات، واليدوية = صافي
+// الثروة كاملة ناقص الالتزامات. وبما أن تصحيح التدفقات يأتي من
+// cashflow_entries (إيداعات الوساطة فقط)، كان كل ارتفاع في القاعدة بلا صفّ
+// تدفق مقابل يُحتسب «مهارة استثمارية»: إعادة تقييم عقار، أو إعادة كتابة رصيد
+// النقد، أو سداد قرض — كلها كانت ترفع «تفوّقك على السوق». انحياز باتجاه واحد.
+//
+// الإصلاح: نستخرج قيمة الأسهم وحدها — وهي محفوظة أصلاً في كلا النوعين:
+//   • اللقطة التلقائية: داخل notes بصيغة «أسهم: NNNN | نقد: … | عقارات: …»
+//   • اللقطة اليدوية:   داخل snapshot_json.auto_stocks
+// فتزول مشكلة اختلاف الأساس بين النوعين من جذرها (كلاهما يصير أسهماً فقط).
+// ══════════════════════════════════════════════════════════════════════
+function _snapStocksValue(s) {
+  const j = s && s.snapshot_json;
+  if (j && j.auto_stocks != null && isFinite(+j.auto_stocks) && +j.auto_stocks > 0) return +j.auto_stocks;
+  // الأرقام في notes لاتينية دائماً (toFixed) — لا حاجة لتطبيع عربي-هندي
+  const m = String((s && s.notes) || '').match(/أسهم:\s*([\d.]+)/);
+  const v = m ? +m[1] : null;
+  return (v != null && isFinite(v) && v > 0) ? v : null;
+}
+
+// سلسلة أسهم فقط، مرتّبة تصاعدياً، صف واحد لكل يوم، مذيَّلة بقيمة اليوم الحيّة
+// (إضافة نقطة اليوم تُغلق فجوة «آخر لقطة قديمة» التي كانت تبتر المقارنة).
+function _stocksOnlySeries() {
+  const byDate = {};
+  (_snapshots || []).forEach(s => {
+    if (!s.date) return;
+    const v = _snapStocksValue(s);
+    if (v != null) byDate[s.date] = v;   // آخر قيمة لليوم تفوز
+  });
+  const live = (_holdings || []).reduce((a, h) => a + (+h.shares || 0) * (+h.current_price || 0), 0);
+  if (live > 0) byDate[todayISO()] = live;
+  return Object.keys(byDate).sort()
+    .map(d => ({ date: d, total_value: byDate[d], notes: 'auto' }));  // notes='auto' ⇒ أساس موحّد
+}
+
+// تدفقات محفظة الأسهم = المشتريات والمبيعات، لا إيداعات الوساطة.
+// هذا هو المال الذي دخل الأسهم فعلاً وخرج منها — وهو المقام الصحيح لـ Dietz.
+function _stockFlows() {
+  return (_tx || []).filter(t => t.date && (t.type === 'buy' || t.type === 'sell'))
+    .map(t => ({ date: t.date, type: t.type === 'buy' ? 'deposit' : 'withdrawal', amount: +t.total || 0 }))
+    .filter(f => f.amount > 0);
+}
+
 function _computeTWR(snapshots, cashflows) {
   // خطوة أولى: سلسلة متجانسة الأساس، ثم لقطة واحدة فقط لكل يوم لتجنب تشويه الحسابات
   const sorted = _deduplicateSnapsByDay(_selectConsistentSnapshots(snapshots));
@@ -1888,7 +1936,21 @@ function renderBenchmarkTab() {
   const emptyEl   = document.getElementById('bm-empty');
   const summaryEl = document.getElementById('bm-summary');
 
-  if (bmEntries.length < 2 || snapshots.length < 2) {
+  // كفاية سلسلة الأسهم تُفحَص بعد بنائها (تشمل نقطة اليوم الحيّة)، فهنا نتحقق
+  // من المؤشر وحده — وإلا حُجبت المقارنة عمّن لديه لقطة واحدة فقط.
+  if (bmEntries.length < 2) {
+    if (chartWrap)  chartWrap.style.display  = 'none';
+    if (emptyEl)    emptyEl.style.display    = '';
+    if (summaryEl)  summaryEl.style.display  = 'none';
+    if (_bmChart) { _bmChart.destroy(); _bmChart = null; }
+    return;
+  }
+
+  // ── إعادة التأطير (2026-08-18): المقارنة على الأسهم وحدها ──────────
+  // portSeries = قيمة أسهمك فقط عبر الزمن (لا نقد ولا عقارات ولا التزامات)،
+  // وتدفقاتها = مشترياتك ومبيعاتك لا إيداعات الوساطة.
+  const portSeries = _stocksOnlySeries();
+  if (portSeries.length < 2) {
     if (chartWrap)  chartWrap.style.display  = 'none';
     if (emptyEl)    emptyEl.style.display    = '';
     if (summaryEl)  summaryEl.style.display  = 'none';
@@ -1900,7 +1962,7 @@ function renderBenchmarkTab() {
   // نستخدم جميع التواريخ في كلا المصدرين ثم نطابق بالأقرب
   const allDates = [...new Set([
     ...bmEntries.map(e => e.date),
-    ...snapshots.map(s => s.date),
+    ...portSeries.map(s => s.date),
   ])].sort();
 
   // دالة مساعدة: قيمة تاسي عند تاريخ معين (أقرب نقطة سابقة أو مطابقة)
@@ -1909,9 +1971,9 @@ function renderBenchmarkTab() {
     return prior.length ? prior[prior.length - 1].value : null;
   };
 
-  // دالة مساعدة: قيمة المحفظة عند تاريخ معين (أقرب snapshot سابق أو مطابق)
+  // دالة مساعدة: قيمة أسهمك عند تاريخ معين (أقرب نقطة سابقة أو مطابقة)
   const getPortAt = (date) => {
-    const prior = snapshots.filter(s => s.date <= date);
+    const prior = portSeries.filter(s => s.date <= date);
     return prior.length ? +prior[prior.length - 1].total_value : null;
   };
 
@@ -1927,9 +1989,10 @@ function renderBenchmarkTab() {
     return;
   }
 
-  // ── حساب TWR للمحفظة ────────────────────────────────────
-  // نستخدم _cf (cashflow_entries) المُحمَّل في init() لتصحيح الإيداعات
-  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(snapshots, _cf || []);
+  // ── حساب TWR لمحفظة الأسهم ──────────────────────────────
+  // التدفقات = مشترياتك ومبيعاتك (المال الداخل للأسهم فعلاً)، لا إيداعات
+  // الوساطة — فيتطابق مجال التصحيح مع مجال القيمة المقاسة.
+  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries, _stockFlows());
 
   const getTwrAt = (date) => {
     const prior = sortedSnaps.filter(s => s.date <= date);
@@ -1937,10 +2000,22 @@ function renderBenchmarkTab() {
     return twrMap[prior[prior.length - 1].date] ?? null;
   };
 
-  // ── تطبيع الى 100 عند أول نقطة مشتركة ──────────────────
+  // ── تطبيع إلى 100 عند أول نقطة مشتركة ──────────────────
+  // AUDIT-FIX (2026-08-18): كان `getTwrAt(base.date) ?? 100` يُسقط التطبيع
+  // صامتاً حين تبدأ سلسلة TWR بعد أول نقطة في الرسم — فيبدأ الخطّان من
+  // تاريخين مختلفين بينما تُخبر الصفحة المستخدم أنهما يتشاركان الأساس.
+  // الآن: نُسقط النقاط السابقة لأول قيمة TWR بدل اختراع أساس.
+  while (points.length && getTwrAt(points[0].date) == null) points.shift();
+  if (points.length < 2) {
+    if (chartWrap)  chartWrap.style.display  = 'none';
+    if (emptyEl)    emptyEl.style.display    = '';
+    if (summaryEl)  summaryEl.style.display  = 'none';
+    if (_bmChart) { _bmChart.destroy(); _bmChart = null; }
+    return;
+  }
   const base      = points[0];
   const tasiBase  = base.tasi;
-  const baseTwr   = getTwrAt(base.date) ?? 100;
+  const baseTwr   = getTwrAt(base.date);
 
   const tasiNorm = points.map(p => +((p.tasi / tasiBase * 100).toFixed(2)));
   // portNorm = TWR مُعدَّل عند نقطة البداية المشتركة (يُزيل أثر الإيداعات)
@@ -2091,21 +2166,30 @@ function renderBenchmarkTab() {
         </div>
 
         ${kvsHtml([
-          ['عائد محفظتك (TWR)',        fmtPct(portDelta)],
+          ['عائد أسهمك (TWR)',         fmtPct(portDelta)],
           ['تاسي — سعري',              fmtPct(tasiDelta)],
           ['تاسي — عائد إجمالي (TRI)', fmtPct(tasiTriDelta)],
           ['Alpha مقابل السعري',       fmtPct(alphaPrice)],
           ['نقاط المقارنة',            `${points.length}`],
-          ['مصادر البيانات',           `${bmEntries.length} نقطة تاسي · ${snapshots.length} لقطة محفظة`],
+          ['مصادر البيانات',           `${bmEntries.length} نقطة تاسي · ${portSeries.length} نقطة قيمة أسهم`],
         ])}
 
-        ${noteHtml('🧭', `<b>لماذا قد يختلف هذا عن «الرؤية المستقبلية»؟</b>
-          هذا الرقم <b>تراكمي</b> خلال فترتك بالضبط، ويقارن <b>عائدك الإجمالي شاملاً التوزيعات</b>
-          بتاسي الفعلي في نفس الفترة، ويقيس بـTWR الذي يعزل توقيت ضخّك.
-          أما صندوق البيانات التاريخية في <a href="forecast.html">الرؤية المستقبلية</a> فيقارن
-          <b>نموّك السعري السنوي فقط</b> (بعد استبعاد توزيعاتك) بمتوسط تاسي طويل المدى، ويقيس بـXIRR.
-          أن تتفوّق هنا وتبدو دون المعيار هناك أمر متّسق: معناه أن
-          <b>تفوّقك مصدره التوزيعات لا ارتفاع الأسعار</b>. للحكم على أدائك مقابل السوق، هذه الصفحة هي المرجع.`, '')}
+        ${noteHtml('🧭', `<b>هذا الرقم تراكمي وزمني-الوزن — وليس هو رقم محرّك القرار.</b>
+          هنا: عائد <b>أسهمك</b> تراكمياً خلال الفترة أعلاه، بـTWR الذي <b>يعزل توقيت ضخّك</b> عمداً
+          ليقيس اختياراتك وحدها. وفي <a href="decision-engine.html">محرّك القرار</a>: نفس السؤال
+          لكن بـXIRR <b>سنوي</b> يضع نفس ريالاتك في نفس تواريخها داخل المؤشر، فيقيس <b>نتيجتك الفعلية</b>
+          بما فيها توقيت الضخّ.
+          <br>الرقمان صحيحان ويجيبان سؤالين مختلفين: هذا يقول «هل اختياراتي جيدة؟»، وذاك يقول
+          «هل خرجتُ فعلاً أفضل من المؤشر بمالي؟». اختلافهما في الإشارة يعني عادةً أن <b>توقيت ضخّك</b>
+          هو الفارق — لا اختياراتك.`, '')}
+
+        ${noteHtml('🔬', `<b>ما الذي يدخل في «عائد أسهمك» هنا؟</b> أسهمك فقط.
+          حتى 2026-08-18 كان هذا الخطّ يُبنى من <code>total_value</code> في لقطات صافي الثروة، وهي
+          <b>ليست محفظة أسهم</b>: اللقطة التلقائية = أسهم + نقد مكتوب يدوياً + عقارات، واليدوية =
+          صافي ثروتك كاملة ناقص الالتزامات. ولأن تصحيح التدفقات كان يأتي من إيداعات الوساطة وحدها،
+          كان رفع تقييم عقار أو إعادة كتابة رصيد النقد أو سداد قرض <b>يُحتسب تفوّقاً على السوق</b>.
+          الآن تُستخرَج قيمة الأسهم وحدها من كل لقطة (من <code>snapshot_json.auto_stocks</code> أو من
+          سطر «أسهم:» داخل الملاحظات)، والتدفقات = مشترياتك ومبيعاتك. الرقم أصدق — وقد يكون أقل.`, '')}
 
         ${noteHtml('⚠️', `
           <b>عائد توزيعات تاسي رقم تقديري لا فعلي.</b> محفظتك (TWR) تشمل توزيعاتك، فلا تُقارن بمؤشر
@@ -2117,13 +2201,26 @@ function renderBenchmarkTab() {
           كمرجع خالٍ من هذا الافتراض.`, 'warn')}
 
         ${noteHtml('📌', `
-          عائد محفظتك محسوب بـ <b>TWR (Time-Weighted Return)</b> بمنهج Modified Dietz — يعزل أداء
-          قراراتك عن إيداعاتك وسحوباتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>.`)}
+          عائد أسهمك محسوب بـ <b>TWR (Time-Weighted Return)</b> بمنهج Modified Dietz — يعزل أداء
+          قراراتك عن مشترياتك ومبيعاتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>
+          (وهو أول تاريخ تتوفّر فيه القيمتان معاً).`)}
+
+        ${(() => {
+          // حارس تقادم المؤشر: سلسلة تاسي متجمّدة بينما قيمة أسهمك تتقدّم إلى
+          // اليوم تمنح محفظتك عائداً لا يناله المؤشر — ألفا مُفبركة بالكامل.
+          const lastBm = bmEntries[bmEntries.length - 1];
+          const gap = Math.floor((Date.now() - new Date(lastBm.date + 'T00:00:00').getTime()) / 86400000);
+          if (gap <= 10) return '';
+          return noteHtml('⏰', `<b>سلسلة تاسي متأخّرة ${gap} يوماً</b> (آخر نقطة ${formatDate(lastBm.date)}).
+            قيمة أسهمك محسوبة حتى اليوم، فأي حركة سوق بعد ذلك التاريخ تُنسَب إليك ولا تُنسَب للمؤشر —
+            أي أن Alpha أعلاه <b>مبالغ فيها بمقدار ما تحرّك السوق في هذه الفجوة</b>.
+            اضغط «🔄 جلب تاسي تلقائياً» أعلى التبويب لإغلاقها.`, 'warn');
+        })()}
 
         ${suspiciousPeriods.length ? detailsHtml(
           `🔍 ${suspiciousPeriods.length} فترة بتغيّر كبير غير مُفسَّر — قد تُشوّه TWR`, `
           <div class="stack-2">
-            ${noteHtml('💡', 'السبب الأكثر شيوعاً: إيداع أو سحب لم يُسجَّل في <b>صفحة التدفقات النقدية</b>. سجّل هذه الحركات ليُصحَّح الحساب تلقائياً.')}
+            ${noteHtml('💡', 'بعد إعادة التأطير صار التصحيح من <b>معاملاتك</b> لا من التدفقات النقدية، فالسبب الأكثر شيوعاً هنا: <b>عملية شراء أو بيع غير مسجَّلة</b>، أو لقطة صافي ثروة قديمة لا يظهر فيها سطر «أسهم:». سجّل الحركة الناقصة ليُصحَّح الحساب تلقائياً.')}
             <div class="table-wrapper"><table class="bm-susp">
               <thead><tr><th>الفترة</th><th>التغيّر</th><th>التدفق المسجَّل</th><th>قيمة البداية</th><th>قيمة النهاية</th></tr></thead>
               <tbody>${suspiciousPeriods.map(p => `
