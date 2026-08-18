@@ -3942,7 +3942,12 @@ async function exportMonthlyReviewMD() {
 
       const gm = _totalMkt;
       const deCfgC = await syncedGet('decision_engine_v1', {}) || {};
-      const isBlue = tk => !!(deCfgC[tk] && (deCfgC[tk].blueChip === true || deCfgC[tk].isBlueChip === true));
+      // AUDIT-FIX (2026-08-18): كان يفتقد fallback أرامكو الموجود حرفياً في
+      // decision-engine.js:168 و targets.js:127 و watchlist.js:21 — فيقرأ سقفها 7%
+      // بدل 12% ويُصدر أمر بيع لسهم ممتثل. العلم اليدوي يتقدّم على الافتراض.
+      const isBlue = tk => (deCfgC[tk] && (deCfgC[tk].blueChip === true || deCfgC[tk].isBlueChip === true))
+        ? true
+        : (deCfgC[tk] && deCfgC[tk].blueChip === false ? false : tk === '2222');
 
       // ① سقف السهم الواحد / القيادي
       if (holdings.length && gm > 0) {
@@ -4039,7 +4044,11 @@ async function exportMonthlyReviewMD() {
       {
         const vh = lsGet('valuation_history_v1', []);
         const nv = Array.isArray(vh) ? vh.length : 0;
-        const covered = Array.isArray(vh) ? new Set(vh.map(v => v && (v.ticker || v.symbol)).filter(Boolean)) : new Set();
+        // AUDIT-FIX (2026-08-18): الرمز يقع داخل inputs (كما يقرؤه decision-engine.js:739
+        // و targets.js:224 و tasks.js:131 و§23 في هذا الملف) — قراءته من الجذر كانت
+        // تُرجع مجموعة فارغة دائماً فيُعلن التقرير «صفر تقييمات» ويأمر بإعادة تسعير الكل.
+        const _vTk = v => String((v && (v.inputs?.ticker ?? v.ticker ?? v.symbol)) || '').trim().toUpperCase();
+        const covered = Array.isArray(vh) ? new Set(vh.map(_vTk).filter(Boolean)) : new Set();
         const missingVal = holdings.filter(h => !covered.has(h.ticker));
         addCheck('إعادة تسعير القيمة العادلة بالنموذج الصحيح لكل أصل', '§3 و§4 الفلتر 2',
           !nv ? '⚠️ غير قابل للفحص' : (missingVal.length ? '⚠️ تغطية ناقصة' : '✅ ممتثل'),
@@ -4157,7 +4166,8 @@ async function exportMonthlyReviewMD() {
           'لا لقطة محفوظة — الفلاتر 1–5 لم تُشغَّل على البيانات الحالية، فلا يمكن إصدار قرارات مربوطة بقاعدة.');
 
         const vhD = lsGet('valuation_history_v1', []);
-        const covD = Array.isArray(vhD) ? new Set(vhD.map(v => v && (v.ticker || v.symbol)).filter(Boolean)) : new Set();
+        const _vTkD = v => String((v && (v.inputs?.ticker ?? v.ticker ?? v.symbol)) || '').trim().toUpperCase();
+        const covD = Array.isArray(vhD) ? new Set(vhD.map(_vTkD).filter(Boolean)) : new Set();
         const noVal = holdings.filter(h => !covD.has(h.ticker));
         if (noVal.length) addAct(6, '🧮 تقييم القيمة العادلة',
           `قيّم ${noVal.length} سهماً بلا تقييم: ${noVal.map(h => h.ticker).join('، ')}`,

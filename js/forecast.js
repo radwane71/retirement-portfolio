@@ -450,9 +450,13 @@ function forecastProjectedAnnualIncome(holdingRows, divRows, txRows) {
     // DPS السنوي المتوقَّع = مجموع DPS آخر 12 شهراً (قرار المالك 2026-08)
     let dps, lastDivDate, sharesAtRefDiv, usedFallback = false, dpsTrend = 'ttm';
     if (dpsSeries.length) {
-      const cutoff = Date.now() - 365 * 86400000;
+      // AUDIT-FIX (2026-08-18): النسخة الثالثة من هذا المنطق، وقد فاتها إغلاق
+      // النافذة عند اليوم (أُصلحت في dashboard.js و dividends.js و decision-*.js).
+      // التوزيع المُعلَن بتاريخ صرف قادم كان يدخل «آخر 12 شهراً» قبل استلامه فينتفخ
+      // عائد التوزيعات، ومنه إلى كل السيناريوهات ومسارات مونتي كارلو.
+      const cutoff = Date.now() - 365 * 86400000, nowTs = Date.now();
       const ttmDps = dpsSeries
-        .filter(p => parseDateLocal(p.date).getTime() >= cutoff)
+        .filter(p => { const t = parseDateLocal(p.date).getTime(); return t >= cutoff && t <= nowTs; })
         .reduce((s, p) => s + p.dps, 0);
       if (ttmDps > 0) {
         dps = ttmDps / freq;                       // يُضرب بـ freq لاحقاً → المجموع كما هو

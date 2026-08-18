@@ -919,7 +919,9 @@ function renderSummaryStrip(totalValue) {
       const t = d.date.getTime(); if (t >= cutoff && t <= nowTs) ttm += (d.amount || 0);
     }));
     const monthly = ttm / 12;
-    const goal = 5000;
+    // AUDIT-FIX (2026-08-18): كان 5000 مثبّتاً بينما بقيّة الصفحة نفسها تقرأ هدفك
+    // المحفوظ (incomeGoalMonthly) — فيرى صاحب هدف 7000 رقمين متناقضين في شاشة واحدة.
+    const goal = incomeGoalMonthly > 0 ? incomeGoalMonthly : 5000;
     const pct = goal > 0 ? Math.min(100, monthly / goal * 100) : 0;
     incomeEl.innerHTML = `💵 دخل توزيعاتك الشهري الحالي (آخر 12 شهراً): <strong>${formatNum(monthly)} ر.س</strong> من هدف <strong>${formatNum(goal)} ر.س</strong> بحلول 2045 (<strong>${formatNum(pct)}%</strong>)`;
   }
