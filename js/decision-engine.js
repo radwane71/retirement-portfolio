@@ -693,6 +693,17 @@ function runEngine() {
   // حفظ لقطة كاملة لمخرجات المحرّك → user_settings (تُدرَج في تقرير المراجعة وتُنسَخ احتياطياً)
   // AUDIT-FIX (2026-08): الفشل لم يعد يُكتم — saveEngineSnapshot تعالج خطأها وتُظهر toast
   saveEngineSnapshot(totalValue, thresholds);
+
+  // طبقة الذكاء (js/decision-intel.js): القياس مقابل تاسي، تنبؤ التوزيعات،
+  // «لو أنا مكانك»، والموثوقية. تعمل على مخرجات المحرّك نفسها ولا تغيّرها.
+  // فشلها لا يوقف المحرّك — الصفحة تبقى كاملة بدونها.
+  if (window.DecisionIntel) {
+    window.DecisionIntel.boot({
+      holdings, results: _results, totalValue, thresholds,
+      txByTicker, divByTicker, valByTicker, engineCfg,
+      incomeGoalMonthly, sharesAt: sharesAtDateOf,
+    });
+  }
 }
 
 // مفتاح لقطة المخرجات (مزامَن عبر user_settings ومشمول في النسخة الاحتياطية)
