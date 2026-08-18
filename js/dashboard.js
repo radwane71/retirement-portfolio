@@ -1734,6 +1734,7 @@ function renderDiversificationCard() {
             <span class="tag">🗂️ ${sectorCount} قطاع</span>
             <span class="tag">🎯 أكبر ${top1Pct.toFixed(1)}% (${esc(top1Name)})</span>
           </div>
+          <div><button class="btn btn-secondary btn-sm" type="button" onclick="showDiversificationBreakdown()">🔬 تحليل مفصّل — أي سهم يرفع العدد الفعّال وأيّه يخفضه</button></div>
         </div>
       </div>
 
@@ -1782,6 +1783,134 @@ function renderDiversificationCard() {
 }
 
 // ── تحليل التنويع المفصّل (popup شخصي) ──────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// 🔬 تفكيك «العدد الفعّال» على مستوى كل سهم
+// ----------------------------------------------------------------------
+// سوء فهم شائع يستحقّ التصحيح في الواجهة نفسها: العدد الفعّال ليس عدّاً
+// لأسهم «فعّالة» مقابل أخرى «غير فعّالة». هو 1 ÷ مجموع مربّعات الأوزان —
+// أي «كم سهماً **متساوي الوزن** يعطي نفس درجة تركّزك الحالية». فلا يوجد سهم
+// فعّال وآخر غير فعّال؛ يوجد **وزن** يقترب من التساوي فيرفع الرقم، ووزن يبتعد
+// عنه فيخفضه — والابتعاد في الاتجاهين يخفضه:
+//   • الثقيل يخفضه لأنه يركّز المحفظة فيه.
+//   • الضئيل يخفضه لأنه يزيد العدّ الاسمي بلا تنويع حقيقي يُذكر.
+// لذلك يقيس هذا التفكيك كل سهم مقابل **الوزن المتساوي** (100 ÷ عدد الأسهم)،
+// ويعرض مساهمته الفعلية في التركّز، والأثر المحسوب لتعديله.
+// ══════════════════════════════════════════════════════════════════════
+function _effNAfter(weights, idx, newW) {
+  // العدد الفعّال لو صار وزن السهم idx مساوياً newW وأُعيد تطبيع الباقي تناسبياً
+  const rest = weights.reduce((s, w, j) => (j === idx ? s : s + w), 0);
+  if (rest <= 0) return null;
+  const scale = (1 - newW) / rest;
+  const nw = weights.map((w, j) => (j === idx ? newW : w * scale));
+  const h = nw.reduce((s, w) => s + w * w, 0);
+  return h > 0 ? 1 / h : null;
+}
+
+function showDiversificationBreakdown() {
+  const items = (holdings || [])
+    .map(h => ({ ticker: h.ticker, name: h.name, value: +h.shares * +h.current_price }))
+    .filter(p => p.value > 0)
+    .sort((a, b) => b.value - a.value);
+
+  if (items.length < 2) {
+    openInfoModal('🔬 تفكيك العدد الفعّال',
+      '<p>يحتاج التفكيك سهمين على الأقل بقيمة موجبة.</p>');
+    return;
+  }
+
+  const total   = items.reduce((s, p) => s + p.value, 0);
+  const n       = items.length;
+  const equalW  = 1 / n;                                  // الوزن المتساوي
+  const weights = items.map(p => p.value / total);
+  const hhi     = weights.reduce((s, w) => s + w * w, 0);
+  const effN    = 1 / hhi;
+
+  const rows = items.map((p, i) => {
+    const w     = weights[i];
+    const share = w / equalW;                             // 1.00 = متوازن تماماً
+    const contrib = (w * w) / hhi * 100;                  // نصيبه من التركّز
+    const gapSAR  = (equalW - w) * total;                 // + يحتاج إضافة / − زائد
+    const effIfBal = _effNAfter(weights, i, equalW);
+    let cls, icon, label;
+    if (share >= 1.5)      { cls = 'bad';  icon = '🔴'; label = 'ثقيل — يخفض العدد الفعّال'; }
+    else if (share >= 0.75){ cls = 'good'; icon = '🟢'; label = 'متوازن — يرفعه'; }
+    else if (share >= 0.5) { cls = 'warn'; icon = '🟡'; label = 'قريب من التوازن'; }
+    else                   { cls = '';     icon = '⚪'; label = 'هامشي — يزيد العدّ لا التنويع'; }
+    return { ...p, w, share, contrib, gapSAR, effIfBal, cls, icon, label };
+  });
+
+  const heavy    = rows.filter(r => r.share >= 1.5);
+  const marginal = rows.filter(r => r.share < 0.5);
+  const near     = rows.filter(r => r.share >= 0.5 && r.share < 0.75);
+  const balanced = rows.filter(r => r.share >= 0.75 && r.share < 1.5);
+
+  // أكبر مكسب ممكن: أي سهم واحد تعديله يرفع العدد الفعّال أكثر من غيره
+  const best = rows.reduce((m, r) =>
+    (r.effIfBal != null && (m == null || r.effIfBal > m.effIfBal) ? r : m), null);
+
+  const body = `
+    <p><b>العدد الفعّال ليس عدّاً لأسهم «فعّالة».</b> هو جواب سؤال واحد:
+    <em>كم سهماً متساوي الوزن يعطي نفس تركّز محفظتي الحالي؟</em>
+    عندك <b class="num">${n}</b> سهماً، وتركّزك يعادل <b class="num">${effN.toFixed(1)}</b> سهماً متساوياً.</p>
+
+    <div class="info-formula">الوزن المتساوي = 100% ÷ ${n} = <b>${(equalW * 100).toFixed(2)}%</b> لكل سهم</div>
+
+    <p>كل سهم يُقاس بنسبته إلى هذا الوزن. <b>والابتعاد عنه يخفض الرقم في الاتجاهين:</b>
+    الثقيل يخفضه لأنه يركّز المحفظة فيه، والضئيل يخفضه لأنه يزيد عدد أسهمك
+    الاسمي بلا تنويع حقيقي.</p>
+
+    <div class="table-wrapper"><table>
+      <thead><tr>
+        <th>السهم</th><th>وزنه</th>
+        <th>مقابل المتساوي<br><span class="small text-muted">1.00 = متوازن</span></th>
+        <th>نصيبه من التركّز</th>
+        <th>الحالة</th>
+        <th>لو وُزن بالتساوي<br><span class="small text-muted">العدد الفعّال يصير</span></th>
+        <th>الفرق بالريال</th>
+      </tr></thead>
+      <tbody>${rows.map(r => `
+        <tr>
+          <td><strong>${esc(r.ticker)}</strong><br><span class="small text-muted">${esc(r.name || '')}</span></td>
+          <td class="num">${(r.w * 100).toFixed(2)}%</td>
+          <td class="num"><b>${r.share.toFixed(2)}×</b></td>
+          <td class="num">${r.contrib.toFixed(1)}%</td>
+          <td>${r.icon} <span class="small">${r.label}</span></td>
+          <td class="num">${r.effIfBal != null
+              ? `${r.effIfBal.toFixed(1)}<span class="small text-muted"> (${r.effIfBal > effN ? '+' : ''}${(r.effIfBal - effN).toFixed(1)})</span>`
+              : '—'}</td>
+          <td class="num">${r.gapSAR >= 0
+              ? `<span class="text-success">+${formatSAR(r.gapSAR)}</span>`
+              : `<span class="text-danger">−${formatSAR(Math.abs(r.gapSAR))}</span>`}</td>
+        </tr>`).join('')}
+      </tbody>
+    </table></div>
+
+    <div class="info-math">
+      🔴 ثقيل (≥ 1.5×): <b>${heavy.length}</b>${heavy.length ? ' — ' + heavy.map(r => esc(r.ticker)).join('، ') : ''}<br>
+      🟢 متوازن (0.75–1.5×): <b>${balanced.length}</b><br>
+      🟡 قريب من التوازن (0.5–0.75×): <b>${near.length}</b>${near.length ? ' — ' + near.map(r => esc(r.ticker)).join('، ') : ''}<br>
+      ⚪ هامشي (< 0.5×): <b>${marginal.length}</b>${marginal.length ? ' — ' + marginal.map(r => esc(r.ticker)).join('، ') : ''}
+    </div>
+
+    ${best && best.effIfBal > effN + 0.05 ? `<p class="info-note">🎯 <b>أكبر مكسب من تعديل واحد:</b>
+      لو صار وزن <b>${esc(best.name || best.ticker)}</b> مساوياً للوزن المتساوي
+      (${(equalW * 100).toFixed(2)}%)، يرتفع عددك الفعّال من
+      <b class="num">${effN.toFixed(1)}</b> إلى <b class="num">${best.effIfBal.toFixed(1)}</b>.
+      عمود «الفرق بالريال» يقول كم يلزم بيعاً أو شراءً للوصول لذلك.</p>` : ''}
+
+    ${marginal.length ? `<p class="info-note">⚪ <b>عن المراكز الهامشية:</b> عندك
+      <b>${marginal.length}</b> سهماً وزنه أقل من نصف الوزن المتساوي. هذه هي التي تجعل
+      «${n} سهماً» تعادل ${effN.toFixed(1)} فقط: تُحسب في العدد ولا تكاد تؤثر في النتيجة.
+      الخيار إما تعزيزها لتصير وازنة أو الخروج منها لتقليل عدد ما تتابعه — والتشتّت في
+      المتابعة تكلفة حقيقية أيضاً.</p>` : ''}
+
+    <p class="info-note">⚠️ هذا التفكيك يقيس <b>توازن الأوزان فقط</b>. سهمان متساويا الوزن
+      في نفس القطاع لا يعطيان التنويع الذي يعطيه سهمان في قطاعين مختلفين — والعدد الفعّال
+      لا يرى ذلك. راجع معه توزيع القطاعات، فالارتباط بين الأسهم لا يقيسه هذا الرقم.</p>`;
+
+  openInfoModal('🔬 تفكيك العدد الفعّال — سهماً سهماً', body);
+}
+
 function showDiversificationAnalysis() {
   const totalVal = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
   if (!holdings.length || !totalVal) return;
