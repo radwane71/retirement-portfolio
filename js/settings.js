@@ -4042,7 +4042,11 @@ async function exportMonthlyReviewMD() {
 
       // ⑧ القيمة العادلة — قاعدة التثبيت
       {
-        const vh = lsGet('valuation_history_v1', []);
+        // AUDIT-FIX (2026-08-18): كان lsGet — أي localStorage وحده. حاسبة القيمة
+        // العادلة رحّلت السجل إلى user_settings ومسحت النسخة المحلية، و§23 في هذا
+        // الملف نفسه يقرؤه بـ syncedGet. فكان التقرير يعلن «لا سجل تقييمات» بينما
+        // يسرده كاملاً قبل صفحات — نفس المصدر لكلّ الأقسام.
+        const vh = await syncedGet('valuation_history_v1', []);
         const nv = Array.isArray(vh) ? vh.length : 0;
         // AUDIT-FIX (2026-08-18): الرمز يقع داخل inputs (كما يقرؤه decision-engine.js:739
         // و targets.js:224 و tasks.js:131 و§23 في هذا الملف) — قراءته من الجذر كانت
@@ -4165,7 +4169,7 @@ async function exportMonthlyReviewMD() {
           'افتح صفحة «محرّك القرار» مرة واحدة',
           'لا لقطة محفوظة — الفلاتر 1–5 لم تُشغَّل على البيانات الحالية، فلا يمكن إصدار قرارات مربوطة بقاعدة.');
 
-        const vhD = lsGet('valuation_history_v1', []);
+        const vhD = await syncedGet('valuation_history_v1', []);
         const _vTkD = v => String((v && (v.inputs?.ticker ?? v.ticker ?? v.symbol)) || '').trim().toUpperCase();
         const covD = Array.isArray(vhD) ? new Set(vhD.map(_vTkD).filter(Boolean)) : new Set();
         const noVal = holdings.filter(h => !covD.has(h.ticker));
@@ -4252,7 +4256,7 @@ async function exportMonthlyReviewMD() {
 
       h3('سجل القيمة العادلة الخام (valuation_history_v1)');
       {
-        const vhRaw = lsGet('valuation_history_v1', []);
+        const vhRaw = await syncedGet('valuation_history_v1', []);
         if (Array.isArray(vhRaw) && vhRaw.length) {
           p(`عدد التقييمات المسجّلة: **${vhRaw.length}**. كل مدخلات كل نموذج كما حُفظت.`);
           const vk = [...new Set(vhRaw.flatMap(v => Object.keys(v || {})))];
