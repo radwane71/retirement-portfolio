@@ -28,6 +28,9 @@ window.DecisionIntel = (function () {
   const PERF_BLEND_MAX_W = 0.25;               // js/forecast.js:222 — سقف وزن أدائك
   const INTEL_HISTORY_KEY = 'decision_intel_history_v1';
   const INTEL_HISTORY_MAX = 400;
+  // أساسيات الشركات المجلوبة آلياً (تاريخ توزيعات 10 سنوات + قوائم مالية)
+  const FUND_KEY = 'stock_fundamentals_v1';
+  const FUND_MAX_AGE_DAYS = 7;    // أقدم من ذلك → تُجدَّد تلقائياً في الخلفية
 
   const DAY = 86400000;
   const MONTH_MS = 30.44 * DAY;
@@ -38,6 +41,8 @@ window.DecisionIntel = (function () {
   let TASI = [];       // [{date:'YYYY-MM-DD', value}] تصاعدياً
   let CF = [];         // cashflow_entries: [{date, type, amount}]
   let HISTORY = [];    // سجل القياسات اليومية
+  let FUND = null;     // { fetchedAt, bySymbol } — أساسيات مجلوبة آلياً
+  let FUND_BUSY = false;
   let INTEL = null;    // آخر نتيجة محسوبة (للتصدير/الفحص)
 
   // ══════════════════════════════════════════════════════════════════
@@ -104,7 +109,104 @@ window.DecisionIntel = (function () {
       HISTORY = Array.isArray(h) ? h.filter(e => e && e.date) : [];
     } catch (_) { HISTORY = []; }
 
+    // ④ أساسيات الشركات المجلوبة آلياً
+    try {
+      const f = await loadUserSetting(FUND_KEY);
+      FUND = (f && f.bySymbol) ? f : null;
+    } catch (_) { FUND = null; }
+
     return errs;
+  }
+
+  // عمر الأساسيات بالأيام (أو null إن لم تُجلب قط)
+  function fundAgeDays() {
+    if (!FUND || !FUND.fetchedAt) return null;
+    const t = new Date(FUND.fetchedAt).getTime();
+    return isFinite(t) ? daysBetween(t, Date.now()) : null;
+  }
+  const fundOf = tk => (FUND && FUND.bySymbol ? FUND.bySymbol[tk] : null) || null;
+
+  // ══════════════════════════════════════════════════════════════════
+  // اتجاه توزيع الشركة نفسها — مستقلّ عن تاريخ ملكيتك
+  // هذا ما يكسر قيد «سنتان كاملتان من سجلك»: سياسة الشركة تُقاس من تاريخها
+  // هي، فسهم اشتريته قبل سنة تُقاس سياسته على عشر سنوات لا على سنة واحدة.
+  // مصدر خارجي (§2) — يُوسم دائماً ولا يُصعّد قراراً إلى الأحمر وحده.
+  // ══════════════════════════════════════════════════════════════════
+  function companyDivTrend(ticker) {
+    const f = fundOf(ticker);
+    const divs = f && Array.isArray(f.dividends) ? f.dividends : null;
+    if (!divs || !divs.length) return null;
+
+    const byYear = {};
+    divs.forEach(d => {
+      const y = +String(d.date).slice(0, 4);
+      if (y) byYear[y] = (byYear[y] || 0) + (+d.amount || 0);
+    });
+    const thisYear = new Date().getFullYear();
+    const years = Object.keys(byYear).map(Number).filter(y => y < thisYear).sort((a, b) => b - a);
+    if (years.length < 2) {
+      return { signal: 'insufficient', yearsCount: years.length, external: true,
+        note: `تاريخ توزيعات الشركة من المصدر الخارجي فيه ${years.length} سنة كاملة فقط` };
+    }
+
+    const y1 = byYear[years[0]], y0 = byYear[years[1]];
+    const changePct = y0 > 0 ? (y1 - y0) / y0 * 100 : null;
+    let signal = 'stable';
+    if (changePct == null)        signal = 'insufficient';
+    else if (changePct <= -25)    signal = 'cut';
+    else if (changePct >= 5)      signal = 'growing';
+
+    // DGR: نمو التوزيع المركّب على أطول مدى متاح (الدستور §2 يذكره كبيان ناقص)
+    let dgr = null, dgrYears = 0;
+    const span = Math.min(years.length, 6);
+    const first = byYear[years[span - 1]], last = byYear[years[0]];
+    if (span >= 3 && first > 0 && last > 0) {
+      dgrYears = span - 1;
+      dgr = (Math.pow(last / first, 1 / dgrYears) - 1) * 100;
+    }
+
+    // تجزئة داخل نافذة المقارنة تُعلَن: مقارنة DPS عبر تجزئة قد تُنتج قطعاً وهمياً
+    const splits = (f.splits || []).filter(s => +String(s.date).slice(0, 4) >= years[1]);
+
+    return {
+      signal, changePct, external: true, yearsCount: years.length,
+      years: `${years[1]}→${years[0]}`, dgr, dgrYears, byYear, splits,
+      currency: f.currency || null,
+      note: changePct == null ? 'سنة المقارنة بلا توزيع'
+        : `توزيع الشركة ${changePct <= -25 ? 'انخفض' : changePct >= 5 ? 'نما' : 'مستقر'} `
+          + `${formatNum(Math.abs(changePct), 0)}% (${years[1]}→${years[0]}، ${years.length} سنة متاحة)`,
+    };
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // نسبة التوزيع من مصدر التغطية الصحيح (§3) — تقييمك أولاً ثم المصدر الخارجي
+  // الدستور §2: التراكر/ملفاتك هي المصدر الأساسي، والخارجي يُستخدم عند الغياب
+  // ويُعلَّم بوضوح. فلا نستبدل رقمك برقم ياهو أبداً.
+  // ══════════════════════════════════════════════════════════════════
+  function payoutOf(r) {
+    const isReit = (r.valInputs || {}).companyType === 'reit';
+    const mk = (val, base, src) => ({ ratio: val, base, source: src });
+
+    // ① من تقييمك أنت
+    const inp = r.valInputs || {};
+    const div = numOf(inp.dividends ?? inp.bankDps);
+    const earn = isReit ? numOf(inp.ffo) : numOf(inp.eps);
+    const fcf = numOf(inp.fcf);
+    if (div != null && div > 0) {
+      if (r.assetType === 'cement_petro' && fcf != null && fcf > 0) return mk(div / fcf, 'FCF', 'owner');
+      if (earn != null && earn > 0) return mk(div / earn, isReit ? 'FFO' : 'EPS', 'owner');
+    }
+
+    // ② من الأساسيات المجلوبة آلياً — مع احترام مقياس نوع الأصل
+    const f = fundOf(r.ticker);
+    if (!f) return null;
+    const fDps = numOf(f.dps), fEps = numOf(f.eps), fFcfPs = numOf(f.fcfPerShare);
+    if (fDps == null || !(fDps > 0)) return null;
+    if (r.assetType === 'cement_petro') {
+      return (fFcfPs != null && fFcfPs > 0) ? mk(fDps / fFcfPs, 'FCF للسهم', 'external') : null;
+    }
+    if (isReit) return null;   // FFO لا يوفّره المصدر الخارجي — لا بديل صامت (§3/§8)
+    return (fEps != null && fEps > 0) ? mk(fDps / fEps, 'EPS', 'external') : null;
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -317,6 +419,9 @@ window.DecisionIntel = (function () {
         fix: 'سجّل نسبة الهدف في صفحة «أهداف الأسهم»' },
       { key: 'price', label: 'سعر محدَّث خلال 7 أيام',      pct: wOf(r => freshSet.has(r.ticker)),
         fix: 'حدّث الأسعار من لوحة التحكم' },
+      { key: 'fund',  label: 'أساسيات وتاريخ توزيعات مجلوبة آلياً',
+        pct: wOf(r => { const f = fundOf(r.ticker); return !!(f && (f.eps != null || (f.dividends || []).length)); }),
+        fix: 'تُجلب تلقائياً كل ' + FUND_MAX_AGE_DAYS + ' أيام؛ اضغط «حدّث الأساسيات» لو تأخّرت' },
     ];
     const readiness = Math.round(axes.reduce((s, a) => s + a.pct, 0) / axes.length * 100);
     const weakest = axes.slice().sort((a, b) => a.pct - b.pct)[0];
@@ -404,19 +509,16 @@ window.DecisionIntel = (function () {
     // إشارة اتجاه صريحة من المحرّك تعني أنه قاس سنتين كاملتين فعلاً (بعد استبعاد
     // سنة أول شراء الجزئية) — فهي دليل نضج أقوى من عدّنا المحلي، ولا يصحّ أن
     // نردّ عليها بـ«بدري على الحكم».
-    const measured = !!(trend && ['growing', 'stable', 'cut', 'stopped'].includes(trend.signal));
+    // اتجاه سياسة الشركة من مصدرها الخارجي — يقيس عشر سنوات لا سجل ملكيتك
+    const cTrend = companyDivTrend(r.ticker);
+    const cDirectional = !!(cTrend && ['growing', 'stable', 'cut'].includes(cTrend.signal));
+    const measured = !!(trend && ['growing', 'stable', 'cut', 'stopped'].includes(trend.signal)) || cDirectional;
+    // الاتجاه الحاكم: سجلك أنت أولاً (§2)، والشركة عند غيابه
+    const govTrend = (trend && trend.signal !== 'insufficient') ? trend : (cDirectional ? cTrend : null);
 
-    // نسبة التوزيع من مصدر التغطية الصحيح (إن توفّر التقييم)
-    let payout = null, payoutBase = null;
-    const inp = r.valInputs || {};
-    const isReit = inp.companyType === 'reit';
-    const div = numOf(inp.dividends ?? inp.bankDps);
-    const earn = isReit ? numOf(inp.ffo) : numOf(inp.eps);
-    const fcf = numOf(inp.fcf);
-    if (div != null && div > 0) {
-      if (r.assetType === 'cement_petro' && fcf != null && fcf > 0) { payout = div / fcf; payoutBase = 'FCF'; }
-      else if (earn != null && earn > 0) { payout = div / earn; payoutBase = isReit ? 'FFO' : 'EPS'; }
-    }
+    const po = payoutOf(r);
+    const payout = po ? po.ratio : null;
+    const payoutBase = po ? po.base + (po.source === 'external' ? ' (مصدر خارجي)' : '') : null;
 
     let bucket, headline;
     if (sus === 'fail') {
@@ -425,9 +527,9 @@ window.DecisionIntel = (function () {
     } else if (fwd.stale && fwd.payments > 0) {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`آخر توزيع قبل ${fwd.daysSince} يوماً — تجاوز المتوقَّع لدوريته (${fwd.staleAfter} يوماً)`);
-    } else if (trend && (trend.signal === 'cut' || trend.signal === 'stopped')) {
+    } else if (govTrend && (govTrend.signal === 'cut' || govTrend.signal === 'stopped')) {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
-      ev.push(`سجل أرباحك: ${trend.note}`);
+      ev.push(`${govTrend.external ? 'سياسة الشركة (مصدر خارجي)' : 'سجل أرباحك'}: ${govTrend.note}`);
     } else if (payout != null && payout > 1.2) {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`التوزيع يفوق ${payoutBase} بنسبة ${formatNum(payout * 100, 0)}% — غير ممكن استمراره بلا اقتراض أو بيع أصول`);
@@ -444,14 +546,30 @@ window.DecisionIntel = (function () {
       if (payout != null && payout > 1.0) ev.push(`التوزيع فوق ${payoutBase} بقليل (${formatNum(payout * 100, 0)}%)`);
     } else if ((fullYears < 2 && !measured) || sus === 'unknown') {
       bucket = 'unknown'; headline = 'بدري على الحكم';
-      if (fullYears < 2) ev.push(`${fullYears} سنة كاملة من التوزيعات فقط — المقارنة السنوية تحتاج سنتين`);
+      if (fullYears < 2 && !measured) ev.push(`${fullYears} سنة كاملة من سجلك فقط، ولا تاريخ كافٍ لسياسة الشركة — المقارنة السنوية تحتاج سنتين`);
       if (sus === 'unknown') ev.push('بوابة الاستدامة غير مكتملة — لا تقدير صامت (§8)');
-    } else if (trend && trend.signal === 'growing') {
+    } else if (govTrend && govTrend.signal === 'growing') {
       bucket = 'growing'; headline = 'مرشّح للنمو';
-      ev.push(`سجل أرباحك: ${trend.note}`);
+      ev.push(`${govTrend.external ? 'سياسة الشركة (مصدر خارجي)' : 'سجل أرباحك'}: ${govTrend.note}`);
     } else {
       bucket = 'stable'; headline = 'مرشّح للاستمرار';
-      ev.push(trend ? `سجل أرباحك: ${trend.note}` : 'دفعات منتظمة بلا انقطاع');
+      ev.push(govTrend
+        ? `${govTrend.external ? 'سياسة الشركة (مصدر خارجي)' : 'سجل أرباحك'}: ${govTrend.note}`
+        : 'دفعات منتظمة بلا انقطاع');
+    }
+
+    // تعارض المصدرين يُعلَن ولا يُحسم صامتاً — غالباً خلل بيانات يستحق نظرتك
+    if (trend && cDirectional && trend.signal !== 'insufficient' && trend.signal !== cTrend.signal) {
+      ev.push(`⚠️ تعارض: سجلك يقول «${trend.signal}» وسياسة الشركة تقول «${cTrend.signal}» — راجع سجل أرباحك لهذا الرمز`);
+    }
+    if (cTrend && cTrend.dgr != null) {
+      ev.push(`نمو التوزيع المركّب (DGR) على ${cTrend.dgrYears} سنة: ${formatNum(cTrend.dgr, 1)}% سنوياً (مصدر خارجي)`);
+    }
+    if (cTrend && cTrend.splits && cTrend.splits.length) {
+      ev.push(`⚠️ حدثت تجزئة (${cTrend.splits.map(s => s.date).join('، ')}) داخل نافذة المقارنة — قد تشوّه مقارنة DPS`);
+    }
+    if (cTrend && cTrend.currency && cTrend.currency !== 'SAR') {
+      ev.push(`⚠️ عملة المصدر الخارجي ${cTrend.currency} لا ر.س — لا تُقارن أرقامه بأرقامك مباشرة`);
     }
 
     if (payout != null && payout <= 1.0 && bucket !== 'risk') {
@@ -465,8 +583,16 @@ window.DecisionIntel = (function () {
     c += Math.min(30, fwd.payments * 6);
     if (fwd.payments < 5) why.push(`كل دفعة جديدة ترفع الثقة (${fwd.payments}/5)`);
     c += fullYears >= 3 ? 30 : fullYears === 2 ? 22 : fullYears === 1 ? 10 : 0;
-    if (fullYears < 3) why.push(`سنة توزيع كاملة إضافية ترفعها (${fullYears}/3)`);
-    if (payout != null) c += 20; else why.push('أدخل الأرباح/التوزيع في حاسبة القيمة العادلة (+20)');
+    if (fullYears < 3) why.push(`سنة توزيع كاملة إضافية في سجلك ترفعها (${fullYears}/3)`);
+    // تاريخ الشركة الأطول يضيف دليلاً — لكن بخصم معلَن لأنه مصدر خارجي (§2)
+    if (cTrend && cTrend.yearsCount > fullYears) {
+      c += Math.min(15, (cTrend.yearsCount - fullYears) * 3);
+    } else if (!cTrend) {
+      why.push('جلب تاريخ توزيعات الشركة آلياً (+15)');
+    }
+    if (po && po.source === 'owner') c += 20;
+    else if (po) { c += 12; why.push('أدخل الأرقام بنفسك في حاسبة القيمة العادلة بدل المصدر الخارجي (+8)'); }
+    else why.push('أدخل الأرباح/التوزيع في حاسبة القيمة العادلة (+20)');
     c += r.fairValue != null ? (r.valStale ? 5 : 10) : 0;
     if (r.fairValue == null) why.push('تقييم عادل محفوظ (+10)');
     else if (r.valStale) why.push('تحديث التقييم (أقدم من 6 أشهر) (+5)');
@@ -475,7 +601,8 @@ window.DecisionIntel = (function () {
     else why.push('تأكيدك اليدوي للاستدامة من ⚙️ (+10)');
     const confidence = Math.min(100, Math.round(c));
 
-    return { bucket, headline, evidence: ev, confidence, raise: why, payout, payoutBase, fullYears };
+    return { bucket, headline, evidence: ev, confidence, raise: why, payout, payoutBase,
+             payoutSource: po ? po.source : null, fullYears, companyTrend: cTrend };
   }
 
   const BUCKET_META = {
@@ -600,7 +727,13 @@ window.DecisionIntel = (function () {
   async function boot(ctx) {
     D = ctx;
     const errs = await loadExtras();
-    try { compute(errs); } catch (e) {
+    try {
+      compute(errs);
+      // أتمتة كاملة: أساسيات غائبة أو أقدم من أسبوع تُجدَّد في الخلفية بلا طلب
+      // منك، ثم يُعاد الحساب. صامتة عند النجاح، معلَنة عند الفشل.
+      const age = fundAgeDays();
+      if (age == null || age > FUND_MAX_AGE_DAYS) refreshFundamentals({ silent: true });
+    } catch (e) {
       console.error('[decision-intel]', e);
       const el = document.getElementById('de-intel-kpis');
       if (el) el.innerHTML = `<div class="note" data-state="bad"><span class="ic">⛔</span><div>تعذّر حساب طبقة الذكاء: ${E(e.message || e)} — بقيّة المحرّك تعمل كالمعتاد.</div></div>`;
@@ -851,11 +984,26 @@ window.DecisionIntel = (function () {
       </tr>`;
     }).join('');
 
+    const age = fundAgeDays();
+    const withHist = I.income.rows.filter(x => x.outlook.companyTrend && x.outlook.companyTrend.yearsCount >= 2).length;
+    const fundLine = `<div class="note"${age == null ? ' data-state="warn"' : ''} style="margin-bottom:10px">
+      <span class="ic">${age == null ? '⏳' : '🛰️'}</span>
+      <div>${age == null
+        ? 'أساسيات الشركات لم تُجلب بعد — تُجلب تلقائياً الآن في الخلفية، وتتحدّث كل ' + FUND_MAX_AGE_DAYS + ' أيام بلا تدخّل منك.'
+        : `أساسيات الشركات وتاريخ توزيعاتها (10 سنوات) مجلوبة آلياً قبل <b>${age} يوماً</b> — ` +
+          `<b>${withHist}</b> من ${I.income.rows.length} رمزاً لها تاريخ سياسة توزيع كافٍ، وهو ما يسمح بالحكم قبل أن يكمل سجل ملكيتك سنتين.`}
+        <div class="mt-2"><button class="btn btn-secondary btn-sm" type="button"
+          onclick="DecisionIntel.refreshFundamentals({btn:this})">🔄 حدّث الأساسيات</button></div>
+        <div id="de-intel-fund-note" class="small" style="margin-top:6px"></div>
+      </div></div>`;
+
     el.innerHTML = `
       <div class="mb-2">${strip}</div>
+      ${fundLine}
       <p class="small text-muted" style="margin:0 0 10px">
         الدخل القادم لكل سهم = مجموع التوزيع للسهم الواحد خلال آخر 12 شهراً × أسهمك الحالية — نفس تعريف لوحة التحكم وصفحة الأرباح.
-        التصنيف يجمع: بوابة الاستدامة، واتجاه DPS في سجلك، ونسبة التوزيع من مصدر التغطية الصحيح حسب نوع الأصل (§3)، وانتظام الدفعات.
+        التصنيف يجمع: بوابة الاستدامة، واتجاه DPS في سجلك، وسياسة توزيع الشركة من تاريخها العشري، ونسبة التوزيع من مصدر التغطية الصحيح حسب نوع الأصل (§3)، وانتظام الدفعات.
+        سجلك أنت له الأولوية دائماً، والمصدر الخارجي يُستخدم عند غيابه <b>ويُوسم «مصدر خارجي»</b> (§2).
         <b>لا تُقدَّر بيانات ناقصة صامتةً</b> — السهم بلا دليل كافٍ يُصنَّف «بدري على الحكم».
       </p>
       <div class="table-wrapper"><table>
@@ -1001,6 +1149,44 @@ window.DecisionIntel = (function () {
     }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // جلب أساسيات الشركات آلياً (تاريخ توزيعات 10 سنوات + قوائم مالية)
+  // تعمل تلقائياً عند القِدم، وبزرّ عند الطلب. لا تكتب في تقييماتك ولا في
+  // حاسبة القيمة العادلة إطلاقاً — القيمة العادلة قرارك أنت (§2/§4).
+  // ══════════════════════════════════════════════════════════════════
+  async function refreshFundamentals(opts) {
+    const o = opts || {};
+    if (FUND_BUSY) return;
+    FUND_BUSY = true;
+    const btn = o.btn;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ جارٍ الجلب…'; }
+    try {
+      const { data, error } = await supabaseClient.functions.invoke('update-prices', {
+        body: { fundamentals: true },
+      });
+      if (error) throw new Error(error.message || 'تعذّر الاتصال بالدالة السحابية update-prices');
+      const f = data && data.fundamentals;
+      if (!f) throw new Error('الدالة السحابية ردّت بلا حقل fundamentals — النسخة المنشورة أقدم من هذه الميزة؛ أعِد نشرها: supabase functions deploy update-prices');
+      if (f.error) throw new Error(f.error);
+      if (!f.bySymbol || !Object.keys(f.bySymbol).length) throw new Error('لم تُرجِع الدالة أي رمز.');
+
+      FUND = f;
+      await saveUserSetting(FUND_KEY, f);
+      const okCount = Object.values(f.bySymbol).filter(v => v && (v.eps != null || (v.dividends || []).length)).length;
+      if (!o.silent) showToast(`✓ الأساسيات: ${okCount} من ${Object.keys(f.bySymbol).length} رمزاً`, 'success');
+      compute(INTEL ? INTEL.errs : []);
+    } catch (e) {
+      // لا نُسكت الفشل حتى في الوضع الصامت — لكن نُظهره في مكانه لا كإزعاج
+      const msg = e.message || String(e);
+      if (!o.silent) showToast('⚠️ تعذّر جلب الأساسيات: ' + msg, 'error');
+      const el = document.getElementById('de-intel-fund-note');
+      if (el) el.innerHTML = `<span style="color:var(--st-warn)">⚠️ تعذّر تحديث الأساسيات آلياً: ${E(msg)}</span>`;
+      if (btn) { btn.disabled = false; btn.textContent = '🔄 حدّث الأساسيات'; }
+    } finally {
+      FUND_BUSY = false;
+    }
+  }
+
   // الواجهة العامة — في نهاية النطاق حتى تكون كل الثوابت والدوال أعلاه مُهيَّأة
-  return { boot, fetchTasi, _debug: () => INTEL };
+  return { boot, fetchTasi, refreshFundamentals, _debug: () => INTEL };
 })();
