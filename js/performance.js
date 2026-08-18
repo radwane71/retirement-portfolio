@@ -642,6 +642,8 @@ function renderOpenPositions() {
     <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}<br><span class="small t-sub">${totalRetPct != null ? totalRetPct.toFixed(2) + '%' : '—'}</span></td>
     <td></td>
   </tr>`;
+
+  makeTableSortable('open-tbody');
 }
 
 // ── Closed positions table ────────────────────────────────────────────
@@ -695,6 +697,8 @@ function renderClosedPositions() {
     <td class="num text-success">${formatSAR(totalDiv)}</td>
     <td class="num bold ${totalRet>=0?'text-success':'text-danger'}">${formatSAR(totalRet,true)}</td>
   </tr>`;
+
+  makeTableSortable('closed-tbody');
 }
 
 // ── Monthly timeline ──────────────────────────────────────────────────
@@ -892,6 +896,8 @@ function renderMonthlyTimeline() {
       <td class="num ${netCls} bold">${r.netMove !== 0 ? formatSAR(r.netMove, true) : '—'}</td>
     </tr>`;
   }).join('');
+
+  makeTableSortable('timeline-tbody');
 }
 
 // ── Monthly chart ─────────────────────────────────────────────────────
@@ -1285,6 +1291,8 @@ function renderDividendMetrics() {
   }).join('');
 
   tbody.innerHTML = rows || `<tr><td colspan="9" class="text-muted small text-center">لا توجد بيانات كافية للحساب</td></tr>`;
+
+  makeTableSortable('dv-tbody');
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1732,6 +1740,99 @@ function _deduplicateSnapsByDay(snapshots) {
 let _twrDropWarned = false;
 
 // ══════════════════════════════════════════════════════════════════════
+// ↕️ فرز الجداول بالنقر على الترويسة — تعميم على كل تبويبات الصفحة
+// ----------------------------------------------------------------------
+// الصفحة فيها ستة جداول تُبنى بدوال مختلفة، وبعض أعمدتها **محسوبة داخل حلقة
+// الرسم** ولا وجود لها في أي مصفوفة (YoC، العائد الحالي، سنوات الاسترداد…).
+// لذلك يفرز هذا المحرّك **صفوف الجدول المرسومة** لا مصفوفة المصدر: فيغطّي كل
+// عمود معروض بلا إعادة هيكلة بيانات كل تبويب، ويبقى صحيحاً بعد أي إعادة رسم.
+//
+// قواعد مقصودة:
+//  • الأرقام تُستخرج من نص الخلية بعد تجريد «ر.س» و«%» والفواصل والإشارة −
+//    (U+2212 التي يستخدمها التنسيق العربي)، فيفرز «1,234.50 ر.س» عددياً لا نصياً.
+//  • «—» و«غير متوفر» تُعامَل فارغة و**تهبط دائماً إلى الأسفل** في الاتجاهين،
+//    فلا تتصدّر القائمة صفوف بلا بيانات.
+//  • النصّ العربي يُقارَن بـ localeCompare (الترتيب الأبجدي الصحيح).
+//  • <tfoot> لا يُمَسّ (صفوف الإجماليات)، وصفّ الحالة الفارغة (colspan) يُترك.
+//  • عمود يُوسَم data-nosort لا يقبل الفرز — يُستخدم لأعمدة تعتمد على ترتيب
+//    الصفوف نفسه (مثل «التغيّر» في جدول تاسي المحسوب مقابل الصف التالي).
+// ══════════════════════════════════════════════════════════════════════
+function _cellSortValue(td) {
+  const raw = (td.textContent || '').trim();
+  if (!raw || raw === '—' || raw === '-' || /^غير متوفر/.test(raw)) return null;
+  // نص فيه رقم واحد على الأقل → عددي (بعد تطبيع الإشارة والفواصل)
+  const norm = raw.replace(/[٠-٩]/g, c => String('٠١٢٣٤٥٦٧٨٩'.indexOf(c)))
+                  .replace(/[−–]/g, '-').replace(/[,،]/g, '');
+  const m = norm.match(/-?\d+(?:\.\d+)?/);
+  if (m && /\d/.test(norm)) {
+    // تاريخ ISO يبقى نصاً (يفرز صحيحاً لفظياً) — لا نحوّله لرقم
+    if (/^\d{4}-\d{2}-\d{2}/.test(norm)) return { s: norm };
+    return { n: +m[0] };
+  }
+  return { s: raw };
+}
+
+function makeTableSortable(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const table = tbody.closest('table');
+  const headRow = table && table.querySelector('thead tr');
+  if (!headRow) return;
+
+  const state = table._sortState || (table._sortState = { col: -1, dir: 'asc', n: 0 });
+  const ths = [...headRow.children];
+  // الجدول الزمني يحقن/يحذف عمود «قيمة المحفظة» وقت التشغيل، فتنزاح الفهارس.
+  // تغيّر عدد الأعمدة ⇒ الفرز المخزَّن لم يعد يشير للعمود نفسه → يُبطَل.
+  if (state.n && state.n !== ths.length) { state.col = -1; state.dir = 'asc'; }
+  state.n = ths.length;
+
+  const apply = () => {
+    const rows = [...tbody.querySelectorAll(':scope > tr')]
+      .filter(tr => !tr.querySelector('[colspan]'));   // تجاهل صفّ «لا بيانات»
+    if (rows.length < 2 || state.col < 0) return;
+    rows.map(tr => [tr, _cellSortValue(tr.children[state.col])])
+      .sort((a, b) => {
+        const [, x] = a, [, y] = b;
+        if (x == null && y == null) return 0;
+        if (x == null) return 1;            // الفارغ يهبط دائماً
+        if (y == null) return -1;
+        let c;
+        if ('n' in x && 'n' in y) c = x.n - y.n;
+        else c = String(x.s ?? x.n).localeCompare(String(y.s ?? y.n), 'ar');
+        return state.dir === 'asc' ? c : -c;
+      })
+      .forEach(([tr]) => tbody.appendChild(tr));
+  };
+
+  ths.forEach((th, i) => {
+    if (th.dataset.nosort !== undefined || !(th.textContent || '').trim()) return;
+    if (!th.dataset.sortBound) {
+      th.dataset.sortBound = '1';
+      th.classList.add('sortable');
+      th.addEventListener('click', () => {
+        if (state.col === i) state.dir = state.dir === 'asc' ? 'desc' : 'asc';
+        else { state.col = i; state.dir = 'asc'; }
+        apply();
+        _paintSortArrows(headRow, state);
+      });
+    }
+  });
+  _paintSortArrows(headRow, state);
+  apply();   // إعادة تطبيق الفرز المختار بعد أي إعادة رسم
+}
+
+function _paintSortArrows(headRow, state) {
+  [...headRow.children].forEach((th, i) => {
+    th.querySelectorAll('.sort-arrow').forEach(el => el.remove());
+    if (th.dataset.nosort !== undefined || !(th.textContent || '').trim()) return;
+    const sp = document.createElement('span');
+    sp.className = 'sort-arrow' + (state.col === i ? ' active' : '');
+    sp.textContent = state.col === i ? (state.dir === 'asc' ? '↑' : '↓') : '↕';
+    th.appendChild(sp);
+  });
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // 📐 سلسلة قيمة الأسهم وحدها — أساس مقارنة المؤشر بعد إعادة التأطير
 // ----------------------------------------------------------------------
 // كان خطّ «محفظتك» في المقارنة يُبنى من total_value، وهو ليس محفظة أسهم:
@@ -1925,6 +2026,7 @@ function renderBenchmarkTab() {
           <td class="bm-acts">${unlockBtn}<button class="btn btn-danger btn-sm" onclick="deleteBenchmarkEntry('${esc(e.date)}')">✕</button></td>
         </tr>`;
       }).join('');
+      makeTableSortable('bm-entries-tbody');
     } else {
       if (entriesWrap) entriesWrap.style.display = 'none';
     }
