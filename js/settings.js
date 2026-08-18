@@ -3507,12 +3507,16 @@ async function exportMonthlyReviewMD() {
       const totalReturns = _totalMkt + _totalDiv;
       const recovery = netCapital > 0 ? totalReturns / netCapital * 100 : 0;
 
-      h3('استرداد رأس المال (نقطة التعادل)');
+      // يُصدَّر بنفس تأطير لوحة التحكم: المسافة عن رأس المال هي الرقم القائد،
+      // ونسبة الاسترداد الخام تفصيل تحته (100% = رأس المال بالضبط لا ربح).
+      const above = netCapital > 0 ? (totalReturns - netCapital) / netCapital * 100 : 0;
+      h3('موقعك من رأس مالك (نقطة التعادل)');
       p('```');
       p(`رأس المال المنشغل (شراء−بيع) : ${SAR(netCapital)} ر.س`);
       p(`إجمالي العوائد (قيمة+توزيعات): ${SAR(totalReturns)} ر.س`);
-      p(`نسبة الاسترداد              : ${recovery.toFixed(1)}%  ${recovery >= 100 ? '✅ تجاوزت التعادل' : recovery >= 75 ? '🟡 قريب' : '🔴 دون التعادل'}`);
+      p(`الفرق عن رأس المال          : ${above >= 0 ? '+' : '−'}${Math.abs(above).toFixed(2)}%  ${above >= 0 ? '✅ فوق رأس مالك' : '🔴 تحت رأس مالك — يأكل منه'}`);
       p(`صافي الربح/الخسارة الحقيقي   : ${(totalReturns - netCapital >= 0 ? '+' : '') + SAR(totalReturns - netCapital)} ر.س`);
+      p(`(للتحقّق) نسبة الاسترداد     : ${recovery.toFixed(1)}%  — 100% = رأس مالك بالضبط`);
       p('```');
 
       // تخصيص الأصول %

@@ -2140,7 +2140,14 @@ function renderInsights(s, totalValue, costBasis, pnl, pnlPct) {
   if (mktFill) mktFill.style.width = Math.min(mktPct / 2, 100) + '%';
   const mktMeter = g('ins-mkt-meter');
   if (mktMeter) mktMeter.dataset.state = pnl >= 0 ? 'good' : 'bad';
-  setText('ins-mkt-ratio', costBasis > 0 ? mktPct.toFixed(1) + '%' : '—');
+  // AUDIT-FIX (2026-08-18، نفس مبدأ كرت التعادل): يُعرض الفرق عن التكلفة لا
+  // النسبة الخام — «102.3%» تُقرأ ربحاً بينما هي 100% تكلفة + 2.3% ربح.
+  setText('ins-mkt-ratio', costBasis > 0
+    ? `${pnl >= 0 ? '+' : '−'}${Math.abs(pnlPct).toFixed(2)}%` : '—');
+  const mktFoot = g('ins-mkt-foot');
+  if (mktFoot) mktFoot.textContent = costBasis > 0
+    ? `قيمتك السوقية = ${mktPct.toFixed(1)}% من تكلفتك (100% = تكلفتك بالضبط)`
+    : 'العلامة = تكلفتك بالضبط';
   const mktPnlEl = g('ins-mkt-pnl');
   if (mktPnlEl) {
     mktPnlEl.innerHTML = tagHtml(pnl >= 0 ? '✅' : '❌',
@@ -3041,8 +3048,12 @@ function renderBreakEvenCard() {
   // نسبة العائد الكلي على رأس المال
   const totalReturnPct = netCapital > 0 ? (trueNetPnL / netCapital * 100) : 0;
 
-  // نقطة التعادل: التقدم = إجمالي العوائد / رأس المال المنشغل
-  const breProgress = netCapital > 0 ? Math.min(totalReturns / netCapital * 100, 200) : 0;
+  // نقطة التعادل: نسبة الاسترداد الخام (بلا سقف) للعرض التفسيري،
+  // ونسخة مسقوفة بـ200% لعرض الشريط فقط (المسار لا يتجاوز طرفه).
+  // AUDIT-FIX (2026-08-18): السقف كان يُطبَّق على الرقم المعروض أيضاً، فمحفظة
+  // استرجعت 300% تظهر 200% — أي بخس صامت. الآن السقف للشريط وحده.
+  const recoveredRaw = netCapital > 0 ? totalReturns / netCapital * 100 : 0;
+  const breProgress = Math.min(recoveredRaw, 200);
   const isBreakEven = trueNetPnL >= 0;
   const gapToBreakEven = netCapital - totalReturns; // سالب = تجاوزت نقطة التعادل
 
@@ -3055,31 +3066,37 @@ function renderBreakEvenCard() {
   const row = (label, val, sub = '') =>
     [`${label}${sub ? ` <span class="text-muted">${sub}</span>` : ''}`, val];
 
-  // ── شريط التقدم المشترك ──────────────────────────────────
-  // breProgress = نسبة استرداد رأس المال. 100% = نقطة التعادل بالضبط.
-  // ما زاد عن 100% هو ربحك الصافي على رأس المال (profit% = breProgress − 100).
-  const recoveredPct = breProgress;                        // كم استرجعت من رأس مالك
-  const aboveBE      = recoveredPct - 100;                 // + فوق التعادل / − تحته
+  // ── الرقم القائد: المسافة من رأس مالك، لا نسبة الاسترداد ──────────
+  // AUDIT-FIX (2026-08-18، بطلب المالك): كان الرقم القائد «102.3%» فيُقرأ
+  // للوهلة الأولى «ربحت 102%»، والصحيح أنه استرداد 100% (رأس المال) + 2.3%
+  // ربحاً. الرقمان كانا معروضين معاً (الهيرو 102.3% والوسم 2.30%) فيتناقض
+  // العرض مع نفسه. الآن الرقم القائد هو المسافة عن رأس المال وحدها:
+  //   +2.3% أخضر = فوق رأس مالك · −1.4% أحمر = يأكل من رأس مالك
+  // ونسبة الاسترداد تبقى تفصيلاً تحت الشريط لمن أراد التحقّق، لا عنواناً.
+  const recoveredPct = breProgress;                        // للشريط (مسقوف 200%)
+  const aboveBE      = totalReturnPct;                     // = (العوائد−رأس المال)/رأس المال — بلا سقف
   const _mBE = assessMetricMaturity('breakeven', (window._ds || {}).mCtx);
   const _beBadge = maturityBadge(_mBE.level, _mBE.reason);
-  const recoveredCaption = (isBreakEven
-    ? `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>+${aboveBE.toFixed(1)}% ربح</b> فوق نقطة التعادل`
-    : `استرجعت ${recoveredPct.toFixed(1)}% من رأس مالك — أي <b>${aboveBE.toFixed(1)}% تحت نقطة التعادل</b>`) + _beBadge;
-  // الرقم القائد: نسبة استرداد رأس المال — 100% = نقطة التعادل بالضبط
+  const signTxt  = `${aboveBE >= 0 ? '+' : '−'}${Math.abs(aboveBE).toFixed(2)}`;
+  const recoveredCaption = `استرجعت <b>${recoveredRaw.toFixed(1)}%</b> من رأس مالك `
+    + `(100% = رأس مالك بالضبط، فالفرق ${signTxt}%)` + _beBadge;
+
   const heroBlock = `
     <div>
-      <div class="hero-num">${recoveredPct.toFixed(1)}<span class="unit">%</span></div>
-      <div class="hero-cap">استرداد رأس المال · نقطة التعادل = 100%${_beBadge}</div>
+      <div class="hero-num ${isBreakEven ? 'text-success' : 'text-danger'}">${signTxt}<span class="unit">%</span></div>
+      <div class="hero-cap">${isBreakEven ? 'فوق رأس مالك' : 'تحت رأس مالك — يأكل من رأس المال'}
+        · التعادل = 0%${_beBadge}</div>
     </div>
     <div class="flex gap-2" style="flex-wrap:wrap">
-      ${tagHtml(barIcon, isBreakEven ? 'تجاوزت نقطة التعادل' : `متبقٍ ${formatSAR(gapToBreakEven)}`, barState)}
-      ${tagHtml(pnlIcon, `${trueNetPnL >= 0 ? 'ربح' : 'خسارة'} ${formatSAR(Math.abs(trueNetPnL))} (${Math.abs(totalReturnPct).toFixed(2)}%)`, pnlState)}
+      ${tagHtml(pnlIcon, `${trueNetPnL >= 0 ? 'ربح' : 'خسارة'} ${formatSAR(Math.abs(trueNetPnL))}`, pnlState)}
+      ${tagHtml(barIcon, isBreakEven ? 'استرجعت كامل رأس مالك' : `يلزم ${formatSAR(gapToBreakEven)} لاسترجاع رأس مالك`, barState)}
     </div>`;
 
-  // المسار يمتد من ٠٪ إلى ٢٠٠٪ من رأس المال، فتقع علامة التعادل (١٠٠٪) في منتصفه
+  // المسار يمتد من ٠٪ إلى ٢٠٠٪ من رأس المال، فتقع علامة رأس المال (١٠٠٪) في منتصفه.
+  // قيمة الشريط تُعرض بالتأطير نفسه (المسافة عن رأس المال) حتى لا يتناقض مع الهيرو.
   const progressBar = meterHtml({
-    label: 'استرداد رأس المال — العلامة = نقطة التعادل (١٠٠٪)',
-    valueTxt: `${recoveredPct.toFixed(1)}%`,
+    label: 'موقعك من رأس مالك — العلامة = رأس مالك',
+    valueTxt: `${signTxt}%`,
     pct: recoveredPct / 2, state: barState, markPct: 50,
     foot: recoveredCaption,
   });
@@ -3962,7 +3979,8 @@ function showCardInfo(key) {
         <div class="info-formula">
           <strong>صافي الربح/الخسارة الحقيقي = إجمالي العوائد − رأس المال المنشغل</strong>
         </div>
-        <p class="info-note">💡 نقطة التعادل نقطة وليست نسبة: هي عندما تسترجع 100% من رأس مالك (إجمالي العوائد = رأس المال). شريط «استرداد رأس المال» يقيس كم استرجعت — فإن وصل 106% فأنت تجاوزت التعادل بـ +6% ربحاً صافياً، وإن كان 90% فأنت تحته بـ 10%.</p>
+        <p class="info-note">💡 <strong>الرقم الكبير في الكرت هو مسافتك عن رأس مالك، لا نسبة استردادك.</strong> فـ<strong class="text-success">+2.3%</strong> تعني أنك استرجعت رأس مالك كاملاً وزدت عليه 2.3%، و<strong class="text-danger">−2.3%</strong> تعني أنك ما زلت دون رأس مالك بـ2.3% (أي أن الخسارة تأكل منه). نقطة التعادل هنا = <strong>صفر</strong>.</p>
+        <p class="info-note">📐 لماذا لا نعرض «102.3%»؟ لأنها تُقرأ للوهلة الأولى ربحاً بنسبة 102%، بينما هي في الحقيقة 100% رأس مالك + 2.3% ربح. نسبة الاسترداد الخام تبقى معروضة تحت الشريط كتفصيل للتحقّق — لا كعنوان.</p>
         <p class="info-note">📌 قيمة المنح تُحسب بسعر السوق الحالي — لأنها أسهم مجانية تحتسب كعائد.</p>`
     },
     'realized': {
