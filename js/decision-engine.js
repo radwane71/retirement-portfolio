@@ -43,6 +43,76 @@ const ENGINE_STORE_KEY = 'decision_engine_v1';
 const ZERO_TARGETS_KEY = 'stock_zero_targets_v1';
 let zeroTargets = new Set();
 
+// ══════════════════════════════════════════════════════════════════════
+// 🛡️ حراسة السعر — كل رقم في الصفحة يرث current_price
+// ----------------------------------------------------------------------
+// الوزن وكسر السقف والانحراف وXIRR وهامش القيمة العادلة وترتيب المرشّحين:
+// كلها مشتقّة من السعر. فإن كان السعر مغلوطاً أو قديماً، القرار مغلوط بثقة
+// كاملة — وهو أسوأ من قرار مفقود.
+//
+// أخطر حالة عملية: **التجزئة**. لو جزّأت شركة سهمها 1:4، ينزل السعر 75%
+// فوراً بينما عدد أسهمك في التراكر يبقى كما هو، فينهار وزن السهم في يوم
+// ويقرأها المحرّك «فرصة تجميع» ويقترح شراءً. توصية كاذبة لا رقم مشوّه.
+//
+// لا يوجد جدول أسعار تاريخية في المشروع، فنحتفظ بمرصد خفيف: آخر سعر مرصود
+// لكل رمز وتاريخه في user_settings، ونقارن به عند كل تشغيل.
+const PRICE_WATCH_KEY = 'price_watch_v1';
+const PRICE_JUMP_PCT = 25;          // قفزة/هبوط يومي يفوقها = مشبوه حتى يُراجَع
+const PRICE_DECISION_MAX_DAYS = 21; // أقدم من ذلك: لا يُبنى عليه قرار سعري
+let priceWatch = {};                // ticker → { p: آخر سعر مرصود, d: تاريخه }
+let priceAlerts = {};               // ticker → { kind, msg }
+
+// نِسَب التجزئة الشائعة — قرب الهبوط منها يرفع الشبهة إلى شبه يقين
+const SPLIT_RATIOS = [
+  { r: 1 / 2, label: '1:2' }, { r: 1 / 3, label: '1:3' },
+  { r: 1 / 4, label: '1:4' }, { r: 1 / 5, label: '1:5' }, { r: 1 / 10, label: '1:10' },
+];
+
+function buildPriceAlerts() {
+  priceAlerts = {};
+  const today = new Date().toISOString().slice(0, 10);
+  const next = {};
+  holdings.forEach(h => {
+    const p = +h.current_price;
+    if (!(p > 0)) return;
+    const prev = priceWatch[h.ticker];
+    next[h.ticker] = { p, d: today };
+
+    // ① قفزة مفاجئة مقارنةً بآخر سعر رصدناه
+    if (prev && prev.p > 0 && prev.d !== today) {
+      const chg = (p - prev.p) / prev.p * 100;
+      if (Math.abs(chg) >= PRICE_JUMP_PCT) {
+        const ratio = p / prev.p;
+        const split = SPLIT_RATIOS.find(s => Math.abs(ratio - s.r) / s.r < 0.08);
+        priceAlerts[h.ticker] = {
+          kind: split ? 'split' : 'jump',
+          msg: split
+            ? `السعر هبط من ${formatNum(prev.p)} إلى ${formatNum(p)} (${formatNum(ratio, 2)}× ≈ تجزئة ${split.label}) منذ ${prev.d}. `
+              + `إن كانت تجزئة فعلاً فعدد أسهمك في التراكر لم يُضاعَف بعد، ووزن السهم المعروض خاطئ. `
+              + `صحّح عدد الأسهم من صفحة المعاملات قبل أي قرار.`
+            : `السعر تحرّك ${chg >= 0 ? '+' : '−'}${formatNum(Math.abs(chg))}% منذ ${prev.d} (${formatNum(prev.p)} → ${formatNum(p)}). `
+              + `تحرّك بهذا الحجم يعني عادةً خبراً جوهرياً (§5) أو خطأ بيانات أو تجزئة — تحقّق قبل أي قرار.`,
+        };
+        // نُبقي المرجع القديم حتى تتأكّد، فلا تُبتلع القفزة صامتةً في الرصد التالي
+        next[h.ticker] = prev;
+      }
+    }
+
+    // ② سعر قديم لا يصلح أساساً لقرار
+    if (!priceAlerts[h.ticker] && !h.price_manual && h.price_updated_at) {
+      const age = Math.floor((Date.now() - new Date(h.price_updated_at).getTime()) / 86400000);
+      if (age > PRICE_DECISION_MAX_DAYS) {
+        priceAlerts[h.ticker] = { kind: 'stale',
+          msg: `آخر تحديث لسعر هذا السهم قبل ${age} يوماً (الحدّ ${PRICE_DECISION_MAX_DAYS}). `
+            + `الوزن والانحراف وهامش القيمة العادلة كلها مبنية عليه، فلا يُبنى عليه قرار بيع أو شراء. `
+            + `حدّث الأسعار من لوحة التحكم.` };
+      }
+    }
+  });
+  priceWatch = next;
+  saveUserSetting(PRICE_WATCH_KEY, priceWatch).catch(() => {});
+}
+
 // ── الحالة ──
 let holdings   = [];   // من جدول holdings
 let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
@@ -101,6 +171,24 @@ function capOf(h) { return isBlueChip(h) ? CAPS.blueChip : CAPS.single; }
 
 // رقم صالح من حقل نصّي (أو null)
 function numOf(v) { if (v == null || v === '') return null; const n = +v; return isFinite(n) ? n : null; }
+
+// ══════════════════════════════════════════════════════════════════════
+// 🔍 فحص وحدات FCF — بند كان معلّقاً في الدستور («وحدات fcf غير مؤكّدة»)
+// ----------------------------------------------------------------------
+// تغطية الإسمنت/البتروكيماويات = التوزيع للسهم ÷ FCF **للسهم** (§3). لو أُدخل
+// FCF إجمالياً بالملايين بينما التوزيع للسهم الواحد، تخرج النسبة بجزء من
+// الألف بالمئة فتظهر «التوزيع مغطّى» خضراء زوراً — والعكس بوحدة أصغر.
+// المرجع الطبيعي: FCF للسهم من رتبة EPS (أو من رتبة السعر إن غاب EPS).
+// عند الشكّ لا نحسب ولا نُخمّن — نُعلن الوحدات مشكوكاً فيها (§8).
+// ══════════════════════════════════════════════════════════════════════
+function fcfUnitsSuspect(fcf, eps, price) {
+  if (fcf == null || !(fcf > 0)) return null;
+  const ref = (eps != null && eps > 0) ? eps : (price > 0 ? price / 10 : null);
+  if (ref == null) return null;
+  if (fcf > ref * 50)  return `FCF المُدخَل (${formatNum(fcf)}) أكبر من ${eps != null && eps > 0 ? 'EPS' : 'مرجع السعر'} بأكثر من 50 ضعفاً — الأرجح أنه إجمالي (بالملايين) لا للسهم الواحد`;
+  if (fcf < ref / 200) return `FCF المُدخَل (${formatNum(fcf)}) أصغر من المتوقَّع بمئتي ضعف — الأرجح أنه بوحدة مختلفة`;
+  return null;
+}
 
 // يحوّل نص نتيجة الحاسبة ("12.50 — 18.30" أو "15.40 ر.س") إلى { avg, min, max }
 // AUDIT-FIX (2026-07): formatCurrency('ar-SA') قد يُخرج أرقاماً عربية-هندية (٠-٩)
@@ -240,7 +328,11 @@ function sustainabilityOf(h) {
       if (isCement) {
         // AUDIT-FIX (2026-08): عند غياب/سلبية FCF كان القياس يسقط لـ EPS خلافاً
         // للدستور §3 — الآن تُعلن «تغطية FCF غير متوفرة» صراحةً (§8) بلا قياس بديل.
-        if (fcf != null && fcf > 0) {
+        const unitDoubt = fcfUnitsSuspect(fcf, eps, numOf(inp.currentPrice));
+        if (unitDoubt) {
+          // وحدات مشكوك فيها → لا تُحسب تغطية من رقم لا نثق بوحدته (§8)
+          covNote = `⚠️ ${unitDoubt}. صحّح الرقم في حاسبة القيمة العادلة ليصير "للسهم الواحد"، أو أدخل التغطية يدوياً.`;
+        } else if (fcf != null && fcf > 0) {
           const payout = div / fcf;
           cov = payout <= 1.0 ? 'covered' : 'weak';
           autoSrc.cov = `تقييم: توزيع/FCF = ${(payout * 100).toFixed(0)}%`;
@@ -380,6 +472,39 @@ function evaluateHolding(h, ctx) {
     blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
   };
 
+  // ── P0.1: قرار تصفية صريح منك — هدف صفر أو مهمة «تصفية» ────────────
+  // AUDIT-FIX (2026-08-18): المحرّك كان يحترم مهمة «مراقبة» (يخفّض التصفية إلى
+  // مراقبة) لكنه يتجاهل مهمة «تصفية» تماماً — احترام غير متماثل لقرارك. ومعه
+  // كان «هدف صفر» يُقرأ «بلا هدف» فيراقب السقف فقط بدل تنفيذ نيّتك بالخروج.
+  // الآن قرارك الصريح يسبق كل شيء — حتى حارس السعر وtriggers الثابتة — لأنه
+  // لا يعتمد على السعر إطلاقاً، فلا معنى لتعليقه بسبب سعر مشبوه.
+  const wantsExit = zeroTarget || taskTypes[h.ticker] === 'liquidation';
+  if (wantsExit && +h.shares > 0) {
+    const src = zeroTarget && taskTypes[h.ticker] === 'liquidation'
+      ? 'هدفك لهذا السهم 0% في صفحة الأهداف، ومهمته «تصفية» في صفحة المهام'
+      : zeroTarget ? 'هدفك لهذا السهم 0% في صفحة الأهداف'
+      : 'مهمته «تصفية» في صفحة المهام';
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
+      reason: `قرار تصفية صريح منك: ${src} → المطلوب بيع كامل المركز (${formatNum(base.shares)} سهماً، ${formatNum(base.value)} ر.س). `
+        + `المحرّك لا يناقش هذا القرار ولا يوازنه بالقيمة العادلة — هو قرارك لا استنتاجه. `
+        + `لإلغائه: امسح خانة الهدف (لا تكتب صفراً) أو أغلق مهمة التصفية.` };
+  }
+
+  // ── P0.5: حارس السعر — يسبق كل إشارة سعرية بما فيها triggers ─────────
+  // قرار مبني على سعر مشبوه أو قديم أسوأ من قرار مفقود: يبدو واثقاً وهو خاطئ.
+  // يُستثنى منه قرارك الصريح بالخروج (هدف صفر / مهمة تصفية) لأنه لا يعتمد على
+  // السعر أصلاً — وقد عولج قبله بخطوة.
+  const pAlert = priceAlerts[h.ticker];
+  if (pAlert) {
+    const head = pAlert.kind === 'split' ? '🔀 تجزئة محتملة'
+      : pAlert.kind === 'jump' ? '⚡ تحرّك سعري غير اعتيادي' : '⏰ سعر قديم';
+    return { ...base, action: 'monitor', label: 'موقوف — تحقّق من السعر',
+      priority: 1.2, severity: 'yellow', priceAlert: pAlert,
+      reason: `${head}: ${pAlert.msg} `
+        + `أوقف المحرّك كل إشارة سعرية لهذا السهم (سقف الوزن، القيمة العادلة، مناطق التجميع والتخفيف، `
+        + `وحتى المشغّلات الثابتة) لأنها كلها مشتقّة من السعر. تُستأنف تلقائياً بمجرد أن يصبح السعر سليماً.` };
+  }
+
   // ── P0: triggers الثابتة — فوق كل شي (الدستور §5) ──
   const trig = FIXED_TRIGGERS.find(t => t.ticker === h.ticker);
   if (trig) {
@@ -398,23 +523,6 @@ function evaluateHolding(h, ctx) {
         cutToWeight: cutTo, priority: 0, severity: weight > cutTo ? 'red' : 'green',
         reason: `trigger ثابت: ${trig.label} — انطبق (السعر ${formatNum(price)} ≤ ${trig.price})` };
     }
-  }
-
-  // ── P1: قرار تصفية صريح منك — هدف صفر أو مهمة «تصفية» ──────────────
-  // AUDIT-FIX (2026-08-18): المحرّك كان يحترم مهمة «مراقبة» (يخفّض التصفية إلى
-  // مراقبة) لكنه يتجاهل مهمة «تصفية» تماماً — احترام غير متماثل لقرارك. ومعه
-  // كان «هدف صفر» يُقرأ «بلا هدف» فيراقب السقف فقط بدل تنفيذ نيّتك بالخروج.
-  // الآن قرارك الصريح يسبق كل الفلاتر التحليلية (ويبقى تحت triggers الثابتة).
-  const wantsExit = zeroTarget || taskTypes[h.ticker] === 'liquidation';
-  if (wantsExit && +h.shares > 0) {
-    const src = zeroTarget && taskTypes[h.ticker] === 'liquidation'
-      ? 'هدفك لهذا السهم 0% في صفحة الأهداف، ومهمته «تصفية» في صفحة المهام'
-      : zeroTarget ? 'هدفك لهذا السهم 0% في صفحة الأهداف'
-      : 'مهمته «تصفية» في صفحة المهام';
-    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
-      reason: `قرار تصفية صريح منك: ${src} → المطلوب بيع كامل المركز (${formatNum(base.shares)} سهماً، ${formatNum(base.value)} ر.س). `
-        + `المحرّك لا يناقش هذا القرار ولا يوازنه بالقيمة العادلة — هو قرارك لا استنتاجه. `
-        + `لإلغائه: امسح خانة الهدف (لا تكتب صفراً) أو أغلق مهمة التصفية.` };
   }
 
   // ── P1: سعر التصفية (تضخّم) من المهام — قرار بيع صريح، يسبق إشارات الاستدامة ──
@@ -553,7 +661,7 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev, rZero] = await Promise.all([
+  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev, rZero, rPW] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight, price_updated_at, price_manual').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
@@ -566,9 +674,11 @@ async function loadAll() {
     // دفتر المراجعة — لعرض آخر مراجعة لكل سهم داخل التقرير وحساب استحقاق الدورة (§5)
     supabaseClient.from('review_log').select('ticker, review_date, notes').order('review_date', { ascending: false }),
     loadUserSetting(ZERO_TARGETS_KEY),
+    loadUserSetting(PRICE_WATCH_KEY),
   ]);
   // فشل التحميل = مجموعة فارغة، وهو الجانب الآمن (لا أوامر تصفية مخترَعة)
   zeroTargets = new Set(Array.isArray(rZero) ? rZero : []);
+  priceWatch = (rPW && typeof rPW === 'object' && !Array.isArray(rPW)) ? rPW : {};
 
   // AUDIT-FIX (2026-08): افحص خطأ كل استعلام قبل أي معالجة — أي فشل يوقف كل شيء
   // (loadUserSetting يرجع null عند الفشل ولا يفرَّق عن «غير موجود» — يُعامل كفارغ)
@@ -705,6 +815,7 @@ function alertThresholds() {
 function runEngine() {
   const totalValue = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
   const thresholds = alertThresholds();
+  buildPriceAlerts();   // قبل التقييم — نتائجه تحكم كل إشارة سعرية
   // قرار كل سهم فردي يعتمد على وزنه وهدفه الفرديين فقط — سقف القطاع 25%
   // يُفحَص على مستوى المحفظة في قسم منفصل (renderSectorCheck)، لا يُطبَّق على السهم.
   const ctx = { totalValue, thresholds };

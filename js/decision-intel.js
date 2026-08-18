@@ -218,7 +218,13 @@ window.DecisionIntel = (function () {
     const earn = isReit ? numOf(inp.ffo) : numOf(inp.eps);
     const fcf = numOf(inp.fcf);
     if (div != null && div > 0) {
-      if (r.assetType === 'cement_petro' && fcf != null && fcf > 0) return mk(div / fcf, 'FCF', 'owner');
+      // وحدات FCF: رقم إجمالي بالملايين مكان رقم للسهم يقلب التغطية رأساً على
+      // عقب. نفس فحص المحرّك (fcfUnitsSuspect) — عند الشكّ لا تُحسب تغطية.
+      const fcfOk = fcf != null && fcf > 0 &&
+        !(typeof fcfUnitsSuspect === 'function' && fcfUnitsSuspect(fcf, earn, numOf(inp.currentPrice) ?? r.price));
+      if (r.assetType === 'cement_petro') {
+        return fcfOk ? mk(div / fcf, 'FCF', 'owner') : null;
+      }
       if (earn != null && earn > 0) return mk(div / earn, isReit ? 'FFO' : 'EPS', 'owner');
     }
 
@@ -228,7 +234,9 @@ window.DecisionIntel = (function () {
     const fDps = numOf(f.dps), fEps = numOf(f.eps), fFcfPs = numOf(f.fcfPerShare);
     if (fDps == null || !(fDps > 0)) return null;
     if (r.assetType === 'cement_petro') {
-      return (fFcfPs != null && fFcfPs > 0) ? mk(fDps / fFcfPs, 'FCF للسهم', 'external') : null;
+      const extOk = fFcfPs != null && fFcfPs > 0 &&
+        !(typeof fcfUnitsSuspect === 'function' && fcfUnitsSuspect(fFcfPs, fEps, r.price));
+      return extOk ? mk(fDps / fFcfPs, 'FCF للسهم', 'external') : null;
     }
     if (isReit) return null;   // FFO لا يوفّره المصدر الخارجي — لا بديل صامت (§3/§8)
     return (fEps != null && fEps > 0) ? mk(fDps / fEps, 'EPS', 'external') : null;
