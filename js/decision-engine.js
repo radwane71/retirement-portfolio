@@ -38,6 +38,10 @@ const FIXED_TRIGGERS = Object.freeze([
 
 // مفتاح حفظ مدخلات المحرّك لكل سهم (يُزامن عبر user_settings)
 const ENGINE_STORE_KEY = 'decision_engine_v1';
+// رموز هدفها صفر بقرار صريح من صفحة الأهداف = تصفية كاملة (لا «بلا هدف»).
+// التمييز ضروري لأن stock_targets.target_pct افتراضه 0 لكل رمز لم يُحدَّد.
+const ZERO_TARGETS_KEY = 'stock_zero_targets_v1';
+let zeroTargets = new Set();
 
 // ── الحالة ──
 let holdings   = [];   // من جدول holdings
@@ -327,8 +331,11 @@ function evaluateHolding(h, ctx) {
   //   • السقف الدستوري: 7% عادي / 12% قيادي (الدستور §1) — حدّ صلب دائماً.
   // إذا لم يُسجَّل هدف (أو 0%) → لا نعرض هدفاً مفبركاً؛ نعرض «بلا هدف» ونراقب
   // السقف فقط. الانحراف يُحسب عن الهدف المسجّل حصراً.
-  const hasExplicitTarget = tgt.target_pct != null && +tgt.target_pct > 0;
-  const targetWeight = hasExplicitTarget ? +tgt.target_pct : null;
+  // هدف صفر مقصود = هدف صريح (وقيمته 0)، لا «بلا هدف». التمييز من قائمة
+  // zeroTargets لأن العمود افتراضه 0 لكل رمز لم يُلمس.
+  const zeroTarget = zeroTargets.has(h.ticker);
+  const hasExplicitTarget = tgt.target_pct != null && (+tgt.target_pct > 0 || zeroTarget);
+  const targetWeight = hasExplicitTarget ? (zeroTarget ? 0 : +tgt.target_pct) : null;
 
   const zones = priceZonesOf(h);      // خطة الأسعار من المهام (أو null)
   const sus = sustainabilityOf(h);
@@ -391,6 +398,23 @@ function evaluateHolding(h, ctx) {
         cutToWeight: cutTo, priority: 0, severity: weight > cutTo ? 'red' : 'green',
         reason: `trigger ثابت: ${trig.label} — انطبق (السعر ${formatNum(price)} ≤ ${trig.price})` };
     }
+  }
+
+  // ── P1: قرار تصفية صريح منك — هدف صفر أو مهمة «تصفية» ──────────────
+  // AUDIT-FIX (2026-08-18): المحرّك كان يحترم مهمة «مراقبة» (يخفّض التصفية إلى
+  // مراقبة) لكنه يتجاهل مهمة «تصفية» تماماً — احترام غير متماثل لقرارك. ومعه
+  // كان «هدف صفر» يُقرأ «بلا هدف» فيراقب السقف فقط بدل تنفيذ نيّتك بالخروج.
+  // الآن قرارك الصريح يسبق كل الفلاتر التحليلية (ويبقى تحت triggers الثابتة).
+  const wantsExit = zeroTarget || taskTypes[h.ticker] === 'liquidation';
+  if (wantsExit && +h.shares > 0) {
+    const src = zeroTarget && taskTypes[h.ticker] === 'liquidation'
+      ? 'هدفك لهذا السهم 0% في صفحة الأهداف، ومهمته «تصفية» في صفحة المهام'
+      : zeroTarget ? 'هدفك لهذا السهم 0% في صفحة الأهداف'
+      : 'مهمته «تصفية» في صفحة المهام';
+    return { ...base, action: 'exit', label: 'تصفية', priority: 1, severity: 'red',
+      reason: `قرار تصفية صريح منك: ${src} → المطلوب بيع كامل المركز (${formatNum(base.shares)} سهماً، ${formatNum(base.value)} ر.س). `
+        + `المحرّك لا يناقش هذا القرار ولا يوازنه بالقيمة العادلة — هو قرارك لا استنتاجه. `
+        + `لإلغائه: امسح خانة الهدف (لا تكتب صفراً) أو أغلق مهمة التصفية.` };
   }
 
   // ── P1: سعر التصفية (تضخّم) من المهام — قرار بيع صريح، يسبق إشارات الاستدامة ──
@@ -529,7 +553,7 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev] = await Promise.all([
+  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev, rZero] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight, price_updated_at, price_manual').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
@@ -541,7 +565,10 @@ async function loadAll() {
     supabaseClient.from('transactions').select('ticker, type, shares, date, total, price').eq('is_archived', false),
     // دفتر المراجعة — لعرض آخر مراجعة لكل سهم داخل التقرير وحساب استحقاق الدورة (§5)
     supabaseClient.from('review_log').select('ticker, review_date, notes').order('review_date', { ascending: false }),
+    loadUserSetting(ZERO_TARGETS_KEY),
   ]);
+  // فشل التحميل = مجموعة فارغة، وهو الجانب الآمن (لا أوامر تصفية مخترَعة)
+  zeroTargets = new Set(Array.isArray(rZero) ? rZero : []);
 
   // AUDIT-FIX (2026-08): افحص خطأ كل استعلام قبل أي معالجة — أي فشل يوقف كل شيء
   // (loadUserSetting يرجع null عند الفشل ولا يفرَّق عن «غير موجود» — يُعامل كفارغ)

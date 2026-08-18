@@ -2,6 +2,15 @@
 let userStocks    = [];
 let holdings      = [];
 let stockTargets  = {};   // ticker → target_pct
+// ── هدف صفر مقصود ≠ خانة فارغة ────────────────────────────────────────
+// جدول stock_targets فيه target_pct NOT NULL DEFAULT 0، والحفظ يكتب صفاً لكل
+// رمز، فأغلب الأصفار معناها «لم يُحدَّد» لا «صفِّه». لذلك لا يصحّ اعتبار الصفر
+// أمر تصفية بذاته — كان سيحوّل كل سهم بلا هدف إلى أمر بيع.
+// الحل بلا تعديل قاعدة البيانات: نميّز الصفر **المكتوب صراحةً** في الخانة عن
+// الخانة الفارغة، ونحفظ قائمة الرموز المقصودة في user_settings.
+const ZERO_TARGETS_KEY = 'stock_zero_targets_v1';
+let zeroTargets = new Set();   // رموز هدفها صفر بقرار صريح = تصفية كاملة
+function isZeroTarget(ticker) { return zeroTargets.has(ticker); }
 let stockZones    = {};   // ticker → { entry_price, exit_price }
 let sectorTargets = {};   // sector → target_pct
 let taskMap       = {};   // ticker → latest active task
@@ -177,6 +186,12 @@ async function loadAll() {
   });
   sectorTargets = {};
   (secRes.data || []).forEach(r => { sectorTargets[r.sector] = +r.target_pct; });
+
+  // قائمة أهداف الصفر المقصودة (فشل التحميل = لا أصفار مقصودة، وهو الجانب الآمن)
+  try {
+    const z = await loadUserSetting(ZERO_TARGETS_KEY);
+    zeroTargets = new Set(Array.isArray(z) ? z : []);
+  } catch (_) { zeroTargets = new Set(); }
 
   // آخر مهمة فعّالة لكل رمز (أول مهمة نصادفها من الأحدث)
   taskMap      = {};
@@ -564,8 +579,9 @@ function renderStockTargets() {
       <td>${zoneCell(zone.exit_price, tz.liquidate_above)}</td>
       <td>
         <input class="target-input" type="number" min="0" max="100" step="0.1"
-               id="${stInputId(s.ticker)}" value="${target || ''}" placeholder="0">
+               id="${stInputId(s.ticker)}" value="${isZeroTarget(s.ticker) ? '0' : (target || '')}" placeholder="—">
         <span class="small text-muted"> %</span>
+        ${isZeroTarget(s.ticker) ? `<div class="mini-warn" title="هدفك لهذا السهم صفر — محرّك القرار يقرأها أمر تصفية كاملة. امسح الخانة لإلغاء ذلك.">🔴 هدف صفر = تصفية</div>` : ''}
         ${capBreachTgt ? `<div class="mini-warn" title="الهدف المحفوظ يتجاوز السقف الدستوري ${cap}% + سماح ${TG_CAP_BUFFER}%">⛔ هدف فوق السقف</div>` : ''}
       </td>
       <td class="wcell">
@@ -934,6 +950,15 @@ async function saveAllTargets() {
     ...userStocks.filter(s => !holdingTickers.has(s.ticker)).map(s => s.ticker),
   ];
 
+  // الصفر المكتوب صراحةً («0») يُسجَّل كقرار تصفية؛ الخانة الفارغة تعني «بلا هدف»
+  // وتُزال من القائمة. القراءة من النص الخام لأن +('' ) و +('0') كلاهما 0.
+  const nextZero = new Set(zeroTargets);
+  allTickers.forEach(ticker => {
+    const raw = (document.getElementById(stInputId(ticker))?.value ?? '').trim();
+    if (raw !== '' && +raw === 0) nextZero.add(ticker);
+    else nextZero.delete(ticker);
+  });
+
   const rows = allTickers.map(ticker => {
     const tz = taskZonesMap[ticker] || {};
     // AUDIT-FIX (2026-07): إن لم توجد مهمة نشطة للرمز نحافظ على المناطق السعرية
@@ -952,6 +977,12 @@ async function saveAllTargets() {
     .upsert(rows, { onConflict: 'user_id,ticker' });
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
+
+  // تُحفظ بعد نجاح الأهداف حتى لا تفترق القائمة عن الأرقام
+  zeroTargets = nextZero;
+  if (!await saveUserSetting(ZERO_TARGETS_KEY, [...zeroTargets])) {
+    showToast('⚠️ حُفظت الأهداف لكن تعذّر حفظ قائمة «هدف صفر = تصفية» — أعد المحاولة', 'error');
+  }
 
   // AUDIT-FIX: parallel updates instead of sequential loop — O(1 RTT) vs O(N RTT)
   await Promise.all([...holdingTickers].map(ticker => {
