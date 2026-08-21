@@ -44,7 +44,24 @@
       "Bash(git reset *)",
       "Bash(echo \"=== commit done, rc=$? ===\")",
       "Bash(echo \"=== rc=$? ===\")",
-      "Bash(node --check js/decision-engine.js)"
+      "Bash(node --check js/decision-engine.js)",
+      "Bash(curl -s \"https://api.github.com/repos/radwane71/retirement-portfolio/actions/runs?per_page=4\")",
+      "Bash(curl -s \"https://api.github.com/repos/radwane71/retirement-portfolio/actions/runs?per_page=6\")",
+      "Bash(node --check js/performance.js)",
+      "Bash(node --check js/dividends.js)",
+      "Bash(git commit -m 'fix\\(audit-2026-07\\): الدفعة 2 — توحيد المنهجيات بين الصفحات \\(5 إصلاحات\\) *)",
+      "Bash(git commit -m 'fix\\(audit-2026-07\\): الدفعة 3 — اتساق الشروحات وسلامة المعاملات \\(5 إصلاحات\\) *)",
+      "Bash(git commit -m 'fix\\(audit-2026-07\\): الدفعة 4 — إكمال الفلتر 3 دستورياً + توحيد الإشعارات \\(4 إصلاحات\\) *)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(node --check js/settings.js)",
+      "Bash(node --check js/forecast.js)",
+      "Bash(gh run *)",
+      "Bash(git status *)",
+      "Bash(git rm *)",
+      "Bash(ls .github/workflows/)",
+      "Bash(git commit --allow-empty -m ' *)",
+      "WebFetch(domain:radwane71.github.io)",
+      "Bash(perl -i -pe 's/\\\\?v=20260705/?v=20260706/g' forecast.html)"
     ]
   }
 }

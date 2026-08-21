@@ -294,7 +294,15 @@ window.DecisionIntel = (function () {
       });
       cwMonths = wb > 0 ? Math.max(0.5, ws / wb) : calMonths;
     }
-    return { first, calMonths, cwMonths: Math.min(cwMonths, calMonths || cwMonths) };
+    // AUDIT-FIX 2026-08-21 (#49): شارة نضج XIRR كانت تُغذّى هنا بـ calMonths —
+    // المحسوب من أقدم معاملة *أو* أقدم تدفّق نقدي — بينما لوحة التحكم تغذّيها من
+    // أول عملية شراء وحدها (dashboard.js:860). إيداع سبق أول شراء بأشهر كان يجعل
+    // الصفحتين تعرضان شارتَي نضج مختلفتين لنفس المؤشر. المقياس الصحيح للعائد هو
+    // مدّة بقاء المال في السوق ⇒ أول شراء. نُعيده منفصلاً ونُبقي calMonths كما هو
+    // لبقية المقاييس (تغطية البيانات وعمر التدفقات).
+    const firstBuyTs = tx.filter(t => t.type === 'buy' && t.date).reduce((m, t) => Math.min(m, t.date.getTime()), Infinity);
+    const investedMonths = isFinite(firstBuyTs) ? Math.max(0, (now - firstBuyTs) / MONTH_MS) : 0;
+    return { first, calMonths, investedMonths, cwMonths: Math.min(cwMonths, calMonths || cwMonths) };
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -910,9 +918,18 @@ window.DecisionIntel = (function () {
     const el = document.getElementById('de-intel-kpis');
     if (!el) return;
     const { age, perf, bench, income, outlook } = I;
-    const retM = assessMetricMaturity('return', { ageMonths: age.calMonths });
-    const incM = assessMetricMaturity('divYield',
-      { divCount: perf.divCount, divYears: Math.min(perf.divYears.length, Math.max(1, Math.ceil(age.calMonths / 12))) });
+    // نضج العائد يُقاس بمدّة بقاء المال في السوق (أول شراء) — نفس أساس
+    // لوحة التحكم بالضبط (dashboard.js:860). راجع AUDIT-FIX #49 في computeAge.
+    const retM = assessMetricMaturity('return', { ageMonths: age.investedMonths });
+    // AUDIT-FIX (2026-08-21): الأرضية max(1,…) كانت تجعل شرط «🌱 مبكّر»
+    // (divYears < 1) مستحيلاً — الشارة معطّلة بنيوياً هنا كما في اللوحة.
+    // الدورة السنوية لا تكتمل قبل بلوغ عمر المحفظة 12 شهراً.
+    const incM = assessMetricMaturity('divYield', {
+      divCount: perf.divCount,
+      divYears: age.calMonths >= 12
+        ? Math.min(perf.divYears.length, Math.max(1, Math.ceil(age.calMonths / 12)))
+        : 0,
+    });
 
     const cards = [];
 

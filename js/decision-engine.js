@@ -977,11 +977,19 @@ function renderSectorCheck(totalValue) {
     .sort((a, b) => b.pct - a.pct);
   const breaches = rows.filter(r => r.pct > CAPS.sector + SECTOR_BUFFER);
 
+  // AUDIT-FIX 2026-08-21 (#35): سهم بقطاع فارغ يقع في دلو «غير مصنّف» فيُنقص وزن
+  // قطاعه الحقيقي — قد يكون قطاع مكسور السقف ويظهر ممتثلاً. يُعلَن ولا يُقدَّر
+  // (§8): لا نخمّن قطاعه هنا، بل نطلب تصنيفه.
+  const _unclassified = holdings.filter(h => !String(h.sector || '').trim());
+  const _uncNote = _unclassified.length
+    ? `<div class="de-alert-line">⚠️ ${_unclassified.length} سهماً بلا قطاع (${_unclassified.map(h => escapeHtmlSafe(h.ticker)).join('، ')}) — وزنها لا يُحتسب على قطاعها الحقيقي، فحكم سقف 25% هنا ناقص حتى تُصنَّف من صفحة الحيازات.</div>`
+    : '';
+
   if (!breaches.length) {
-    el.innerHTML = `<p class="text-muted" style="margin:0">✅ كل القطاعات تحت سقف ${CAPS.sector}% (+منطقة سماح ${SECTOR_BUFFER}%). أعلى قطاع: <strong>${escapeHtmlSafe(rows[0]?.sec || '—')}</strong> (${formatNum(rows[0]?.pct || 0)}%).</p>`;
+    el.innerHTML = _uncNote + `<p class="text-muted" style="margin:0">${_unclassified.length ? '🟡' : '✅'} كل القطاعات <em>المصنَّفة</em> تحت سقف ${CAPS.sector}% (+منطقة سماح ${SECTOR_BUFFER}%). أعلى قطاع: <strong>${escapeHtmlSafe(rows[0]?.sec || '—')}</strong> (${formatNum(rows[0]?.pct || 0)}%).</p>`;
     return;
   }
-  el.innerHTML = breaches.map(b =>
+  el.innerHTML = _uncNote + breaches.map(b =>
     `<div class="de-alert-line">⚠️ تركيز قطاعي: <strong>${escapeHtmlSafe(b.sec)}</strong> = ${formatNum(b.pct)}% &gt; السقف ${CAPS.sector}% + منطقة السماح ${SECTOR_BUFFER}% (الفلتر 4)</div>`
   ).join('');
 }

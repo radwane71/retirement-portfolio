@@ -438,11 +438,17 @@ async function recomputeHoldingFromTx(userId, ticker) {
     }).eq('id', existing.id);
   } else {
     // سهم جديد — أضفه
+    // AUDIT-FIX 2026-08-21 (#35): كان القطاع يُكتب فارغاً دائماً من هذا المسار،
+    // بينما مزامنة لوحة التحكم تكتبه من tickerdb. سهم بقطاع فارغ يسقط من مقام
+    // سقف القطاع 25% (الدستور §4 الفلتر 4) فيظهر التركيز أقلّ مما هو — كسر سقف
+    // صامت. نقرأ القطاع الرسمي هنا بنفس المصدر، وإن لم يوجد الرمز نكتب «أخرى»
+    // (قطاع معلَن في OFFICIAL_SECTORS) بدل الفراغ حتى يبقى السهم داخل المقام.
+    const _known = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
     await supabaseClient.from('holdings').insert([{
       user_id:      userId,
       ticker,
-      name:         stockName,
-      sector:       '',
+      name:         stockName || (_known && _known.name) || '',
+      sector:       (_known && _known.sector) || 'أخرى',
       shares:       +totalShares.toFixed(6),
       avg_price:    +avgPrice.toFixed(4),
       current_price: +avgPrice.toFixed(4),

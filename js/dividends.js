@@ -132,8 +132,16 @@ function _ttmDividends() {
 }
 
 // تكلفة الحيازات الحالية = مجموع (متوسط التكلفة × الأسهم المتبقية) لكل سهم
-// نفس المحرّك المستخدم في الجدول السنوي → مقام موحّد للعائد بلا تضارب
+// AUDIT-FIX 2026-08-21 (#52): كان المقام يُعاد بناؤه من دفتر المعاملات هنا بينما
+// لوحة التحكم (dashboard.js:555) تقرؤه من جدول الحيازات — فيختلف مقام «العائد على
+// التكلفة» بين الصفحتين متى ما تعارض الجدول مع الدفتر (صفقة بلا تاريخ تُسقَط هنا
+// ولا تُسقَط هناك، أو avg_price مُحرَّر يدوياً). الدستور §2 يجعل التراكر — أي جدول
+// الحيازات — المصدر الأساسي، فنعتمده هنا أيضاً ونُبقي إعادة البناء من الدفتر
+// للجدول السنوي التاريخي وحده (لا بديل له هناك: الجدول لا يحفظ تكلفة كل سنة).
 function _currentCostBasis() {
+  const fromHoldings = holdings.reduce((s, h) => s + +h.shares * +h.avg_price, 0);
+  if (fromHoldings > 0) return fromHoldings;
+  // احتياطي فقط: جدول الحيازات فارغ (لم يُحمَّل بعد) — نعيد البناء من الدفتر.
   const currentYear = new Date().getFullYear();
   const tickers = [...new Set([...txBuyRows.map(t => t.ticker), ...txSellRows.map(t => t.ticker)])];
   return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
@@ -182,6 +190,15 @@ function _divSortDate(d) {
   const yr = d.year || new Date().getFullYear();
   const mo = String(d.month || 1).padStart(2, '0');
   return `${yr}-${mo}-01`;
+}
+
+// مفتاح الشهر الذي تنتمي إليه التوزيعة — مشتقّ من نفس المصدر الذي يعتمده TTM.
+// AUDIT-FIX 2026-08-21 (#41): كان الرسم الشهري يبوّب بحقلي year/month بينما KPI
+// «آخر 12 شهراً» يبوّب بحقل date، فيختلف الرقمان في نفس الصفحة إذا تعارض الحقلان
+// في سجل مُدخل يدوياً. الآن كلاهما يشتقّ من date وعند غيابه من year/month.
+function _divPeriodKey(d) {
+  const iso = d.date ? String(d.date) : _divSortDate(d);
+  return iso.slice(0, 7);
 }
 
 // الدخل التوزيعي المتوقع سنوياً (Forward Projected Income)
@@ -650,7 +667,7 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
           ${cwDiff >= 2
             ? `رأس المال الفعلي: ${monthsText} | تقويمي: ${calText}`
             : `عمر المحفظة: ${monthsText}`}
-          · ${divYears} سنة أرباح · ${uniqueTickers} موزِّع
+          · <span title="نفس القيمة المستعملة في احتساب محور «سنوات الأرباح» بالأسفل — دورة جزئية تُحتسب جزئياً. كان الوسم يعرض العدد مقرَّباً لأعلى (${divYears}) بينما التفصيل يعرض ${divCycles.toFixed(1)}، فيظهر رقمان لمقياس واحد في البطاقة نفسها.">${divCycles.toFixed(1)} دورة أرباح</span> · ${uniqueTickers} موزِّع
         </span>
       </div>
       <p style="font-size:.81rem;color:var(--text-2);margin:0;line-height:1.6">${body}</p>
@@ -1281,26 +1298,22 @@ function renderMonthChart(canvas) {
     const tickers = [...new Set(dividends.map(d => d.ticker))].sort();
     const datasets = tickers.map((t, i) => {
       const data = periodKeys.map(key => {
-        const [yr, mo] = key.split('-').map(Number);
-        return dividends.filter(d => d.ticker === t && d.year === yr && d.month === mo).reduce((s,d) => s + +d.amount, 0);
+        return dividends.filter(d => d.ticker === t && _divPeriodKey(d) === key).reduce((s,d) => s + +d.amount, 0);
       });
       const c = STACKED_COLORS[i % STACKED_COLORS.length];
       return { label: t, data, backgroundColor: c + 'cc', borderColor: c, borderWidth: 1, borderRadius: 2 };
     });
-    const total = dividends.filter(d => {
-      const key = d.year + '-' + String(d.month).padStart(2,'0');
-      return periodKeys.includes(key);
-    }).reduce((s,d) => s + +d.amount, 0);
-    document.getElementById('chart-total-label').textContent = 'إجمالي آخر 12 شهراً: ~' + total.toFixed(2) + ' ر.س';
+    const total = dividends.filter(d => periodKeys.includes(_divPeriodKey(d))).reduce((s,d) => s + +d.amount, 0);
+    document.getElementById('chart-total-label').textContent = 'إجمالي آخر 12 شهراً تقويمياً: ~' + total.toFixed(2) + ' ر.س';
     buildChart(canvas, labels, datasets, true);
     return;
   }
 
   const actualMap = {};
-  dividends.forEach(d => { const key = d.year + '-' + String(d.month).padStart(2,'0'); actualMap[key] = (actualMap[key] || 0) + +d.amount; });
+  dividends.forEach(d => { const key = _divPeriodKey(d); actualMap[key] = (actualMap[key] || 0) + +d.amount; });
   const received = periodKeys.map(k => actualMap[k] || 0);
   const total    = received.reduce((s,v) => s+v, 0);
-  document.getElementById('chart-total-label').textContent = 'إجمالي آخر 12 شهراً: ~' + total.toFixed(2) + ' ر.س';
+  document.getElementById('chart-total-label').textContent = 'إجمالي آخر 12 شهراً تقويمياً: ~' + total.toFixed(2) + ' ر.س';
 
   buildChart(canvas, labels, [{ label: 'مستلم', data: received, backgroundColor: '#14b8a6cc', borderColor: '#14b8a6', borderWidth: 1, borderRadius: 4 }]);
 }

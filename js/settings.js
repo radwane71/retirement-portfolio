@@ -79,6 +79,11 @@ function deleteOrder(list = TABLES) {
 
 // حجم الـ batch لكل جدول (الجداول الكبيرة تحتاج batch أصغر)
 // review_log_attachments: كل صف حتى 2MB → batch=5 يحافظ على حجم طلب معقول (~10MB)
+// دورة المراجعة النصف سنوية (الدستور §5) — نفس ثابت review-log.js:75 حرفياً.
+// AUDIT-FIX 2026-08-21 (#36): كان التقرير يستعمل 183 والدفتر 180، فيتناقض حكماهما
+// على نفس السهم في نفس اليوم. أي تعديل هنا يُطبَّق على review-log.js أيضاً.
+const REVIEW_CYCLE_DAYS = 180;
+
 const BATCH_SIZES = {
   transactions:            50,
   holdings:               200,
@@ -92,13 +97,33 @@ const DEFAULT_BATCH = 500;
 // customize: دالة اختيارية تضيف فلاتر/ترتيباً على الاستعلام.
 // الجداول غير الموجودة (42P01) تُرجع [] بهدوء (جداول اختيارية).
 // ══════════════════════════════════════════════════════════════
+// عمود الترتيب لكل جدول — الافتراضي المفتاح الأساسي id، والاستثناء الجداول
+// ذات المفتاح المركّب. يُستخدم لجعل ترقيم الصفحات قطعياً في النسخة الاحتياطية.
+const ORDER_COL = { user_settings: 'key' };
+
 async function fetchAllRows(table, customize) {
   const PAGE = 1000;
   const rows = [];
   for (let from = 0; ; from += PAGE) {
     let q = supabaseClient.from(table).select('*');
     if (customize) q = customize(q);
-    const { data, error } = await q.range(from, from + PAGE - 1);
+    // AUDIT-FIX (2026-08-21): الترقيم بلا ORDER حاسم غير مضمون — Postgres لا
+    // يضمن ترتيباً مستقراً بين استعلامين، فقد يتكرر صف أو يسقط بصمت في جدول
+    // يتجاوز 1000 صف (transactions تبلغه بسهولة). ولا يكشفه أي تحقق لاحق:
+    // البصمة تُحسب على المجلوب نفسه، واختبار الرحلة يقارن الجلبة بنسختها.
+    // الترتيب بالمفتاح الأساسي يجعل الترقيم قطعياً.
+    // user_settings مفتاحه مركّب (user_id, key) بلا عمود id — لكل جدول عموده
+    const orderCol = ORDER_COL[table] || 'id';
+    q = q.order(orderCol, { ascending: true });
+    let { data, error } = await q.range(from, from + PAGE - 1);
+    if (error && (error.code === '42703' || /column .* does not exist/i.test(error.message || ''))) {
+      // عمود ترتيب غير موجود: نُعيد بلا ترتيب بدل إسقاط الجدول كاملاً،
+      // ونُعلن ذلك لأن الترقيم يفقد قطعيّته حينها.
+      console.warn(`[backup] ${table}: تعذّر الترتيب بـ${orderCol} — ترقيم بلا ترتيب`);
+      let q2 = supabaseClient.from(table).select('*');
+      if (customize) q2 = customize(q2);
+      ({ data, error } = await q2.range(from, from + PAGE - 1));
+    }
     if (error) {
       if (error.code === '42P01') return rows;
       throw new Error(`خطأ في جدول ${table}: ${error.message}`);
@@ -920,7 +945,20 @@ async function restoreBackup(input) {
     // ── 2. حذف كل البيانات الحالية (الأبناء أولاً) ───────────
     setStatus('restore-status', 'info', 'يتم حذف البيانات الحالية…');
     const deleteNotes = {};
+    const skippedDeletes = [];
     for (const table of deleteOrder(TABLES)) {
+      // AUDIT-FIX (2026-08-21): كان الحذف يمرّ على كل الجداول ثم يتخطّى الإدراج
+      // صامتاً للجدول الغائب عن الملف — فملف نسخة أقدم من إضافة جدول (مثل
+      // user_settings المُضاف 2026-06-16، ورقم الإصدار لم يتغيّر فلا يميّزه)
+      // يمحو الجدول كاملاً بلا بديل: مدخلات محرّك القرار وسجل التقييمات وهدف
+      // التقاعد والراتب والصكوك وسجل تاسي… جميعها في user_settings.
+      // القاعدة الآن: **لا يُحذف ما لا يُستبدَل.**
+      const rowsForTable = backup[table];
+      if (!Array.isArray(rowsForTable)) {
+        skippedDeletes.push(table);
+        deleteNotes[table] = 'غير موجود في ملف النسخة — أُبقي كما هو ولم يُحذف';
+        continue;
+      }
       const { error } = await supabaseClient.from(table).delete().eq(ownerColOf(table), user.id);
       if (error && error.code !== '42P01') {
         if (OPTIONAL_TABLES.has(table)) { deleteNotes[table] = `تعذّر الحذف (RLS): ${error.message}`; continue; }
@@ -929,6 +967,10 @@ async function restoreBackup(input) {
       // تحقّق فعلي: هل حُذفت الصفوف حقاً؟ RLS قد تمنع الحذف بلا خطأ
       const left = await countOwnedRows(table, user.id);
       if (left != null && left > 0) deleteNotes[table] = `بقي ${left} صف لم يُحذف (سياسة RLS) — قد تتكرر البيانات`;
+    }
+
+    if (skippedDeletes.length) {
+      showToast(`ℹ️ ${skippedDeletes.length} جدولاً غير موجود في ملف النسخة — أُبقيت بياناتها كما هي ولم تُحذف: ${skippedDeletes.join('، ')}`, 'info');
     }
 
     // ── 3. إدراج البيانات من النسخة ──────────────────────────
@@ -2075,9 +2117,11 @@ async function exportMonthlyReviewMD() {
       if (t.type === 'buy')  xirrFlows.push({ date: parseDateLocal(t.date), amount: -(+t.total) });
       if (t.type === 'sell') xirrFlows.push({ date: parseDateLocal(t.date), amount: +(+t.total) });
     });
+    // AUDIT-FIX 2026-08-21 (#44): كان يفترض «1 يونيو» بلا سقف عند اليوم، فتدخل
+    // توزيعة مُعلَنة لم تُصرف كتدفّق موجب. التعريف الموحَّد في utils.js.
     dividends.forEach(d => {
-      const dDate = d.date ? parseDateLocal(d.date) : new Date((d.year || today.getFullYear()), 5, 1);
-      xirrFlows.push({ date: dDate, amount: +d.amount });
+      const dDate = dividendFlowDate(d, today);
+      if (dDate) xirrFlows.push({ date: dDate, amount: +d.amount });
     });
     if (totalMktValue > 0) xirrFlows.push({ date: new Date(), amount: totalMktValue });
     const xirrResult = (typeof computeXIRR === 'function') ? computeXIRR(xirrFlows) : null;
@@ -3435,13 +3479,19 @@ async function exportMonthlyReviewMD() {
 
       // نمو التوزيعات السنوي (Dividend CAGR)
       h3('نمو التوزيعات السنوي (Dividend CAGR)');
+      // AUDIT-FIX 2026-08-21 (#45): نستثني سنة أول شراء تماماً كما تفعل لوحة التحكم
+      // (dashboard.js:840-845). كانت اللوحة تستثنيها والتقرير لا يستثنيها، فيخرج
+      // رقمان مختلفان لمؤشر واحد يعلن المنهجية نفسها. سنة أول شراء سنة جزئية —
+      // المحفظة بدأت في منتصفها — واحتسابها كسنة كاملة يضخّم النمو زوراً.
+      const _rFirstBuyDate = transactions.filter(t => t.type === 'buy' && t.date).map(t => t.date).sort()[0] || null;
+      const _rFirstBuyYear = _rFirstBuyDate ? +String(_rFirstBuyDate).slice(0, 4) : null;
       const divByYear = {};
       dividends.forEach(d => { const y = +d.year || new Date(d.date).getFullYear(); divByYear[y] = (divByYear[y] || 0) + +d.amount; });
-      const fullYears = Object.keys(divByYear).map(Number).filter(y => y < today.getFullYear() && divByYear[y] > 0).sort((a, b) => a - b);
+      const fullYears = Object.keys(divByYear).map(Number).filter(y => y < today.getFullYear() && y !== _rFirstBuyYear && divByYear[y] > 0).sort((a, b) => a - b);
       if (fullYears.length >= 2) {
         const span = fullYears[fullYears.length - 1] - fullYears[0];
         const cagr = (Math.pow(divByYear[fullYears[fullYears.length - 1]] / divByYear[fullYears[0]], 1 / span) - 1) * 100;
-        p(`نمو التوزيعات المركّب من ${fullYears[0]} إلى ${fullYears[fullYears.length - 1]}: **${(cagr >= 0 ? '+' : '') + cagr.toFixed(1)}%/سنة** (سنوات كاملة فقط، تستبعد السنة الجارية).`);
+        p(`نمو التوزيعات المركّب من ${fullYears[0]} إلى ${fullYears[fullYears.length - 1]}: **${(cagr >= 0 ? '+' : '') + cagr.toFixed(1)}%/سنة** (سنوات كاملة فقط، تستبعد السنة الجارية${_rFirstBuyYear ? ' وسنة أول شراء ' + _rFirstBuyYear : ''}) — نفس منهجية لوحة التحكم.`);
       } else {
         p('_يحتاج سنتين تقويميتين مكتملتين على الأقل من التوزيعات._');
       }
@@ -3632,8 +3682,10 @@ async function exportMonthlyReviewMD() {
           if (t.type === 'sell') pflows.push({ date: dt, amount:  (+t.total || 0) });
           // grant: منحة بلا تكلفة — لا تدفق نقدي
         });
+        // AUDIT-FIX 2026-08-21 (#44): كان يُسقط كل توزيعة بلا حقل date كلياً بينما
+        // §10 في نفس الملف يحتسبها — فيطبع الملف الواحد XIRR بمجموعتَي تدفّقات.
         dividends.forEach(dv => {
-          const dt = _d(dv.date); if (!dt) return;
+          const dt = dividendFlowDate(dv, today); if (!dt) return;
           pflows.push({ date: dt, amount: +dv.amount || 0 });
         });
         // AUDIT-FIX (2026-08-18): كانت القيمة النهائية = سوقية + نقد غير مستثمر،
@@ -3675,7 +3727,7 @@ async function exportMonthlyReviewMD() {
           if (t.type === 'sell') { e.flows.push({ date: dt, amount:  (+t.total || 0) }); e.sells += +t.total || 0; }
         });
         dividends.forEach(dv => {
-          const dt = _d(dv.date); if (!dt) return;
+          const dt = dividendFlowDate(dv, today); if (!dt) return;   // AUDIT-FIX #44
           const e = _reg(dv.ticker, dv.name);
           e.flows.push({ date: dt, amount: +dv.amount || 0 });
           e.div += +dv.amount || 0;
@@ -3921,18 +3973,33 @@ async function exportMonthlyReviewMD() {
       }
 
       // ⑥ الدورة النصف سنوية
+      // AUDIT-FIX 2026-08-21 (#36): كان الفحص يأخذ أحدث سطر في الدفتر عبر كل الرموز،
+      // فمراجعة واحدة لسهم واحد تُبرّئ المحفظة كلها — بينما دفتر المراجعة يحاسب كل
+      // رمز على حدة. وكانت العتبة 183 يوماً هنا مقابل 180 في review-log.js:75.
+      // المعتمد الآن: العتبة 180 والمحاسبة لكل رمز مملوك — نفس منهجية الدفتر.
       {
-        const last = reviewLog.length
-          ? [...reviewLog].sort((a, b) => String(b.review_date).localeCompare(String(a.review_date)))[0]
-          : null;
-        if (!last) {
-          addCheck('الدورة الروتينية كل 6 أشهر', '§5', '🔴 مخالف',
+        const lastByTicker = {};
+        reviewLog.forEach(r => {
+          const tk = String(r.ticker || '').trim().toUpperCase();
+          if (!tk || !r.review_date) return;
+          const d = String(r.review_date);
+          if (!lastByTicker[tk] || d > lastByTicker[tk]) lastByTicker[tk] = d;
+        });
+        const _ageOf = d => (today - new Date(d)) / 86400000;
+        const overdue = holdings.filter(h => {
+          const d = lastByTicker[String(h.ticker || '').trim().toUpperCase()];
+          return !d || _ageOf(d) > REVIEW_CYCLE_DAYS;
+        });
+        const neverRev = holdings.filter(h => !lastByTicker[String(h.ticker || '').trim().toUpperCase()]);
+        if (!reviewLog.length) {
+          addCheck('الدورة الروتينية كل 6 أشهر (لكل سهم)', '§5', '🔴 مخالف',
             'لا توجد أي مراجعة مسجّلة في دفتر المراجعة — الدورة لم تبدأ.');
         } else {
-          const days = (today - new Date(last.review_date)) / 86400000;
-          addCheck('الدورة الروتينية كل 6 أشهر', '§5',
-            days <= 183 ? '✅ ممتثل' : '🔴 مخالف',
-            `آخر مراجعة ${last.review_date} — منذ ${days.toFixed(0)} يوماً. ${days > 183 ? `تأخّر ${(days - 183).toFixed(0)} يوماً عن موعد الدورة.` : `متبقٍ ${(183 - days).toFixed(0)} يوماً.`}`);
+          addCheck('الدورة الروتينية كل 6 أشهر (لكل سهم)', '§5',
+            overdue.length ? '🔴 مخالف' : '✅ ممتثل',
+            overdue.length
+              ? `**${overdue.length}** من ${holdings.length} سهماً تجاوزت ${REVIEW_CYCLE_DAYS} يوماً بلا مراجعة: ${overdue.map(h => h.ticker).join('، ')}${neverRev.length ? ` — منها ${neverRev.length} لم تُراجَع قطّ. ` : '. '}مراجعة سهم واحد لا تُبرّئ البقية (§5).`
+              : `كل الـ ${holdings.length} سهماً روجعت خلال آخر ${REVIEW_CYCLE_DAYS} يوماً.`);
         }
       }
 
@@ -4097,9 +4164,9 @@ async function exportMonthlyReviewMD() {
 
         const lastR = reviewLog.length ? [...reviewLog].sort((a, b) => String(b.review_date).localeCompare(String(a.review_date)))[0] : null;
         const dLast = lastR ? (today - new Date(lastR.review_date)) / 86400000 : null;
-        if (dLast == null || dLast > 183) addAct(6, '📅 الدورة النصف سنوية',
+        if (dLast == null || dLast > REVIEW_CYCLE_DAYS) addAct(6, '📅 الدورة النصف سنوية',
           'نفّذ مراجعة الدورة وسجّلها في دفتر المراجعة',
-          dLast == null ? 'لا مراجعة مسجّلة إطلاقاً (§5).' : `آخر مراجعة منذ ${dLast.toFixed(0)} يوماً — تجاوزت 183 يوماً (§5).`);
+          dLast == null ? 'لا مراجعة مسجّلة إطلاقاً (§5).' : `آخر مراجعة منذ ${dLast.toFixed(0)} يوماً — تجاوزت ${REVIEW_CYCLE_DAYS} يوماً (§5).`);
       }
 
       if (actions.length) {

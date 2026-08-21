@@ -584,8 +584,12 @@ async function loadAllData() {
   // AUDIT-FIX (2026-07): سجل بلا تاريخ يُحتسب بتاريخ مُركَّب من شهر/سنة (أول الشهر)
   // بدل إسقاطه — موحَّد مع _ttmDividends في صفحة الأرباح.
   const ttmDiv = divRows.reduce((s, d) => {
+    // AUDIT-FIX 2026-08-21 (#51): كان `new Date('YYYY-MM-DD')` يُفسَّر UTC بينما
+    // احتياطي year/month في السطر التالي — و tsOf في الدخل المتوقَّع أسفل الملف —
+    // يُفسَّر بالتوقيت المحلي. فرق الإزاحة كان ينقل توزيعة أول/آخر يوم في النافذة
+    // شهراً كاملاً بين المسارين داخل الملف الواحد. parseDateLocal محلي دائماً.
     const dt = d.date
-      ? new Date(d.date)
+      ? (parseDateLocal(d.date) || new Date(d.date))
       : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null);
     // AUDIT-FIX (2026-08-18): كانت النافذة مغلقة الطرفين (>=) أي 366 يوماً، فتحتسب
     // دفعة الموزّع السنوي مرتين في يوم الذكرى السنوية بالضبط. صفحة الأرباح أصلحت
@@ -794,12 +798,11 @@ async function loadAllData() {
     // grant: total=0 — لا تدفّق نقدي
   });
   divRows.forEach(d => {
-    // AUDIT-FIX 2026-08: سجل بلا تاريخ يُحتسب بتاريخ مُركَّب من سنة/شهر (أول الشهر)
-    // بدل إسقاطه من XIRR — موحَّد مع منطق ttmDiv أعلاه
-    const dt = d.date
-      ? new Date(d.date)
-      : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null);
-    if (dt && !isNaN(dt)) cashflows.push({ date: dt, amount: +d.amount });
+    // AUDIT-FIX 2026-08-21 (#44): تعريف واحد لتاريخ التوزيعة داخل XIRR عبر المشروع
+    // كله — utils.js/dividendFlowDate. يشمل: قراءة محلية، احتياطي أول الشهر من
+    // سنة/شهر، إسقاط الشهر المجهول بلا تقدير، وإسقاط التوزيع المُعلَن غير المصروف.
+    const dt = dividendFlowDate(d, _today);
+    if (dt) cashflows.push({ date: dt, amount: +d.amount });
   });
   if (totalValue > 0) cashflows.push({ date: new Date(), amount: totalValue });
   const xirr = computeXIRR(cashflows);
@@ -860,7 +863,11 @@ async function loadAllData() {
   const _maturityCtx  = {
     ageMonths:  _mAgeMonths,
     snapshots:  _nwCount,   // AUDIT-FIX 2026-08: count حقيقي بدل طول نافذة limit
-    divYears:   divRows.length ? _mDivYears : 0,
+    // AUDIT-FIX (2026-08-21): كانت `_mDivYears` أرضيّتها 1 (بسبب max(1,…) في
+    // السقف)، فشرط شارة «🌱 مبكّر» في assessMetricMaturity (`divYears < 1`) لم
+    // يكن يتحقّق أبداً — الشارة معطّلة بنيوياً في اللوحة بينما تعمل في صفحتَي
+    // الأرباح والأداء. الدورة السنوية لا تكتمل قبل أن يبلغ عمر المحفظة 12 شهراً.
+    divYears:   divRows.length ? (_mAgeMonths >= 12 ? _mDivYears : 0) : 0,
     divCount:   divRows.length,
     stockCount: holdings.length,
   };
@@ -2586,11 +2593,20 @@ function _renderSectorCards(entries, total) {
 
 // ── حالة وزن السهم مقابل هدفه: مفتاح واحد للّون والأيقونة والنص ──
 // 'none' بلا هدف · 'over' زيادة · 'under' نقص · 'ok' ضمن الهدف
+// AUDIT-FIX 2026-08-21 (#46): كان الهامش ثابتاً ±1% هنا بينما جدول الأوزان في
+// نفس الصفحة (dashboard.js:2532) وبطاقة الصحة (1400) وصفحة الأهداف
+// (targets.js/getAlertThresholds) تقرأ كلها عتبة المستخدم. فمن رفع عتبته إلى 3%
+// كان يرى ✅ في الجدول و🔴 في الكرت للسهم نفسه في اللحظة نفسها. مصدر واحد الآن.
+function _wThrGreen() {
+  const v = +(localStorage.getItem(userLsKey('tharwa-alert-green')) ?? localStorage.getItem('tharwa-alert-green') ?? 1);
+  return Number.isFinite(v) && v >= 0 ? v : 1;
+}
 function weightStateOf(cur, tgt, ticker) {
   if (!tgt && ticker && isZeroTarget(ticker)) return 'liquidate';
   if (!tgt)          return 'none';
-  if (cur > tgt + 1) return 'over';
-  if (cur < tgt - 1) return 'under';
+  const thr = _wThrGreen();
+  if (cur > tgt + thr) return 'over';
+  if (cur < tgt - thr) return 'under';
   return 'ok';
 }
 const WEIGHT_STATE_META = {

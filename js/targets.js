@@ -157,6 +157,21 @@ async function init() {
   await loadAll();
 }
 
+// تحليل نص نطاق القيمة العادلة — نسخة حرفية من decision-engine.js/parseFairValueRange
+// (المشروع يكرّر هذا المنطق عمداً: كل صفحة سكربت كلاسيكي مستقل). أي تعديل هناك
+// يُطبَّق هنا وفي tasks.js/parseFairRange.
+function _tgParseRange(str) {
+  if (!str) return null;
+  const normalized = String(str)
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/٫/g, '.').replace(/[,،]/g, '');
+  const nums = normalized.match(/\d+(?:\.\d+)?/g);
+  if (!nums || !nums.length) return null;
+  const vals = nums.map(Number).filter(n => n > 0);
+  if (!vals.length) return null;
+  return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, min: Math.min(...vals), max: Math.max(...vals) };
+}
+
 async function loadAll() {
   const [usRes, hRes, stRes, secRes, taskRes, engRes] = await Promise.all([
     supabaseClient.from('user_stocks').select('*').order('ticker'),
@@ -225,7 +240,13 @@ async function loadAll() {
         if (!tk || valuationLatest[tk]) return;          // أبقِ الأحدث فقط
         const res = e.results || {};
         valuationLatest[tk] = {
-          fairValueAvg:   (res.fairValueAvg != null && isFinite(+res.fairValueAvg)) ? +res.fairValueAvg : null,
+          // AUDIT-FIX 2026-08-21 (#47): كانت هذه الصفحة وحدها بلا احتياطي تحليل نص
+          // النطاق — فالتقييم القديم المحفوظ بنص «١٢٠ – ١٤٠» بلا حقل fairValueAvg
+          // رقمي يظهر رقماً في محرّك القرار (decision-engine.js:752) وفي المهام
+          // (tasks.js:133) و«بلا تقييم» هنا. نفس منطق parseFairValueRange حرفياً.
+          fairValueAvg:   (res.fairValueAvg != null && isFinite(+res.fairValueAvg) && +res.fairValueAvg > 0)
+                            ? +res.fairValueAvg
+                            : (_tgParseRange(res.fairValueRange)?.avg ?? null),
           fairValueRange: res.fairValueRange || null,
           marginText:     res.marginText || '',
           models:         Array.isArray(res.models) ? res.models : [],
@@ -1109,7 +1130,15 @@ function valuationScore(ticker, price) {
   // ── درجة من سجل حاسبة القيمة العادلة ──
   const v = valuationLatest[ticker];
   let fvScore = null, fvReason = '';
-  if (v && v.fairValueAvg > 0 && price > 0) {
+  // AUDIT-FIX (2026-08-21): كانت الدرجة تُبنى على القيمة العادلة بلا أي فحص
+  // لعمرها، بينما محرّك القرار يمنع أي إجراء سعري على تقييم أقدم من 180 يوماً
+  // (VAL_STALE_DAYS). فكانت هذه الصفحة **تصرف ميزانية شراء** بناءً على رقم
+  // تصفه هي نفسها «⚠️ قديم» في الجدول أعلاه. نفس العتبة الآن، وتُعلَن.
+  const _vAgeDays = (v && v.ts) ? Math.floor((Date.now() - v.ts) / 86400000) : null;
+  const _vStale   = _vAgeDays != null && _vAgeDays > TG_VAL_STALE_DAYS;
+  if (v && v.fairValueAvg > 0 && price > 0 && _vStale) {
+    fvReason = `تقييمه عمره ${_vAgeDays} يوماً (> ${TG_VAL_STALE_DAYS}) — مُستبعَد من الدرجة كما يستبعده محرّك القرار`;
+  } else if (v && v.fairValueAvg > 0 && price > 0) {
     const disc = (v.fairValueAvg - price) / v.fairValueAvg;     // موجب = تحت العادلة
     fvScore = Math.max(0, Math.min(1, (disc + 0.10) / 0.40));   // ‑10% → 0 · +30% → 1
     fvReason = disc >= 0

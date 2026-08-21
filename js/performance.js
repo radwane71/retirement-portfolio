@@ -269,8 +269,10 @@ function _calcPositionXIRR(p, tickerDivs, terminalValue) {
     if (d) flows.push({ date: d, amount: +(+t.total) });
   });
   // أرباح موزعة (موجبة)
+  // AUDIT-FIX 2026-08-21 (#44): التعريف الموحَّد في utils.js/dividendFlowDate —
+  // كان السجل بلا حقل date يُسقَط هنا ويُحتسب في لوحة التحكم.
   tickerDivs.forEach(d => {
-    const dt = parseDateLocal(d.date);
+    const dt = dividendFlowDate(d);
     if (dt) flows.push({ date: dt, amount: +(+d.amount) });
   });
   // القيمة النهائية (للمراكز المفتوحة)
@@ -290,7 +292,11 @@ function buildPositionData() {
   const posMap = {};
   // فهرسة أرباح كل رمز (للـ XIRR الفردي)
   const divsByTicker = {};
+  // AUDIT-FIX (2026-08-21): المُعلَن بتاريخ صرف قادم يُستبعَد من XIRR — لم يُستلَم
+  // بعد، وإدخاله كتدفق موجب يضخّم العائد. نفس قاعدة محرّك القرار واللوحة.
+  const _todayISO = todayISO();
   _divs.forEach(d => {
+    if (d.date && d.date > _todayISO) return;
     if (!divsByTicker[d.ticker]) divsByTicker[d.ticker] = [];
     divsByTicker[d.ticker].push(d);
   });

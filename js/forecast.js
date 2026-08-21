@@ -559,10 +559,10 @@ async function loadHistoricalData() {
     if (t.type === 'sell') xirrFlows.push({ date: parseDateLocal(t.date), amount: +(+t.total) });
   });
   divRows.forEach(d => {
-    // توزيعة بلا تاريخ: نفترض 1 يونيو من سنتها، مسقوفاً باليوم — لا تدفق مستقبلياً في XIRR
-    const assumed = new Date(+d.year, 5, 1); // June local
-    const dDate = d.date ? parseDateLocal(d.date) : (assumed > today ? today : assumed);
-    xirrFlows.push({ date: dDate, amount: +d.amount });
+    // AUDIT-FIX 2026-08-21 (#44): كان الافتراض «1 يونيو» يُقحم شهراً مخترعاً على
+    // توزيعة معلومة الشهر. التعريف الموحَّد في utils.js/dividendFlowDate.
+    const dDate = dividendFlowDate(d, today);
+    if (dDate) xirrFlows.push({ date: dDate, amount: +d.amount });
   });
   if (currentValue > 0) xirrFlows.push({ date: new Date(), amount: currentValue });
 
