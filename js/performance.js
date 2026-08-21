@@ -56,8 +56,10 @@ window.CARD_INFO = {
     title: '📉 أقصى تراجع (Max Drawdown)',
     body: `
       <p>أكبر «هبوطة» مرّت على محفظتك من أعلى قمة وصلت لها إلى أدنى قاع بعدها. مثل أعلى نقطة في الأفعوانية ثم أوطى نقطة — كم كان طول السقوط.</p>
-      <div class="info-formula">التراجع = (القاع − القمة) ÷ القمة × 100 — محسوب على الأداء المعزول عن إيداعاتك وسحوباتك</div>
-      <p class="info-note">💡 يقيس أسوأ ألم مررت به. رقم صغير (قريب من الصفر) = مسار هادئ. رقم كبير سالب = تقلّبات حادة تحتاج أعصاباً قوية.</p>`
+      <div class="info-formula">التراجع = (القاع − القمة) ÷ القمة × 100 — محسوب على الأداء المعزول عن مشترياتك ومبيعاتك</div>
+      <p class="info-note">💡 يقيس أسوأ ألم مررت به. رقم صغير (قريب من الصفر) = مسار هادئ. رقم كبير سالب = تقلّبات حادة تحتاج أعصاباً قوية.</p>
+      <p class="info-note">🔬 <b>على أسهمك وحدها.</b> حتى 2026-08-21 كان يُحسب على لقطات صافي الثروة — أي أسهم + نقد + عقار — فكانت إعادة تقييم عقار أو إعادة كتابة رصيد النقد تحرّك «أقصى تراجع محفظتك». الآن نفس أساس تبويب مقارنة المؤشر بالضبط: قيمة أسهمك، مصحَّحةً بمشترياتك ومبيعاتك.</p>
+      <p class="info-note">⚠️ يحتاج لقطات تحمل <b>مكوّن الأسهم</b>. اللقطات الأقدم من إضافة هذا الحقل لا تدخل الحساب — فإن ظهر «بيانات غير كافية» فالسبب هذا لا قلّة لقطاتك.</p>`
   },
   'kpi-hhi': {
     title: '🧩 تركّز المحفظة (HHI)',
@@ -75,7 +77,8 @@ window.CARD_INFO = {
         • <strong>Sharpe:</strong> كم ربح مقابل كل وحدة تأرجح (أعلى = أفضل).<br>
         • <strong>Sortino:</strong> مثل شارب لكن يعاقب فقط على التأرجح <em>الهابط</em> (المؤلم) — أنسب لمن يهمّه حماية رأس ماله.
       </div>
-      <p class="info-note">🟡 هذه المقاييس تحتاج لقطات صافي ثروة شهرية كافية لتصبح موثوقة — لذلك تظهر شارة «مبكّر/تقريبي» حتى تتراكم بياناتك.</p>`
+      <p class="info-note">🔬 <b>محسوبة على أسهمك وحدها</b>، بنفس أساس تبويب مقارنة المؤشر وأقصى التراجع — لا على صافي ثروتك. قبل 2026-08-21 كانت على لقطات صافي الثروة (أسهم + نقد + عقار)، فكان تحرّك عقارك يظهر «تذبذباً» في محفظتك.</p>
+      <p class="info-note">🟡 تحتاج أربع لقطات على الأقل تحمل <b>مكوّن الأسهم</b> — والسطر تحت كل رقم يقول لك كم لديك من كم. لذلك تظهر شارة «مبكّر/تقريبي» حتى تتراكم.</p>`
   },
 };
 
@@ -442,9 +445,15 @@ function renderKPIs() {
   // Max Drawdown — AUDIT-FIX (H3): compute on the flow-adjusted TWR index, NOT raw net worth.
   // On raw total_value a deposit masks a drawdown and a withdrawal masquerades as one. Reusing
   // the Modified-Dietz TWR series (same one the benchmark tab uses) isolates true market drops.
+  // AUDIT-FIX (2026-08-21): كان الأساس `net_worth_snapshots.total_value` — أي
+  // أسهم + نقد + عقار (أو صافي الثروة كاملاً في اللقطة اليدوية) مصحَّحاً بإيداعات
+  // الوساطة وحدها. فكان «أقصى تراجع محفظتك» يتحرّك بإعادة تقييم عقار أو إعادة
+  // كتابة رصيد النقد. وبعد إعادة تأطير تبويب المقارنة إلى الأسهم وحدها صار في
+  // الصفحة أساسان متعارضان في شاشة واحدة. الآن أساس واحد: أسهمك وتدفقاتها.
   const ddEl = document.getElementById('pk-max-drawdown');
-  if (ddEl && _snapshots.length >= 2) {
-    const { twrMap, sortedSnaps } = _computeTWR(_snapshots, _cf || []);
+  const _riskSeries = _screenStocksSeries(_stocksOnlySeries()).clean;
+  if (ddEl && _riskSeries.length >= 2) {
+    const { twrMap, sortedSnaps } = _computeTWR(_riskSeries, _stockFlows());
     // sortedSnaps is ISO-date ordered & de-duplicated by day; twrMap[date] = index (base 100)
     let peak = twrMap[sortedSnaps[0].date] ?? 100;
     let maxDD = 0;
@@ -465,6 +474,7 @@ function renderKPIs() {
   } else if (ddEl) {
     ddEl.textContent = '— (بيانات غير كافية)';
     ddEl.className   = 'value num text-muted';
+    ddEl.title = `${_riskSeries.length} من ${(_snapshots || []).length} لقطة تحمل قيمة أسهم — يحتاج نقطتين على الأقل`;
   }
 
   // ── مقاييس مُعدَّلة بالمخاطر: التذبذب / شارب / سورتينو ──────────────
@@ -486,8 +496,10 @@ const RISK_FREE_RATE = 0.03;
 //   شارب            = (العائد السنوي − RF) ÷ التذبذب السنوي
 //   سورتينو         = (العائد السنوي − RF) ÷ تذبذب الهبوط
 function _computeRiskMetrics() {
-  if (!_snapshots || _snapshots.length < 4) return null;
-  const { twrMap, sortedSnaps } = _computeTWR(_snapshots, _cf || []);
+  // نفس أساس تبويب المقارنة وأقصى التراجع: أسهمك وحدها وتدفقاتها (لا نقد ولا عقار)
+  const series = _screenStocksSeries(_stocksOnlySeries()).clean;
+  if (series.length < 4) return null;
+  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows());
   const pts = sortedSnaps
     .map(s => ({ date: s.date, idx: twrMap[s.date] }))
     .filter(p => p.idx != null && p.idx > 0);
@@ -548,12 +560,17 @@ function renderRiskMetrics() {
   const soEl  = document.getElementById('pk-sortino');
   const m = _computeRiskMetrics();
 
+  // AUDIT-FIX (2026-08-21): بعد توحيد الأساس على الأسهم وحدها صار سبب النقص
+  // مختلفاً: ليس «لقطات قليلة» بل «لقطات لا تحمل مكوّن الأسهم». نقولها بدقة
+  // مع العدد الفعلي، فالمالك يعرف ما ينقصه بالضبط بدل إرشاد عام.
+  const _usable = _screenStocksSeries(_stocksOnlySeries()).clean.length;
+  const _total  = (_snapshots || []).length;
   const setInsufficient = (el, subId) => {
     if (!el) return;
     el.textContent = '— (بيانات غير كافية)';
     el.className   = 'value num text-muted';
     const sub = document.getElementById(subId);
-    if (sub) sub.textContent = '🟡 يحتاج لقطات شهرية أكثر';
+    if (sub) sub.textContent = `🟡 ${_usable} من ${_total} لقطة تحمل قيمة أسهم — تحتاج 4 على الأقل`;
   };
   if (!m) { setInsufficient(volEl, 'pk-volatility-sub'); setInsufficient(shEl, 'pk-sharpe-sub'); setInsufficient(soEl, 'pk-sortino-sub'); return; }
 
