@@ -587,7 +587,10 @@ async function loadAllData() {
     const dt = d.date
       ? new Date(d.date)
       : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null);
-    return (dt && !isNaN(dt) && dt >= _yearAgo && dt <= _today) ? s + +d.amount : s;
+    // AUDIT-FIX (2026-08-18): كانت النافذة مغلقة الطرفين (>=) أي 366 يوماً، فتحتسب
+    // دفعة الموزّع السنوي مرتين في يوم الذكرى السنوية بالضبط. صفحة الأرباح أصلحت
+    // هذا في _ttmDividends واللوحة لم تتلقّ الإصلاح رغم تعليق «موحَّد معها» أعلاه.
+    return (dt && !isNaN(dt) && dt > _yearAgo && dt <= _today) ? s + +d.amount : s;
   }, 0);
 
   // ── حساب رأس المال أول السنة الحالية (للعائد المُسنوى) ───
@@ -819,7 +822,7 @@ async function loadAllData() {
   cfRows.forEach(e => {
     if (!e.date) return;
     const dt = new Date(e.date);
-    if (dt >= _yearAgo && dt <= _today) {
+    if (dt > _yearAgo && dt <= _today) {   // نصف مفتوحة — نفس نافذة TTM أعلاه
       hasCf12 = true;
       if (e.type === 'deposit')          dep12 += +e.amount;
       else if (e.type === 'withdrawal')  wd12  += +e.amount;
