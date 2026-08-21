@@ -553,6 +553,16 @@ async function auditBackup(backup, user, { probe = true, onProgress } = {}) {
         entry.schema = 'الصف الأول غير صالح (سيُتخطى)'; entry.schemaState = 'warn';
       } else {
         delete probeRow.id;   // id يُولَّد تلقائياً حتى لا يصطدم بصف قائم
+        // AUDIT-FIX 2026-08-21: الفحص التجريبي يُدرج الصف الأول فعلياً ثم يحذفه.
+        // في كل الجداول الصف الزائد بيانات مرئية، أما في `user_settings` فهو
+        // **إعداد** تقرؤه الصفحات كحقيقة: مدخلات محرّك القرار، هدف التقاعد،
+        // سجل التقييمات… فلو فشل الحذف (سياسة RLS، انقطاع شبكة) بقي إعداد من ملف
+        // نسخة **لم يوافق المالك على استعادته بعد** يحكم قرارات الحساب صامتاً.
+        // الحل: نفحص المخطّط بمفتاح اصطناعي لا تقرؤه أي صفحة، فالفشل يترك صفاً
+        // خاملاً بدل إعداد فعّال. نحتفظ بشكل القيمة كما هو ليبقى الفحص حقيقياً.
+        if (table === 'user_settings') {
+          probeRow.key = '__restore_probe__';
+        }
         const { data: ins, error: perr } = await supabaseClient.from(table).insert(probeRow).select();
         if (perr) {
           if (perr.code === '23505' || perr.code === '23503') {
@@ -579,6 +589,11 @@ async function auditBackup(backup, user, { probe = true, onProgress } = {}) {
             const { error: delErr } = await supabaseClient.from(table)
               .delete().eq('user_id', user.id).eq('key', probeRow.key);
             cleaned = !delErr;
+          }
+          // حزام أمان ثانٍ للمفتاح الاصطناعي: يُحذف دائماً أياً كان مسار التنظيف
+          // أعلاه، فلا يبقى أثر للفحص حتى لو تغيّر شكل الصف المُعاد.
+          if (table === 'user_settings') {
+            try { await supabaseClient.from(table).delete().eq('user_id', user.id).eq('key', '__restore_probe__'); } catch (_) {}
           }
           if (!cleaned) {
             entry.issues.push('⚠️ تعذّر حذف الصف التجريبي — قد يبقى صف زائد واحد في هذا الجدول');
@@ -4131,6 +4146,35 @@ async function exportMonthlyReviewMD() {
       const snapD = await syncedGet('decision_engine_snapshot_v1', null);
       const gm2   = _totalMkt;
 
+      // أولوية 0 — قرارك الصريح بالخروج (هدف صفر أو مهمة تصفية)
+      // ADDED 2026-08-21: التقرير لم يكن يعرف `stock_zero_targets_v1` إطلاقاً، بينما
+      // محرّك القرار يضعه في المرتبة P0.1 **فوق** المشغّلات الثابتة (قرارك لا يعتمد
+      // على السعر فلا يُعلَّق بسببه). فكان التقرير قد يوصي بالاحتفاظ — أو حتى
+      // بالتجميع — في سهم أعلنتَ أنت نيّة تصفيته. الصفر الافتراضي في عمود الهدف
+      // **ليس** أمر بيع؛ المميِّز هو تسجيل الرمز صراحةً في هذا المفتاح.
+      {
+        const zeroT = await syncedGet('stock_zero_targets_v1', []);
+        const zeroSet = new Set(Array.isArray(zeroT) ? zeroT.map(t => String(t).trim().toUpperCase()) : []);
+        const liqTasks = new Set((tasks || [])
+          .filter(t => t.type === 'liquidation' && t.status !== 'done' && t.ticker)
+          .map(t => String(t.ticker).trim().toUpperCase()));
+        const wantsExit = [...new Set([...zeroSet, ...liqTasks])];
+        wantsExit.forEach(tk => {
+          const h = holdings.find(x => String(x.ticker).trim().toUpperCase() === tk);
+          if (!h) return;
+          const val = +h.shares * +h.current_price;
+          const src = zeroSet.has(tk) && liqTasks.has(tk) ? 'هدف صفر + مهمة تصفية'
+                    : zeroSet.has(tk) ? 'هدف صفر مقصود' : 'مهمة تصفية مفتوحة';
+          addAct(0, `🔻 ${h.ticker} — ${h.name || ''}`,
+            `تصفية المركز بالكامل (≈ ${SAR(val)} ر.س${gm2 > 0 ? ` · ${PCT(val / gm2 * 100)} من المحفظة` : ''})`,
+            `قرارك الصريح بالخروج (${src}) — يسبق كل حساب آخر بما فيه المشغّلات الثابتة، لأنه لا يعتمد على السعر فلا يُعلَّق بحارس السعر. ما دام الرمز مسجّلاً هنا فلا يصحّ أن يظهر كفرصة تجميع.`);
+        });
+        if (wantsExit.some(tk => !holdings.find(x => String(x.ticker).trim().toUpperCase() === tk))) {
+          const done = wantsExit.filter(tk => !holdings.find(x => String(x.ticker).trim().toUpperCase() === tk));
+          p(`_ملاحظة: ${done.length} رمزاً مسجَّلاً كنيّة تصفية لم يعد في الحيازات (${done.join('، ')}) — نُفِّذ الخروج، ويمكن إزالة العلامة._`);
+        }
+      }
+
       // أولوية 1 — المشغّلات الثابتة
       (snapD?.results || []).filter(r => r.trigger?.fired).forEach(r => {
         addAct(1, `⚡ ${r.ticker} — ${r.name || ''}`,
@@ -4218,7 +4262,7 @@ async function exportMonthlyReviewMD() {
 
       if (actions.length) {
         actions.sort((a, b) => a.prio - b.prio);
-        const PL = { 1:'1 — مشغّل ثابت', 2:'2 — كسر سقف', 3:'3 — فشل استدامة', 4:'4 — قلق استدامة', 5:'5 — فرصة إضافة', 6:'6 — صيانة بيانات' };
+        const PL = { 0:'0 — قرارك بالخروج', 1:'1 — مشغّل ثابت', 2:'2 — كسر سقف', 3:'3 — فشل استدامة', 4:'4 — قلق استدامة', 5:'5 — فرصة إضافة', 6:'6 — صيانة بيانات' };
         p(mdTable(['الأولوية','البند','الإجراء','السبب (القاعدة التي اشتغلت)'],
           actions.map(a => [PL[a.prio] || String(a.prio), a.label, a.what, a.why])));
 
@@ -4231,6 +4275,7 @@ async function exportMonthlyReviewMD() {
           p('```');
         });
 
+        const p0 = actions.filter(a => a.prio === 0).length;
         const p1 = actions.filter(a => a.prio === 1).length;
         const p2 = actions.filter(a => a.prio === 2).length;
         const p3 = actions.filter(a => a.prio === 3).length;
@@ -4371,6 +4416,142 @@ async function exportMonthlyReviewMD() {
           } catch { p('(تعذّرت السلسلة إلى JSON)'); }
           p('```');
         });
+      }
+    }
+    hr();
+
+    // ════════════════════════════════════════════════════════
+    // 39. طبقة الذكاء ومدخلات القرار المحفوظة
+    // ADDED 2026-08-21: خمسة مفاتيح في user_settings كانت **صفر تغطية** في هذا
+    // التقرير رغم أنها تحمل قرارات ومدخلات فعلية: نيّة التصفية، الأساسيات
+    // المجلوبة آلياً، مرصد السعر وكشف التجزئة، سجل قياس الموثوقية، والأسعار
+    // التاريخية. النسخة الاحتياطية كانت تحفظها (تُصدَّر ضمن user_settings كاملاً)
+    // لكن التقرير لم يكن يشرحها — فالبيانات موجودة والمعنى غائب.
+    // ════════════════════════════════════════════════════════
+    book('A');
+    await tick('طبقة الذكاء');
+    h2('39. طبقة الذكاء ومدخلات القرار المحفوظة');
+    p('هذه المفاتيح تُغذّي محرّك القرار وطبقة الذكاء فوقه. كلها في جدول `user_settings` وتدخل النسخة الاحتياطية كاملةً، لكنها لا تُقرأ من الجداول العادية فتُشرح هنا صراحةً.');
+    {
+      // ① نيّة التصفية
+      h3('39.1 نيّة التصفية المُعلَنة (stock_zero_targets_v1)');
+      const _zt = await syncedGet('stock_zero_targets_v1', []);
+      const _ztArr = Array.isArray(_zt) ? _zt.map(t => String(t).trim().toUpperCase()) : [];
+      p('الصفر في عمود الهدف **ليس** أمر بيع — فالعمود افتراضه صفر لكل رمز. المميِّز هو تسجيل الرمز صراحةً في هذا المفتاح، وعندها يضعه محرّك القرار في المرتبة P0.1 **فوق** المشغّلات الثابتة، لأن قرارك لا يعتمد على السعر فلا يُعلَّق بحارس السعر.');
+      if (_ztArr.length) {
+        p(mdTable(['الرمز', 'الاسم', 'القيمة الحالية', 'الوزن', 'الحالة'], _ztArr.map(tk => {
+          const _h = holdings.find(x => String(x.ticker).trim().toUpperCase() === tk);
+          if (!_h) return [tk, '—', '—', '—', '✅ خرج فعلاً — يمكن إزالة العلامة'];
+          const v = +_h.shares * +_h.current_price;
+          return [tk, _h.name || '—', SAR(v), _totalMkt > 0 ? PCT(v / _totalMkt * 100) : '—', '🔻 ما زال مملوكاً — التصفية لم تُنفَّذ'];
+        })));
+      } else {
+        p('_لا رمز مُعلَن للتصفية._');
+      }
+
+      // ② الأساسيات المجلوبة آلياً
+      h3('39.2 أساسيات الشركات المجلوبة آلياً (stock_fundamentals_v1)');
+      const _fd = await syncedGet('stock_fundamentals_v1', null);
+      p('مصدر **خارجي** (§2): يُستعمل فقط حين تغيب أرقامك، وكل سطر منه موسوم، و**لا يُصعِّد قراراً إلى الأحمر بمفرده**. بيتا لا تُجلب عمداً — المصدر يقيسها مقابل مؤشر أمريكي والدستور §2 يعتبرها غير صالحة سعودياً. وFFO لا يوفّره المصدر، فالريتس بلا بديل صامت.');
+      if (_fd && _fd.bySymbol && Object.keys(_fd.bySymbol).length) {
+        const _fAge = _fd.fetchedAt ? ((Date.now() - new Date(_fd.fetchedAt).getTime()) / 86400000) : null;
+        p('آخر جلب: **' + (_fd.fetchedAt ? new Date(_fd.fetchedAt).toLocaleString('ar-SA') : 'غير مسجَّل') + '**'
+          + (_fAge != null ? ' (منذ ' + _fAge.toFixed(1) + ' يوماً)' : '')
+          + ' · يُجدَّد تلقائياً كل 7 أيام'
+          + (_fAge != null && _fAge > 90 ? ' — ⚠️ **تجاوز 90 يوماً**، وهو حدّ طزاجة المصدر الخارجي في §2.' : '.'));
+        const _fRows = Object.entries(_fd.bySymbol).map(([tk, f]) => {
+          const _h = holdings.find(x => x.ticker === tk);
+          return [tk, _h ? (_h.name || '—') : '—',
+            (f && f.dps != null) ? formatNum(+f.dps, 2) : 'غير متوفرة',
+            (f && f.eps != null) ? formatNum(+f.eps, 2) : 'غير متوفرة',
+            (f && f.fcfPerShare != null) ? formatNum(+f.fcfPerShare, 2) : 'غير متوفرة',
+            (f && f.currency && f.currency !== 'SAR') ? ('⚠️ ' + f.currency) : 'SAR',
+            (f && Array.isArray(f.splits) && f.splits.length) ? ('⚠️ ' + f.splits.length) : '—'];
+        });
+        p(mdTable(['الرمز', 'الاسم', 'DPS', 'EPS', 'FCF/سهم', 'العملة', 'تجزئة'], _fRows));
+        const _noCover = holdings.filter(h2x => !_fd.bySymbol[h2x.ticker]);
+        if (_noCover.length) p('**' + _noCover.length + '** سهماً مملوكاً بلا أساسيات خارجية: ' + _noCover.map(h2x => h2x.ticker).join('، ') + ' — تُعلَن ولا تُقدَّر (§8).');
+      } else {
+        p('_لا أساسيات مجلوبة بعد._ افتح صفحة محرّك القرار مرة واحدة ليتم الجلب، وتأكّد أن الدالة السحابية `update-prices` منشورة بوضع `fundamentals`.');
+        noteMissing('أساسيات الشركات (stock_fundamentals_v1)', 'فارغة — تصنيف التوزيعات يعتمد على سجل ملكيتك وحده بدل تاريخ سياسة الشركة.');
+      }
+
+      // ③ مرصد السعر
+      h3('39.3 مرصد السعر وكشف التجزئة (price_watch_v1)');
+      const _pw = (await syncedGet('price_watch_v1', {})) || {};
+      p('آخر سعر رُصد لكل رمز وتاريخه. وظيفته حراسة المدخلات: تحرّك ≥25% بين رصدين يوقف **كل إشارة سعرية** لذلك السهم (قد يكون تجزئة لا انهياراً)، وسعر أقدم من 21 يوماً يمنع أي قرار سعري. السعر المثبَّت يدوياً (`price_manual`) لا يتقادم — قرارك.');
+      const _pwKeys = Object.keys(_pw);
+      if (_pwKeys.length) {
+        const _pwRows = _pwKeys.map(tk => {
+          const w = _pw[tk] || {};
+          const _h = holdings.find(x => x.ticker === tk);
+          const cur = _h ? +_h.current_price : null;
+          const chg = (w.p > 0 && cur > 0) ? (cur - w.p) / w.p * 100 : null;
+          const ageD = w.d ? (Date.now() - new Date(w.d).getTime()) / 86400000 : null;
+          return [tk, _h ? (_h.name || '—') : '—', formatNum(+w.p || 0, 2), w.d || '—',
+            ageD == null ? '—' : ageD.toFixed(0),
+            cur ? formatNum(cur, 2) : '—',
+            chg == null ? '—' : ((chg >= 0 ? '+' : '') + chg.toFixed(1) + '%'),
+            (chg != null && Math.abs(chg) >= 25) ? '🚨 قفزة — إشارات السعر موقوفة'
+              : (ageD != null && ageD > 21) ? '⏳ أقدم من 21 يوماً — لا قرار سعري'
+              : (_h && _h.price_manual) ? '🔒 مثبَّت يدوياً' : '✅'];
+        });
+        p(mdTable(['الرمز', 'الاسم', 'السعر المرصود', 'تاريخ الرصد', 'منذ (يوم)', 'السعر الآن', 'التغيّر', 'الحالة'], _pwRows));
+      } else {
+        p('_لا رصد محفوظ بعد — يُبنى تلقائياً عند أول فتح لصفحة محرّك القرار._');
+      }
+
+      // ④ سجل قياس الموثوقية
+      h3('39.4 سجل قياس الموثوقية والأداء (decision_intel_history_v1)');
+      const _ih = await syncedGet('decision_intel_history_v1', []);
+      const _ihArr = Array.isArray(_ih) ? _ih : [];
+      p('قياس واحد يومياً (سقف 400) لكل ما تقيسه طبقة الذكاء. الغرض: أن يكون تحسّن الموثوقية **مقيساً** لا موعوداً — الأرقام أدناه هي الفرق الفعلي بين أول قياس وآخره.');
+      if (_ihArr.length >= 2) {
+        const _a = _ihArr[0], _z = _ihArr[_ihArr.length - 1];
+        const _dlt = (x, y, isPct) => (x == null || y == null) ? '—'
+          : (formatNum(x, isPct ? 2 : 0) + ' ← ' + formatNum(y, isPct ? 2 : 0) + (isPct ? '%' : '')
+             + ' (' + (y - x >= 0 ? '+' : '') + formatNum(y - x, isPct ? 2 : 0) + ')');
+        p(mdTable(['المقياس', 'من ' + _a.date + ' إلى ' + _z.date], [
+          ['عدد القياسات المحفوظة', String(_ihArr.length)],
+          ['قيمة المحفظة', _dlt(_a.value, _z.value)],
+          ['عائدك السنوي (XIRR)', _dlt(_a.xirr, _z.xirr, true)],
+          ['فرقك عن تاسي (ألفا)', _dlt(_a.alpha, _z.alpha, true)],
+          ['دخلك القادم (Forward)', _dlt(_a.fwdIncome, _z.fwdIncome)],
+          ['الدخل المهدَّد', _dlt(_a.atRisk, _z.atRisk)],
+          ['ثقة البيانات', _dlt(_a.confidence, _z.confidence, true)],
+          ['اكتمال بيانات القرار', _dlt(_a.readiness, _z.readiness, true)],
+        ]));
+        if (_z.actions) p('آخر قياس أحصى: **' + (_z.actions.exit || 0) + '** خروج · **' + (_z.actions.trim || 0) + '** تخفيف · **' + (_z.actions.add || 0) + '** إضافة.');
+      } else if (_ihArr.length === 1) {
+        p('_قياس واحد فقط (' + _ihArr[0].date + ') — المقارنة تحتاج قياسين. افتح صفحة محرّك القرار في يوم لاحق._');
+      } else {
+        p('_لا قياس محفوظ بعد._');
+      }
+
+      // ⑤ الأسعار التاريخية
+      h3('39.5 تغطية الأسعار التاريخية (price_history_v1)');
+      const _ph = await syncedGet('price_history_v1', null);
+      p('الإغلاقات اليومية لكل رمز مملوك. عليها يُبنى خطّ المحفظة اليومي في صفحة الأداء بدل اللقطات الشهرية. **الصفوف الخام لا تُطبع هنا** (عشرات الآلاف من النقاط) — تُحفظ كاملةً في النسخة الاحتياطية، ويُطبع هنا مدى التغطية فقط.');
+      if (_ph && _ph.bySymbol && Object.keys(_ph.bySymbol).length) {
+        const _phRows = Object.entries(_ph.bySymbol).map(([tk, v]) => {
+          const arr = (v && Array.isArray(v.p)) ? v.p : [];
+          const _h = holdings.find(x => x.ticker === tk);
+          return [tk, _h ? (_h.name || '—') : '—', String(arr.length),
+            arr.length ? String(arr[0][0]) : '—',
+            arr.length ? String(arr[arr.length - 1][0]) : '—',
+            arr.length ? '✅' : '⚠️ لا نقاط'];
+        });
+        p(mdTable(['الرمز', 'الاسم', 'عدد النقاط', 'من', 'إلى', 'الحالة'], _phRows));
+        const _phMiss = holdings.filter(h3x => {
+          const rec = _ph.bySymbol[h3x.ticker];
+          return !(rec && Array.isArray(rec.p) && rec.p.length);
+        });
+        p(_phMiss.length
+          ? ('⚠️ **' + _phMiss.length + '** سهماً مملوكاً بلا أسعار تاريخية: ' + _phMiss.map(h3x => h3x.ticker).join('، ') + ' — خطّ المحفظة اليومي يسقط على أساس اللقطات ويُعلن ذلك في صفحة الأداء.')
+          : '✅ كل الحيازات مغطّاة — خطّ المحفظة اليومي يعمل على أساس الأسعار.');
+      } else {
+        p('_لا أسعار تاريخية محفوظة._ اضغط «🔄 جلب تاسي تلقائياً» في صفحة الأداء (تجلب الأسعار معها). خطّ المحفظة يعمل حالياً على أساس اللقطات — أقل دقّة ومُعلَن في الصفحة.');
+        noteMissing('الأسعار التاريخية (price_history_v1)', 'فارغة — خطّ الأداء اليومي يسقط على اللقطات الشهرية.');
       }
     }
     hr();
