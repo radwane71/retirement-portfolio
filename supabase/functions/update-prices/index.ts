@@ -67,6 +67,7 @@ Deno.serve(async (req) => {
     let extraTickers: string[] = []
     let wantTasi = false
     let wantFund = false
+    let wantPrices = false
     let tasiRange = TASI_DEFAULT_RANGE
     try {
       const body = await req.json()
@@ -77,6 +78,7 @@ Deno.serve(async (req) => {
       }
       wantTasi = body?.tasiHistory === true
       wantFund = body?.fundamentals === true
+      wantPrices = body?.priceHistory === true
       // الأمان: المدى لا يُمرَّر للرابط إلا بعد مطابقته لقائمة بيضاء (نفس نمط تصفية الرموز)
       if (typeof body?.range === 'string' && TASI_RANGES.has(body.range)) tasiRange = body.range
     } catch (_) { /* لا جسم / ليس JSON — تجاهل */ }
@@ -271,6 +273,56 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // 📈 تاريخ الأسعار اليومي لكل سهم — لإعادة بناء قيمة المحفظة يومياً
+    // ──────────────────────────────────────────────────────────────
+    // لقطات صافي الثروة شهرية، فخطّ المحفظة المرسوم منها **دالة درجية**:
+    // مسطَّح بين اللقطات ثم يقفز. لا يمكن أن يطابق مواقع المقارنة التي تبني
+    // الخطّ من السعر اليومي لكل سهم. الحلّ: نجلب الإغلاق اليومي لكل رمز،
+    // فيُعيد العميل بناء القيمة يوماً بيوم من معاملاته (أسهم اليوم × سعره).
+    // الصيغة مضغوطة [تاريخ, إغلاق] لأن 19 رمزاً × سنتين تُخزَّن في صفّ واحد.
+    const fetchPriceHistory = async (tickers: string[], range: string) => {
+      const list = tickers.slice(0, FUND_MAX_TICKERS)
+      const rows = await pool(list, FUND_CONCURRENCY, async (t) => {
+        try {
+          const { cookie, crumb } = await getYahooAuth()
+          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(t + '.SR')}`
+            + `?range=${range}&interval=1d${crumb ? `&crumb=${encodeURIComponent(crumb)}` : ''}`
+          const res = await fetch(url, { headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) } })
+          if (!res.ok) return [t, { error: `HTTP ${res.status}` }] as const
+          const r = (await res.json())?.chart?.result?.[0]
+          const ts = r?.timestamp, cl = r?.indicators?.quote?.[0]?.close
+          const out: [string, number][] = []
+          const seen = new Set<string>()
+          if (Array.isArray(ts) && Array.isArray(cl)) {
+            for (let i = 0; i < ts.length; i++) {
+              const t0 = ts[i], c = cl[i]
+              if (typeof t0 !== 'number' || !Number.isFinite(t0)) continue
+              if (typeof c !== 'number' || !Number.isFinite(c) || c <= 0) continue
+              const d = new Date(t0 * 1000).toISOString().slice(0, 10)
+              if (seen.has(d)) continue
+              seen.add(d)
+              out.push([d, Math.round(c * 100) / 100])
+            }
+          }
+          // آخر سعر من meta إن كان أحدث (نفس علّة تاسي: السلسلة قد تتجمّد)
+          const m = r?.meta
+          if (typeof m?.regularMarketPrice === 'number' && typeof m?.regularMarketTime === 'number') {
+            const d = new Date(m.regularMarketTime * 1000).toISOString().slice(0, 10)
+            if (!seen.has(d)) out.push([d, Math.round(m.regularMarketPrice * 100) / 100])
+          }
+          out.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+          return [t, out.length ? { p: out, last: out[out.length - 1][0] } : { error: 'لا سلسلة' }] as const
+        } catch (e) {
+          return [t, { error: String(e) }] as const
+        }
+      })
+      return {
+        fetchedAt: new Date().toISOString(), range,
+        bySymbol: Object.fromEntries(rows),
+      }
+    }
+
     const fetchFundamentals = async (tickers: string[]) => {
       const list = tickers.slice(0, FUND_MAX_TICKERS)
       const rows = await pool(list, FUND_CONCURRENCY, async (t) => {
@@ -333,6 +385,9 @@ Deno.serve(async (req) => {
     const fundPromise = wantFund
       ? fetchFundamentals([...allTickerSet]).catch((e) => ({ error: String(e) }))
       : null
+    const pricesPromise = wantPrices
+      ? fetchPriceHistory([...allTickerSet], tasiRange).catch((e) => ({ error: String(e) }))
+      : null
 
     const symbols = [...allTickerSet].map((t) => `${t}.SR`).join(',')
     const { cookie, crumb } = await getYahooAuth()
@@ -351,7 +406,8 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         updated: 0, message: `yahoo ${yRes.status}`,
         ...(tasiPromise ? { tasi: await tasiPromise } : {}),
-        ...(fundPromise ? { fundamentals: await fundPromise } : {})
+        ...(fundPromise ? { fundamentals: await fundPromise } : {}),
+        ...(pricesPromise ? { priceHistory: await pricesPromise } : {})
       }), {
         headers: { ...cors, 'Content-Type': 'application/json' }
       })
@@ -402,7 +458,8 @@ Deno.serve(async (req) => {
       updated, total: quotes.length, prices, failed: failedTickers,
       // إضافات اختيارية: المفتاح لا يظهر إطلاقاً ما لم يُطلب صراحةً
       ...(tasiPromise ? { tasi: await tasiPromise } : {}),
-      ...(fundPromise ? { fundamentals: await fundPromise } : {})
+      ...(fundPromise ? { fundamentals: await fundPromise } : {}),
+      ...(pricesPromise ? { priceHistory: await pricesPromise } : {})
     }), {
       headers: { ...cors, 'Content-Type': 'application/json' }
     })

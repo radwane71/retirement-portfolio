@@ -223,6 +223,9 @@ async function init() {
   _positionCache    = null; // invalidate cache on fresh load
   _monthlyDataCache = null; // I-3: invalidate monthly data cache
 
+  // تاريخ الأسعار اليومي — أساس إعادة بناء خطّ المحفظة ومقاييس المخاطر
+  await _loadPriceHistory();
+
   renderKPIs();
   renderOpenPositions();
   renderClosedPositions();
@@ -451,7 +454,7 @@ function renderKPIs() {
   // كتابة رصيد النقد. وبعد إعادة تأطير تبويب المقارنة إلى الأسهم وحدها صار في
   // الصفحة أساسان متعارضان في شاشة واحدة. الآن أساس واحد: أسهمك وتدفقاتها.
   const ddEl = document.getElementById('pk-max-drawdown');
-  const _riskSeries = _screenStocksSeries(_stocksOnlySeries()).clean;
+  const _riskSeries = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (ddEl && _riskSeries.length >= 2) {
     const { twrMap, sortedSnaps } = _computeTWR(_riskSeries, _stockFlows());
     // sortedSnaps is ISO-date ordered & de-duplicated by day; twrMap[date] = index (base 100)
@@ -497,7 +500,7 @@ const RISK_FREE_RATE = 0.03;
 //   سورتينو         = (العائد السنوي − RF) ÷ تذبذب الهبوط
 function _computeRiskMetrics() {
   // نفس أساس تبويب المقارنة وأقصى التراجع: أسهمك وحدها وتدفقاتها (لا نقد ولا عقار)
-  const series = _screenStocksSeries(_stocksOnlySeries()).clean;
+  const series = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (series.length < 4) return null;
   const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows());
   const pts = sortedSnaps
@@ -563,8 +566,9 @@ function renderRiskMetrics() {
   // AUDIT-FIX (2026-08-21): بعد توحيد الأساس على الأسهم وحدها صار سبب النقص
   // مختلفاً: ليس «لقطات قليلة» بل «لقطات لا تحمل مكوّن الأسهم». نقولها بدقة
   // مع العدد الفعلي، فالمالك يعرف ما ينقصه بالضبط بدل إرشاد عام.
-  const _usable = _screenStocksSeries(_stocksOnlySeries()).clean.length;
-  const _total  = (_snapshots || []).length;
+  const _daily0 = _dailyPortfolioSeries();
+  const _usable = _daily0 ? _daily0.length : _screenStocksSeries(_stocksOnlySeries()).clean.length;
+  const _total  = _daily0 ? _daily0.length : (_snapshots || []).length;
   const setInsufficient = (el, subId) => {
     if (!el) return;
     el.textContent = '— (بيانات غير كافية)';
@@ -1889,6 +1893,86 @@ function _stocksOnlySeries() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// 📈 إعادة بناء قيمة المحفظة يوماً بيوم من الأسعار التاريخية
+// ----------------------------------------------------------------------
+// لقطات صافي الثروة شهرية، فالخطّ المرسوم منها **دالة درجية**: مسطَّح بين
+// اللقطات ثم يقفز عمودياً. لا يمكن أن يشبه مواقع المقارنة التي تبني الخطّ من
+// السعر اليومي لكل سهم — والفرق منهجي لا حسابي.
+// هنا نُعيد بناءه كما يُبنى هناك:  قيمة اليوم = Σ (أسهمك ذلك اليوم × إغلاقه)
+// الأسهم تُشتقّ من معاملاتك تراكمياً، والأسعار من `price_history_v1` المجلوبة
+// آلياً. فلا حاجة للقطات إطلاقاً، ويصير الخطّ يومياً حقيقياً.
+const PRICE_HIST_KEY = 'price_history_v1';
+let _priceHist = null;          // { fetchedAt, bySymbol: { TK: { p:[[date,close]] } } }
+
+async function _loadPriceHistory() {
+  try {
+    const raw = await loadUserSetting(PRICE_HIST_KEY);
+    _priceHist = (raw && raw.bySymbol) ? raw : null;
+  } catch (_) { _priceHist = null; }
+  return _priceHist;
+}
+
+// خريطة تاريخ→سعر لكل رمز، مع ترحيل آخر سعر معروف (العطل لا سعر لها)
+function _priceMapOf(ticker) {
+  const e = _priceHist && _priceHist.bySymbol && _priceHist.bySymbol[ticker];
+  if (!e || !Array.isArray(e.p) || !e.p.length) return null;
+  return e.p;   // مرتّبة تصاعدياً [[date, close], ...]
+}
+
+// عدد الأسهم المملوكة لرمز عند تاريخ (من المعاملات، شامل المنح)
+function _sharesAtISO(ticker, iso) {
+  let sh = 0;
+  for (const t of (_tx || [])) {
+    if (t.ticker !== ticker || !t.date || t.date > iso) continue;
+    if (t.type === 'buy' || t.type === 'grant') sh += +t.shares || 0;
+    else if (t.type === 'sell') sh -= +t.shares || 0;
+  }
+  return Math.max(0, sh);
+}
+
+// السلسلة اليومية: [{date, total_value, notes:'auto'}] بنفس شكل اللقطات
+// حتى تعمل مع _computeTWR بلا تغيير.
+function _dailyPortfolioSeries() {
+  if (!_priceHist || !_priceHist.bySymbol) return null;
+  const tickers = [...new Set((_tx || []).map(t => t.ticker).filter(Boolean))];
+  const covered = tickers.filter(t => _priceMapOf(t));
+  if (!covered.length) return null;
+
+  // أول تاريخ = أول معاملة؛ محور التواريخ = اتحاد تواريخ الأسعار بعده
+  const firstTx = (_tx || []).filter(t => t.date).map(t => t.date).sort()[0];
+  if (!firstTx) return null;
+  const dateSet = new Set();
+  covered.forEach(t => _priceMapOf(t).forEach(([d]) => { if (d >= firstTx) dateSet.add(d); }));
+  const dates = [...dateSet].sort();
+  if (dates.length < 2) return null;
+
+  // مؤشّر متقدّم لكل رمز + آخر سعر معروف (ترحيل)
+  const idx = {}, last = {};
+  covered.forEach(t => { idx[t] = 0; last[t] = null; });
+
+  const out = [];
+  for (const d of dates) {
+    let total = 0;
+    for (const t of covered) {
+      const arr = _priceMapOf(t);
+      while (idx[t] < arr.length && arr[idx[t]][0] <= d) { last[t] = arr[idx[t]][1]; idx[t]++; }
+      if (last[t] == null) continue;                 // قبل أول سعر معروف
+      const sh = _sharesAtISO(t, d);
+      if (sh > 0) total += sh * last[t];
+    }
+    if (total > 0) out.push({ date: d, total_value: total, notes: 'auto' });
+  }
+  return out.length >= 2 ? out : null;
+}
+
+// تغطية إعادة البناء — تُعلَن للمالك بدل الصمت عن رمز بلا أسعار
+function _dailyCoverage() {
+  const tickers = [...new Set((_tx || []).map(t => t.ticker).filter(Boolean))];
+  const missing = tickers.filter(t => !_priceMapOf(t));
+  return { total: tickers.length, missing };
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // 🩺 كشف اللقطات المشبوهة في سلسلة الأسهم
 // ----------------------------------------------------------------------
 // خطّ المحفظة مسطَّح بين اللقطات (ترحيل آخر قيمة)، فلا يهبط من تلقاء نفسه:
@@ -2120,9 +2204,14 @@ function renderBenchmarkTab() {
   // أو auto_stocks = 0) تسقط كلياً، فتنكمش نافذة المقارنة من سنة إلى أشهر
   // والمالك لا يدري. الرقم أصدق تعريفاً وأضعف تغطيةً — والثاني يجب أن يُعلَن.
   const _snapTotal = (_snapshots || []).length;
-  const _rawSeries = _stocksOnlySeries();
-  const _snapUsable = _rawSeries.filter(p => p.date !== todayISO()).length;
-  const _snapSkipped = Math.max(0, _snapTotal - _snapUsable);
+  // الأولوية للسلسلة اليومية المُعاد بناؤها من الأسعار — فهي وحدها تُنتج خطاً
+  // يومياً حقيقياً قابلاً للمقارنة بمنحنى المؤشر. اللقطات احتياطي فقط.
+  const _daily = _dailyPortfolioSeries();
+  const _seriesMode = _daily ? 'daily' : 'snapshots';
+  const _rawSeries = _daily || _stocksOnlySeries();
+  const _snapUsable = _daily ? _daily.length : _rawSeries.filter(p => p.date !== todayISO()).length;
+  const _snapSkipped = _daily ? 0 : Math.max(0, _snapTotal - _snapUsable);
+  const _cov = _dailyCoverage();
   const { clean: portSeries, anomalies: _snapAnoms } = _screenStocksSeries(_rawSeries);
   if (portSeries.length < 2) {
     if (chartWrap)  chartWrap.style.display  = 'none';
@@ -2345,7 +2434,7 @@ function renderBenchmarkTab() {
           ['تاسي — عائد إجمالي (TRI)', fmtPct(tasiTriDelta)],
           ['Alpha مقابل السعري',       fmtPct(alphaPrice)],
           ['نقاط المقارنة',            `${points.length}`],
-          ['مصادر البيانات',           `${bmEntries.length} نقطة تاسي · ${portSeries.length} نقطة قيمة أسهم`],
+          ['مصادر البيانات',           `${bmEntries.length} نقطة تاسي · ${portSeries.length} نقطة محفظة (${_seriesMode === 'daily' ? 'يومية من الأسعار' : 'من اللقطات'})`],
         ])}
 
         ${noteHtml('🧭', `<b>هذا الرقم تراكمي وزمني-الوزن — وليس هو رقم محرّك القرار.</b>
@@ -2378,6 +2467,13 @@ function renderBenchmarkTab() {
           عائد أسهمك محسوب بـ <b>TWR (Time-Weighted Return)</b> بمنهج Modified Dietz — يعزل أداء
           قراراتك عن مشترياتك ومبيعاتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>
           (وهو أول تاريخ تتوفّر فيه القيمتان معاً).`)}
+
+        ${_seriesMode === 'daily' ? noteHtml('📈', `<b>خطّ محفظتك مُعاد بناؤه يوماً بيوم من أسعار أسهمك.</b>
+          قيمة كل يوم = مجموع (أسهمك في ذلك اليوم × سعر إغلاقه) — الأسهم من معاملاتك،
+          والأسعار مجلوبة آلياً. <b>${_rawSeries.length}</b> نقطة يومية بدل لقطات شهرية،
+          وهي نفس طريقة مواقع المقارنة.
+          ${_cov.missing.length ? `<br>⚠️ <b>${_cov.missing.length}</b> من ${_cov.total} رمزاً بلا أسعار تاريخية (${_cov.missing.map(esc).join('، ')}) — مستبعَدة من الخطّ، فالقيمة أقلّ من الحقيقية بمقدارها.` : ''}`,
+          _cov.missing.length ? 'warn' : '') : ''}
 
         ${_snapSkipped > 0 ? noteHtml('📉', `<b>تغطية قصيرة: ${_snapUsable} من ${_snapTotal} لقطة تحمل قيمة أسهم.</b>
           هذه المقارنة تقيس <b>أسهمك وحدها</b>، وقيمة الأسهم مسجّلة فقط في اللقطات التي تحفظها
@@ -2584,7 +2680,7 @@ async function fetchTasiAuto() {
 
   try {
     const { data, error } = await supabaseClient.functions.invoke('update-prices', {
-      body: { tasiHistory: true, range },
+      body: { tasiHistory: true, range, priceHistory: true },
     });
     if (error) throw new Error(error.message || 'تعذّر الاتصال بالدالة السحابية update-prices');
 
@@ -2597,6 +2693,16 @@ async function fetchTasiAuto() {
 
     const pts = _bmNormalize(t.points).map(p => ({ date: p.date, value: p.value }));
     if (!pts.length) throw new Error('لم تُرجِع الدالة أي نقطة صالحة (تاريخ ISO + قيمة موجبة).');
+
+    // تاريخ الأسعار يُحفَظ إن عاد — فشله لا يُسقط جلب تاسي (كلٌّ مستقلّ)
+    const ph = data?.priceHistory;
+    if (ph && ph.bySymbol && Object.keys(ph.bySymbol).length) {
+      _priceHist = ph;
+      const okN = Object.values(ph.bySymbol).filter(v => v && Array.isArray(v.p) && v.p.length).length;
+      try { await saveUserSetting(PRICE_HIST_KEY, ph); } catch (_) {}
+      showToast(`✓ أسعار تاريخية: ${okN} من ${Object.keys(ph.bySymbol).length} رمزاً`,
+                okN ? 'success' : 'error');
+    }
 
     const r = _mergeAutoTasi(pts);
     _tasiLastError  = null;
