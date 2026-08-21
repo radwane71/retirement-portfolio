@@ -4,8 +4,9 @@ const ALLOWED_ORIGIN = Deno.env.get('APP_ORIGIN') ?? 'http://localhost:8080'
 
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36'
 
-// ── مؤشر تاسي: رمزه على ياهو غير مؤكّد، لذا نجرّب المرشّحين بالترتيب ونتوقّف عند أول ──
-// رمز يرجع سلسلة صالحة. الرمز الناجح يُعاد في الرد حتى يعرفه العميل.
+// ── مؤشر تاسي: رمزه على ياهو غير مؤكّد، فنجرّب كل المرشّحين ونختار **الأحدث**
+// بياناتٍ لا أول من ينجح (فحص 2026-08-21: ^TASI.SR وحده يعمل، والثلاثة الباقية
+// محذوفة عند ياهو). الرمز المختار يُعاد في الرد حتى يعرفه العميل.
 const TASI_SYMBOLS = ['^TASI.SR', '^TASI', 'TASI.SR', '^TASI.SAU']
 const TASI_RANGES = new Set(['1y', '2y', '5y', '10y', 'max'])
 const TASI_DEFAULT_RANGE = '5y'
@@ -109,61 +110,84 @@ Deno.serve(async (req) => {
     }
 
     // ── جلب تاريخ مؤشر تاسي من نقطة نهاية الرسم البياني ──────────
-    // الرد: { symbol, points:[{date,value}], count } أو { error, tried }
-    const fetchTasiHistory = async (range: string) => {
+    // الرد: { symbol, points:[{date,value}], count, lastDate, notes } أو { error, tried, notes }
+    // AUDIT-FIX (2026-08-21): كان يأخذ **أول** رمز يرجع سلسلة، وبفاصل يومي فقط.
+    // تبيّن بالفحص المباشر أن ياهو يجمّد السلسلة **اليومية** لـ^TASI.SR عند
+    // 2026-07-16 بينما **الأسبوعية** لنفس الرمز محدَّثة حتى الأمس، وأن meta
+    // يحمل regularMarketPrice بتاريخ اليوم. فالنتيجة كانت مؤشراً متجمّداً خمسة
+    // أسابيع بلا أي خطأ ظاهر — وألفا مضخّمة لأن المحفظة تتقدّم والمؤشر واقف.
+    // الآن: يُجرَّب كل فاصل، وتُدمج نقاطه، ويُضاف سعر meta إن كان أحدث، ثم
+    // يُختار الرمز **الأحدث** لا الأول الذي ينجح.
+    const TASI_INTERVALS = ['1d', '1wk']
+
+    const fetchTasiOne = async (sym: string, range: string, interval: string) => {
       const { cookie, crumb } = await getYahooAuth()
-      const tried: string[] = []
-      let lastErr = ''
-      for (const sym of TASI_SYMBOLS) {
-        tried.push(sym)
-        try {
-          const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}`
-            + `?range=${range}&interval=1d${crumb ? `&crumb=${encodeURIComponent(crumb)}` : ''}`
-          const res = await fetch(url, {
-            headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) }
-          })
-          if (!res.ok) {
-            lastErr = `${sym}: HTTP ${res.status}`
-            console.log('tasi chart', sym, res.status)
-            continue
-          }
-          const result = (await res.json())?.chart?.result?.[0]
-          const stamps = result?.timestamp
-          const closes = result?.indicators?.quote?.[0]?.close
-          if (!Array.isArray(stamps) || !stamps.length || !Array.isArray(closes)) {
-            lastErr = `${sym}: لا توجد سلسلة زمنية`
-            continue
-          }
-
-          // خريطة بالتاريخ: تُسقط التكرار تلقائياً (آخر قيمة لليوم تفوز)
-          const byDate = new Map<string, number>()
-          for (let i = 0; i < stamps.length; i++) {
-            const t = stamps[i]
-            const c = closes[i]
-            // أيام العطل ترجع close = null → تُتجاهل، وكذلك أي قيمة غير منتهية أو ≤ 0
-            if (typeof t !== 'number' || !Number.isFinite(t)) continue
-            if (typeof c !== 'number' || !Number.isFinite(c) || c <= 0) continue
-            // الطابع بالثواني UTC؛ جلسة تاسي (UTC+3) تبدأ ~07:00 UTC فاليوم UTC = اليوم المحلي
-            const date = new Date(t * 1000).toISOString().slice(0, 10)
-            byDate.set(date, Math.round(c * 100) / 100)
-          }
-          if (!byDate.size) {
-            lastErr = `${sym}: لا توجد نقاط صالحة`
-            continue
-          }
-
-          const points = [...byDate.entries()]
-            .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))   // تصاعدي بالتاريخ
-            .map(([date, value]) => ({ date, value }))
-          console.log('tasi ok:', sym, points.length, 'points')
-          return { symbol: sym, points, count: points.length }
-        } catch (e) {
-          lastErr = `${sym}: ${String(e)}`
-          console.log('tasi chart error:', sym, String(e))
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}`
+        + `?range=${range}&interval=${interval}${crumb ? `&crumb=${encodeURIComponent(crumb)}` : ''}`
+      const res = await fetch(url, {
+        headers: { 'User-Agent': UA, ...(cookie ? { Cookie: cookie } : {}) }
+      })
+      if (!res.ok) return { err: `${sym}/${interval}: HTTP ${res.status}` }
+      const result = (await res.json())?.chart?.result?.[0]
+      const stamps = result?.timestamp
+      const closes = result?.indicators?.quote?.[0]?.close
+      const out = new Map<string, number>()
+      if (Array.isArray(stamps) && Array.isArray(closes)) {
+        for (let i = 0; i < stamps.length; i++) {
+          const t = stamps[i], c = closes[i]
+          if (typeof t !== 'number' || !Number.isFinite(t)) continue
+          if (typeof c !== 'number' || !Number.isFinite(c) || c <= 0) continue
+          out.set(new Date(t * 1000).toISOString().slice(0, 10), Math.round(c * 100) / 100)
         }
       }
-      console.log('tasi failed after', tried.length, 'symbols')
-      return { error: lastErr || 'تعذّر جلب تاريخ مؤشر تاسي من ياهو', tried }
+      // سعر الإغلاق الأخير من meta — غالباً أحدث من آخر نقطة في السلسلة
+      const meta = result?.meta
+      const mp = meta?.regularMarketPrice, mt = meta?.regularMarketTime
+      if (typeof mp === 'number' && Number.isFinite(mp) && mp > 0
+          && typeof mt === 'number' && Number.isFinite(mt)) {
+        out.set(new Date(mt * 1000).toISOString().slice(0, 10), Math.round(mp * 100) / 100)
+      }
+      return { map: out, currency: meta?.currency ?? null }
+    }
+
+    const fetchTasiHistory = async (range: string) => {
+      const tried: string[] = []
+      const notes: string[] = []
+      let best: { symbol: string; points: {date:string;value:number}[]; last: string } | null = null
+      let lastErr = ''
+
+      for (const sym of TASI_SYMBOLS) {
+        tried.push(sym)
+        const merged = new Map<string, number>()
+        for (const interval of TASI_INTERVALS) {
+          try {
+            const r = await fetchTasiOne(sym, range, interval)
+            if ((r as any).err) { lastErr = (r as any).err; continue }
+            const m = (r as any).map as Map<string, number>
+            if (!m || !m.size) continue
+            // الفاصل اليومي أدقّ فيُكتب أولاً؛ الأسبوعي يملأ ما بعده فقط
+            for (const [d, v] of m) if (interval === '1d' || !merged.has(d)) merged.set(d, v)
+            const lastOf = [...m.keys()].sort().pop()
+            notes.push(`${sym}/${interval}: ${m.size} نقطة حتى ${lastOf}`)
+          } catch (e) {
+            lastErr = `${sym}/${interval}: ${String(e)}`
+          }
+        }
+        if (!merged.size) continue
+        const points = [...merged.entries()]
+          .sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+          .map(([date, value]) => ({ date, value }))
+        const last = points[points.length - 1].date
+        if (!best || last > best.last) best = { symbol: sym, points, last }
+      }
+
+      if (!best) {
+        console.log('tasi failed after', tried.length, 'symbols')
+        return { error: lastErr || 'تعذّر جلب تاريخ مؤشر تاسي من ياهو', tried, notes }
+      }
+      console.log('tasi ok:', best.symbol, best.points.length, 'points, last', best.last)
+      return { symbol: best.symbol, points: best.points, count: best.points.length,
+               lastDate: best.last, notes }
     }
 
     // نُطلقه الآن ليعمل بالتوازي مع جلب الحيازات والأسعار؛ .catch حارس ضد رفض غير معالَج
