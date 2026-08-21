@@ -1211,8 +1211,15 @@ function runRebalancing() {
   // ⚖️ السقف الدستوري قيد صلب لا هدف استرشادي (CLAUDE.md §1 + الفلتر 4):
   // الهدف الفعّال = min(الهدف المحفوظ، السقف) — 7% للسهم و12% للقيادي.
   // السقف الأساس بلا منطقة السماح: السماح يعني «لا تنبّه ضمنه» لا «اشترِ داخله عمداً».
+  // AUDIT-FIX (2026-08-21): كان يوصي بشراء سهم مهمّته الفعّالة «تصفية» —
+  // بينما نفس الصفحة تعرض شارة «🔴 تصفية» فوقه، ومحرّك القرار يُصدر عليه
+  // خروجاً كاملاً بأولوية P0.1. توصيتان متعاكستان في شاشة واحدة، والقابلة
+  // للتنفيذ منهما (بمبلغ ريالي) هي الخاطئة. هدف الصفر كان مستبعَداً أصلاً
+  // بشرط > 0، أما مهمة التصفية مع هدف موجب فكانت تمرّ بلا فلترة.
+  const _liq = Object.keys(taskMap).filter(t => taskMap[t] === 'liquidation');
   const candidatesAll = holdings
-    .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0)
+    .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0
+                 && taskMap[h.ticker] !== 'liquidation')
     .map(h => {
       const currentPct  = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
       const savedTarget = stockTargets[h.ticker] || 0;     // ما حفظه المالك
@@ -1253,6 +1260,7 @@ function runRebalancing() {
     + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`
     + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي`
     + (capBlocked.length ? ` · ${capBlocked.length} سهماً بلغ سقفه الدستوري` : '')
+    + (_liq.length ? ` · <b>${_liq.length} سهماً مهمّته «تصفية»</b> (${_liq.map(esc).join('، ')}) — قرارك بالخروج منه يتقدّم على أي توصية شراء` : '')
     + `. السهم بلا وزن حالي وبلا سعر لا فجوة له تُقاس، فلا يدخل التوزيع.`, '');
 
   // ── لافتة القصّ الدستوري: تُعرض في كل مخرَج (§8: لا تقليص صامت) ──

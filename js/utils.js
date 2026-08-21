@@ -815,7 +815,10 @@ window.closeMobileNav = function() {
 // Prevents a user manipulating data-* attributes to update arbitrary rows/fields.
 const INLINE_EDIT_ALLOWLIST = {
   transactions:     new Set(['date','ticker','name','type','shares','price','notes']),
-  holdings:         new Set(['ticker','name','sector','shares','avg_price','current_price','target_weight','notes','price_manual']),
+  // AUDIT-FIX (2026-08-21): أُزيل target_weight — مصدر الحقيقة لهدف الوزن هو
+  // stock_targets.target_pct (تقرؤه صفحة الأهداف ومحرّك القرار)، وholdings.target_weight
+  // نسخة عرض تُداس عند كل تحميل. تحريره سطرياً كان يعطي إحساساً كاذباً بالحفظ.
+  holdings:         new Set(['ticker','name','sector','shares','avg_price','current_price','notes','price_manual']),
   // AUDIT-FIX 2026-08: الأسماء تطابق أعمدة الصفحة الفعلية (كانت rent_amount/purchase_price/address وهمية)
   real_estate:      new Set(['current_value','status','name','type','purchase_value','monthly_rental','purchase_date']),
   dividends:        new Set(['amount','date','year','month','ticker','name','notes']),

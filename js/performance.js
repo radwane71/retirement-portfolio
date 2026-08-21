@@ -2926,7 +2926,7 @@ function _bmMigrateSources() {
   } catch (_) {}
 }
 
-function initBenchmarkTab() {
+async function initBenchmarkTab() {
   const dateInp = document.getElementById('bm-date');
   if (dateInp && !dateInp.value) dateInp.value = todayISO();
 
@@ -2935,16 +2935,28 @@ function initBenchmarkTab() {
   _bmMigrateLegacyKey(BM_SEEDED_KEY);
   _bmMigrateSources();
 
-  // auto-seed: استورد بيانات تاسي التاريخية مرة واحدة فقط (إذا لم تُفعَّل من قبل)
+  // ══════════════════════════════════════════════════════════════
+  // AUDIT-FIX (2026-08-21) — فقدان بيانات أحادي الاتجاه:
+  // حارس البذرة (BM_SEEDED_KEY) محليّ، فعلى أي متصفح جديد كان يُعتبر «لم يُبذَر»
+  // فتُدمج 51 نقطة البذرة مع محليّ فارغ، ثم يستبدل _saveBenchmark قيمة المفتاح
+  // السحابي **كاملةً** عبر upsert — فتُمحى سلسلة تاسي السحابية (1200+ نقطة)
+  // بما فيها نقاط المالك اليدوية ✋. وكان ذلك يقع **قبل** انتهاء
+  // _syncBenchmarkFromSupabase، وهي تسحب من السحابة إلى المحلي ولا تدفع أبداً
+  // — فالبتر لا يُصلَح ذاتياً.
+  // الآن: السحابة أولاً وبانتظار، ولا تُبذَر البذرة إلا إذا بقي السجل فارغاً.
+  // ══════════════════════════════════════════════════════════════
+  try { await _syncBenchmarkFromSupabase(); } catch (_) { /* بلا شبكة: نكمل محلياً */ }
+
   if (!localStorage.getItem(userLsKey(BM_SEEDED_KEY))) {
-    _mergeBenchmark(TASI_SEED, 'seed');
+    const existing = _loadBenchmark();
+    if (!existing.length) {
+      _mergeBenchmark(TASI_SEED, 'seed');
+      showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي مضمّناً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
+    }
+    // يُرفع العلم في الحالتين: وجود سجل سحابي يعني أن البذرة لم تعد مطلوبة أصلاً
     localStorage.setItem(userLsKey(BM_SEEDED_KEY), '1');
     localStorage.setItem(userLsKey(BM_SRC_MIGRATED_KEY), '1');
-    showToast(`✓ تم تحميل ${TASI_SEED.length} إغلاق أسبوعي لتاسي مضمّناً (${TASI_SEED[0].date} → ${TASI_SEED[TASI_SEED.length-1].date})`, 'success');
   }
-
-  // S-4: sync from Supabase (covers device-switch / cleared browser data)
-  _syncBenchmarkFromSupabase().then(() => renderBenchmarkTab());
 
   renderBenchmarkTab();
 }

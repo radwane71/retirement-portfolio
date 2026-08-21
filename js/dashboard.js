@@ -2995,7 +2995,7 @@ function renderTable() {
       <td class="num bold">${formatSAR(value)}</td>
       <td class="num ${cls}">${formatSAR(pnl,true)}<br><span class="small">${(pnl>=0?'+':'')}${pnlP.toFixed(2)}%</span></td>
       <td class="num">${wt.toFixed(2)}%</td>
-      <td ${ed('holdings',h.id,'target_weight','number',h.target_weight||0,'text-muted')}>${(+h.target_weight||0).toFixed(2)}%</td>
+      <td class="text-muted" title="هدف الوزن يُحفظ في «أهداف الأسهم والقطاعات» — وهو المصدر الذي يقرؤه محرّك القرار. التحرير هنا كان يُداس عند إعادة التحميل.">${(+h.target_weight||0).toFixed(2)}%</td>
       <td>
         <div class="flex gap-2">
           <button class="btn btn-secondary btn-sm" onclick="openModal('${esc(h.id)}')">تعديل</button>
@@ -3688,6 +3688,26 @@ async function saveHolding(e) {
   if (editingId) ({ error } = await supabaseClient.from('holdings').update(payload).eq('id', editingId));
   else           ({ error } = await supabaseClient.from('holdings').insert([payload]));
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
+
+  // AUDIT-FIX (2026-08-21): كان الهدف يُكتب في holdings.target_weight وحده — وهو
+  // حقل **لا تقرؤه أي صفحة قرار** (صفحة الأهداف ومحرّك القرار يقرآن
+  // stock_targets.target_pct حصراً)، ويُداس من stockTargets عند كل تحميل. فيرى
+  // المالك «تم التحديث ✓» ثم يعود الرقم كما كان، أو يبقى هدفاً وهمياً لا يشارك
+  // في أي قرار. الآن يُكتب في المصدر الحقيقي أيضاً.
+  const _tw = +g('h-target-wt').value || 0;
+  const _prevTw = prev ? +prev.target_weight || 0 : null;
+  if (payload.ticker && (_prevTw === null || Math.abs(_tw - _prevTw) > 1e-9)) {
+    try {
+      const { data: { user } = {} } = await supabaseClient.auth.getUser();
+      if (user) {
+        const { error: tErr } = await supabaseClient.from('stock_targets')
+          .upsert([{ user_id: user.id, ticker: payload.ticker, target_pct: _tw }],
+                  { onConflict: 'user_id,ticker' });
+        if (tErr) showToast('⚠️ حُفظ السهم لكن تعذّر حفظ هدف الوزن: ' + tErr.message, 'error');
+        else if (_tw > 0) showToast(`✓ هدف الوزن ${_tw}% حُفظ في «أهداف الأسهم» — يقرؤه محرّك القرار الآن`, 'success');
+      }
+    } catch (e) { showToast('⚠️ تعذّر حفظ هدف الوزن', 'error'); }
+  }
   if (stampISO) {
     _priceTimestamps[payload.ticker] = stampISO;
     _savePriceTimestamps();

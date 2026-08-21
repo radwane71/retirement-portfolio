@@ -726,8 +726,14 @@ window.DecisionIntel = (function () {
       const outlook = divOutlookOf(r, fwd);
       return { r, fwd, outlook };
     });
+    // AUDIT-FIX (2026-08-21): البسط والمقام كانا على أساسين مختلفين — المقام
+    // يستبعد الأسهم المنقطعة والبسط يجمعها. والتقاطع حتمي لا احتمالي: كل سهم
+    // يتجاوز مهلة الحكم يكون stale ويُسنَد إلى bucket 'risk'، فيدخل البسط
+    // ويخرج من المقام. فتنتفخ النسبة (وقد تتجاوز 100%) ويقرأ المالك إنذاراً
+    // أحمر مبنياً على دخل مُسقَط أصلاً من توقّعاته.
     const total = rows.reduce((s, x) => s + (x.fwd.stale ? 0 : x.fwd.income), 0);
-    const atRisk = rows.filter(x => x.outlook.bucket === 'risk' || x.outlook.bucket === 'watch')
+    const atRisk = rows.filter(x => !x.fwd.stale
+        && (x.outlook.bucket === 'risk' || x.outlook.bucket === 'watch'))
       .reduce((s, x) => s + x.fwd.income, 0);
     const staleIncome = rows.filter(x => x.fwd.stale).reduce((s, x) => s + x.fwd.income, 0);
     return { rows, total, atRisk, staleIncome, atRiskPct: total > 0 ? atRisk / total : 0 };
