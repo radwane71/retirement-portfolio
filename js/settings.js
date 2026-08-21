@@ -2158,9 +2158,15 @@ async function exportMonthlyReviewMD() {
       const monthlyTarget  = retGoal.monthly;
       const swrPct         = retGoal.swr || 4;
       const portfolioNeeded = (monthlyTarget * 12) / (swrPct / 100);
-      const currentPortfolio = totalMktValue + activeRE.reduce((s, r) => s + +r.current_value, 0)
-                              + activeAssets.reduce((s, a) => s + +a.value, 0)
-                              - activeLiabilities.reduce((s, l) => s + +l.value, 0);
+      // AUDIT-FIX (2026-08-18): كانت القاعدة هنا «أسهم + عقار + أصول − التزامات»،
+      // أي أنها تحتسب العقار (لا يُسحب منه 4% شهرياً) وتُسقط النقد والصكوك (يُسحب
+      // منهما فعلاً) — عكس ما تفعله لوحة التحكم (dashboard.js:1334) والقسم 32 من
+      // هذا التقرير نفسه (settings.js:3581). ثلاث جهات على قاعدة الأصول السائلة
+      // وهذه وحدها شاذّة، فكان المالك يقرأ نسبتَي إنجاز مختلفتين لنفس الهدف —
+      // ومرّتين متعارضتين داخل الملف الواحد. وُحِّدت على الأصول السائلة.
+      const _fireSukuk = (sukukData.opportunities || [])
+        .filter(o => o.status === 'مشترك').reduce((s, o) => s + (+o.amount || 0), 0);
+      const currentPortfolio = totalMktValue + portfolioCash + _fireSukuk;
       const fireProgress   = portfolioNeeded > 0 ? currentPortfolio / portfolioNeeded * 100 : 0;
       const remaining      = portfolioNeeded - currentPortfolio;
 
@@ -2170,6 +2176,8 @@ async function exportMonthlyReviewMD() {
       p(`نسبة السحب الآمن (SWR)      : ${swrPct}%`);
       p(`قاعدة الضرب                 : ${(100 / swrPct).toFixed(0)}× (قاعدة ${100 / swrPct >= 25 ? '25' : (100/swrPct).toFixed(0)} ضعف)`);
       p(`المحفظة المطلوبة للتقاعد    : ${SAR(portfolioNeeded)} ر.س`);
+      p(`قاعدة الأصول المحتسبة       : أسهم + نقد + صكوك = ${SAR(currentPortfolio)} ر.س`);
+      p(`                              (العقار مستبعَد عمداً — لا يُسحب منه دخل شهري؛ نفس قاعدة لوحة التحكم والقسم 32)`);
       p(`إجمالي الثروة الحالية        : ${SAR(currentPortfolio)} ر.س`);
       p(`نسبة الإنجاز                : ${PCT(fireProgress)}`);
       p(`المبلغ المتبقي               : ${SAR(Math.max(0, remaining))} ر.س`);
@@ -3731,13 +3739,19 @@ async function exportMonthlyReviewMD() {
           const dt = _d(dv.date); if (!dt) return;
           pflows.push({ date: dt, amount: +dv.amount || 0 });
         });
-        if (_totalMkt + portfolioCash > 0) pflows.push({ date: today, amount: _totalMkt + portfolioCash });
+        // AUDIT-FIX (2026-08-18): كانت القيمة النهائية = سوقية + نقد غير مستثمر،
+        // بينما التدفقات لا تحوي إيداع ذلك النقد كتدفق سالب. إضافة مبلغ للطرف
+        // النهائي بلا تكلفة مقابلة تضخّم XIRR بلا وجه حق. والأهم: §10 في نفس
+        // حزمة التقارير يستخدم الأسهم وحدها — فكان الملف الواحد يطبع رقمين
+        // مختلفين اسمهما «XIRR للمحفظة». الآن كلاهما على الأسهم وحدها.
+        if (_totalMkt > 0) pflows.push({ date: today, amount: _totalMkt });
 
         const pXirr = computeXIRR(pflows);
         p('```');
         p(`عدد التدفقات المستخدمة   : ${pflows.length}`);
         p(`أول تدفق                 : ${pflows.length ? new Date(Math.min(...pflows.map(f => f.date.getTime()))).toISOString().slice(0, 10) : '—'}`);
-        p(`القيمة النهائية المفترضة : ${SAR(_totalMkt + portfolioCash)} ر.س (سوقية + نقد غير مستثمر)`);
+        p(`القيمة النهائية المفترضة : ${SAR(_totalMkt)} ر.س (القيمة السوقية للأسهم — مطابقة للقسم 10)`);
+        p(`ملاحظة                   : النقد غير المستثمر (${SAR(portfolioCash)} ر.س) مستبعَد عمداً — لم يدخل كتدفق سالب فلا يصحّ ظهوره في الطرف النهائي.`);
         p(`XIRR للمحفظة             : ${pXirr == null ? 'غير متوفر' : ((pXirr >= 0 ? '+' : '') + (pXirr).toFixed(2) + '%')}`);
         p('```');
         if (pXirr == null) {
@@ -4118,7 +4132,14 @@ async function exportMonthlyReviewMD() {
         const deCfgD = await syncedGet('decision_engine_v1', {}) || {};
         holdings.forEach(h => {
           const w    = (+h.shares * +h.current_price) / gm2 * 100;
-          const blue = !!(deCfgD[h.ticker] && (deCfgD[h.ticker].blueChip === true || deCfgD[h.ticker].isBlueChip === true));
+          // AUDIT-FIX (2026-08-18، الدفعة الثانية): كوميت cd45f18 أصلح §36 وفوّت هذا
+          // الموضع — وهو الأخطر لأنه يُصدر **أمر البيع** لا مجرد حكم امتثال. بلا
+          // fallback أرامكو كان يقرأ سقفها 7% ويأمر بقصّ سهم ممتثل عند 12%.
+          // نفس منطق decision-engine.js:164-170 و targets.js:123-129.
+          const _cfgD = deCfgD[h.ticker];
+          const blue = (_cfgD && (_cfgD.blueChip === true || _cfgD.isBlueChip === true))
+            ? true
+            : (_cfgD && _cfgD.blueChip === false ? false : h.ticker === '2222');
           const cap  = blue ? 12 : 7;
           if (w > cap + 0.75) {
             const excessVal = (w - cap) / 100 * gm2;

@@ -1,5 +1,12 @@
 let holdings    = [];
 let stockTargets = {};   // ticker → target_pct  (من stock_targets)
+// AUDIT-FIX (2026-08-18): «هدف صفر» قرار تصفية صريح سجّله المالك في صفحة الأهداف،
+// وتقرؤه صفحة الأهداف ومحرّك القرار. اللوحة كانت لا تقرؤه فتعرض «⚪ بدون هدف»
+// لسهم يقول عنه المحرّك «تصفية — بِع كامل المركز»، وتُخرجه من حساب الانضباط
+// فيبدو الالتزام أعلى مما هو. المفتاح نفسه في الصفحات الثلاث.
+const ZERO_TARGETS_KEY = 'stock_zero_targets_v1';
+let zeroTargets = new Set();
+function isZeroTarget(t) { return zeroTargets.has(t); }
 let stockZones   = {};   // ticker → { entry_price, exit_price }
 let trimZonesMap = {};   // ticker → trim_from (من portfolio_tasks)
 let stockTaskMap = {};   // ticker → نوع المهمة اليدوية الفعّالة (من portfolio_tasks)
@@ -457,6 +464,10 @@ async function loadAllData() {
   // بناء خريطة الأهداف — stock_targets للنسب، portfolio_tasks للمناطق السعرية
   stockTargets = {};
   stockZones   = {};
+  try {
+    const _z = await loadUserSetting(ZERO_TARGETS_KEY);
+    zeroTargets = new Set(Array.isArray(_z) ? _z : []);
+  } catch (_) { zeroTargets = new Set(); }
   (rSt.data || []).forEach(r => {
     stockTargets[r.ticker] = +r.target_pct;
     stockZones[r.ticker]   = { entry_price: r.entry_price ?? null, exit_price: r.exit_price ?? null };
@@ -888,6 +899,10 @@ async function reloadHoldings() {
   stockTargets = {};
   stockZones   = {};
   trimZonesMap = {};
+  try {
+    const _z2 = await loadUserSetting(ZERO_TARGETS_KEY);
+    zeroTargets = new Set(Array.isArray(_z2) ? _z2 : []);
+  } catch (_) { /* الموجود يبقى */ }
   (stData || []).forEach(r => {
     stockTargets[r.ticker] = +r.target_pct;
     stockZones[r.ticker]   = { entry_price: r.entry_price ?? null, exit_price: r.exit_price ?? null };
@@ -2559,13 +2574,15 @@ function _renderSectorCards(entries, total) {
 
 // ── حالة وزن السهم مقابل هدفه: مفتاح واحد للّون والأيقونة والنص ──
 // 'none' بلا هدف · 'over' زيادة · 'under' نقص · 'ok' ضمن الهدف
-function weightStateOf(cur, tgt) {
+function weightStateOf(cur, tgt, ticker) {
+  if (!tgt && ticker && isZeroTarget(ticker)) return 'liquidate';
   if (!tgt)          return 'none';
   if (cur > tgt + 1) return 'over';
   if (cur < tgt - 1) return 'under';
   return 'ok';
 }
 const WEIGHT_STATE_META = {
+  liquidate: { icon: '🔴', label: 'هدف صفر = تصفية' },
   none:  { icon: '⚪', label: 'بدون هدف' },
   over:  { icon: '🔴', label: 'زيادة عن الهدف' },
   under: { icon: '🔵', label: 'نقص عن الهدف' },
@@ -2573,7 +2590,8 @@ const WEIGHT_STATE_META = {
 };
 function weightStateColor(st) {
   // النقص أزرق معلوماتي لا «سيّئ»؛ وبلا هدف ذهبي محايد
-  return st === 'ok' ? stateColorOf('good')
+  return st === 'liquidate' ? stateColorOf('bad')   // قرار تصفية صريح — أحمر كالزيادة
+    : st === 'ok'    ? stateColorOf('good')
     : st === 'over'  ? stateColorOf('bad')
     : st === 'under' ? seriesColor(1)          // --series-2 (أزرق)
     : seriesColor(0);                          // --series-1 (ذهبي)
@@ -2602,7 +2620,7 @@ function renderWeightChart() {
   const wTarget  = wSorted.map(h => +(+h.target_weight || 0));
   const wColors  = wSorted.map((h, i) => {
     const cur = wCurrent[i], tgt = wTarget[i];
-    return weightStateColor(weightStateOf(cur, tgt));
+    return weightStateColor(weightStateOf(cur, tgt, h.ticker));
   });
 
   const chartCont = document.getElementById('weightChart-container');
@@ -2743,7 +2761,7 @@ function _renderBarsChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
         legend: {
           labels: {
             color: th.muted, font: { family: th.font, size: 11 }, padding: 14, usePointStyle: true,
-            generateLabels: () => ['ok', 'over', 'under', 'none'].map(st => {
+            generateLabels: () => (zeroTargets.size ? ['ok', 'over', 'under', 'none', 'liquidate'] : ['ok', 'over', 'under', 'none']).map(st => {
               const c = weightStateColor(st), m = WEIGHT_STATE_META[st];
               return { text: `${m.icon} ${m.label}`, fillStyle: tint(c, 'd9'), strokeStyle: c, lineWidth: 1, pointStyle: 'rect', fontColor: th.text };
             }).concat([{ text: '🎯 الهدف المحدد', fillStyle: tgtFill, strokeStyle: tgtLine, lineWidth: 1.5, pointStyle: 'rect', fontColor: th.text }])
@@ -2785,7 +2803,7 @@ function _renderGapChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
   const allRows = [...withTarget, ...noTarget];
   const labels  = allRows.map(x => x.h.ticker);
   const gaps    = allRows.map(x => x.tgt > 0 ? +(x.cur - x.tgt).toFixed(2) : null);
-  const colors  = allRows.map(x => weightStateColor(weightStateOf(x.cur, x.tgt)));
+  const colors  = allRows.map(x => weightStateColor(weightStateOf(x.cur, x.tgt, x.h && x.h.ticker)));
   const th = chartTheme();
 
   weightChart = new Chart(wCtx, {
@@ -2836,7 +2854,7 @@ function _renderGapChart(wSorted, wCurrent, wTarget, wColors, wCtx) {
 function _renderWeightCards(wSorted, wCurrent, wTarget, wColors) {
   const cards = wSorted.map((h, i) => {
     const cur = wCurrent[i], tgt = wTarget[i];
-    const st  = weightStateOf(cur, tgt), meta = WEIGHT_STATE_META[st], clr = wColors[i];
+    const st  = weightStateOf(cur, tgt, h.ticker), meta = WEIGHT_STATE_META[st], clr = wColors[i];
     const diff = tgt ? (cur - tgt) : null;
     const diffTxt = diff !== null ? (diff >= 0 ? '+' : '') + diff.toFixed(1) + '%' : '';
     return `<div class="w-card" style="--card-accent:${clr}">
@@ -2859,7 +2877,7 @@ function _renderWeightCards(wSorted, wCurrent, wTarget, wColors) {
 function _renderWeightTable(wSorted, wCurrent, wTarget, wColors) {
   const rows = wSorted.map((h, i) => {
     const cur = wCurrent[i], tgt = wTarget[i];
-    const st  = weightStateOf(cur, tgt), meta = WEIGHT_STATE_META[st], clr = wColors[i];
+    const st  = weightStateOf(cur, tgt, h.ticker), meta = WEIGHT_STATE_META[st], clr = wColors[i];
     const diff = tgt ? (cur - tgt) : null;
     const diffTxt  = diff !== null ? (diff >= 0 ? '+' : '') + diff.toFixed(2) + '%' : '—';
     return `<tr>

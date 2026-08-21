@@ -1062,7 +1062,17 @@ function readWithdrawalConfig(retireCalYear) {
   const on = !!document.getElementById('inp-withdraw-enable')?.checked;
   const endYear = parseInt(document.getElementById('inp-withdraw-end-year')?.value) || 2065;
   const mode    = document.getElementById('inp-withdraw-mode')?.value || 'rate';
-  const rate    = (parseFloat(document.getElementById('inp-withdraw-rate')?.value) || 4) / 100;
+  // AUDIT-FIX (2026-08-18): الحقل مثبّت على 4 في HTML ولا يُبذَر من هدفك المحفوظ،
+  // بينما رقم FIRE ونسبة الإنجاز أعلى الصفحة يُحسبان بـ fireGoal.swr. فمن ضبط
+  // السحب على 3.5% كان يرى «نسبة السحب الآمن 3.5%» ثم تُحاكى بقاء محفظته بسحب 4%
+  // — أي أعلى 14% مما اختاره، على 10,000 مسار. الآن هدفك هو الافتراضي.
+  const _swrEl  = document.getElementById('inp-withdraw-rate');
+  const _savedSwr = +(_hist?.fireGoal?.swr) || 0;
+  if (_swrEl && !_swrEl.dataset.userTouched && _savedSwr > 0
+      && Math.abs((parseFloat(_swrEl.value) || 0) - _savedSwr) > 1e-9) {
+    _swrEl.value = _savedSwr;          // بذر من هدفك ما لم تُعدّله بنفسك
+  }
+  const rate    = (parseFloat(_swrEl?.value) || _savedSwr || 4) / 100;
   const monthly = parseFloat(document.getElementById('inp-withdraw-monthly')?.value) || 0;
   const inflate = document.getElementById('inp-withdraw-inflate')
     ? !!document.getElementById('inp-withdraw-inflate').checked : true;

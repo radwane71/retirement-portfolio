@@ -722,7 +722,7 @@
         </div>
         <div class="inp-group">
           <label>نسبة السحب السنوية (%)</label>
-          <input type="number" id="inp-withdraw-rate" step="0.1" min="0" max="20" value="4">
+          <input type="number" id="inp-withdraw-rate" step="0.1" min="0" max="20" value="4" oninput="this.dataset.userTouched='1'" title="يُبذَر تلقائياً من نسبة السحب الآمن في هدف تقاعدك؛ تعديلك هنا يتقدّم عليه">
           <span class="small text-muted" style="margin-top:3px">تُستخدم في وضع «النسبة»</span>
         </div>
         <div class="inp-group">

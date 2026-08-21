@@ -468,6 +468,7 @@ function evaluateHolding(h, ctx) {
     fairValue: val && val.fair ? val.fair.avg : null, valDate: val ? val.date : null,
     valFair: val && val.fair ? val.fair : null, valInputs: val ? val.inputs : null,
     valAgeDays: valAge, valStale, stabilizationFlag: val ? val.stabilizationFlag : null,
+    fvUnreliable: !!(val && val.unreliable), fvCV: val ? val.cv : null,
     xirr: stockFinancials(h.ticker).xirr,
     blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
   };
@@ -589,7 +590,15 @@ function evaluateHolding(h, ctx) {
   // §8 «ممنوع بيع رابح قوي توزيعه ينمو لمجرد ارتفاع السعر».
   const fvMargin = (base.fairValue != null && base.fairValue > 0 && priceOk)
     ? (base.fairValue - price) / base.fairValue * 100 : null;
-  if (fvMargin != null && fvMargin <= -15 && !valStale) {
+  if (base.fvUnreliable && fvMargin != null && fvMargin <= -15 && !valStale) {
+    return { ...base, action: 'monitor', label: 'راجع التقييم', priority: 2.8, severity: 'yellow',
+      reason: `السعر ${formatNum(price)} يبدو فوق القيمة العادلة ${formatNum(base.fairValue)}، `
+        + `لكن **الحاسبة نفسها رفضت اعتماد رقم واحد** لهذا السهم: تشتّت النماذج `
+        + `${base.fvCV != null ? formatNum(base.fvCV, 0) + '% ' : ''}تجاوز العتبة بلا مرساة، `
+        + `والرقم المحفوظ متوسط حسابي «للعلم فقط». فلا يُرشَّح للتخفيف بناءً عليه. `
+        + `أعِد تقييمه في حاسبة القيمة العادلة بمرساة، أو اعتمد نطاقاً لا رقماً.` };
+  }
+  if (fvMargin != null && fvMargin <= -15 && !valStale && !base.fvUnreliable) {
     return { ...base, action: 'monitor', label: 'مرشّح تخفيف (فوق العادلة)', priority: 2.7, severity: 'yellow',
       reason: `سقف القيمة (الفلتر 3): السعر ${formatNum(price)} أعلى من القيمة العادلة ${formatNum(base.fairValue)} بهامش ${formatNum(Math.abs(fvMargin))}% (> 15%) — مرشّح للتخفيف بعد مراجعتك. لا بيع آلي: تحقق أولاً أن التقييم محدَّث وأن الأرقام لم ترتفع فعلاً (قاعدة التثبيت §4)`
         + (watchNote ? ` | ملاحظة استدامة: ${watchNote}` : '') };
@@ -751,6 +760,13 @@ async function loadAll() {
         : parsedRange,
       inputs: entry.inputs || {},
       results: entry.results || {},
+      // AUDIT-FIX (2026-08-18): الحاسبة ترفع fairValueUnreliable حين يتجاوز تشتّت
+      // النماذج 30% بلا مرساة، وتقول للمالك حرفياً «لا تبنِ قراراً على رقم واحد» —
+      // ثم تحفظ المتوسط الحسابي في fairValueAvg على أي حال. كان المحرّك يقرأ الرقم
+      // ويتجاهل التحذير، فيرشّح سهماً للتخفيف بناءً على رقم رفضت الحاسبة إعطاءه.
+      unreliable: entry.results?.fairValueUnreliable === true,
+      cv: (entry.results?.dispersionCV != null && isFinite(+entry.results.dispersionCV))
+        ? +entry.results.dispersionCV : null,
     };
     (valHistByTicker[tk] = valHistByTicker[tk] || []).push(rec); // السجل الكامل لتتبّع التطور (§4)
     if (!valByTicker[tk]) valByTicker[tk] = rec;          // أول ظهور = الأحدث
