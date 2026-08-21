@@ -456,7 +456,8 @@ function renderKPIs() {
   const ddEl = document.getElementById('pk-max-drawdown');
   const _riskSeries = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (ddEl && _riskSeries.length >= 2) {
-    const { twrMap, sortedSnaps } = _computeTWR(_riskSeries, _stockFlows(_riskSeries.covered));
+    const { twrMap, sortedSnaps } = _computeTWR(_riskSeries,
+      _riskSeries.covered ? _externalFlows() : _stockFlows());
     // sortedSnaps is ISO-date ordered & de-duplicated by day; twrMap[date] = index (base 100)
     let peak = twrMap[sortedSnaps[0].date] ?? 100;
     let maxDD = 0;
@@ -502,7 +503,8 @@ function _computeRiskMetrics() {
   // نفس أساس تبويب المقارنة وأقصى التراجع: أسهمك وحدها وتدفقاتها (لا نقد ولا عقار)
   const series = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (series.length < 4) return null;
-  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows(series.covered));
+  const { twrMap, sortedSnaps } = _computeTWR(series,
+    series.covered ? _externalFlows() : _stockFlows());
   const pts = sortedSnaps
     .map(s => ({ date: s.date, idx: twrMap[s.date] }))
     .filter(p => p.idx != null && p.idx > 0);
@@ -1950,20 +1952,72 @@ function _dailyPortfolioSeries() {
   const idx = {}, last = {};
   covered.forEach(t => { idx[t] = 0; last[t] = null; });
 
+  // ══════════════════════════════════════════════════════════════
+  // AUDIT-FIX (2026-08-21): القيمة كانت **أسعاراً فقط**. حين توزّع شركة أرباحاً
+  // ينزل سعرها يوم الاستحقاق وتدخل النقود جيب المالك — فكان الخطّ يسجّل الهبوط
+  // ولا يسجّل النقود: **انحياز منهجي ضدّ المالك**، ويُقارَن فوق ذلك بتاسي
+  // «العائد الإجمالي» الذي يشمل توزيعات السوق. مقارنة عائد سعري بعائد إجمالي.
+  //
+  // النموذج الصحيح — المحفظة = أسهم + نقد داخلها:
+  //   نقد(t) = إيداعاتك − سحوباتك − مشترياتك + مبيعاتك + توزيعاتك (حتى t)
+  //   القيمة(t) = أسهم(t) + نقد(t)
+  // وبذلك: التوزيعة **عائد** لا تدفّق (القيمة لا تتغيّر: سعر ينزل ونقد يرتفع)،
+  // والشراء والبيع **حركة داخلية** لا تدفّق، والتدفق الخارجي الوحيد هو
+  // إيداعاتك وسحوباتك الفعلية. وهذا هو تعريف العائد الإجمالي للمحفظة.
+  // ══════════════════════════════════════════════════════════════
+  const coveredSet = new Set(covered);
+  const evByDate = {};                       // تاريخ → صافي أثر النقد ذلك اليوم
+  const addEv = (d, v) => { if (d) evByDate[d] = (evByDate[d] || 0) + v; };
+  (_cf || []).forEach(c => {
+    if (!c.date) return;
+    if (c.type === 'deposit')         addEv(c.date,  +c.amount || 0);
+    else if (c.type === 'withdrawal') addEv(c.date, -(+c.amount || 0));
+  });
+  (_tx || []).forEach(t => {
+    if (!t.date || !coveredSet.has(t.ticker)) return;   // غير المُقيَّم مستبعَد كلياً
+    if (t.type === 'buy')       addEv(t.date, -(+t.total || 0));
+    else if (t.type === 'sell') addEv(t.date,  (+t.total || 0));
+  });
+  (_divs || []).forEach(d => {
+    const dt = d.date || null;
+    if (!dt || !coveredSet.has(d.ticker)) return;
+    addEv(dt, +d.amount || 0);
+  });
+
   const out = [];
-  out.covered = new Set(covered);
+  out.covered = coveredSet;
+  let cash = 0, impliedDeposits = 0;
+  // أحداث سابقة لأول تاريخ في المحور تُطوى في الرصيد الابتدائي
+  Object.keys(evByDate).filter(d => d < dates[0]).sort()
+    .forEach(d => { cash += evByDate[d]; });
+
   for (const d of dates) {
-    let total = 0;
+    cash += (evByDate[d] || 0);
+    // رصيد سالب = إيداعات لم تُسجَّل في صفحة التدفقات (المشتريات تفوق الممول).
+    // نرفعه إلى الصفر ونعدّ الفارق إيداعاً ضمنياً — ونُعلنه بدل تشويه العائد.
+    if (cash < -0.005) { impliedDeposits += -cash; addEv(d, -cash); cash = 0; }
+
+    let stocks = 0;
     for (const t of covered) {
       const arr = _priceMapOf(t);
       while (idx[t] < arr.length && arr[idx[t]][0] <= d) { last[t] = arr[idx[t]][1]; idx[t]++; }
       if (last[t] == null) continue;                 // قبل أول سعر معروف
       const sh = _sharesAtISO(t, d);
-      if (sh > 0) total += sh * last[t];
+      if (sh > 0) stocks += sh * last[t];
     }
-    if (total > 0) out.push({ date: d, total_value: total, notes: 'auto' });
+    const total = stocks + cash;
+    if (total > 0) out.push({ date: d, total_value: total, notes: 'auto', stocks, cash });
   }
+  out.impliedDeposits = impliedDeposits;
   return out.length >= 2 ? out : null;
+}
+
+// التدفقات الخارجية للنموذج الجديد: إيداعاتك وسحوباتك الفعلية فقط.
+// المشتريات والمبيعات حركة داخلية (نقد ↔ أسهم) لا تدخل الحساب، والتوزيعات عائد.
+function _externalFlows() {
+  return (_cf || []).filter(c => c.date && (c.type === 'deposit' || c.type === 'withdrawal'))
+    .map(c => ({ date: c.date, type: c.type, amount: +c.amount || 0 }))
+    .filter(f => f.amount > 0);
 }
 
 // تغطية إعادة البناء — تُعلَن للمالك بدل الصمت عن رمز بلا أسعار
@@ -2275,7 +2329,8 @@ function renderBenchmarkTab() {
   // ── حساب TWR لمحفظة الأسهم ──────────────────────────────
   // التدفقات = مشترياتك ومبيعاتك (المال الداخل للأسهم فعلاً)، لا إيداعات
   // الوساطة — فيتطابق مجال التصحيح مع مجال القيمة المقاسة.
-  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries, _stockFlows(_rawSeries.covered));
+  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries,
+    _seriesMode === 'daily' ? _externalFlows() : _stockFlows());
 
   const getTwrAt = (date) => {
     const prior = sortedSnaps.filter(s => s.date <= date);
@@ -2449,7 +2504,7 @@ function renderBenchmarkTab() {
         </div>
 
         ${kvsHtml([
-          ['عائد أسهمك (TWR)',         fmtPct(portDelta)],
+          ['عائد محفظتك — إجمالي (TWR)', fmtPct(portDelta)],
           ['تاسي — سعري',              fmtPct(tasiDelta)],
           ['تاسي — عائد إجمالي (TRI)', fmtPct(tasiTriDelta)],
           ['Alpha مقابل السعري',       fmtPct(alphaPrice)],
@@ -2488,10 +2543,13 @@ function renderBenchmarkTab() {
           قراراتك عن مشترياتك ومبيعاتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>
           (وهو أول تاريخ تتوفّر فيه القيمتان معاً).`)}
 
-        ${_seriesMode === 'daily' ? noteHtml('📈', `<b>خطّ محفظتك مُعاد بناؤه يوماً بيوم من أسعار أسهمك.</b>
-          قيمة كل يوم = مجموع (أسهمك في ذلك اليوم × سعر إغلاقه) — الأسهم من معاملاتك،
-          والأسعار مجلوبة آلياً. <b>${_rawSeries.length}</b> نقطة يومية بدل لقطات شهرية،
-          وهي نفس طريقة مواقع المقارنة.
+        ${_seriesMode === 'daily' ? noteHtml('📈', `<b>خطّ محفظتك مُعاد بناؤه يوماً بيوم — بالعائد الإجمالي شاملاً توزيعاتك.</b>
+          قيمة كل يوم = <b>(أسهمك × سعر إغلاقها) + النقد داخل محفظتك</b>،
+          والنقد = إيداعاتك − سحوباتك − مشترياتك + مبيعاتك <b>+ توزيعاتك</b>.
+          فالتوزيعة <b>عائد لا تدفّق</b> (سعر السهم ينزل والنقد يرتفع، والقيمة لا تتغيّر)،
+          والشراء والبيع حركة داخلية، والتدفق الخارجي الوحيد إيداعاتك وسحوباتك.
+          <b>${_rawSeries.length}</b> نقطة يومية — وهذا ما يجعل الرقم قابلاً للمقارنة بتاسي «العائد الإجمالي».
+          ${_rawSeries.impliedDeposits > 0 ? `<br>⚠️ <b>${formatSAR(_rawSeries.impliedDeposits)}</b> إيداعات <b>ضمنية</b>: مشترياتك تجاوزت ما تموّله تدفقاتك المسجّلة، فافترضنا إيداعاً بالفارق بدل تشويه العائد. سجّلها في صفحة التدفقات النقدية ليصير الحساب دقيقاً.` : ''}
           ${_cov.missing.length ? `<br>⚠️ <b>${_cov.missing.length}</b> من ${_cov.total} رمزاً بلا أسعار تاريخية (${_cov.missing.map(esc).join('، ')}) — مستبعَدة من الخطّ، فالقيمة أقلّ من الحقيقية بمقدارها.` : ''}`,
           _cov.missing.length ? 'warn' : '') : ''}
 
