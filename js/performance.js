@@ -454,6 +454,7 @@ function renderKPIs() {
   // كتابة رصيد النقد. وبعد إعادة تأطير تبويب المقارنة إلى الأسهم وحدها صار في
   // الصفحة أساسان متعارضان في شاشة واحدة. الآن أساس واحد: أسهمك وتدفقاتها.
   const ddEl = document.getElementById('pk-max-drawdown');
+  let _snapMaxDD = null;
   const _riskSeries = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (ddEl && _riskSeries.length >= 2) {
     const { twrMap, sortedSnaps } = _computeTWR(_riskSeries,
@@ -470,6 +471,7 @@ function renderKPIs() {
       const dd = peak > 0 ? (v - peak) / peak * 100 : 0;
       if (dd < maxDD) { maxDD = dd; ddPeakDate = peakDate; ddTroughDate = s.date; }
     }
+    _snapMaxDD = maxDD;
     // AUDIT-FIX (2026-08): شارة النضج على عدد اللقطات بعد إزالة التكرارات لا العدد الخام
     const _mDD = assessMetricMaturity('risk', { snapshots: sortedSnaps.length });
     ddEl.innerHTML    = maxDD.toFixed(2) + '%' + maturityBadge(_mDD.level, _mDD.reason);
@@ -483,6 +485,24 @@ function renderKPIs() {
 
   // ── مقاييس مُعدَّلة بالمخاطر: التذبذب / شارب / سورتينو ──────────────
   renderRiskMetrics();
+
+  // لقطة للمقاييس ليقرأها تقرير المراجعة بدل إعادة حسابها بصيغ مغايرة
+  const _rm = _computeRiskMetrics();
+  const _basisDaily = !!_dailyPortfolioSeries();
+  _savePerfSnapshot({
+    basis: _basisDaily ? 'daily-prices' : 'snapshots',
+    basisLabel: _basisDaily
+      ? 'سلسلة يومية مُعاد بناؤها من أسعار الأسهم (أسهم + نقد + توزيعات)'
+      : 'لقطات صافي الثروة — مكوّن الأسهم فقط',
+    points: _riskSeries ? _riskSeries.length : 0,
+    risk: _rm ? {
+      annReturn: _rm.annReturn, annVol: _rm.annVol, annDownside: _rm.annDownside,
+      sharpe: _rm.sharpe, sortino: _rm.sortino,
+      nReturns: _rm.nReturns, nSnaps: _rm.nSnaps, shortSpan: _rm.shortSpan,
+    } : null,
+    maxDrawdown: (typeof _snapMaxDD === 'number') ? _snapMaxDD : null,
+    riskFree: RISK_FREE_RATE,
+  });
 }
 
 // ثابت العائد الخالي من المخاطر (افتراض): ~ عائد أدوات قصيرة سعودية.
@@ -1895,6 +1915,29 @@ function _stocksOnlySeries() {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// 📸 لقطة مقاييس صفحة الأداء — مصدر واحد بدل إعادة حساب في التقرير
+// ----------------------------------------------------------------------
+// تقرير المراجعة في الإعدادات كان **يعيد حساب** TWR وشارب وسورتينو وأقصى
+// التراجع والتدقيق السلوكي وكفاءة المحفظة بصيغ خاصة به، ثم **يصرّح** بأنها
+// «مطابقة لصفحة الأداء» — وهي ليست كذلك: أساسه لقطات صافي الثروة (أسهم + نقد
+// + عقار) بينما الصفحة انتقلت إلى سلسلة الأسهم اليومية، وصيغه تسبق إصلاحات
+// أغسطس 2026. اثنتا عشرة نتيجة تدقيق مؤكَّدة سببها هذا الازدواج وحده.
+//
+// العلاج البنيوي: الصفحة تحفظ مقاييسها في user_settings، والتقرير **يقرأ**
+// ولا يحسب — نفس نمط `decision_engine_snapshot_v1` المعتمد في المشروع.
+// وإن غابت اللقطة يقول التقرير ذلك صراحةً بدل أن يخترع رقماً مخالفاً.
+const PERF_SNAP_KEY = 'performance_snapshot_v1';
+let _perfSnap = null;
+
+async function _savePerfSnapshot(partial) {
+  try {
+    if (!_perfSnap) _perfSnap = (await loadUserSetting(PERF_SNAP_KEY)) || {};
+    Object.assign(_perfSnap, partial, { generated_at: new Date().toISOString() });
+    await saveUserSetting(PERF_SNAP_KEY, _perfSnap);
+  } catch (_) { /* اللقطة تحسين لا شرط — فشلها لا يعطّل الصفحة */ }
+}
+
+// ══════════════════════════════════════════════════════════════════════
 // 📈 إعادة بناء قيمة المحفظة يوماً بيوم من الأسعار التاريخية
 // ----------------------------------------------------------------------
 // لقطات صافي الثروة شهرية، فالخطّ المرسوم منها **دالة درجية**: مسطَّح بين
@@ -2484,6 +2527,17 @@ function renderBenchmarkTab() {
 
   const fmtPct = (v, sign = true) =>
     `${sign && v > 0 ? '+' : ''}${v.toFixed(2)}%`;
+
+  // لقطة المقارنة — يقرأها تقرير المراجعة بدل أن يحسب ألفا بأساس آخر
+  _savePerfSnapshot({
+    benchmark: {
+      from: points[0].date, to: points[points.length - 1].date,
+      portDelta, tasiDelta, tasiTriDelta, alpha, alphaPrice,
+      tasiDivYield: TASI_DIV_YIELD, points: points.length,
+      seriesMode: _seriesMode, seriesPoints: _rawSeries.length,
+      units: 'تراكمي على الفترة (لا سنوي)',
+    },
+  });
 
   const alphaState  = alpha >= 0 ? 'good' : 'bad';
   const periodLabel = `${formatDate(points[0].date)} — ${formatDate(points[points.length - 1].date)}`;

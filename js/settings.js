@@ -1436,6 +1436,17 @@ async function exportMonthlyReviewMD() {
     const salaryData = await syncedGet('salary_planner_v1',  { categories: [], entries: [] });
     const sukukData  = await syncedGet('sukuk_planner_v1',   { opportunities: [] });
     const benchmark  = await syncedGet('tharwa-benchmark_v1', []);
+    // AUDIT-FIX (2026-08-21): مقاييس الأداء تُقرأ من لقطة صفحة الأداء ولا تُعاد
+    // حسابها هنا. كان التقرير يحسبها بصيغ خاصة (أساس لقطات صافي الثروة وصيغ
+    // تسبق إصلاحات أغسطس 2026) **ويصرّح بأنها مطابقة للصفحة** — وهي ليست كذلك.
+    // اثنتا عشرة نتيجة تدقيق مؤكَّدة سببها هذا الازدواج وحده.
+    const perfSnap = await syncedGet('performance_snapshot_v1', null);
+    const _snapAge = (perfSnap && perfSnap.generated_at)
+      ? Math.floor((Date.now() - new Date(perfSnap.generated_at).getTime()) / 86400000) : null;
+    const _snapNote = (what) => {
+      p(`_⚠️ ${what} تُحسب في **صفحة الأداء التاريخي** ولا يُعاد حسابها هنا (لئلا يتضارب رقمان تحت اسم واحد)._`);
+      p('_افتح صفحة الأداء التاريخي مرة واحدة — تُحفظ مقاييسها تلقائياً ثم تظهر في التقرير التالي._');
+    };
     // life_goals_v1 يُزامَن عبر user_settings (life-goals.js: saveUserSetting/loadUserSetting)
     // — كان يُقرأ من localStorage فقط فيظهر التقرير بلا أهداف على جهاز جديد.
     const lifeGoals  = await syncedGet('life_goals_v1', []);
@@ -2071,8 +2082,11 @@ async function exportMonthlyReviewMD() {
     if (totalMktValue > 0) xirrFlows.push({ date: new Date(), amount: totalMktValue });
     const xirrResult = (typeof computeXIRR === 'function') ? computeXIRR(xirrFlows) : null;
 
-    // ── Forward YOC (آخر DPS × دورية × الأسهم الحالية) ─────────
-    // تقدير مبسّط: متوسط آخر سنتين ÷ القيمة السوقية
+    // AUDIT-FIX (2026-08-21): التعليق كان يصف منهجية لا يطبّقها الكود، والوسم
+    // «Forward» كان يُستعمل هنا وفي §33 لتعريفين مختلفين بلا تمييز — رقمان
+    // سنويان بالريال تحت اسم واحد. هذا **متوسط تاريخي** لا تقدير أمامي، فسُمّي
+    // باسمه. التقدير الأمامي الحقيقي (مجموع DPS آخر 12 شهراً × الأسهم الحالية)
+    // في §33 وحده، وهو المطابق للوحة التحكم وصفحة الأرباح.
     const divByYr = {};
     dividends.forEach(d => { divByYr[d.year] = (divByYr[d.year] || 0) + +d.amount; });
     const sortedYrs = Object.keys(divByYr).map(Number).sort((a,b) => b-a);
@@ -2081,12 +2095,17 @@ async function exportMonthlyReviewMD() {
     const fwdYoc = totalMktValue > 0 ? avgRecentDiv / totalMktValue * 100 : 0;
 
     // ── TTM (آخر 12 شهراً) ──────────────────────────────────────
-    const ttmKeys = new Set();
-    for (let i = 0; i < 12; i++) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      ttmKeys.add(d.getFullYear() + '-' + (d.getMonth() + 1));
-    }
-    const ttmDiv = dividends.reduce((s, d) => ttmKeys.has(+d.year + '-' + +d.month) ? s + +d.amount : s, 0);
+    // AUDIT-FIX (2026-08-21): كان يُحسب بمطابقة حقلي year/month على 12 شهراً
+    // تقويمياً، بينما لوحة التحكم وصفحة الأرباح تحسبانه بنافذة 365 يوماً متحركة
+    // على حقل **التاريخ** (نصف مفتوحة: > قبل سنة و≤ اليوم) مع احتياطي year/month
+    // للسجلات بلا تاريخ. فكان الرقم يختلف بين التقرير والصفحتين لسببين: تعارض
+    // الحقول المُدخلة يدوياً، وشهر تقويمي كامل مقابل نافذة متحركة.
+    const _ttmFrom = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+    const ttmDiv = dividends.reduce((s, d) => {
+      const dt = d.date ? parseDateLocal(d.date)
+        : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null);
+      return (dt && !isNaN(dt) && dt > _ttmFrom && dt <= today) ? s + +d.amount : s;
+    }, 0);
     const ttmYoc = totalCostBasis > 0 ? ttmDiv / totalCostBasis * 100 : 0;
 
     p('```');
@@ -2103,7 +2122,8 @@ async function exportMonthlyReviewMD() {
     p(`أرباح السنة الحالية ${today.getFullYear()}      : ${SAR(currentYearDivs)} ر.س`);
     p(`أرباح آخر 12 شهراً (TTM)    : ${SAR(ttmDiv)} ر.س`);
     p(`YOC على التكلفة (TTM)       : ${PCT(ttmYoc)}`);
-    p(`Forward YOC (متوقع)         : ${PCT(fwdYoc)}  (≈ ${SAR(avgRecentDiv)} / سنة)`);
+    p(`متوسط التوزيع السنوي (تاريخي): ${PCT(fwdYoc)}  (≈ ${SAR(avgRecentDiv)} / سنة — متوسط آخر سنتين تقويميتين ÷ القيمة السوقية)`);
+    p(`  ← ليس «الدخل المتوقَّع». التقدير الأمامي في القسم 33، وهو المطابق للوحة وصفحة الأرباح.`);
     p(`--- التدفقات النقدية ---`);
     p(`إجمالي الإيداعات            : ${SAR(totalDeposited)} ر.س`);
     p(`إجمالي السحوبات             : ${SAR(totalWithdrawn)} ر.س`);
@@ -3153,94 +3173,27 @@ async function exportMonthlyReviewMD() {
     book('B');
     await tick('العائد المعدَّل بالزمن');
     h2('29. الأداء التفصيلي — العائد المعدَّل بالزمن (TWR)');
-    p('العائد المعدَّل بالزمن (Time-Weighted Return، معيار GIPS بطريقة Modified Dietz) يعزل أداء قراراتك الاستثمارية بإزالة أثر الإيداعات والسحوبات. الأساس = 100 عند أول لقطة صافي ثروة. (مطابق لمنطق صفحة الأداء.)');
+    p('العائد المعدَّل بالزمن (Time-Weighted Return، معيار GIPS بطريقة Modified Dietz) يعزل أداء قراراتك الاستثمارية بإزالة أثر إيداعاتك وسحوباتك.');
     {
-      // مطابقة _deduplicateSnapsByDay + _computeTWR في performance.js
-      const _dedupSnaps = (snaps) => {
-        const byDate = {};
-        for (const s of snaps) {
-          const existing = byDate[s.date];
-          if (!existing) { byDate[s.date] = s; continue; }
-          const isManual  = s.notes && !s.notes.startsWith('auto');
-          const wasManual = existing.notes && !existing.notes.startsWith('auto');
-          if (isManual && !wasManual) { byDate[s.date] = s; continue; }
-          if (!wasManual && !isManual) byDate[s.date] = s;
-        }
-        return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-      };
-      const _twr = (snaps, cfsIn) => {
-        const sorted = _dedupSnaps(snaps);
-        if (!sorted.length) return { twrMap: {}, sorted: [] };
-        const cfs = cfsIn.slice().sort((a, b) => a.date.localeCompare(b.date));
-        const twrMap = {}; let factor = 1.0; twrMap[sorted[0].date] = 100;
-        for (let i = 1; i < sorted.length; i++) {
-          const sD = sorted[i - 1].date, eD = sorted[i].date;
-          const sV = +sorted[i - 1].total_value, eV = +sorted[i].total_value;
-          const netCF = cfs.filter(c => c.date > sD && c.date <= eD)
-            .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
-          const denom = sV + netCF / 2;
-          if (denom > 0) { const r = (eV - sV - netCF) / denom; factor *= (1 + r); }
-          twrMap[sorted[i].date] = +(factor * 100).toFixed(3);
-        }
-        return { twrMap, sorted };
-      };
-
-      if (snapshots.length >= 2) {
-        const { twrMap, sorted } = _twr(snapshots, cashflows);
-        const lastIdx  = twrMap[sorted[sorted.length - 1].date];
-        const totalTWR = lastIdx - 100;
-        const days     = (parseDateLocal(sorted[sorted.length - 1].date) - parseDateLocal(sorted[0].date)) / 86400000;
-        const years    = days / 365;
-        const annTWR   = years > 0.08 && lastIdx > 0 ? (Math.pow(lastIdx / 100, 1 / years) - 1) * 100 : null;
-
-        p(`**الفترة:** ${sorted[0].date} ← ${sorted[sorted.length - 1].date} (${years.toFixed(1)} سنة، ${sorted.length} لقطة)  `);
-        p(`**إجمالي عائد TWR:** ${(totalTWR >= 0 ? '+' : '') + PCT(totalTWR)}  `);
-        if (annTWR != null) p(`**عائد TWR السنوي المركّب:** ${(annTWR >= 0 ? '+' : '') + PCT(annTWR)}`);
-
-        // العوائد الشهرية — آخر مؤشر في كل شهر
-        h3('العوائد الشهرية (TWR)');
-        const monthEnd = {};
-        sorted.forEach(s => { monthEnd[s.date.slice(0, 7)] = twrMap[s.date]; });
-        const months = Object.keys(monthEnd).sort();
-        let prevIdx = null;
-        const mRows = months.map(m => {
-          const idx = monthEnd[m];
-          const ret = prevIdx != null && prevIdx > 0 ? (idx - prevIdx) / prevIdx * 100 : null;
-          prevIdx = idx;
-          return [m, N(idx), ret == null ? '—' : ((ret >= 0 ? '+' : '') + PCT(ret))];
-        });
-        p(mdTable(['الشهر','مؤشر TWR (=100 بداية)','عائد الشهر'], mRows));
-
-        // مقارنة بمؤشر تاسي
-        h3('مقارنة بمؤشر تاسي');
-        const bmSorted = [...(Array.isArray(benchmark) ? benchmark : [])]
-          .filter(e => e && e.date).sort((a, b) => a.date.localeCompare(b.date));
-        if (bmSorted.length >= 2) {
-          const tasiAt = (date) => { const pr = bmSorted.filter(e => e.date <= date); return pr.length ? +pr[pr.length - 1].value : null; };
-          const twrAt  = (date) => { const pr = sorted.filter(s => s.date <= date); return pr.length ? twrMap[pr[pr.length - 1].date] : null; };
-          const startDate = sorted[0].date < bmSorted[0].date ? bmSorted[0].date : sorted[0].date;
-          const endDate   = sorted[sorted.length - 1].date;
-          const twrStart  = twrAt(startDate) ?? 100;
-          const tasiStart = tasiAt(startDate), tasiEnd = tasiAt(endDate);
-          const portDelta = twrStart > 0 ? (lastIdx / twrStart * 100 - 100) : null;
-          const tasiDelta = (tasiStart && tasiEnd && tasiStart > 0) ? (tasiEnd - tasiStart) / tasiStart * 100 : null;
-          if (portDelta != null && tasiDelta != null) {
-            const alpha = portDelta - tasiDelta;
-            p(mdTable(['المقياس','القيمة'], [
-              ['الفترة المشتركة', `${startDate} ← ${endDate}`],
-              ['عائد محفظتك (TWR)', (portDelta >= 0 ? '+' : '') + PCT(portDelta)],
-              ['عائد تاسي (سعري)',  (tasiDelta >= 0 ? '+' : '') + PCT(tasiDelta)],
-              ['الفارق (ألفا، سعري)', (alpha >= 0 ? '+' : '') + PCT(alpha)],
-            ]));
-            p('_ملاحظة منهجية: عائد محفظتك TWR يشمل توزيعاتك، بينما تاسي هنا سعري فقط (لا يشمل التوزيعات). للمقارنة العادلة أضف عائد توزيعات تاسي التقديري ~3.5%/سنة._');
-          } else {
-            p('_تعذّرت المقارنة — بيانات تاسي لا تغطي فترة المحفظة._');
-          }
-        } else {
-          p('_لا توجد بيانات كافية لمؤشر تاسي للمقارنة (انظر القسم 19)._');
+      const b = perfSnap && perfSnap.benchmark;
+      if (b) {
+        p(mdTable(['المقياس','القيمة'], [
+          ['الفترة المشتركة', `${b.from} ← ${b.to}`],
+          ['عائد محفظتك (TWR، تراكمي)', (b.portDelta >= 0 ? '+' : '') + PCT(b.portDelta)],
+          ['تاسي — سعري',               (b.tasiDelta >= 0 ? '+' : '') + PCT(b.tasiDelta)],
+          ['تاسي — عائد إجمالي (TRI)',  (b.tasiTriDelta >= 0 ? '+' : '') + PCT(b.tasiTriDelta)],
+          ['**ألفا مقابل TRI**',        (b.alpha >= 0 ? '+' : '') + PCT(b.alpha)],
+          ['ألفا مقابل السعري',         (b.alphaPrice >= 0 ? '+' : '') + PCT(b.alphaPrice)],
+          ['نقاط المقارنة', String(b.points)],
+          ['أساس المحفظة', perfSnap.basisLabel || '—'],
+        ]));
+        p(`_المصدر: لقطة صفحة الأداء التاريخي${_snapAge != null ? ` (عمرها ${_snapAge} يوماً)` : ''}. الأرقام هنا **نسخة** منها لا حساباً مستقلاً — فلا يمكن أن تتضارب الصفحتان._`);
+        p(`_الوحدة **تراكمية على الفترة** لا سنوية. وعائد توزيعات تاسي في TRI افتراض ثابت ${(b.tasiDivYield * 100).toFixed(1)}%/سنة مكتوب في الكود، وليس العائد الفعلي للمؤشر._`);
+        if (_snapAge != null && _snapAge > 7) {
+          p(`_⏰ اللقطة عمرها ${_snapAge} يوماً — افتح صفحة الأداء لتحديثها قبل الاعتماد على هذه الأرقام._`);
         }
       } else {
-        p('_تحتاج لقطتَي صافي ثروة على الأقل لحساب TWR. أضِف لقطات من صفحة صافي الثروة._');
+        _snapNote('مقاييس TWR ومقارنة تاسي');
       }
     }
     hr();
@@ -3259,172 +3212,103 @@ async function exportMonthlyReviewMD() {
         });
       return sh;
     };
-    // الدخل التوزيعي المتوقّع (Forward) — نفس منطق dividends.js/_dpsTrendAware:
-    // وسيط آخر (freq) دفعات، مع استثناء الأسهم النامية التصاعدية (آخر دفعة معلنة).
+    // ══════════════════════════════════════════════════════════════
+    // الدخل التوزيعي المتوقَّع (Forward) — **منسوخ حرفياً** من قرار المالك
+    // 2026-08 المطبَّق في dashboard.js و dividends.js:
+    //     DPS السنوي = مجموع DPS آخر 12 شهراً (لا وسيط آخر freq دفعات)
+    //     المتوقَّع   = DPS × الأسهم الحالية
+    // AUDIT-FIX (2026-08-21): كانت هنا نسخة ثالثة متفرّعة تستخدم المنهجية
+    // المهجورة (وسيط النافذة + استثناء «تصاعدي») — وهي تفترض تساوي الدفعات
+    // فتضخّم النمط السعودي (مرحلي صغير + ختامي كبير) حتى +129%، وتفتقد فرع
+    // الدورية الشهرية فتقسم دخل الريت الشهري على ثلاثة، ولا تستبعد المنقطعين.
+    // فكان «الدخل المتوقع» و«نسبة تغطية هدف الدخل» في التقرير يخالفان اللوحة
+    // وصفحة الأرباح. **أي تعديل على المنهجية يجب أن يُطبَّق في الملفات الثلاثة.**
+    // ══════════════════════════════════════════════════════════════
     const _computeForwardIncome = () => {
-      const rows = []; let total = 0;
+      const rows = []; let total = 0; const stale = [];
+      const nowTs = today.getTime();
       new Set(holdings.map(h => h.ticker)).forEach(ticker => {
         const h = holdings.find(x => x.ticker === ticker);
         if (!h || +h.shares <= 0) return;
         const divs = dividends.filter(d => d.ticker === ticker)
           .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
         if (!divs.length) return;
+
+        const dateOf = d => (d.date ? parseDateLocal(d.date)
+          : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null));
+
+        // الدورية من وسيط الفجوات — مع فرع شهري (≤45 يوماً) كما في الملفين
         let freq = 1;
         if (divs.length >= 2) {
           const gaps = [];
           for (let i = 1; i < divs.length; i++) {
-            const d0 = divs[i - 1].date, d1 = divs[i].date;
-            if (d0 && d1) gaps.push((new Date(d1) - new Date(d0)) / 86400000);
+            const a = dateOf(divs[i - 1]), b = dateOf(divs[i]);
+            if (a && b) gaps.push(Math.floor((b - a) / 86400000));
           }
-          gaps.sort((a, b) => a - b);
-          const med = gaps[Math.floor(gaps.length / 2)] || 999;
-          if (med <= 105) freq = 4; else if (med <= 210) freq = 2;
+          gaps.sort((x, y) => x - y);
+          const med = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 999;
+          if (med <= 45) freq = 12; else if (med <= 105) freq = 4; else if (med <= 210) freq = 2;
         }
+
+        // DPS لكل دفعة = المبلغ ÷ الأسهم وقتها (المستلَم فقط — لا تواريخ مستقبلية)
         const series = [];
         divs.forEach(d => {
+          const dt = dateOf(d);
+          if (!dt || dt.getTime() > nowTs) return;      // مُعلَن لم يُصرف بعد
           const sh = _sharesAtDate(ticker, d.date || '9999-12-31');
-          if (sh >= 0.001) series.push(+d.amount / sh);
+          if (sh >= 0.001) series.push({ dps: +d.amount / sh, ts: dt.getTime() });
         });
-        let dps = 0;
-        if (series.length) {
-          const win = series.slice(-freq);
-          let rising = freq >= 2 && win.length >= freq;
-          if (rising) {
-            for (let i = 1; i < win.length; i++) if (win[i] < win[i - 1] * 0.99) { rising = false; break; }
-            rising = rising && win[win.length - 1] > win[0] * 1.03;
-          }
-          dps = rising ? win[win.length - 1] : win.slice().sort((a, b) => a - b)[Math.floor(win.length / 2)];
-        } else {
-          // احتياطي: آخر سنة مسجّلة ÷ الدورية ÷ الأسهم الحالية
-          const lastYr = Math.max(...divs.map(d => +d.year || new Date(d.date).getFullYear()));
-          const yrTotal = divs.filter(d => (+d.year || new Date(d.date).getFullYear()) === lastYr)
-            .reduce((s, d) => s + +d.amount, 0);
-          dps = yrTotal > 0 ? yrTotal / +h.shares / freq : 0;
+        if (!series.length) return;
+
+        const cutoff = nowTs - 365 * 86400000;
+        const ttmDps = series.filter(x => x.ts >= cutoff).reduce((a, x) => a + x.dps, 0);
+        // احتياطي الموزّع السنوي الذي تجاوزت دفعته 12 شهراً: مجموع آخر دورة كاملة
+        const dpsAnnual = ttmDps > 0 ? ttmDps
+          : series.slice(-freq).reduce((a, x) => a + x.dps, 0);
+
+        // استبعاد المنقطع — نفس عتبة الملفين: (365 ÷ freq) × 1.75
+        const lastTs = series[series.length - 1].ts;
+        const daysSince = Math.floor((nowTs - lastTs) / 86400000);
+        const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+        const projected = dpsAnnual * +h.shares;
+        if (daysSince > staleAfter) {
+          stale.push({ ticker, name: h.name || ticker, daysSince, projected });
+          return;                                        // لا يدخل المجموع
         }
-        const projected = dps * freq * +h.shares;
         total += projected;
-        rows.push({ ticker, name: h.name || ticker, dps, freq, shares: +h.shares, projected });
+        rows.push({ ticker, name: h.name || ticker, dps: dpsAnnual, freq, shares: +h.shares, projected });
       });
-      return { total, rows };
+      return { total, rows, stale };
     };
     // TWR (Modified Dietz) — نفس منطق performance.js
-    const _dedupSnaps30 = (snaps) => {
-      const byDate = {};
-      for (const s of snaps) {
-        const ex = byDate[s.date];
-        if (!ex) { byDate[s.date] = s; continue; }
-        const isM = s.notes && !s.notes.startsWith('auto');
-        const wasM = ex.notes && !ex.notes.startsWith('auto');
-        if (isM && !wasM) { byDate[s.date] = s; continue; }
-        if (!wasM && !isM) byDate[s.date] = s;
-      }
-      return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
-    };
-    const _twr30 = (snaps, cfsIn) => {
-      const sorted = _dedupSnaps30(snaps);
-      if (!sorted.length) return { twrMap: {}, sorted: [] };
-      const cfs = cfsIn.slice().sort((a, b) => a.date.localeCompare(b.date));
-      const twrMap = {}; let factor = 1.0; twrMap[sorted[0].date] = 100;
-      for (let i = 1; i < sorted.length; i++) {
-        const sD = sorted[i - 1].date, eD = sorted[i].date;
-        const sV = +sorted[i - 1].total_value, eV = +sorted[i].total_value;
-        const netCF = cfs.filter(c => c.date > sD && c.date <= eD)
-          .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
-        const denom = sV + netCF / 2;
-        if (denom > 0) { const r = (eV - sV - netCF) / denom; factor *= (1 + r); }
-        twrMap[sorted[i].date] = factor * 100;
-      }
-      return { twrMap, sorted };
-    };
+    // AUDIT-FIX (2026-08-21): حُذفت نسختا _dedupSnaps30 و_twr30 — كانتا نسخة
+    // ثانية من منطق TWR داخل هذا الملف، بلا الفلتر الذي تطبّقه صفحة الأداء
+    // (_selectConsistentSnapshots) فتخلط اللقطات التلقائية باليدوية صامتاً.
+    // المقاييس الآن تُقرأ من لقطة الصفحة، فلا محلّ لحساب ثانٍ يتفرّع عنها.
 
-    // أرقام أساسية مشتركة
-    const _totalMkt   = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
-    const _totalCost  = holdings.reduce((s, h) => s + +h.shares * +h.avg_price, 0);
-    const _totalBuys  = transactions.filter(t => t.type === 'buy').reduce((s, t) => s + +t.total, 0);
-    const _totalSells = transactions.filter(t => t.type === 'sell').reduce((s, t) => s + +t.total, 0);
-    const _totalDiv   = dividends.reduce((s, d) => s + +d.amount, 0);
-    const _totalComm  = transactions.reduce((s, t) => s + (+t.commission || 0) + (+t.vat || 0), 0);
-    const _sukukActive = (sukukData.opportunities || [])
-      .filter(o => o.status === 'مشترك').reduce((s, o) => s + (+o.amount || 0), 0);
-    const _reVal      = activeRE.reduce((s, r) => s + +r.current_value, 0);
-    const _assetVal   = activeAssets.reduce((s, a) => s + +a.value, 0);
-    const _fwd        = _computeForwardIncome();
-
-    // ════════════════════════════════════════════════════════
-    // 30. مقاييس المخاطر (Risk Metrics)
-    // ════════════════════════════════════════════════════════
-    book('B');
-    await tick('مقاييس المخاطر');
-    h2('30. مقاييس المخاطر — التنويع والتركيز والتذبذب');
-    p('طبقة المخاطر التي تكمّل أرقام العائد: تقيس *ثمن* العائد لا حجمه فقط. (مطابقة للوحة التحكم وصفحة الأداء.)');
-
-    // ── التنويع (HHI + العدد الفعّال) ──
-    if (holdings.length && _totalMkt > 0 && typeof computeDiversification === 'function') {
-      const dv = computeDiversification(holdings.map(h => ({
-        value: +h.shares * +h.current_price, sector: h.sector, label: h.ticker,
-      })));
-      if (dv) {
-        h3('التنويع (Diversification)');
+    h3('العائد المعدَّل بالمخاطر');
+    {
+      // AUDIT-FIX (2026-08-21): كانت تُحسب هنا بصيغة تسبق إصلاحَي أغسطس 2026 في
+      // صفحة الأداء (تسنية قسرية تحت السنة، RF بلا تحجيم زمني، بلا ترقيق ≥20 يوماً)
+      // وعلى أساس مختلف — مع تصريح نصّي بالمطابقة. الآن تُقرأ من لقطة الصفحة.
+      const rk = perfSnap && perfSnap.risk;
+      if (rk) {
+        const pct = v => (v == null ? '—' : (v * 100).toFixed(1) + '%');
         p('```');
-        p(`عدد الأسهم                 : ${holdings.length}`);
-        p(`العدد الفعّال (1÷HHI)       : ${dv.effectiveN}  ← تنوّع أوزانك يعادل هذا العدد من أسهم متساوية`);
-        p(`HHI (تركّز الأوزان)         : ${dv.hhi.toFixed(4)}`);
-        p(`مؤشر التنويع (0–100)       : ${dv.gaugePos} — ${dv.zoneLabel}`);
-        p(`عدد القطاعات               : ${dv.sectorCount}`);
-        p(`أكبر مركز                  : ${dv.top1Pct.toFixed(1)}% (${dv.top1Name})`);
-        p(`أكبر قطاع                  : ${dv.topSectorPct.toFixed(1)}% (${dv.topSectorName}) عبر ${dv.topSectorCount} سهم`);
+        p(`أساس القياس                 : ${perfSnap.basisLabel || '—'}`);
+        p(`${rk.shortSpan ? 'العائد التراكمي (المدة < سنة)' : 'العائد السنوي'}      : ${pct(rk.annReturn)}`);
+        p(`التذبذب ${rk.shortSpan ? 'على المدة' : 'السنوي'}          : ${pct(rk.annVol)}`);
+        p(`تذبذب الهبوط                : ${pct(rk.annDownside)}`);
+        p(`Sharpe  = (العائد−RF)÷التذبذب: ${rk.sharpe == null ? '—' : rk.sharpe.toFixed(2)}`);
+        p(`Sortino = (العائد−RF)÷الهبوط : ${rk.sortino == null ? '—' : rk.sortino.toFixed(2)}`);
+        p(`العائد الخالي من المخاطر RF : ${((perfSnap.riskFree ?? 0.03) * 100).toFixed(0)}% (افتراض مكتوب في الكود)`);
+        p(`أقصى تراجع                  : ${perfSnap.maxDrawdown == null ? '—' : perfSnap.maxDrawdown.toFixed(2) + '%'}`);
+        p(`عدد الفترات المستخدَمة       : ${rk.nReturns} (من ${rk.nSnaps} نقطة)`);
         p('```');
-        p('- **المرجع (Evans & Archer 1968):** ~90% من المخاطر القابلة للتنويع تُزال عند 15 سهماً فعّالاً.');
-        if (dv.corrWarn) {
-          p(`\n> ⚠️ **تنويع اسمي لا فعلي:** ${dv.corrMsg} المؤشر يقيس تركيز الأوزان لا ترابط الأسهم — القطاع الواحد يتحرك ككتلة عند الصدمات.`);
-        }
-      }
-    } else {
-      p('_لا توجد حيازات كافية لحساب التنويع._');
-    }
-
-    // ── التذبذب + Sharpe + Sortino + Max Drawdown (من TWR) ──
-    h3('العائد المعدَّل بالمخاطر (من سلسلة TWR)');
-    if (snapshots.length >= 4) {
-      const { twrMap, sorted } = _twr30(snapshots, cashflows);
-      const pts = sorted.map(s => ({ date: s.date, idx: twrMap[s.date] })).filter(x => x.idx > 0);
-      if (pts.length >= 4) {
-        // Max Drawdown
-        let peak = pts[0].idx, maxDD = 0;
-        pts.forEach(pt => { if (pt.idx > peak) peak = pt.idx; const dd = (pt.idx - peak) / peak * 100; if (dd < maxDD) maxDD = dd; });
-        // عوائد الفترات
-        const rets = [];
-        for (let i = 1; i < pts.length; i++) rets.push(pts[i].idx / pts[i - 1].idx - 1);
-        const spanDays = (new Date(pts[pts.length - 1].date) - new Date(pts[0].date)) / 86400000;
-        const years = spanDays / 365.25;
-        const ppy = rets.length / years;
-        const annRet = Math.pow(pts[pts.length - 1].idx / pts[0].idx, 1 / years) - 1;
-        const mean = rets.reduce((s, r) => s + r, 0) / rets.length;
-        const varSmp = rets.reduce((s, r) => s + (r - mean) ** 2, 0) / (rets.length - 1);
-        const volP = Math.sqrt(Math.max(0, varSmp));
-        const downSq = rets.reduce((s, r) => s + (r < 0 ? r * r : 0), 0) / rets.length;
-        const ddP = Math.sqrt(Math.max(0, downSq));
-        const annVol = volP * Math.sqrt(ppy);
-        const annDown = ddP * Math.sqrt(ppy);
-        const RF = 0.03;
-        const sharpe = annVol > 1e-9 ? (annRet - RF) / annVol : null;
-        const sortino = annDown > 1e-9 ? (annRet - RF) / annDown : null;
-        p('```');
-        p(`أقصى تراجع (Max Drawdown)  : ${maxDD.toFixed(2)}%  ← أعمق هبوط من قمة إلى قاع (معزول عن الإيداعات)`);
-        p(`التذبذب السنوي (Volatility) : ${(annVol * 100).toFixed(1)}%`);
-        p(`تذبذب الهبوط (Downside Dev) : ${(annDown * 100).toFixed(1)}%`);
-        p(`العائد السنوي (TWR هندسي)   : ${(annRet >= 0 ? '+' : '') + (annRet * 100).toFixed(2)}%`);
-        p(`Sharpe  = (العائد−RF)÷التذبذب: ${sharpe == null ? '—' : sharpe.toFixed(2)}`);
-        p(`Sortino = (العائد−RF)÷الهبوط : ${sortino == null ? '—' : sortino.toFixed(2)}`);
-        p(`العائد الخالي من المخاطر RF : ${(RF * 100).toFixed(0)}% (افتراض)`);
-        p(`عدد الفترات المحسوبة        : ${rets.length}`);
-        p('```');
-        p('🟡 _تقريبي: مبني على لقطات صافي الثروة الشهرية غير المنتظمة، لا أسعار يومية. Sortino أنسب لأنه يعاقب على الهبوط فقط._');
+        p(`_المصدر: لقطة صفحة الأداء${_snapAge != null ? ` (عمرها ${_snapAge} يوماً)` : ''} — نسخة لا حساب مستقل._`);
       } else {
-        p('_تحتاج ≥4 لقطات صافي ثروة صالحة لحساب مقاييس المخاطر._');
+        _snapNote('التذبذب وشارب وسورتينو وأقصى التراجع');
       }
-    } else {
-      p('_تحتاج ≥4 لقطات صافي ثروة (أضِفها من صفحة صافي الثروة) لحساب Sharpe/Sortino/التذبذب/التراجع._');
     }
     hr();
 
@@ -3434,7 +3318,8 @@ async function exportMonthlyReviewMD() {
     book('B');
     await tick('التدقيق السلوكي');
     h2('31. التدقيق السلوكي — انضباط قراراتك');
-    p('يحلّل صفقاتك المُغلقة (المُصفّاة بالكامل) لكشف الأنماط النفسية: هل تُمسك بخاسريك؟ هل تُتاجر بإفراط؟ (مطابق لصفحة الأداء.)');
+    p('يحلّل صفقاتك المُغلقة (المُصفّاة بالكامل) لكشف الأنماط النفسية: هل تُمسك بخاسريك؟ هل تُتاجر بإفراط؟');
+    p('_⚠️ **ليس مطابقاً لتبويب «تحليل السلوك» في صفحة الأداء** — كان يُصرَّح بذلك خطأً. الصفحة تستبعد الصفقات ناقصة التاريخ وتُعلن عددها، وتحجب تشخيص «نفور من الخسارة» دون 8 صفقات وتعرض فاصل ثقة، وتحتسب المنح في وتيرة التداول. هذا القسم أبسط منه — اعتمد الصفحة عند التعارض._');
     {
       // بناء الصفقات المغلقة: رمز بِيع بالكامل (الأسهم المتبقية ≈ 0)
       const byTk = {};
@@ -3691,13 +3576,19 @@ async function exportMonthlyReviewMD() {
         });
         return Object.values(m).reduce((s, v) => v.bs < 0.001 ? s : s + v.sr - (v.bc / v.bs) * v.ss, 0);
       })();
-      const efficiency = _totalComm > 0 ? totalPnL / _totalComm : null;
+      // AUDIT-FIX (2026-08-21): البسط كان يُسقط التوزيعات المستلمة بينما «كفاءة
+      // رأس المال» في صفحة الأداء تستخدم totalReturn الذي يشملها (performance.js:1219)،
+      // فيظهر رقمان مختلفان لنفس المفهوم — والوسم يقول «إجمالي الأرباح» رغم إسقاطها.
+      const efficiency = _totalComm > 0 ? (totalPnL + _totalDiv) / _totalComm : null;
 
       p('```');
       p(`Div ROI (توزيعات ÷ تكلفة الشراء) : ${divROI.toFixed(1)}%  ← نسبة استرداد رأس المال عبر التوزيعات وحدها`);
       p(`سنوات التعادل بالتوزيعات          : ${breakEvenYrs == null ? '—' : breakEvenYrs.toFixed(1) + ' سنة'}  (تكلفة الحيازة ÷ الدخل المتوقع سنوياً)`);
-      p(`الدخل التوزيعي المتوقع (Forward)  : ${SAR(_fwd.total)} ر.س/سنة`);
-      p(`نسبة كفاءة المحفظة               : ${efficiency == null ? '—' : efficiency.toFixed(1) + '×'}  (إجمالي الأرباح ÷ العمولات والضرائب)`);
+      p(`الدخل التوزيعي المتوقع (Forward)  : ${SAR(_fwd.total)} ر.س/سنة  (مجموع DPS آخر 12 شهراً × أسهمك الحالية — نفس تعريف اللوحة وصفحة الأرباح)`);
+      if (_fwd.stale && _fwd.stale.length) {
+        p(`مستبعَد كمنقطع                    : ${_fwd.stale.length} سهماً (${_fwd.stale.map(x => x.ticker + ' — ' + x.daysSince + ' يوماً').join('، ')})`);
+      }
+      p(`نسبة كفاءة المحفظة               : ${efficiency == null ? '—' : efficiency.toFixed(1) + '×'}  (ر.خ محقق + غير محقق + التوزيعات ÷ العمولات والضرائب — نفس بسط «كفاءة رأس المال» في صفحة الأداء)`);
       p(`إجمالي العمولات والضرائب المدفوعة : ${SAR(_totalComm)} ر.س`);
       p('```');
       if (efficiency != null) {
