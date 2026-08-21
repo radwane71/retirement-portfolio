@@ -29,6 +29,31 @@ const TABLES = [
 ];
 
 // ══════════════════════════════════════════════════════════════
+// كشف جدول جديد لم يُسجَّل في TABLES — AUDIT-FIX 2026-08-21 (#17)
+// القائمة أعلاه يدوية: أي جدول يُضاف للمخطّط ولا يُضاف هنا يفوت النسخة
+// الاحتياطية بالكامل وبصمت (حدث فعلاً مع support_tickets و user_profiles).
+// PostgREST ينشر مواصفة OpenAPI على جذر /rest/v1/ تسرد كل جدول يراه الدور
+// الحالي — نقارنها بـTABLES ونُعلن الفرق. عند تعذّر الجلب نُعلن التعذّر ولا
+// ندّعي الاكتمال (§8: لا فشل صامت).
+async function detectUnlistedTables() {
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/`, {
+      headers: { apikey: SUPABASE_KEY, Accept: 'application/openapi+json' },
+    });
+    if (!res.ok) return { ok: false, reason: `HTTP ${res.status}` };
+    const spec = await res.json();
+    const seen = spec && spec.definitions ? Object.keys(spec.definitions)
+               : (spec && spec.paths ? Object.keys(spec.paths).filter(k => k.startsWith('/') && k.length > 1).map(k => k.slice(1)) : []);
+    const known = new Set(TABLES);
+    const unlisted = seen.filter(t => t && !t.startsWith('rpc/') && !known.has(t)).sort();
+    const missing  = TABLES.filter(t => !seen.includes(t)).sort();
+    return { ok: true, seen: seen.length, unlisted, missing };
+  } catch (e) {
+    return { ok: false, reason: String(e && e.message || e) };
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // مواصفات الجداول الخارجة عن الافتراضي
 //   ownerCol   : عمود هوية المالك (الافتراضي user_id)
 //   OPTIONAL   : قد تمنع RLS قراءتها/حذفها → لا تُوقف التصدير ولا الاستعادة،
@@ -374,7 +399,18 @@ async function exportBackup() {
              `<td><span class="tag" data-state="${st}">${esc(note)}</span></td></tr>`;
     }).join('');
 
+    // AUDIT-FIX 2026-08-21 (#17): TABLES قائمة يدوية — جدول يُضاف للمخطّط ولا
+    // يُضاف إليها يفوت النسخة بالكامل وبصمت. نستجوب مواصفة PostgREST بعد كل
+    // تصدير ونُعلن أي جدول خارج القائمة فوق التقرير مباشرةً.
+    const _det = await detectUnlistedTables();
+    const _detHtml = !_det.ok
+      ? noteHtml('warn', `⚠️ تعذّر التحقق من اكتمال قائمة الجداول (${esc(_det.reason)}) — لا يمكن تأكيد أن النسخة تغطي كل جدول.`)
+      : _det.unlisted.length
+        ? noteHtml('bad', `🔴 <b>${esc(_det.unlisted.length)}</b> جدولاً في قاعدة البيانات <b>خارج</b> هذه النسخة: <code>${esc(_det.unlisted.join('، '))}</code> — أضِفه إلى <code>TABLES</code> في <code>js/settings.js</code> ثم أعد التصدير.`)
+        : '';
+
     setReport('backup-report',
+      _detHtml +
       noteHtml(unavail.length ? 'warn' : 'good',
         `تم تصدير <b>${esc(totalRows)}</b> صف من <b>${esc(TABLES.length)}</b> جدول ` +
         `+ <b>${esc(lsCount)}</b> مفتاح تفضيلات محلية · حجم الملف ${esc(sizeKB)} KB · ` +
@@ -3187,7 +3223,11 @@ async function exportMonthlyReviewMD() {
     book('A');
     await tick('طزاجة الأسعار');
     h2('28. مواعيد آخر تحديث لأسعار الأسهم (Price Freshness)');
-    p('تاريخ آخر تحديث يدوي للسعر لكل رمز — يقيس طزاجة بيانات الأسعار. يُعتبر السعر «قديماً» بعد 7 أيام.');
+    // AUDIT-FIX 2026-08-21 (#32): التقرير لم يكن يعرف حقل `price_manual` إطلاقاً،
+    // فيصنّف السعر الذي ثبّته المالك عمداً «🔴 قديم» بينما لوحة التحكم تصونه ولا
+    // تعدّه قديماً أبداً (dashboard.js:227) — حكمان متعارضان على السهم نفسه.
+    // التعريف المعتمد هو تعريف اللوحة: السعر اليدوي قرار مالك لا بيانات متقادمة.
+    p('تاريخ آخر تحديث للسعر لكل رمز — يقيس طزاجة بيانات الأسعار. يُعتبر السعر «قديماً» بعد 7 أيام، **إلا** السعر المثبَّت يدوياً (`price_manual`) فهو قرار المالك ولا يتقادم.');
     {
       const ts   = lsGet('tharwa-price-timestamps', {});
       const keys = ts && typeof ts === 'object' ? Object.keys(ts) : [];
@@ -3196,15 +3236,18 @@ async function exportMonthlyReviewMD() {
           const t   = new Date(ts[tk]);
           const age = (Date.now() - t.getTime()) / 86400000;
           const h   = holdings.find(x => x.ticker === tk);
-          return { tk, name: h?.name || '—', iso: ts[tk], age, stale: age > 7 };
+          const man = !!(h && h.price_manual);
+          return { tk, name: h?.name || '—', iso: ts[tk], age, man, stale: !man && age > 7 };
         }).sort((a, b) => b.age - a.age);
         p(mdTable(['الرمز','الاسم','آخر تحديث','منذ (يوم)','الحالة'],
           rows.map(r => [
             r.tk, r.name, new Date(r.iso).toLocaleString('ar-SA'),
-            r.age.toFixed(1), r.stale ? '🔴 قديم (>7 أيام)' : '🟢 حديث',
+            r.age.toFixed(1),
+            r.man ? '🔒 مثبَّت يدوياً (لا يتقادم)' : (r.stale ? '🔴 قديم (>7 أيام)' : '🟢 حديث'),
           ])));
         const staleN = rows.filter(r => r.stale).length;
-        p(`\n**${rows.length}** رمز لها طابع زمني | **${staleN}** قديم (>7 أيام).`);
+        const manN   = rows.filter(r => r.man).length;
+        p(`\n**${rows.length}** رمز لها طابع زمني | **${staleN}** قديم (>7 أيام)${manN ? ` | **${manN}** مثبَّت يدوياً (مستثنى من الحكم)` : ''}.`);
       } else {
         p('_لا توجد طوابع زمنية لأسعار الأسهم بعد._');
       }
@@ -4006,15 +4049,19 @@ async function exportMonthlyReviewMD() {
       // ⑦ طزاجة الأسعار (شرط صحة كل حساب دستوري)
       {
         const tsC = lsGet('tharwa-price-timestamps', {}) || {};
+        // AUDIT-FIX 2026-08-21 (#32): نفس تعريف hasStalePrice في اللوحة —
+        // السعر المثبَّت يدوياً قرار مالك لا بيانات متقادمة.
         const staleC = holdings.filter(h => {
+          if (h.price_manual) return false;
           const v = tsC[h.ticker]; if (!v) return true;
           const ms = new Date(v).getTime();
           return !isFinite(ms) || (Date.now() - ms) / 86400000 > 7;
         });
+        const manC = holdings.filter(h => h.price_manual).length;
         addCheck('سلامة مدخلات القرار — الأسعار حديثة (≤ 7 أيام)', '§2',
           holdings.length ? (staleC.length ? '⚠️ ضعف في المدخلات' : '✅ ممتثل') : '⚠️ غير قابل للفحص',
           holdings.length
-            ? (staleC.length ? `${staleC.length} سهم سعره قديم أو بلا طابع: ${staleC.map(h => h.ticker).join('، ')} — كل وزن وانحراف وXIRR مبني عليها يرث الضعف.` : 'كل الأسعار محدَّثة خلال 7 أيام.')
+            ? (staleC.length ? `${staleC.length} سهم سعره قديم أو بلا طابع: ${staleC.map(h => h.ticker).join('، ')} — كل وزن وانحراف وXIRR مبني عليها يرث الضعف.` : `كل الأسعار محدَّثة خلال 7 أيام${manC ? ` (${manC} منها مثبَّت يدوياً بقرارك)` : ''}.`)
             : 'لا حيازات.');
       }
 
@@ -4238,6 +4285,43 @@ async function exportMonthlyReviewMD() {
       dumpTable('portfolio_cash — النقد غير المستثمر', portfolioCashRows);
       dumpTable('review_log_attachments — مرفقات المراجعة', reviewAttachments,
         'محتوى الملفات الثنائية (base64) مقتطع عمداً — يبقى في النسخة الاحتياطية لا في التقرير.');
+
+      // AUDIT-FIX 2026-08-21 (#19): كان العنوان يَعِد بـ«كل جدول في قاعدة البيانات»
+      // ويطبع 16 من 19 — الثلاثة الغائبة (user_settings, support_tickets,
+      // user_profiles) هي بالذات التي تحمل إعدادات المالك وحسابه. تُطبع الآن،
+      // ويُطبع بعدها جرد يقارن ما طُبع بـTABLES فلا يعود الادّعاء بلا إثبات.
+      {
+        const _extra = await Promise.all([
+          fetchTable('user_settings').catch(() => null),
+          fetchTable('support_tickets').catch(() => null),
+          fetchTable('user_profiles').catch(() => null),
+        ]);
+        const _lbl = ['user_settings — الإعدادات المتزامنة', 'support_tickets — تذاكر الدعم', 'user_profiles — ملف الحساب'];
+        _extra.forEach((rows, i) => {
+          if (rows == null) { h3(`${_lbl[i]} — تعذّرت القراءة`); p('_منعت RLS قراءة هذا الجدول أو فشلت الشبكة — يُعلَن ولا يُكتم (§8)._'); return; }
+          dumpTable(_lbl[i], rows, i === 0 ? 'قيم JSON الطويلة مقتطعة عند 300 حرف — النسخة الاحتياطية تحفظها كاملة.' : '');
+        });
+
+        h3('جرد الاكتمال — ما طُبع مقابل قائمة الجداول المعتمدة');
+        const _dumped = new Set(['holdings','transactions','dividends','cashflow_entries','net_worth_snapshots',
+          'nw_assets','nw_liabilities','real_estate','stock_targets','sector_targets','watchlist',
+          'portfolio_tasks','user_stocks','review_log','portfolio_cash','review_log_attachments',
+          'user_settings','support_tickets','user_profiles']);
+        const _notDumped = TABLES.filter(t => !_dumped.has(t));
+        p(_notDumped.length
+          ? `⚠️ **${_notDumped.length}** جدولاً في TABLES لم يُطبع هنا: \`${_notDumped.join('`، `')}\` — العنوان يَعِد بالكل، فالفرق يُعلَن.`
+          : `✅ كل الـ **${TABLES.length}** جدولاً في قائمة النسخ الاحتياطي مطبوعة أعلاه.`);
+
+        const _det = await detectUnlistedTables();
+        if (!_det.ok) {
+          p(`⚠️ تعذّر التحقق من وجود جداول خارج القائمة (${esc(_det.reason)}) — لا يمكن تأكيد أن القائمة كاملة.`);
+        } else if (_det.unlisted.length) {
+          p(`🔴 **${_det.unlisted.length}** جدولاً موجود في قاعدة البيانات وغير مُسجَّل في TABLES: \`${_det.unlisted.join('`، `')}\` — **لا يدخل النسخة الاحتياطية إطلاقاً**. أضِفه إلى TABLES في settings.js.`);
+        } else {
+          p(`✅ لا جدول خارج القائمة: قاعدة البيانات تنشر ${_det.seen} جدولاً وكلها مُسجَّلة في TABLES.`);
+          if (_det.missing.length) p(`ℹ️ ${_det.missing.length} جدولاً في TABLES غير منشور للدور الحالي: \`${_det.missing.join('`، `')}\`.`);
+        }
+      }
 
       h3('سجل القيمة العادلة الخام (valuation_history_v1)');
       {

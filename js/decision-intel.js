@@ -434,14 +434,21 @@ window.DecisionIntel = (function () {
     const maxCycles = Math.max(1, Math.ceil(calMonths / 12));
     const divYears  = Math.min(rawDivYears, maxCycles);
     const months    = cwMonths;
-    const agePct = months < 3  ? 0.05 : months < 6  ? 0.20 :
-                   months < 9  ? 0.32 : months < 12 ? 0.45 :
-                   months < 18 ? 0.62 : months < 24 ? 0.76 :
-                   months < 36 ? 0.88 : 1.00;
-    const divPct = divYears === 0 ? 0.05 : divYears === 1 ? 0.45 :
-                   divYears === 2 ? 0.72 : 0.95;
-    const holdPct = holdingsCount < 3  ? 0.40 : holdingsCount < 6  ? 0.65 :
-                    holdingsCount < 10 ? 0.82 : 0.95;
+    // AUDIT-FIX 2026-08-21 (#28): استيفاء خطّي بين نفس نقاط المعايرة بدل الدوال
+    // الدرجية — نسخة حرفية من forecast.js بعد نفس الإصلاح. أي تعديل هناك يُطبَّق هنا.
+    const _lerp = (x, pts) => {
+      if (x <= pts[0][0]) return pts[0][1];
+      const last = pts[pts.length - 1];
+      if (x >= last[0]) return last[1];
+      for (let i = 1; i < pts.length; i++) {
+        const [x0, y0] = pts[i - 1], [x1, y1] = pts[i];
+        if (x <= x1) return y0 + (y1 - y0) * ((x - x0) / (x1 - x0));
+      }
+      return last[1];
+    };
+    const agePct  = _lerp(months, [[0,0.05],[3,0.20],[6,0.32],[9,0.45],[12,0.62],[18,0.76],[24,0.88],[36,1.00]]);
+    const divPct  = _lerp(divYears, [[0,0.05],[1,0.45],[2,0.72],[3,0.95]]);
+    const holdPct = _lerp(holdingsCount, [[0,0.40],[3,0.65],[6,0.82],[10,0.95]]);
     return { score: Math.round(agePct * 45 + divPct * 35 + holdPct * 20), agePct, divPct, holdPct, divYears };
   }
 
@@ -1167,7 +1174,9 @@ window.DecisionIntel = (function () {
       </div>`;
 
     const up = [];
-    if (ageUpgrade) up.push(`ترتفع من <b>${ageUpgrade.from}%</b> إلى <b>${ageUpgrade.to}%</b> يوم <b>${ageUpgrade.date}</b> (بعد ${Math.ceil(ageUpgrade.monthsNeeded * 30.44)} يوماً) لمّا يبلغ عمر رأس مالك ${ageUpgrade.tier} شهراً.`);
+    // AUDIT-FIX 2026-08-21 (#28): بعد تحويل المقياس إلى استيفاء خطّي صار يرتفع كل
+    // يوم لا عند العتبة فقط — الصياغة تقول ذلك بدل الإيحاء بأنه متجمّد حتى العتبة.
+    if (ageUpgrade) up.push(`ترتفع تدريجياً كل يوم مع تقادم رأس مالك، وتبلغ <b>${ageUpgrade.to}%</b> يوم <b>${ageUpgrade.date}</b> (بعد ${Math.ceil(ageUpgrade.monthsNeeded * 30.44)} يوماً) حين يبلغ عمر رأس مالك ${ageUpgrade.tier} شهراً — وهي الآن <b>${ageUpgrade.from}%</b>.`);
     if (divUpgrade) up.push(`وترتفع إلى <b>${divUpgrade.to}%</b> يوم <b>${divUpgrade.date}</b> عند اكتمال دورة التوزيع السنوية رقم ${divUpgrade.cycles}.`);
     if (!up.length) up.push('بلغت بياناتك سقف النضج الزمني — لا ترقية زمنية متبقية.');
 

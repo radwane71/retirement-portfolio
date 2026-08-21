@@ -661,7 +661,7 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
     <div class="note" data-state="${state}" style="flex-direction:column;gap:10px">
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;width:100%">
         <span style="font-weight:700;font-size:.9rem">${title}</span>
-        <span class="tag" data-state="${state}">ثقة البيانات ${score}%</span>
+        <span class="tag" data-state="${state}" title="مقياس خاصّ ببيانات التوزيعات: عمر رأس المال (45) · دورات الأرباح (35) · تغطية الدخل المتوقَّع (20).&#10;لا يساوي «ثقة البيانات» في الرؤية المستقبلية ومحرّك القرار — العامل الثالث هناك عدد الأسهم لا تغطية الدخل، فالرقمان يقيسان شيئين مختلفين عمداً.">ثقة بيانات التوزيعات ${score}%</span>
         <span class="tag"
           title="عمر رأس المال الفعلي (مرجَّح بالمعاملات) = ${months} شهر&#10;العمر التقويمي = ${calMonths} شهر&#10;الضخ التدريجي يقلّص عمر رأس المال الفعلي">
           ${cwDiff >= 2
