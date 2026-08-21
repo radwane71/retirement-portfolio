@@ -1162,13 +1162,26 @@ function valScaleHtml(val) {
     ${val.range ? `<div class="small text-muted">عادلة: ${esc(val.range)}${val.valDate ? ` · ${esc(val.valDate)}` : ''}${_staleValBadge(val.valTs)}</div>` : ''}`;
 }
 
-// شارة «قديم» لتقييم تجاوز عمره 90 يوماً — قاعدة حداثة البيانات (§2 في CLAUDE.md).
-// العمر يُقاس من طابع إنشاء التقييم (id = Date.now()) لغياب تاريخ قابل للتحليل.
+// AUDIT-FIX (2026-08-21): كانت الشارة تُطلق «قديم» عند 90 يوماً مستشهدةً بـ§2،
+// بينما §2 يخصّ **المصادر الخارجية** (تُقبل خلال 90 يوماً)، وتقييمك أنت تحكمه
+// دورة المراجعة في §5 = 6 أشهر — وهو ما يستخدمه محرّك القرار (VAL_STALE_DAYS=180)
+// وصفحة المهام والحاسبة. فكان السهم يُوسَم «قديم» هنا و«حديث» هناك بنفس التاريخ.
+// التسوية: 180 يوماً هي حدّ «قديم» الفعلي (مطابقاً للمحرّك)، و90 تبقى تنبيهاً
+// أصفر مبكّراً — نُبقي الإشارة الأشدّ ولا نُلغيها، لكن لا نسمّي الاثنين شيئاً واحداً.
+const TG_VAL_SOON_DAYS  = 90;
+const TG_VAL_STALE_DAYS = 180;   // = VAL_STALE_DAYS في decision-engine.js و tasks.js
 function _staleValBadge(ts) {
-  if (!ts || (Date.now() - ts) <= 90 * 86400000) return '';
+  if (!ts) return '';
   const days = Math.round((Date.now() - ts) / 86400000);
-  return ` <span class="tag tag-xs" data-state="bad"
-    title="عمر هذا التقييم ${days} يوماً — تجاوز حدّ الحداثة 90 يوماً (§2). أعد تقييم السهم في حاسبة القيمة العادلة">⚠️ قديم</span>`;
+  if (days > TG_VAL_STALE_DAYS) {
+    return ` <span class="tag tag-xs" data-state="bad"
+      title="عمر هذا التقييم ${days} يوماً — تجاوز دورة المراجعة 6 أشهر (§5). محرّك القرار يمنع أي إجراء سعري بناءً عليه. أعد تقييمه في الحاسبة">⚠️ قديم</span>`;
+  }
+  if (days > TG_VAL_SOON_DAYS) {
+    return ` <span class="tag tag-xs" data-state="warn"
+      title="عمر هذا التقييم ${days} يوماً — يقترب من دورة المراجعة (6 أشهر، §5). ما زال معتمَداً في محرّك القرار">⏳ يقترب من التجديد</span>`;
+  }
+  return '';
 }
 
 function runRebalancing() {

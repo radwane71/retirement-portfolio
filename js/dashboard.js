@@ -1183,15 +1183,22 @@ function renderStats() {
   if (concEl) {
     if (s.largestHolding && s.largestPosPct > 0) {
       concEl.textContent = s.largestPosPct.toFixed(1) + '%';
-      // >25% تركيز خطر، >15% مرتفع، غير ذلك صحي — لمحفظة تقاعد
-      concEl.className = 'value num ' + (s.largestPosPct >= 25 ? 'text-danger' : s.largestPosPct >= 15 ? 'text-accent' : 'text-success');
+      // AUDIT-FIX (2026-08-21): كانت العتبات عامة (خطر ≥25%، مرتفع ≥15%) فتصف
+      // بـ«تركيز صحي» وزناً يسمّيه دستورك كسراً للسقف. الدستور §1: سقف السهم 7%
+      // (12% للقيادي) + منطقة سماح 0.75%. النظام القائم على قواعد يفقد قيمته إن
+      // خالفت واجهته قاعدته. العتبات الآن دستورية: فوق 12.75% كسر مؤكّد لأي سهم،
+      // وفوق 7.75% كسر لغير القيادي.
+      const _capHard = 12 + 0.75, _capSingle = 7 + 0.75;
+      concEl.className = 'value num ' + (s.largestPosPct > _capHard ? 'text-danger'
+        : s.largestPosPct > _capSingle ? 'text-accent' : 'text-success');
       const nm = s.largestHolding.name ? `${s.largestHolding.ticker} — ${s.largestHolding.name}` : s.largestHolding.ticker;
       setText('stat-concentration-name', 'أكبر مركز: ' + nm);
       setText('stat-concentration-sub', `أكبر 5 مراكز: ${s.top5Pct.toFixed(1)}% من قيمة الأسهم`);
-      setHtml('stat-concentration-tag', s.largestPosPct >= 25
-        ? tagHtml('🔴', 'تركيز خطر', 'bad')
-        : s.largestPosPct >= 15 ? tagHtml('⚠️', 'تركيز مرتفع', 'warn')
-        : tagHtml('✅', 'تركيز صحي', 'good'));
+      setHtml('stat-concentration-tag', s.largestPosPct > _capHard
+        ? tagHtml('🔴', `فوق السقف الدستوري 12%`, 'bad')
+        : s.largestPosPct > _capSingle
+          ? tagHtml('⚠️', 'فوق سقف السهم 7% — قيادي فقط يُسمح له بـ12%', 'warn')
+          : tagHtml('✅', 'ضمن السقف الدستوري', 'good'));
     } else {
       concEl.textContent = '—';
       concEl.className = 'value num text-muted';
@@ -1489,9 +1496,9 @@ function renderPortfolioHealthCard() {
 
   // T1: عدد الأسهم
   if (stockCount < 5)
-    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. الهدف: 10–15 سهم على الأقل لمحفظة توزيعات منيعة` });
-  else if (stockCount < 8)
-    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — تنوع أولي جيد. استمر بالإضافة وصولاً للنطاق الأمثل (10–20 سهم)` });
+    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. حجم المحفظة المستهدف في دستورك: 18–25 سهماً` });
+  else if (stockCount < 18)
+    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — دون الحد الأدنى في دستورك (18–25 سهماً). استمر بالإضافة بأوزان متوازنة` });
   else if (stockCount > 25)
     tips.push({ lvl:'yellow', txt: `${stockCount} سهماً — راجع كل سهم: هل تعرفه وتتابعه؟ الأسهم التي لا تعرفها جيداً تزيد المخاطر لا تقللها` });
 
@@ -1510,10 +1517,12 @@ function renderPortfolioHealthCard() {
     tips.push({ lvl:'yellow', txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — تركيز مرتفع. خفّضه تدريجياً لأقل من 20% عند أي فرصة إعادة توازن` });
 
   // T4: تركيز قطاعي
-  if (largestSectorPct > 50)
-    tips.push({ lvl:'red',    txt: `قطاع ${_largSecE} يشكل ${largestSectorPct.toFixed(1)}% — تركيز قطاعي مرتفع جداً. أضف أسهماً من قطاعات دفاعية` });
-  else if (largestSectorPct > 38)
-    tips.push({ lvl:'yellow', txt: `قطاع ${_largSecE} (${largestSectorPct.toFixed(1)}%) — حاول إبقاؤه دون 35% وزيادة القطاعات الأخرى` });
+  // AUDIT-FIX (2026-08-21): كانت العتبات 50%/38% وتنصح بـ«دون 35%» بينما الدستور
+  // §1 يضع سقف القطاع 25% + منطقة سماح 1.25% — فكانت اللوحة تسكت عن كسر مؤكّد.
+  if (largestSectorPct > 25 + 1.25)
+    tips.push({ lvl:'red',    txt: `قطاع ${_largSecE} يشكل ${largestSectorPct.toFixed(1)}% — كسر سقف القطاع الدستوري 25% (+1.25% سماح). خفّف أو وزّع على قطاعات أخرى` });
+  else if (largestSectorPct > 25)
+    tips.push({ lvl:'yellow', txt: `قطاع ${_largSecE} (${largestSectorPct.toFixed(1)}%) — داخل منطقة السماح فوق سقف 25%، راقبه` });
 
   // T5: الأوزان
   if (hasTargets && redDev > 0)
@@ -1955,10 +1964,10 @@ function showDiversificationAnalysis() {
   // ── معايير "تنوع ممتاز" ──────────────────────────────────────
   // HHI < 5% → N_eff > 20، وعامل القطاعات يجب أن يكون عالياً
   const TARGET_HHI     = 0.067;  // N_eff ≥ 15 — Evans & Archer (1968): 15 سهم تُزيل 90% من المخاطر القابلة للتنويع
-  const TARGET_TOP1    = 15;     // % - أكبر مركز
+  const TARGET_TOP1    = 12;     // % - أكبر مركز (سقف القيادي الدستوري §1؛ وغير القيادي 7%)
   const TARGET_TOP3    = 45;     // % - أكبر 3
   const TARGET_SECTORS = 4;      // قطاعات كحد أدنى
-  const TARGET_TOPSEC  = 35;     // % - أكبر قطاع
+  const TARGET_TOPSEC  = 25;     // % - أكبر قطاع (السقف الدستوري §1)
   const TARGET_SECFACT = 0.85;   // معامل القطاعات المطلوب
 
   // ── بناء قائمة التحقق ────────────────────────────────────────

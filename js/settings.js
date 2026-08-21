@@ -2123,14 +2123,20 @@ async function exportMonthlyReviewMD() {
 
     // توصيات الأهداف
     if (stockTargets.length) {
-      h3('الانحرافات عن الأهداف (> 1.5%)');
+      // AUDIT-FIX (2026-08-21): كانت العتبة 1.5% ثابتة بينما هذا الملف نفسه يقرأ
+      // ويحفظ عتبتَي المالك (tharwa-alert-green/yellow، السطر 222) وكل الصفحات
+      // الأخرى تستخدمهما. فكان التقرير يعلن «ضمن النطاق» لسهم تصفه اللوحة والمحرّك
+      // بأنه خارجه. الآن العتبة الصفراء للمالك هي الحدّ.
+      const _devY = +(localStorage.getItem(userLsKey('tharwa-alert-yellow'))
+                   ?? localStorage.getItem('tharwa-alert-yellow') ?? 3) || 3;
+      h3(`الانحرافات عن الأهداف (> ${_devY}% — عتبتك من الإعدادات)`);
       const deviations = stockTargets
         .map(st => {
           const h    = holdings.find(x => x.ticker === st.ticker);
           const curr = h && totalMktValue > 0 ? (+h.shares * +h.current_price) / totalMktValue * 100 : 0;
           return { ticker: st.ticker, target: +st.target_pct, current: curr, diff: curr - +st.target_pct };
         })
-        .filter(x => Math.abs(x.diff) > 1.5)
+        .filter(x => Math.abs(x.diff) > _devY)
         .sort((a, b) => Math.abs(b.diff) - Math.abs(a.diff));
 
       if (deviations.length) {
@@ -2143,7 +2149,7 @@ async function exportMonthlyReviewMD() {
         ]);
         p(mdTable(['الرمز','الهدف','الحالي','الانحراف','الإجراء المقترح'], devRows));
       } else {
-        p('_جميع الأسهم ضمن نطاق الهدف (انحراف < 1.5%)._');
+        p(`_جميع الأسهم ضمن نطاق الهدف (انحراف < ${_devY}% — عتبتك المحفوظة)._`);
       }
     }
     hr();
