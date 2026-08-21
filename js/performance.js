@@ -456,7 +456,7 @@ function renderKPIs() {
   const ddEl = document.getElementById('pk-max-drawdown');
   const _riskSeries = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (ddEl && _riskSeries.length >= 2) {
-    const { twrMap, sortedSnaps } = _computeTWR(_riskSeries, _stockFlows());
+    const { twrMap, sortedSnaps } = _computeTWR(_riskSeries, _stockFlows(_riskSeries.covered));
     // sortedSnaps is ISO-date ordered & de-duplicated by day; twrMap[date] = index (base 100)
     let peak = twrMap[sortedSnaps[0].date] ?? 100;
     let maxDD = 0;
@@ -502,7 +502,7 @@ function _computeRiskMetrics() {
   // نفس أساس تبويب المقارنة وأقصى التراجع: أسهمك وحدها وتدفقاتها (لا نقد ولا عقار)
   const series = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (series.length < 4) return null;
-  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows());
+  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows(series.covered));
   const pts = sortedSnaps
     .map(s => ({ date: s.date, idx: twrMap[s.date] }))
     .filter(p => p.idx != null && p.idx > 0);
@@ -1951,6 +1951,7 @@ function _dailyPortfolioSeries() {
   covered.forEach(t => { idx[t] = 0; last[t] = null; });
 
   const out = [];
+  out.covered = new Set(covered);
   for (const d of dates) {
     let total = 0;
     for (const t of covered) {
@@ -2021,8 +2022,27 @@ function _screenStocksSeries(series) {
 
 // تدفقات محفظة الأسهم = المشتريات والمبيعات، لا إيداعات الوساطة.
 // هذا هو المال الذي دخل الأسهم فعلاً وخرج منها — وهو المقام الصحيح لـ Dietz.
-function _stockFlows() {
-  return (_tx || []).filter(t => t.date && (t.type === 'buy' || t.type === 'sell'))
+// AUDIT-FIX (2026-08-21): كانت تحسب تدفقات **كل** الرموز بينما السلسلة اليومية
+// لا تُقيّم إلا الرموز التي لها أسعار. فشراء رمز بلا أسعار = مال داخل بلا قيمة
+// مقابلة، وModified Dietz يقرأ الفارق **خسارة**:
+//     r = (النهاية − البداية − التدفق) ÷ (البداية + التدفق/2)
+// فيهبط الخطّ هبوطاً حادّاً **بلا ارتداد** يوم الضخّ — وهو ما رآه المالك في
+// 3–4 سبتمبر 2025، أيام أكبر إيداعاته. نفس المنطق ينطبق على رمز تبدأ سلسلة
+// أسعاره بعد تاريخ شرائه: أسهمه غير مُقيَّمة بعد بينما تدفّقه محسوب.
+// القاعدة الحاكمة: **مجال التدفقات = مجال القيمة بالضبط**، وإلا انهار المقياس.
+function _firstPriceDateOf(ticker) {
+  const arr = _priceMapOf(ticker);
+  return arr && arr.length ? arr[0][0] : null;
+}
+
+function _stockFlows(coveredSet) {
+  return (_tx || []).filter(t => {
+    if (!t.date || (t.type !== 'buy' && t.type !== 'sell')) return false;
+    if (!coveredSet) return true;                       // مسار اللقطات: كما كان
+    if (!coveredSet.has(t.ticker)) return false;        // رمز غير مُقيَّم → تدفّقه مستبعَد
+    const from = _firstPriceDateOf(t.ticker);
+    return !from || t.date >= from;                     // قبل أول سعر معروف لا قيمة له
+  })
     .map(t => ({ date: t.date, type: t.type === 'buy' ? 'deposit' : 'withdrawal', amount: +t.total || 0 }))
     .filter(f => f.amount > 0);
 }
@@ -2255,7 +2275,7 @@ function renderBenchmarkTab() {
   // ── حساب TWR لمحفظة الأسهم ──────────────────────────────
   // التدفقات = مشترياتك ومبيعاتك (المال الداخل للأسهم فعلاً)، لا إيداعات
   // الوساطة — فيتطابق مجال التصحيح مع مجال القيمة المقاسة.
-  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries, _stockFlows());
+  const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries, _stockFlows(_rawSeries.covered));
 
   const getTwrAt = (date) => {
     const prior = sortedSnaps.filter(s => s.date <= date);
