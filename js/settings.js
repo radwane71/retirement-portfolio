@@ -3388,6 +3388,24 @@ async function exportMonthlyReviewMD() {
     // (_selectConsistentSnapshots) فتخلط اللقطات التلقائية باليدوية صامتاً.
     // المقاييس الآن تُقرأ من لقطة الصفحة، فلا محلّ لحساب ثانٍ يتفرّع عنها.
 
+    // ── أرقام أساسية مشتركة ──────────────────────────────────────────────
+    // REGRESSION-FIX 2026-08-21: هذه الإعلانات الأحد عشر كانت هنا، وحُذفت سهواً
+    // مع دالتَي _twr30/_dedupSnaps30 في الكوميت 684f831 لأنها كانت ملاصقة لها.
+    // النتيجة: `_totalBuys is not defined` يُسقط تصدير التقارير كلّه عند §32،
+    // فلا يُنتَج أي ملف. تستهلكها الأقسام 32 و33 و34 و36 و37 و39 و«الحالة في
+    // سطور». **لا تنقلها ولا تُدمجها في قسم واحد** — كل ما بعدها يعتمد عليها.
+    const _totalMkt    = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+    const _totalCost   = holdings.reduce((s, h) => s + +h.shares * +h.avg_price, 0);
+    const _totalBuys   = transactions.filter(t => t.type === 'buy').reduce((s, t) => s + +t.total, 0);
+    const _totalSells  = transactions.filter(t => t.type === 'sell').reduce((s, t) => s + +t.total, 0);
+    const _totalDiv    = dividends.reduce((s, d) => s + +d.amount, 0);
+    const _totalComm   = transactions.reduce((s, t) => s + (+t.commission || 0) + (+t.vat || 0), 0);
+    const _sukukActive = (sukukData.opportunities || [])
+      .filter(o => o.status === 'مشترك').reduce((s, o) => s + (+o.amount || 0), 0);
+    const _reVal       = activeRE.reduce((s, r) => s + +r.current_value, 0);
+    const _assetVal    = activeAssets.reduce((s, a) => s + +a.value, 0);
+    const _fwd         = _computeForwardIncome();
+
     h3('العائد المعدَّل بالمخاطر');
     {
       // AUDIT-FIX (2026-08-21): كانت تُحسب هنا بصيغة تسبق إصلاحَي أغسطس 2026 في
