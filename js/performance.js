@@ -1871,6 +1871,53 @@ function _stocksOnlySeries() {
     .map(d => ({ date: d, total_value: byDate[d], notes: 'auto' }));  // notes='auto' ⇒ أساس موحّد
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// 🩺 كشف اللقطات المشبوهة في سلسلة الأسهم
+// ----------------------------------------------------------------------
+// خطّ المحفظة مسطَّح بين اللقطات (ترحيل آخر قيمة)، فلا يهبط من تلقاء نفسه:
+// أي انهيار مفاجئ يعني نقطة لقطة تحمل قيمة أسهم منخفضة فعلاً. وأكثر أسبابها
+// شيوعاً ليست خسارة سوقية بل **لقطة نصف محمَّلة**: صورة أُخذت قبل اكتمال جلب
+// الأسعار أو الحيازات، أو لقطة يدوية حُفظ فيها auto_stocks قديماً.
+// المؤشر الحاسم: هبوط حادّ **لا تفسّره معاملاتك** ثم **تعافٍ فوري** في النقطة
+// التالية. خسارة سوقية حقيقية لا ترتدّ كاملةً خلال أسبوعين، وبيع حقيقي يظهر
+// في المعاملات. فنستبعدها من الحساب ونُعلنها بدل رسم انهيار لم يقع.
+const SNAP_ANOMALY_DROP = 0.20;      // هبوط غير مفسَّر يتجاوزه = مشبوه
+const SNAP_ANOMALY_RECOVER = 0.15;   // ثم ارتداد يتجاوزه = شبه يقين أنها بيانات
+
+function _flowsBetween(fromISO, toISO) {
+  return (_tx || []).reduce((sum, t) => {
+    if (!t.date || t.date <= fromISO || t.date > toISO) return sum;
+    if (t.type === 'buy')  return sum + (+t.total || 0);
+    if (t.type === 'sell') return sum - (+t.total || 0);
+    return sum;
+  }, 0);
+}
+
+// تُرجع { clean, anomalies } — clean بلا النقاط المشبوهة، وanomalies لعرضها
+function _screenStocksSeries(series) {
+  const anomalies = [];
+  if (series.length < 3) return { clean: series, anomalies };
+  const keep = series.map(() => true);
+  for (let i = 1; i < series.length - 1; i++) {
+    const prev = series[i - 1], cur = series[i], next = series[i + 1];
+    const inFlow  = _flowsBetween(prev.date, cur.date);
+    const outFlow = _flowsBetween(cur.date, next.date);
+    const expected = prev.total_value + inFlow;
+    if (!(expected > 0)) continue;
+    const drop = (cur.total_value - expected) / expected;                 // سالب = هبوط غير مفسَّر
+    const recover = (next.total_value - (cur.total_value + outFlow)) / Math.max(1, cur.total_value);
+    if (drop <= -SNAP_ANOMALY_DROP && recover >= SNAP_ANOMALY_RECOVER) {
+      keep[i] = false;
+      anomalies.push({
+        date: cur.date, value: cur.total_value, expected,
+        dropPct: drop * 100, recoverPct: recover * 100,
+        flowIn: inFlow, prev: prev.total_value, next: next.total_value,
+      });
+    }
+  }
+  return { clean: series.filter((_, i) => keep[i]), anomalies };
+}
+
 // تدفقات محفظة الأسهم = المشتريات والمبيعات، لا إيداعات الوساطة.
 // هذا هو المال الذي دخل الأسهم فعلاً وخرج منها — وهو المقام الصحيح لـ Dietz.
 function _stockFlows() {
@@ -2051,7 +2098,8 @@ function renderBenchmarkTab() {
   // ── إعادة التأطير (2026-08-18): المقارنة على الأسهم وحدها ──────────
   // portSeries = قيمة أسهمك فقط عبر الزمن (لا نقد ولا عقارات ولا التزامات)،
   // وتدفقاتها = مشترياتك ومبيعاتك لا إيداعات الوساطة.
-  const portSeries = _stocksOnlySeries();
+  const _rawSeries = _stocksOnlySeries();
+  const { clean: portSeries, anomalies: _snapAnoms } = _screenStocksSeries(_rawSeries);
   if (portSeries.length < 2) {
     if (chartWrap)  chartWrap.style.display  = 'none';
     if (emptyEl)    emptyEl.style.display    = '';
@@ -2306,6 +2354,45 @@ function renderBenchmarkTab() {
           عائد أسهمك محسوب بـ <b>TWR (Time-Weighted Return)</b> بمنهج Modified Dietz — يعزل أداء
           قراراتك عن مشترياتك ومبيعاتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>
           (وهو أول تاريخ تتوفّر فيه القيمتان معاً).`)}
+
+        ${_snapAnoms.length ? noteHtml('🩺', `<b>استُبعدت ${_snapAnoms.length} لقطة مشبوهة من الحساب.</b>
+          هبوط حادّ لا تفسّره معاملاتك ثم تعافٍ فوري بعده — النمط المميّز للقطة نصف
+          محمَّلة (صورة أُخذت قبل اكتمال جلب الأسعار أو الحيازات)، لا لخسارة سوقية:
+          الخسارة الحقيقية لا ترتدّ كاملةً، والبيع الحقيقي يظهر في معاملاتك.
+          <div class="table-wrapper" style="margin-top:8px"><table>
+            <thead><tr><th>تاريخ اللقطة</th><th>قيمتها</th><th>المتوقَّع من سابقتها</th>
+              <th>الفارق</th><th>التالية</th></tr></thead>
+            <tbody>${_snapAnoms.map(a => `<tr>
+              <td>${formatDate(a.date)}</td>
+              <td class="num text-danger">${formatSAR(a.value)}</td>
+              <td class="num">${formatSAR(a.expected)}</td>
+              <td class="num text-danger">${a.dropPct.toFixed(1)}%</td>
+              <td class="num text-success">${formatSAR(a.next)}</td></tr>`).join('')}</tbody>
+          </table></div>
+          <span class="small">لتصحيحها نهائياً: افتح صفحة صافي الثروة واحذف اللقطة أو صحّح قيمتها، ثم أعد فتح هذا التبويب.</span>`,
+          'warn') : ''}
+
+        ${detailsHtml(`🔬 السلسلة الخام لقيمة أسهمك (${_rawSeries.length} نقطة) — تحقّق بنفسك`, `
+          <div class="table-wrapper"><table>
+            <thead><tr><th>التاريخ</th><th>قيمة الأسهم</th><th>التغيّر</th>
+              <th>معاملاتك بينهما</th><th>غير مفسَّر</th><th>الحالة</th></tr></thead>
+            <tbody>${_rawSeries.map((pt, i) => {
+              const pr = i ? _rawSeries[i - 1] : null;
+              const fl = pr ? _flowsBetween(pr.date, pt.date) : 0;
+              const exp = pr ? pr.total_value + fl : null;
+              const un  = exp && exp > 0 ? (pt.total_value - exp) / exp * 100 : null;
+              const bad = _snapAnoms.some(a => a.date === pt.date);
+              return `<tr${bad ? ' style="opacity:.75"' : ''}>
+                <td>${formatDate(pt.date)}</td>
+                <td class="num">${formatSAR(pt.total_value)}</td>
+                <td class="num">${pr ? ((pt.total_value - pr.total_value >= 0 ? '+' : '') + formatSAR(pt.total_value - pr.total_value)) : '—'}</td>
+                <td class="num">${pr ? ((fl >= 0 ? '+' : '') + formatSAR(fl)) : '—'}</td>
+                <td class="num ${un != null && un < -10 ? 'text-danger' : ''}">${un != null ? un.toFixed(1) + '%' : '—'}</td>
+                <td>${bad ? '🩺 مستبعَدة' : (un != null && Math.abs(un) > 10 ? '⚠️ راجعها' : '✅')}</td></tr>`;
+            }).join('')}</tbody>
+          </table></div>
+          <span class="small text-muted">«غير مفسَّر» = تغيّر القيمة بعد خصم مشترياتك ومبيعاتك بين التاريخين.
+          العمود يجيب سؤالك مباشرةً: هل للهبوط سبب في محفظتك أم لا.</span>`)}
 
         ${(() => {
           // حارس تقادم المؤشر: سلسلة تاسي متجمّدة بينما قيمة أسهمك تتقدّم إلى
