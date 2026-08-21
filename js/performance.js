@@ -2098,7 +2098,14 @@ function renderBenchmarkTab() {
   // ── إعادة التأطير (2026-08-18): المقارنة على الأسهم وحدها ──────────
   // portSeries = قيمة أسهمك فقط عبر الزمن (لا نقد ولا عقارات ولا التزامات)،
   // وتدفقاتها = مشترياتك ومبيعاتك لا إيداعات الوساطة.
+  // AUDIT-FIX (2026-08-21): إعادة التأطير إلى «أسهم فقط» قلّصت التغطية بصمت —
+  // اللقطات التي لا تسجّل مكوّن الأسهم (يدوية قديمة قبل عمود snapshot_json،
+  // أو auto_stocks = 0) تسقط كلياً، فتنكمش نافذة المقارنة من سنة إلى أشهر
+  // والمالك لا يدري. الرقم أصدق تعريفاً وأضعف تغطيةً — والثاني يجب أن يُعلَن.
+  const _snapTotal = (_snapshots || []).length;
   const _rawSeries = _stocksOnlySeries();
+  const _snapUsable = _rawSeries.filter(p => p.date !== todayISO()).length;
+  const _snapSkipped = Math.max(0, _snapTotal - _snapUsable);
   const { clean: portSeries, anomalies: _snapAnoms } = _screenStocksSeries(_rawSeries);
   if (portSeries.length < 2) {
     if (chartWrap)  chartWrap.style.display  = 'none';
@@ -2354,6 +2361,17 @@ function renderBenchmarkTab() {
           عائد أسهمك محسوب بـ <b>TWR (Time-Weighted Return)</b> بمنهج Modified Dietz — يعزل أداء
           قراراتك عن مشترياتك ومبيعاتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>
           (وهو أول تاريخ تتوفّر فيه القيمتان معاً).`)}
+
+        ${_snapSkipped > 0 ? noteHtml('📉', `<b>تغطية قصيرة: ${_snapUsable} من ${_snapTotal} لقطة تحمل قيمة أسهم.</b>
+          هذه المقارنة تقيس <b>أسهمك وحدها</b>، وقيمة الأسهم مسجّلة فقط في اللقطات التي تحفظها
+          (تلقائياً من لوحة التحكم في الملاحظات، أو يدوياً في <code>snapshot_json.auto_stocks</code>).
+          اللقطات الأقدم من إضافة هذا الحقل لا تحمله، فتسقط — وتنكمش النافذة معها.
+          <br><b>أثر ذلك على الأرقام أعلاه:</b> ألفا محسوبة على
+          <b>${points.length}</b> نقطة مقارنة خلال الفترة المعروضة فقط، لا على تاريخك كاملاً؛
+          و<b>كل نقطة معطوبة واحدة تُحدث أثراً كبيراً</b> حين تكون النقاط قليلة.
+          ${_snapUsable < 6 ? '<br>⚠️ بأقل من ست نقاط، اقرأ هذا الرقم كإشارة اتجاه لا كقياس.' : ''}
+          <br><span class="small">يتحسّن تلقائياً: كل لقطة جديدة من لوحة التحكم أو صفحة صافي الثروة تُسجّل مكوّن الأسهم وتدخل هنا.</span>`,
+          _snapUsable < 6 ? 'warn' : '') : ''}
 
         ${_snapAnoms.length ? noteHtml('🩺', `<b>استُبعدت ${_snapAnoms.length} لقطة مشبوهة من الحساب.</b>
           هبوط حادّ لا تفسّره معاملاتك ثم تعافٍ فوري بعده — النمط المميّز للقطة نصف
