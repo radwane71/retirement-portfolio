@@ -181,6 +181,24 @@ window.DecisionIntel = (function () {
     else if (changePct <= -25)    signal = 'cut';
     else if (changePct >= 5)      signal = 'growing';
 
+    // AUDIT-FIX (2026-08-21): عتبة −25% مسطّحة تخلط حالتين مختلفتين تماماً:
+    // شركة تتدهور فتقطع، وشركة عادت من **ذروة استثنائية** إلى مستواها الطبيعي.
+    // الثانية شائعة في السوق السعودي (توزيع مرتبط بالأداء فوق التوزيع الأساسي).
+    // نكشفها بمقارنة سنة الأساس بوسيط السنوات الأقدم: إن كانت شاذّة عنه بوضوح
+    // بينما السنة الأحدث قريبة منه، فالهبوط عودة لا تدهور.
+    let fromPeak = false, medianOlder = null;
+    if (years.length >= 4) {
+      const older = years.slice(2).map(y => byYear[y]).filter(v => v > 0).sort((a, b) => a - b);
+      if (older.length >= 2) {
+        const m = older.length % 2
+          ? older[(older.length - 1) / 2]
+          : (older[older.length / 2 - 1] + older[older.length / 2]) / 2;
+        medianOlder = m;
+        // سنة الأساس أعلى من الوسيط بمرة ونصف، والسنة الأحدث ضمن ±35% منه
+        fromPeak = m > 0 && y0 > m * 1.5 && Math.abs(y1 - m) / m <= 0.35;
+      }
+    }
+
     // DGR: نمو التوزيع المركّب على أطول مدى متاح (الدستور §2 يذكره كبيان ناقص)
     let dgr = null, dgrYears = 0;
     const span = Math.min(years.length, 6);
@@ -195,6 +213,7 @@ window.DecisionIntel = (function () {
 
     return {
       signal, changePct, external: true, yearsCount: years.length,
+      fromPeak, medianOlder,
       years: `${years[1]}→${years[0]}`, dgr, dgrYears, byYear, splits,
       currency: f.currency || null,
       note: changePct == null ? 'سنة المقارنة بلا توزيع'
@@ -582,12 +601,31 @@ window.DecisionIntel = (function () {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`آخر توزيع قبل ${fwd.daysSince} يوماً — تجاوز دوريته المتوقَّعة (${fwd.staleAfter} يوماً) `
         + `وتجاوز معها مهلة الإفصاح الكاملة (${JUDGMENT_GRACE_DAYS} يوماً)`);
-    } else if (govTrend && (govTrend.signal === 'cut' || govTrend.signal === 'stopped')) {
+    } else if (govTrend && govTrend.signal === 'stopped') {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`${govTrend.external ? 'سياسة الشركة (مصدر خارجي)' : 'سجل أرباحك'}: ${govTrend.note}`);
     } else if (payout != null && payout > 1.2) {
       bucket = 'risk'; headline = 'خطر خفض أو قطع';
       ev.push(`التوزيع يفوق ${payoutBase} بنسبة ${formatNum(payout * 100, 0)}% — غير ممكن استمراره بلا اقتراض أو بيع أصول`);
+    // AUDIT-FIX (2026-08-21): انخفاض حدث **فعلاً** ليس تنبؤاً بانخفاض قادم.
+    // كان المحرّك يسمّي الواقعة التاريخية «خطر خفض أو قطع» — ادّعاء تطلّعي بدليل
+    // خلفي. شركة خفّضت ثم استقرّت على مستوى مغطّى ليست مهدَّدة؛ هي خفّضت وانتهى.
+    // الخطر التطلّعي مصدره التغطية والاستدامة والانقطاع — وكلها فُحصت قبل هنا.
+    } else if (govTrend && govTrend.signal === 'cut') {
+      const peak = govTrend.fromPeak;
+      bucket = 'declined';
+      headline = peak ? 'عاد من ذروة استثنائية' : 'خُفِّض فعلاً — لا مهدَّد';
+      ev.push(`${govTrend.external ? 'سياسة الشركة (مصدر خارجي)' : 'سجل أرباحك'}: ${govTrend.note}`);
+      if (peak) {
+        ev.push(`سنة الأساس (${govTrend.years.split('→')[0]}) كانت **ذروة استثنائية**: `
+          + `${formatNum(govTrend.byYear[+govTrend.years.split('→')[0]])} مقابل وسيط السنوات الأقدم `
+          + `${formatNum(govTrend.medianOlder)}. والمستوى الحالي عاد قريباً من ذلك الوسيط — `
+          + `هذا عودة إلى الطبيعي لا تدهور. شائع حين يكون فوق التوزيع الأساسي جزءٌ مرتبط بالأداء.`);
+      }
+      ev.push(payout != null
+        ? `والمستوى الحالي ${payout <= 1 ? 'مغطّى' : 'غير مغطّى'}: التوزيع = ${formatNum(payout * 100, 0)}% من ${payoutBase}`
+        : `⚠️ تغطية المستوى الحالي **غير معروفة** — أدخل الأرباح/التوزيع في الحاسبة ليُحكَم عليها. `
+          + `الانخفاض وحده لا يقول إن الباقي مهدَّد، وغياب التغطية لا يقول إنه آمن.`);
     } else if (!fwd.payments) {
       bucket = 'unknown'; headline = 'لا يمكن التنبؤ بعد';
       // فرّق بين «لا توزيعات أصلاً» و«توزيعات مسجّلة قبل أن تمتلكه» — الثانية
@@ -673,11 +711,13 @@ window.DecisionIntel = (function () {
   }
 
   const BUCKET_META = {
-    growing: { icon: '📈', label: 'مرشّح للنمو',       state: 'good', order: 0 },
-    stable:  { icon: '🟢', label: 'مرشّح للاستمرار',   state: 'good', order: 1 },
-    unknown: { icon: '⚪', label: 'بدري على الحكم',    state: '',     order: 2 },
-    watch:   { icon: '🟡', label: 'انتبه',            state: 'warn', order: 3 },
-    risk:    { icon: '🔴', label: 'خطر خفض أو قطع',    state: 'bad',  order: 4 },
+    growing:  { icon: '📈', label: 'مرشّح للنمو',       state: 'good', order: 0 },
+    stable:   { icon: '🟢', label: 'مرشّح للاستمرار',   state: 'good', order: 1 },
+    unknown:  { icon: '⚪', label: 'بدري على الحكم',    state: '',     order: 2 },
+    // واقعة تاريخية لا تنبؤ — تُعرض بلونها الخاص ولا تُخلط بالخطر التطلّعي
+    declined: { icon: '📉', label: 'خُفِّض فعلاً',        state: 'warn', order: 3 },
+    watch:    { icon: '🟡', label: 'انتبه',            state: 'warn', order: 4 },
+    risk:     { icon: '🔴', label: 'خطر خفض أو قطع',    state: 'bad',  order: 5 },
   };
 
   function computeIncome(results) {
