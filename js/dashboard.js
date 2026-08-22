@@ -691,20 +691,9 @@ async function loadAllData() {
       // L-3: use median inter-dividend gap for frequency — robust to skipped dividends
       // (يُحسب قبل الاحتياطي لأن الاحتياطي يحتاجه لتفادي مضاعفة الدخل)
       let freq = 1;
-      if (tickerDivs.length >= 2) {
-        const gaps = [];
-        for (let i = 1; i < tickerDivs.length; i++) {
-          gaps.push(Math.floor(
-            (new Date(divDate(tickerDivs[i])) - new Date(divDate(tickerDivs[i - 1]))) / 86400000
-          ));
-        }
-        gaps.sort((a, b) => a - b);
-        const medGap = gaps[Math.floor(gaps.length / 2)];
-        // AUDIT-FIX 2026-08: فرع شهري (REITs الشهرية مثلاً) — كان الكشف يسقف عند 4
-        if (medGap <= 45)       freq = 12;
-        else if (medGap <= 105) freq = 4;
-        else if (medGap <= 210) freq = 2;
-      }
+      // AUDIT-FIX 2026-08-22: التعريف الموحَّد في utils.js — بحارس يمنع قلب
+      // موزّع سنوي إلى «شهري» بسبب تسجيلين متقاربين.
+      freq = inferDividendFrequency(tickerDivs.map(divDate));
 
       // DPS السنوي المتوقع = مجموع DPS آخر 12 شهراً (قرار المالك 2026-08).
       // كان: دفعة واحدة (وسيط أو آخر دفعة) × الدورية — وهو يفترض تساوي الدفعات،
@@ -772,7 +761,7 @@ async function loadAllData() {
       const daysSinceDiv = lastDivDate
         ? Math.floor((Date.now() - tsOf(lastDivDate)) / 86400000)
         : null;
-      const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+      const staleAfter = dividendStaleDays(freq);
       const isStale    = daysSinceDiv != null && daysSinceDiv > staleAfter;
 
       if (isStale) {

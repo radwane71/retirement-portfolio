@@ -120,6 +120,45 @@ function parseDateLocal(s) {
   return new Date(y, m - 1, d);
 }
 
+// دورية التوزيع — التعريف الوحيد المعتمد في المشروع.
+// AUDIT-FIX 2026-08-22: كان المنطق مكرَّراً حرفياً في خمسة ملفات (لوحة التحكم،
+// الأرباح، الأداء، محرّك القرار، التقرير) وكلها بلا حارس: الدورية تُستنتج من
+// **وسيط الفجوات**، وفجوة واحدة متقاربة — دفعة مرحلية ثم ختامية، أو إعلان ثم
+// صرف — تقلب موزّعاً **سنوياً** إلى «شهري».
+//
+// والأثر ليس تجميلياً: عتبة «منقطع» تتبع الدورية بـ(365÷freq)×1.75، فتصير
+// 53 يوماً بدل 638، ويُستبعد سهم سليم من جدول الدخل المتوقَّع بعد 81 يوماً من
+// آخر توزيع — أي يختفي صفّه ويهبط دخلك المعروض بلا سبب حقيقي.
+//
+// الحارس: الدورية العالية تحتاج شاهدين — عدد فجوات كافٍ **و** عدد دفعات فعلي
+// في آخر 12 شهراً يطابقها (شهري ≥6، ربعي ≥3، نصفي ≥2). وإلا نهبط لأقرب دورية
+// تدعمها البيانات. لا نرفع الدورية بشاهد واحد أبداً.
+//
+// dates: مصفوفة تواريخ ISO للتوزيعات المستلَمة (بأي ترتيب).
+function inferDividendFrequency(dates, asOf) {
+  const iso = (dates || []).filter(Boolean).map(String).sort();
+  if (iso.length < 2) return 1;
+  const ms = d => { const p = (typeof parseDateLocal === 'function') ? parseDateLocal(d) : null; return (p || new Date(d)).getTime(); };
+  const gaps = [];
+  for (let i = 1; i < iso.length; i++) gaps.push(Math.floor((ms(iso[i]) - ms(iso[i - 1])) / 86400000));
+  gaps.sort((a, b) => a - b);
+  const med = gaps[Math.floor(gaps.length / 2)];
+  let freq = med <= 45 ? 12 : med <= 105 ? 4 : med <= 210 ? 2 : 1;
+
+  const now = (asOf instanceof Date ? asOf : new Date()).getTime();
+  const ttmCount = iso.filter(d => { const x = ms(d); return x <= now && x >= now - 365 * 86400000; }).length;
+  const MIN_PAYS = { 12: 6, 4: 3, 2: 2, 1: 1 };
+  while (freq > 1 && (gaps.length < 2 || ttmCount < MIN_PAYS[freq])) {
+    freq = freq === 12 ? 4 : freq === 4 ? 2 : 1;
+  }
+  return freq;
+}
+
+// عتبة اعتبار التوزيع «منقطعاً» بالأيام — مشتقّة من الدورية.
+function dividendStaleDays(freq) {
+  return (365 / Math.max(1, +freq || 1)) * 1.75;
+}
+
 // تاريخ التوزيعة كتدفّق نقدي — التعريف الوحيد المعتمد في المشروع.
 // AUDIT-FIX 2026-08-21 (#44): كان لسجلّ بلا حقل `date` خمس معالجات متمايزة داخل
 // XIRR: لوحة التحكم تبني التاريخ من سنة/شهر، الرؤية المستقبلية تفترض 1 يونيو

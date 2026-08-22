@@ -546,13 +546,10 @@ window.DecisionIntel = (function () {
     return out;
   }
 
+  // AUDIT-FIX 2026-08-22: موحَّد مع utils.js/inferDividendFrequency — بحارس يمنع
+  // قلب موزّع سنوي إلى «شهري» بسبب تسجيلين متقاربين.
   function freqOf(series) {
-    if (series.length < 2) return 1;
-    const gaps = [];
-    for (let i = 1; i < series.length; i++) gaps.push(daysBetween(series[i - 1].date, series[i].date));
-    gaps.sort((a, b) => a - b);
-    const med = gaps[Math.floor(gaps.length / 2)];
-    return med <= 45 ? 12 : med <= 105 ? 4 : med <= 210 ? 2 : 1;
+    return inferDividendFrequency((series || []).map(x => x.date));
   }
 
   function forwardOf(r) {
@@ -570,7 +567,7 @@ window.DecisionIntel = (function () {
     const dps = ttm > 0 ? ttm : s.slice(-freq).reduce((a, p) => a + p.dps, 0);
     const lastDate = s[s.length - 1].date;
     const daysSince = daysBetween(lastDate, Date.now());
-    const staleAfter = (365 / Math.max(1, freq)) * 1.75;   // نفس عتبة الانقطاع في صفحة الأرباح
+    const staleAfter = dividendStaleDays(freq);   // نفس عتبة الانقطاع في صفحة الأرباح
     return {
       dps, freq, basis, payments: s.length, series: s, lastDate, daysSince,
       staleAfter: Math.round(staleAfter), stale: daysSince > staleAfter,

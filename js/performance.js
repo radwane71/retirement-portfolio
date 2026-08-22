@@ -1183,16 +1183,9 @@ function renderDividendMetrics() {
       .sort((a, b) => a.date.localeCompare(b.date));
     if (!entries.length) return 0;
     // الدورية من وسيط الفجوات الزمنية بين الدفعات
-    let freq = 1;
-    if (entries.length >= 2) {
-      const gaps = [];
-      for (let i = 1; i < entries.length; i++) {
-        gaps.push(Math.floor((parseDateLocal(entries[i].date) - parseDateLocal(entries[i - 1].date)) / 86400000));
-      }
-      gaps.sort((a, b) => a - b);
-      const med = gaps[Math.floor(gaps.length / 2)];
-      if (med <= 105) freq = 4; else if (med <= 210) freq = 2;
-    }
+    // AUDIT-FIX 2026-08-22: التعريف الموحَّد في utils.js (وكان هذا الموضع يفتقد
+    // فرع «شهري» أصلاً، فالريت الشهري يُقرأ ربعياً).
+    const freq = inferDividendFrequency(entries.map(e => e.date));
     // سلسلة DPS = المبلغ ÷ الأسهم وقت كل دفعة
     const dpsSeries = [];
     entries.forEach(e => {

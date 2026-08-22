@@ -258,22 +258,10 @@ function _projectedAnnualIncome() {
 
     // الدورية أولاً (وسيط الفجوات الزمنية) — نحتاجها لاختيار آخر freq دفعات
     // AUDIT-FIX: use median inter-dividend gap (matches dashboard.js) — robust to skipped payments
-    let freq = 1;
-    let freqLabel = 'سنوي';
-    if (tickerDivs.length >= 2) {
-      const gaps = [];
-      for (let i = 1; i < tickerDivs.length; i++) {
-        gaps.push(Math.floor(
-          (new Date(_divSortDate(tickerDivs[i])) - new Date(_divSortDate(tickerDivs[i - 1]))) / 86400000
-        ));
-      }
-      gaps.sort((a, b) => a - b);
-      const medGap = gaps[Math.floor(gaps.length / 2)];
-      // AUDIT-FIX 2026-08: فرع شهري (REITs الشهرية مثلاً) — كان الكشف يسقف عند 4 (يطابق dashboard.js)
-      if (medGap <= 45)       { freq = 12; freqLabel = 'شهري'; }
-      else if (medGap <= 105) { freq = 4; freqLabel = 'ربع سنوي'; }
-      else if (medGap <= 210) { freq = 2; freqLabel = 'نصف سنوي'; }
-    }
+    // AUDIT-FIX 2026-08-22: التعريف الموحَّد في utils.js — بحارس يمنع قلب موزّع
+    // سنوي إلى «شهري» بسبب تسجيلين متقاربين (انظر شرح inferDividendFrequency).
+    const freq = inferDividendFrequency(tickerDivs.map(_divSortDate));
+    const freqLabel = freq === 12 ? 'شهري' : freq === 4 ? 'ربع سنوي' : freq === 2 ? 'نصف سنوي' : 'سنوي';
 
     // سلسلة DPS لكل دفعة كان المستخدم يملك أسهماً عندها (بالترتيب الزمني)
     let lastValidShares = 0, lastValidDate = null, lastValidAmt = 0;
@@ -360,7 +348,7 @@ function _projectedAnnualIncome() {
     const daysSinceDiv = lastDivDate
       ? Math.floor((Date.now() - parseDateLocal(lastDivDate).getTime()) / 86400000)
       : null;
-    const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+    const staleAfter = dividendStaleDays(freq);
     const isStale    = daysSinceDiv != null && daysSinceDiv > staleAfter;
 
     if (!isStale) total += projected;
@@ -1579,7 +1567,7 @@ function renderDividendQuality() {
     // (د) انقطاع فعلي: تجاوز 1.75 ضعف الدورة بلا توزيع = Streak مُصفَّر
     //     (نفس عتبة استبعاد الدخل المتوقع — الدستور §4 الفلتر 1)
     const daysSinceLast = Math.floor((Date.now() - anchor) / DAY);
-    const broken = daysSinceLast > (365 / Math.max(1, freq)) * 1.75;
+    const broken = daysSinceLast > dividendStaleDays(freq);
     const continuityScore = Math.round(35 * regularity * maturity * cutFactor * (broken ? 0.15 : 1));
 
     // ── الدرجة الكلية: تُطبَّع على المحاور المتاحة فقط (من 100) ──

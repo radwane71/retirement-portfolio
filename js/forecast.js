@@ -431,19 +431,10 @@ function forecastProjectedAnnualIncome(holdingRows, divRows, txRows) {
     if (!tickerDivs.length) return;
 
     // الدورية = وسيط الفجوات الزمنية بين الدفعات (محصّن ضد دفعة مفقودة)
-    let freq = 1, freqLabel = 'سنوي';
-    if (tickerDivs.length >= 2) {
-      const gaps = [];
-      for (let i = 1; i < tickerDivs.length; i++) {
-        gaps.push(Math.floor(
-          (new Date(_fwdDivSortDate(tickerDivs[i])) - new Date(_fwdDivSortDate(tickerDivs[i - 1]))) / 86400000));
-      }
-      gaps.sort((a, b) => a - b);
-      const medGap = gaps[Math.floor(gaps.length / 2)];
-      if      (medGap <= 45)  { freq = 12; freqLabel = 'شهري'; }
-      else if (medGap <= 105) { freq = 4;  freqLabel = 'ربع سنوي'; }
-      else if (medGap <= 210) { freq = 2;  freqLabel = 'نصف سنوي'; }
-    }
+    // AUDIT-FIX 2026-08-22: التعريف الموحَّد في utils.js — بحارس يمنع قلب موزّع
+    // سنوي إلى «شهري» بسبب تسجيلين متقاربين (النسخة السادسة من هذا المنطق).
+    const freq = inferDividendFrequency(tickerDivs.map(_fwdDivSortDate));
+    const freqLabel = freq === 12 ? 'شهري' : freq === 4 ? 'ربع سنوي' : freq === 2 ? 'نصف سنوي' : 'سنوي';
 
     // سلسلة DPS لكل دفعة كان المالك يملك أسهماً عندها
     let lastValidShares = 0, lastValidDate = null, lastValidAmt = 0;
@@ -510,7 +501,7 @@ function forecastProjectedAnnualIncome(holdingRows, divRows, txRows) {
     // → يُستبعد من الدخل المتوقَّع ويُعلَن صراحةً (§8: لا إسقاط صامت).
     const daysSinceDiv = lastDivDate
       ? Math.floor((Date.now() - parseDateLocal(lastDivDate).getTime()) / 86400000) : null;
-    const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+    const staleAfter = dividendStaleDays(freq);
     const isStale    = daysSinceDiv != null && daysSinceDiv > staleAfter;
     if (!isStale) total += projected;
 

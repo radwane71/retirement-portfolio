@@ -3410,35 +3410,15 @@ async function exportMonthlyReviewMD() {
         const dateOf = d => (d.date ? parseDateLocal(d.date)
           : (d.year ? new Date(+d.year, (+d.month || 1) - 1, 1) : null));
 
-        // الدورية من وسيط الفجوات — مع فرع شهري (≤45 يوماً) كما في الملفين
-        let freq = 1;
-        if (divs.length >= 2) {
-          const gaps = [];
-          for (let i = 1; i < divs.length; i++) {
-            const a = dateOf(divs[i - 1]), b = dateOf(divs[i]);
-            if (a && b) gaps.push(Math.floor((b - a) / 86400000));
-          }
-          gaps.sort((x, y) => x - y);
-          const med = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 999;
-          let inferred = 1;
-          if (med <= 45) inferred = 12; else if (med <= 105) inferred = 4; else if (med <= 210) inferred = 2;
-          // AUDIT-FIX 2026-08-22 (تدقيق خارجي #4): الوسيط على فجوة واحدة أو فجوتين
-          // كان يقلب موزّعاً **سنوياً** إلى «شهري» لمجرد تسجيلين متقاربين (دفعة
-          // مرحلية + ختامية، أو إعلان ثم صرف). والعتبة تعتمد على الدورية:
-          // (365÷12)×1.75 = 53 يوماً — فيُستبعد السهم «منقطعاً» بعد 81 يوماً وهو
-          // يوزّع مرة في السنة. النتيجة: صفوف تختفي من جدول الدخل بلا سبب حقيقي.
-          // الحارس: الدورية العالية تحتاج شاهدين — عدد فجوات كافٍ **و** عدد دفعات
-          // فعلي في آخر 12 شهراً يطابقها. وإلا نهبط لأقرب دورية تدعمها البيانات.
-          const _ttmCount = divs.filter(d => {
-            const dt = dateOf(d);
-            return dt && dt.getTime() <= nowTs && dt.getTime() >= nowTs - 365 * 86400000;
-          }).length;
-          const _minPays = { 12: 6, 4: 3, 2: 2, 1: 1 };
-          freq = inferred;
-          while (freq > 1 && (gaps.length < 2 || _ttmCount < _minPays[freq])) {
-            freq = freq === 12 ? 4 : freq === 4 ? 2 : 1;
-          }
-        }
+        // AUDIT-FIX 2026-08-22: نُقل إلى utils.js/inferDividendFrequency ليكون
+        // تعريفاً واحداً لكل الصفحات بدل خمس نسخ متطابقة، وبحارس يمنع قلب
+        // موزّع سنوي إلى «شهري» بسبب تسجيلين متقاربين.
+        // ISO محلي — `toISOString` يزيح التاريخ بفارق المنطقة الزمنية فينقل
+        // توزيعة طرف الشهر إلى شهر آخر ويشوّه الفجوات.
+        const _isoLocal = x => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+        const freq = inferDividendFrequency(divs.map(d => {
+          const x = dateOf(d); return x ? _isoLocal(x) : null;
+        }));
 
         // DPS لكل دفعة = المبلغ ÷ الأسهم وقتها (المستلَم فقط — لا تواريخ مستقبلية)
         const series = [];
@@ -3459,7 +3439,7 @@ async function exportMonthlyReviewMD() {
         // استبعاد المنقطع — نفس عتبة الملفين: (365 ÷ freq) × 1.75
         const lastTs = series[series.length - 1].ts;
         const daysSince = Math.floor((nowTs - lastTs) / 86400000);
-        const staleAfter = (365 / Math.max(1, freq)) * 1.75;
+        const staleAfter = dividendStaleDays(freq);
         const projected = dpsAnnual * +h.shares;
         if (daysSince > staleAfter) {
           stale.push({ ticker, name: h.name || ticker, daysSince, projected });
