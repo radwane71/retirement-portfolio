@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260822m">
+  <link rel="stylesheet" href="css/style.css?v=20260822n">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -542,10 +542,22 @@
           <span id="hist-saving-badge" class="hist-saving" style="display:none;">💾 جاري الحفظ…</span>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn btn-primary btn-sm" onclick="downloadHistCSV('selected')" id="hist-dl-sel">⬇️ تنزيل المحدَّد (0)</button>
+          <button class="btn btn-secondary btn-sm" onclick="downloadHistCSV('all')">⬇️ تنزيل الكل CSV</button>
+          <button class="btn btn-secondary btn-sm" onclick="verifyHistorySaved()" title="يقرأ السجل من الخادم مباشرةً ويقارنه بما تراه">🛡️ تحقّق من الحفظ</button>
           <button class="btn btn-secondary btn-sm" onclick="exportHistoryMD()">⬇️ تصدير Markdown</button>
           <button class="btn btn-secondary btn-sm" onclick="recomputeAllHistory()" title="يعيد حساب نتائج كل العمليات المحفوظة بالمعادلة المحدّثة من مدخلاتها الأصلية">🔄 إعادة حساب السجل</button>
           <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
         </div>
+      </div>
+      <div id="hist-verify-line" class="small" style="margin:6px 0 0;line-height:1.6"></div>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 0;font-size:.82rem;">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="hist-check-all" onchange="toggleAllHist(this.checked)">
+          <span>تحديد كل المعروض</span>
+        </label>
+        <button class="btn btn-secondary btn-sm" type="button" onclick="clearHistSel()">إلغاء التحديد</button>
+        <span id="hist-sel-count" class="text-muted"></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:10px 0;">
         <input type="search" id="hist-search" placeholder="🔎 ابحث برمز السهم أو اسمه أو داخل الملاحظات وتقييم Perplexity…" oninput="onHistSearch()"
@@ -627,9 +639,9 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260822m"></script>
-  <script src="js/auth.js?v=20260822m"></script>
-  <script src="js/utils.js?v=20260822m"></script>
+  <script src="js/supabase.js?v=20260822n"></script>
+  <script src="js/auth.js?v=20260822n"></script>
+  <script src="js/utils.js?v=20260822n"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -2809,6 +2821,114 @@
       return mt.includes('مبالغ فيه') ? -val : val;
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // تحديد العمليات وتنزيلها CSV + التحقّق من الحفظ — طلب المالك 2026-08-22:
+    // «ما أقدر أرجع للعملية الأولى نهائياً… أبغى أسوي تِك وأختار أي عملية
+    //  وتنزل لي بملف CSV بنفس المدخلات اللي في الحاسبة، وأقدر أنزّل الكل».
+    //
+    // التنزيل يحمل **المدخلات الخام** لا النتائج وحدها: النتيجة مشتقّة ويمكن
+    // إعادة حسابها، أما المدخل فهو ما أدخلتَه ولا يُستعاد إن ضاع. ولهذا
+    // الأعمدة تُبنى من اتحاد مفاتيح كل العمليات المختارة — فسهم بمدخلات
+    // إضافية (ريت مثلاً) لا تُبتر خاناته لأن غيره لا يملكها.
+    // ══════════════════════════════════════════════════════════════════
+    const _histSel = new Set();
+
+    function onHistSelChange(id, on) {
+      if (on) _histSel.add(id); else _histSel.delete(id);
+      refreshHistSelUI();
+    }
+    function toggleAllHist(on) {
+      document.querySelectorAll('#historyList .hist-sel').forEach(cb => {
+        cb.checked = on;
+        const id = +cb.dataset.id;
+        if (on) _histSel.add(id); else _histSel.delete(id);
+      });
+      refreshHistSelUI();
+    }
+    function clearHistSel() {
+      _histSel.clear();
+      document.querySelectorAll('#historyList .hist-sel').forEach(cb => { cb.checked = false; });
+      const all = document.getElementById('hist-check-all');
+      if (all) all.checked = false;
+      refreshHistSelUI();
+    }
+    function refreshHistSelUI() {
+      const n = _histSel.size;
+      const btn = document.getElementById('hist-dl-sel');
+      if (btn) { btn.textContent = `⬇️ تنزيل المحدَّد (${n})`; btn.disabled = n === 0; }
+      const cnt = document.getElementById('hist-sel-count');
+      if (cnt) cnt.textContent = n ? `${n} عملية محدَّدة` : 'لم تُحدَّد أي عملية';
+    }
+
+    function _csvCell(v) {
+      if (v == null) return '';
+      if (typeof v === 'object') { try { v = JSON.stringify(v); } catch (_) { v = ''; } }
+      const t = String(v);
+      return /[",\n\r;]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    }
+
+    function buildHistCSV(entries) {
+      // اتحاد المفاتيح — لا نفترض أن كل العمليات لها نفس المدخلات
+      const inKeys = [], resKeys = [];
+      entries.forEach(e => {
+        Object.keys(e.inputs  || {}).forEach(k => { if (!inKeys.includes(k))  inKeys.push(k); });
+        Object.keys(e.results || {}).forEach(k => { if (!resKeys.includes(k)) resKeys.push(k); });
+      });
+      const head = ['id', 'التاريخ', ...inKeys.map(k => 'مدخل: ' + k), ...resKeys.map(k => 'نتيجة: ' + k)];
+      const rows = entries.map(e => [
+        e.id, e.date || '',
+        ...inKeys.map(k => (e.inputs || {})[k]),
+        ...resKeys.map(k => (e.results || {})[k]),
+      ].map(_csvCell).join(','));
+      // BOM ليقرأ Excel العربية صحيحةً
+      return '\uFEFF' + [head.map(_csvCell).join(','), ...rows].join('\r\n');
+    }
+
+    function downloadHistCSV(mode) {
+      const entries = mode === 'all'
+        ? _history.slice()
+        : _history.filter(e => _histSel.has(e.id));
+      if (!entries.length) {
+        showToast(mode === 'all' ? 'لا عمليات محفوظة' : 'لم تحدّد أي عملية — ضع علامة على ما تريد تنزيله', 'error');
+        return;
+      }
+      entries.sort((a, b) => (a.id || 0) - (b.id || 0));   // الأقدم أولاً — ترتيب زمني
+      const csv  = buildHistCSV(entries);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href = url;
+      a.download = `tharwa_valuations_${mode === 'all' ? 'all' : 'selected'}_${entries.length}_${todayISO()}.csv`;
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 100);
+      showToast(`نُزِّلت ${entries.length} عملية بكل مدخلاتها ✓`, 'success');
+    }
+
+    // ── التحقّق من الحفظ: نقرأ من الخادم مباشرةً ونقارن ──
+    // المالك طلب التأكد أن العمليات محفوظة فعلاً لا في الذاكرة فقط.
+    async function verifyHistorySaved() {
+      const line = document.getElementById('hist-verify-line');
+      if (line) line.innerHTML = '<span class="text-muted">جارٍ القراءة من الخادم…</span>';
+      try {
+        const remote = await loadUserSetting(HIST_DB_KEY);
+        const rn = Array.isArray(remote) ? remote.length : 0;
+        const ln = _history.length;
+        const rIds = new Set((Array.isArray(remote) ? remote : []).map(e => e.id));
+        const missing = _history.filter(e => !rIds.has(e.id));
+        if (rn === 0 && ln > 0) {
+          line.innerHTML = `<span style="color:var(--st-bad)">🔴 الخادم لا يحوي أي عملية بينما تظهر ${ln} على الشاشة — لم تُحفظ. أعد الحفظ فوراً.</span>`;
+        } else if (missing.length) {
+          line.innerHTML = `<span style="color:var(--st-warn)">🟡 ${missing.length} من ${ln} عملية غير موجودة على الخادم: ${missing.map(e => escHist((e.inputs||{}).ticker || e.id)).join('، ')}</span>`;
+        } else {
+          const oldest = _history.reduce((m, e) => (e.id && e.id < m ? e.id : m), Infinity);
+          const oldTxt = isFinite(oldest) ? new Date(oldest).toLocaleDateString('ar-SA') : '—';
+          line.innerHTML = `<span style="color:var(--st-good)">🟢 محفوظة على الخادم: <b>${rn}</b> عملية — كلها موجودة، أقدمها ${escHist(oldTxt)}. تُقرأ على أي جهاز وتدخل النسخة الاحتياطية.</span>`;
+        }
+      } catch (e) {
+        line.innerHTML = `<span style="color:var(--st-bad)">🔴 تعذّرت القراءة من الخادم: ${escHist(e?.message || e)}</span>`;
+      }
+    }
+
     function renderHistory() {
       const section = document.getElementById('historySection');
       const list    = document.getElementById('historyList');
@@ -2859,6 +2979,7 @@
       // ── ترقيم الصفحات: 25 بطاقة كحد أقصى في الشاشة ──
       const pages = Math.ceil(filtered.length / HIST_PAGE_SIZE);
       if (_histPage >= pages) _histPage = 0;
+      setTimeout(refreshHistSelUI, 0);   // بعد حقن الـHTML
       const pageItems = filtered.slice(_histPage * HIST_PAGE_SIZE, (_histPage + 1) * HIST_PAGE_SIZE);
 
       list.innerHTML = pageItems.map(entry => {
@@ -2905,6 +3026,10 @@
         return `<div class="hist-card${cardCls}">
           <div class="hist-top">
             <div class="hist-idwrap">
+              <input type="checkbox" class="hist-sel" data-id="${entry.id}"
+                     onchange="onHistSelChange(${entry.id}, this.checked)"
+                     ${_histSel.has(entry.id) ? 'checked' : ''}
+                     title="حدّده لتنزيله في ملف CSV" style="cursor:pointer;margin-inline-end:6px">
               ${ticker ? `<span class="hist-badge">${escHist(ticker)}</span>` : ''}
               ${stockName ? `<span class="hist-nm">${escHist(stockName)}</span>` : ''}
             </div>
