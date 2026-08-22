@@ -1198,6 +1198,12 @@ function exportTargetsCSV() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// معامل أولوية السهم المخطّط. الفجوة وحدها ترفعه أصلاً (وزنه 0% فالفجوة =
+// الهدف كاملاً)، وهذا المعامل يحسم التساوي لصالح نيّتك المعلنة بالدخول حين
+// تتساوى فجوته مع سهم مملوك. قيمته 1.15 لا أكثر: تحيّز صريح محدود، لا قفز
+// فوق سهم فجوته أكبر فعلياً.
+const PLANNED_PRIORITY_BOOST = 1.15;
+
 // ⚖️ محرك إعادة التوازن — Rebalancing Engine
 // ══════════════════════════════════════════════════════════════
 
@@ -1330,6 +1336,9 @@ function runRebalancing() {
   // مراعاة موقع السعر من التقييم (افتراضياً مُفعّل) — يجعل المحرك ذكياً لا يعتمد الفجوة وحدها
   const valAwareEl   = document.getElementById('reb-valuation-aware');
   const valAware     = valAwareEl ? valAwareEl.checked : true;
+  // إدراج الأسهم المخطّطة (غير المملوكة) — افتراضياً مُفعَّل بطلب المالك.
+  const _incPlannedEl = document.getElementById('reb-include-planned');
+  const includePlanned = _incPlannedEl ? _incPlannedEl.checked : true;
   const resultEl     = document.getElementById('reb-result');
   if (!resultEl) return;
 
@@ -1356,6 +1365,54 @@ function runRebalancing() {
   // للتنفيذ منهما (بمبلغ ريالي) هي الخاطئة. هدف الصفر كان مستبعَداً أصلاً
   // بشرط > 0، أما مهمة التصفية مع هدف موجب فكانت تمرّ بلا فلترة.
   const _liq = Object.keys(taskMap).filter(t => taskMap[t] === 'liquidation');
+
+  // ══════════════════════════════════════════════════════════════════
+  // الأسهم المخطّطة — بطلب المالك 2026-08-22 (نقض قرار سابق باستبعادها)
+  // ------------------------------------------------------------------
+  // سهم في قاعدة بياناتك بهدف محدَّد ولم تشترِه بعد وزنه 0%، ففجوته = هدفه
+  // **كاملاً** — وهي أكبر فجوة ممكنة. استبعاده كان يجعل المحرّك يوزّع على
+  // ما تملكه فقط ويتجاهل نيّتك المعلنة للدخول.
+  //
+  // العقبة الحقيقية التي بُني عليها الاستبعاد: **لا سعر سوقي** لغير المملوك
+  // (جدول holdings وحده يحمل current_price). العلاج ليس تخمين سعر، بل:
+  //   • المرجع السعري = سعر دخولك المستهدف (entry_price) ثم سعر التجميع من
+  //     المهام (accumulate_at) ثم القيمة العادلة — بهذا الترتيب، **معلَّماً**.
+  //   • لا حكم سعري: درجة التقييم محايدة (1) ويُصرَّح بأنها ليست تقييماً —
+  //     لأن قياس «هل السعر في منطقة الشراء؟» بسعر دخولك نفسه دوران منطقي
+  //     يمنح كل سهم مخطّط درجة كاملة زوراً (§8: لا تقدير صامت).
+  //   • بلا أي مرجع ⇒ يبقى في التوزيع بالمبلغ، ويُعلَن أن تحويله إلى عدد
+  //     أسهم غير ممكن — لا يُحذف بصمت.
+  // ══════════════════════════════════════════════════════════════════
+  const _heldSet = new Set(holdings.map(h => h.ticker));
+  const plannedAll = (includePlanned ? userStocks : [])
+    .filter(sk => !_heldSet.has(sk.ticker) && stockTargets[sk.ticker] > 0
+                  && taskMap[sk.ticker] !== 'liquidation' && !zeroTargets.has(sk.ticker))
+    .map(sk => {
+      const z   = stockZones[sk.ticker] || {};
+      const tz  = taskZonesMap[sk.ticker] || {};
+      const fv  = valuationLatest[sk.ticker]?.fairValueAvg;
+      let refPrice = 0, refSrc = '';
+      if (+z.entry_price > 0)        { refPrice = +z.entry_price; refSrc = 'سعر دخولك المستهدف'; }
+      else if (+tz.accumulate_at > 0){ refPrice = +tz.accumulate_at; refSrc = 'سعر التجميع من المهام'; }
+      else if (+fv > 0)              { refPrice = +fv; refSrc = 'القيمة العادلة'; }
+      const savedTarget = stockTargets[sk.ticker] || 0;
+      const capPct      = tgCapOf(sk.ticker);
+      const targetPct   = Math.min(savedTarget, capPct);
+      return {
+        ticker: sk.ticker, name: sk.name || sk.ticker, sector: sk.sector || '—',
+        shares: 0, current_price: refPrice,
+        planned: true, refSrc, hasRef: refPrice > 0,
+        currentPct: 0, savedTarget, capPct, targetPct,
+        capBound: targetPct < savedTarget - 1e-9,
+        blueChip: tgIsBlueChip(sk.ticker),
+        gap: targetPct,                       // الوزن 0 ⇒ الفجوة = الهدف كاملاً
+        inZone: true,                         // لا سعر سوقي ⇒ لا فلتر منطقة شراء
+        val: { score: 1, label: '⚪ بلا سعر سوقي', reason: 'سهم مخطّط — لا حكم سعري (§8)' },
+        effScore: 1,
+        priority: targetPct * PLANNED_PRIORITY_BOOST,
+      };
+    });
+
   const candidatesAll = holdings
     .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0
                  && taskMap[h.ticker] !== 'liquidation')
@@ -1377,7 +1434,7 @@ function runRebalancing() {
                blueChip: tgIsBlueChip(h.ticker), gap, inZone, val, effScore, priority };
     });
 
-  const candidates = candidatesAll
+  const candidates = [...candidatesAll, ...plannedAll]
     .filter(c => c.gap > 0.05)                             // فقط الناقص فعلاً (فوق 0.05%)
     .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
     .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
@@ -1394,13 +1451,23 @@ function runRebalancing() {
   const _exPlanned  = userStocks.filter(s => !_hTickers.has(s.ticker)).length;
   const _exNoPrice  = holdings.filter(h => !(+h.current_price > 0)).length;
   const _exNoTarget = holdings.filter(h => +h.current_price > 0 && !(stockTargets[h.ticker] > 0)).length;
+  const _plannedNoRef = plannedAll.filter(c => !c.hasRef);
   const scopeNote = noteHtml('ℹ️',
-    `<strong>نطاق المحرّك: الأسهم المملوكة فقط.</strong> يوزّع على ما له وزن حالي قابل للقياس وهدف محدَّد وسعر حالي > 0.`
-    + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`
+    (includePlanned
+      ? `<strong>نطاق المحرّك: المملوك + المخطّط.</strong> السهم المخطّط الذي حدّدت له هدفاً وزنه 0% ففجوته = هدفه كاملاً، وهي أكبر فجوة ممكنة — لذلك يتصدّر الترتيب.`
+        + (plannedAll.length
+            ? ` أُدرج الآن <b>${plannedAll.length}</b> سهماً مخطّطاً`
+              + (_plannedNoRef.length
+                  ? ` — منها <b>${_plannedNoRef.length}</b> بلا مرجع سعري (${_plannedNoRef.map(c => esc(c.ticker)).join('، ')}): يظهر مبلغه ولا يُحوَّل إلى عدد أسهم.`
+                  : ' — كلها لها مرجع سعري.')
+            : ' لا سهم مخطّط له هدف محدَّد حالياً.')
+        + ` <b>لا حكم سعري على المخطّط:</b> لا يوجد سعر سوقي لغير المملوك، وقياسه بسعر دخولك نفسه دوران يمنحه درجة كاملة زوراً — فدرجته محايدة ويُعلَن ذلك (§8).`
+      : `<strong>نطاق المحرّك: الأسهم المملوكة فقط.</strong> يوزّع على ما له وزن حالي قابل للقياس وهدف محدَّد وسعر حالي > 0.`
+        + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`)
     + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي`
     + (capBlocked.length ? ` · ${capBlocked.length} سهماً بلغ سقفه الدستوري` : '')
     + (_liq.length ? ` · <b>${_liq.length} سهماً مهمّته «تصفية»</b> (${_liq.map(esc).join('، ')}) — قرارك بالخروج منه يتقدّم على أي توصية شراء` : '')
-    + `. السهم بلا وزن حالي وبلا سعر لا فجوة له تُقاس، فلا يدخل التوزيع.`, '');
+    + `.`, '');
 
   // ── لافتة القصّ الدستوري: تُعرض في كل مخرَج (§8: لا تقليص صامت) ──
   const capNoteItems = [
@@ -1553,7 +1620,11 @@ function runRebalancing() {
   if (!rows.length) {
     resultEl.innerHTML = `<div class="stack">
       ${noteHtml('⚠️', `المبلغ غير كافٍ لشراء ولو سهم واحد من الأسهم المرشحة.
-        <div class="small text-muted">أدنى سعر بين المرشحين: ${formatSAR(Math.min(...candidates.map(c => +c.current_price)))}</div>`, 'warn')}
+        <div class="small text-muted">أدنى سعر بين المرشحين: ${(() => {
+          // تجاهل من لا سعر مرجعي له (سهم مخطّط بلا entry/تجميع/عادلة) وإلا ظهر «0»
+          const px = candidates.map(c => +c.current_price).filter(v => v > 0);
+          return px.length ? formatSAR(Math.min(...px)) : 'غير متاح';
+        })()}</div>`, 'warn')}
       ${capNote}
       ${scopeNote}
     </div>`;
@@ -1618,15 +1689,22 @@ function runRebalancing() {
             const gapAfterCls  = Math.abs(r.gapAfter) <= 1 ? 'text-success' : Math.abs(r.gapAfter) <= 3 ? 'text-accent' : 'text-muted';
             const cap    = tgCapOf(r.ticker);
             const rScale = Math.max(cap + TG_CAP_BUFFER + 2, r.targetPct * 1.15, r.newPct * 1.15);
-            const zoneEl = r.inZone
+            const zoneEl = r.planned
+              ? '<span class="text-muted small" title="لا سعر سوقي لغير المملوك — لا حكم سعري (§8)">⚪ غير مُقيَّم</span>'
+              : r.inZone
               ? tagHtml('✅', 'ضمن النطاق', 'good')
               : (stockZones[r.ticker]?.entry_price
                   ? tagHtml('▲', `فوق ${formatSAR(stockZones[r.ticker].entry_price)}`, 'warn')
                   : '<span class="text-muted small">—</span>');
             return `<tr>
-              <td><strong class="text-accent">${esc(r.ticker)}</strong></td>
+              <td><strong class="text-accent">${esc(r.ticker)}</strong>${r.planned
+                ? `<span title="سهم مخطّط — لم تشترِه بعد. وزنه 0% ففجوته = هدفه كاملاً"
+                     style="font-size:.62rem;background:rgba(59,130,246,.15);color:#58a6ff;border-radius:3px;padding:1px 5px;font-weight:600;cursor:help"> مخطّط</span>`
+                : ''}</td>
               <td>${esc(r.name)}</td>
-              <td class="num">${formatSAR(r.current_price)}</td>
+              <td class="num">${formatSAR(r.current_price)}${r.planned
+                ? `<div class="small text-muted" style="font-size:.62rem">${esc(r.refSrc || 'بلا مرجع')} — لا سعر سوقي</div>`
+                : ''}</td>
               <td class="num bold text-accent">${r.sharesToBuy.toLocaleString()}</td>
               <td class="num bold">${formatSAR(r.cost)}</td>
               <td class="wcell">
