@@ -116,6 +116,7 @@ function buildPriceAlerts() {
 // ── الحالة ──
 let holdings   = [];   // من جدول holdings
 let stockTargets = {}; // ticker → { target_pct, entry_price, exit_price }
+let sectorTargets = {}; // sector → نسبة الهدف — لخطة الوصول على مستوى القطاع
 let taskZones  = {};   // ticker → { accumulate, trimFrom, trimTo, liquidate } من صفحة المهام
 let taskTypes  = {};   // ticker → نوع المهمة (monitoring/accumulation/…) — قرار المالك
 let taskConflicts = {}; // ticker → عدد المهام النشطة (>1 = تعارض يُنبَّه عليه)
@@ -670,7 +671,7 @@ async function init() {
 }
 
 async function loadAll() {
-  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev, rZero, rPW] = await Promise.all([
+  const [rH, rT, rEng, rTasks, rDiv, rVal, rTx, rRev, rZero, rPW, rSecT] = await Promise.all([
     supabaseClient.from('holdings').select('ticker, name, sector, shares, avg_price, current_price, target_weight, price_updated_at, price_manual').order('ticker'),
     supabaseClient.from('stock_targets').select('ticker, target_pct, entry_price, exit_price'),
     loadUserSetting(ENGINE_STORE_KEY),
@@ -684,6 +685,8 @@ async function loadAll() {
     supabaseClient.from('review_log').select('ticker, review_date, notes').order('review_date', { ascending: false }),
     loadUserSetting(ZERO_TARGETS_KEY),
     loadUserSetting(PRICE_WATCH_KEY),
+    // أهداف القطاعات — تُستعمل في «خطة الوصول إلى أهدافك» (المستوى القطاعي)
+    supabaseClient.from('sector_targets').select('sector, target_pct'),
   ]);
   // فشل التحميل = مجموعة فارغة، وهو الجانب الآمن (لا أوامر تصفية مخترَعة)
   zeroTargets = new Set(Array.isArray(rZero) ? rZero : []);
@@ -702,6 +705,11 @@ async function loadAll() {
   holdings = rH.data || [];
   stockTargets = {};
   (rT.data || []).forEach(r => { stockTargets[r.ticker] = r; });
+  sectorTargets = {};
+  ((rSecT && rSecT.data) || []).forEach(r => {
+    const k = String(r.sector || '').trim();
+    if (k) sectorTargets[k] = +r.target_pct || 0;
+  });
   engineCfg = rEng || {};
 
   // سجل الأرباح الفعلي لكل رمز — مصدر كشف اتجاه التوزيع آلياً
@@ -842,6 +850,7 @@ function runEngine() {
   renderSummaryStrip(totalValue);
   renderActionGroups();
   renderSectorCheck(totalValue);
+  renderTargetPlan();
   renderCards();
 
   // حفظ لقطة كاملة لمخرجات المحرّك → user_settings (تُدرَج في تقرير المراجعة وتُنسَخ احتياطياً)
@@ -964,6 +973,249 @@ function renderActionGroups() {
 }
 
 // ── فحص سقف القطاع 25% (الفلتر 4) ──
+
+// ══════════════════════════════════════════════════════════════════════
+// 🧭 خطة الوصول إلى أهدافك — بطلب المالك 2026-08-22
+// ----------------------------------------------------------------------
+// الفجوة التي تسدّها: الصفحة كانت تقول «هذا السهم فوق سقفه» و«هذا فرصة»،
+// لكنها لا تقول **ماذا أفعل بالضبط لأصل إلى الأوزان التي رسمتُها**. ومحرّك
+// التوازن في صفحة الأهداف يوزّع **مبلغاً جديداً** فقط — لا يعطي الطرف الآخر
+// (ممّ أخفّف ولا كم).
+//
+// المخرَج: أوامر ملموسة بالريال وبعدد الأسهم، مرتّبة، مبنية على ثلاثة مدخلات
+// كلها **قراراتك أنت** لا اجتهاد المحرّك:
+//   ① أهدافك للأوزان (صفحة الأهداف) — الوجهة.
+//   ② قراراتك المسجّلة في المهام (تجميع/احتفاظ/تخفيف/مراقبة/تصفية) — تحكم
+//      اتجاه الحركة المسموح بها لكل سهم.
+//   ③ تقييماتك العادلة (حاسبة القيمة العادلة) — تحكم ما إذا كان **السعر**
+//      يسمح بالتنفيذ الآن.
+//
+// قواعد التعارض — مستمدّة من الدستور لا مخترَعة:
+//   • «تصفية» أو هدف صفر ⇒ خروج كامل مهما قال الهدف (P0.1، يسبق كل شيء).
+//   • كسر السقف الدستوري ⇒ تخفيف واجب **ولو كان السعر تحت العادلة**
+//     (§4 الفلتر 5: أي سقف ينكسر أولاً يفرض التخفيف — خطر تركيز لا قرار سعري).
+//   • فجوة موجبة (تحت الهدف) + السعر **فوق** العادلة ⇒ **لا تجميع الآن**؛
+//     تُعرض كـ«مؤجَّلة» مع السبب (§4 الفلتر 3: الشراء عند النزول مشروط لا آلي).
+//   • قرارك «تخفيف» مع فجوة موجبة، أو «تجميع» مع فجوة سالبة ⇒ **تعارض
+//      يُعلَن ولا يُحسم تلقائياً** — القرار قرارك، والمحرّك لا ينقض مهمتك.
+//   • «مراقبة» ⇒ لا مال جديد يدخل حتى ينتهي سبب المراقبة.
+//   • تقييم غير موثوق أو أقدم من VAL_STALE_DAYS ⇒ لا يُبنى عليه منع ولا سماح،
+//     ويُعلَن (§8: لا تقدير صامت).
+// ══════════════════════════════════════════════════════════════════════
+
+// الحدّ الأدنى لأمر يستحق التنفيذ — ما دونه تكلفة الصفقة تأكله
+const PLAN_MIN_SAR = 500;
+
+function _planEffectiveTarget(r) {
+  // الهدف الفعّال = الأدنى بين هدفك المسجّل والسقف الدستوري. لا نرفع هدفك،
+  // ولا نسمح لهدف فوق السقف أن يقود أمر شراء يكسر §1.
+  if (!r.hasTarget) return null;
+  return Math.min(r.targetWeight, r.cap);
+}
+
+function _planFairVerdict(r) {
+  // هل السعر يسمح بالتجميع الآن؟ يرجع {ok, why, usable}
+  if (r.fairValue == null)  return { ok: null, usable: false, why: 'بلا تقييم عادل مسجّل' };
+  if (r.fvUnreliable)       return { ok: null, usable: false, why: 'التقييم مُعلَّم غير موثوق (تشتّت النماذج)' };
+  if (r.valStale)           return { ok: null, usable: false, why: `التقييم أقدم من ${VAL_STALE_DAYS} يوماً` };
+  const margin = (r.fairValue - r.price) / r.fairValue * 100;   // موجب = تحت العادلة
+  return {
+    ok: margin > 0, usable: true, margin,
+    why: margin > 0
+      ? `السعر ${formatNum(r.price)} تحت العادلة ${formatNum(r.fairValue)} بـ${formatNum(margin)}%`
+      : `السعر ${formatNum(r.price)} فوق العادلة ${formatNum(r.fairValue)} بـ${formatNum(-margin)}%`,
+  };
+}
+
+function buildTargetPlan(valAware) {
+  const rows = _results || [];
+  const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
+  const out = { exits: [], trims: [], adds: [], deferred: [], conflicts: [],
+                noTarget: [], total, fundedBy: 0, needed: 0 };
+  if (!(total > 0)) return out;
+
+  rows.forEach(r => {
+    const price = +r.price || 0;
+    const mk = (extra) => ({
+      ticker: r.ticker, name: r.name, price, weight: r.weight, value: r.value,
+      target: _planEffectiveTarget(r), taskType: r.taskType, sector: r.sector, ...extra,
+    });
+
+    // ① قرارك الصريح بالخروج — يسبق كل حساب (P0.1)
+    if (zeroTargets.has(r.ticker) || r.taskType === 'liquidation') {
+      out.exits.push(mk({
+        sar: r.value, shares: r.shares,
+        why: zeroTargets.has(r.ticker) && r.taskType === 'liquidation' ? 'هدف صفر + مهمة تصفية'
+           : zeroTargets.has(r.ticker) ? 'هدف صفر مقصود' : 'مهمة تصفية مفتوحة',
+      }));
+      out.fundedBy += r.value;
+      return;
+    }
+
+    // بلا هدف مسجّل: لا وجهة نقيس إليها — يُعلَن ولا يُخترع هدف
+    const tgt = _planEffectiveTarget(r);
+    if (tgt == null) { out.noTarget.push(mk({})); return; }
+    if (!(price > 0)) { out.noTarget.push(mk({ noPrice: true })); return; }
+
+    const gapPct = tgt - r.weight;                 // + = تحت الهدف · − = فوقه
+    const sar    = Math.abs(gapPct) / 100 * total;
+    const shares = price > 0 ? sar / price : 0;
+    const fair   = _planFairVerdict(r);
+    const capped = tgt < r.targetWeight - 1e-9;    // هدفك قُصَّ عند السقف الدستوري
+
+    // ② فوق الهدف ⇒ تخفيف
+    if (gapPct < 0 && sar >= PLAN_MIN_SAR) {
+      if (r.taskType === 'accumulation') {
+        out.conflicts.push(mk({ sar, shares, gapPct,
+          why: 'وزنه فوق هدفك بينما مهمتك المسجّلة «تجميع» — القراران متعاكسان',
+          fix: 'إمّا ترفع هدفه في صفحة الأهداف، أو تغلق مهمة التجميع. المحرّك لا ينقض قرارك.' }));
+        return;
+      }
+      out.trims.push(mk({ sar, shares, gapPct, capped,
+        forced: r.overCap,
+        why: r.overCap
+          ? `كسر السقف الدستوري ${r.cap}% — تخفيف واجب بغضّ النظر عن السعر (§4 الفلتر 5)`
+          : `فوق هدفك بـ${formatNum(-gapPct)} نقطة`,
+        fairNote: fair.usable && !fair.ok ? 'والسعر فوق العادلة — التخفيف هنا مدعوم سعرياً أيضاً'
+                : fair.usable && fair.ok ? 'ملاحظة: السعر تحت العادلة، والتخفيف هنا **لخطر التركيز** لا لغلاء السعر'
+                : '' }));
+      out.fundedBy += sar;
+      return;
+    }
+
+    // ③ تحت الهدف ⇒ تجميع، بشرط أن يسمح السعر وقرارك
+    if (gapPct > 0 && sar >= PLAN_MIN_SAR) {
+      out.needed += sar;
+      if (r.sustain && r.sustain.status === 'fail') {
+        out.deferred.push(mk({ sar, shares, gapPct,
+          why: 'فشل بوابة الاستدامة — ممنوع الشراء لمجرد نزول السعر (§8)' }));
+        return;
+      }
+      if (r.taskType === 'liquidation') return;            // عولج أعلاه
+      if (r.taskType === 'reduction') {
+        out.conflicts.push(mk({ sar, shares, gapPct,
+          why: 'وزنه تحت هدفك بينما مهمتك المسجّلة «تخفيف» — القراران متعاكسان',
+          fix: 'إمّا تخفض هدفه في صفحة الأهداف، أو تغلق مهمة التخفيف.' }));
+        return;
+      }
+      if (r.taskType === 'monitoring') {
+        out.deferred.push(mk({ sar, shares, gapPct,
+          why: 'قرارك «مراقبة» — لا مال جديد يدخل حتى ينتهي سبب المراقبة' }));
+        return;
+      }
+      if (valAware && fair.usable && !fair.ok) {
+        out.deferred.push(mk({ sar, shares, gapPct,
+          why: `${fair.why} — الفجوة قائمة لكن الشراء عند النزول مشروط لا آلي (§4 الفلتر 3)` }));
+        return;
+      }
+      out.adds.push(mk({ sar, shares, gapPct, capped,
+        fairOk: fair.ok, fairUsable: fair.usable,
+        why: fair.usable ? fair.why : `${fair.why} — التنفيذ على مسؤوليتك، لا مرجع سعري`,
+        priority: gapPct * (fair.usable && fair.ok ? 1 + Math.min(0.5, fair.margin / 100) : 1) }));
+      return;
+    }
+  });
+
+  out.trims.sort((a, b) => (b.forced === a.forced ? b.sar - a.sar : (b.forced ? 1 : -1)));
+  out.adds.sort((a, b) => b.priority - a.priority);
+  out.exits.sort((a, b) => b.sar - a.sar);
+  return out;
+}
+
+function renderTargetPlan() {
+  const el = document.getElementById('de-plan-body');
+  if (!el) return;
+  const valAware = document.getElementById('de-plan-valaware')?.checked !== false;
+  const p = buildTargetPlan(valAware);
+
+  if (!(p.total > 0)) {
+    el.innerHTML = '<p class="text-muted" style="margin:0">لا حيازات لبناء خطة عليها.</p>';
+    return;
+  }
+
+  const SAR = v => formatSAR(v);
+  const line = (o, kind) => {
+    const badge = { exit: '🔻 تصفية كاملة', trim: '✂️ خفّف', add: '➕ جمّع',
+                    defer: '⏸️ مؤجَّل', conflict: '⚠️ تعارض' }[kind];
+    const amt = o.sar != null
+      ? `<b class="num">${SAR(o.sar)}</b> ر.س${o.price > 0 ? ` ≈ <b class="num">${formatNum(o.shares, 0)}</b> سهم` : ''}`
+      : '';
+    const to = (kind === 'trim' || kind === 'add') && o.target != null
+      ? ` — من <b>${formatNum(o.weight)}%</b> إلى <b>${formatNum(o.target)}%</b>` : '';
+    return `<div class="de-alert-line" style="align-items:flex-start">
+      <div>
+        <b>${badge}: ${escapeHtmlSafe(o.ticker)}</b> ${escapeHtmlSafe(o.name || '')}${to}<br>
+        <span class="small">${amt}</span>
+        <div class="small text-muted" style="margin-top:3px;line-height:1.6">${o.why || ''}${
+          o.fairNote ? `<br>${o.fairNote}` : ''}${
+          o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
+          o.capped ? '<br>ℹ️ هدفك المسجّل أعلى من السقف الدستوري — الخطة تستعمل السقف.' : ''}</div>
+      </div></div>`;
+  };
+
+  const block = (title, arr, kind, empty) => arr.length
+    ? `<h4 class="de-d-h">${title} (${arr.length})</h4>${arr.map(o => line(o, kind)).join('')}`
+    : (empty ? `<h4 class="de-d-h">${title}</h4><p class="small text-muted" style="margin:0 0 10px">${empty}</p>` : '');
+
+  // ── الميزانية: كم يموّل تخفيفك من احتياجك؟ ──
+  const gapFund = p.needed - p.fundedBy;
+  const fundPct = p.needed > 0 ? Math.min(100, p.fundedBy / p.needed * 100) : 100;
+  const budget = `
+    <div class="note" data-state="${gapFund > 0 ? 'warn' : 'good'}" style="flex-direction:column;gap:6px">
+      <div><b>الميزانية الذاتية للخطة</b></div>
+      <div class="small">تحتاج <b class="num">${SAR(p.needed)}</b> ر.س لسدّ فجوات التجميع، ويوفّر التخفيف والتصفية <b class="num">${SAR(p.fundedBy)}</b> ر.س
+      — أي <b>${formatNum(fundPct, 0)}%</b> ${gapFund > 0
+        ? `منها. الفارق <b class="num">${SAR(gapFund)}</b> ر.س يحتاج ضخّاً جديداً.`
+        : 'منها — الخطة تموّل نفسها بالكامل، والفائض يذهب لأولوية التجميع الأعلى.'}</div>
+    </div>`;
+
+  const nothing = !p.exits.length && !p.trims.length && !p.adds.length;
+  el.innerHTML = `
+    <p class="small text-muted" style="margin:0 0 12px;line-height:1.7">
+      خطة تُحوّل <b>أهدافك</b> + <b>قراراتك المسجّلة في المهام</b> + <b>تقييماتك العادلة</b> إلى أوامر ملموسة.
+      الأوامر دون <b>${SAR(PLAN_MIN_SAR)}</b> ر.س مُسقَطة (تكلفة الصفقة تأكلها).
+      المحرّك <b>لا ينقض قرارك</b>: عند تعارض هدفك مع مهمتك يعرض التعارض ويترك الحسم لك.
+    </p>
+    ${budget}
+    ${nothing ? '<p class="small" style="margin:12px 0 0">✅ <b>لا أمر مطلوب الآن.</b> كل سهم له هدف مسجّل يقع ضمن هدفه، ولا مهمة تصفية مفتوحة.</p>' : ''}
+    ${block('① قرارك بالخروج — يسبق كل شيء', p.exits, 'exit')}
+    ${block('② تخفيف — ممّ تموّل', p.trims, 'trim')}
+    ${block('③ تجميع — أين تضع المال', p.adds, 'add')}
+    ${block('④ مؤجَّل — الفجوة قائمة والتنفيذ ممنوع الآن', p.deferred, 'defer')}
+    ${block('⑤ تعارض بين هدفك وقرارك — الحسم بيدك', p.conflicts, 'conflict')}
+    ${p.noTarget.length ? `<h4 class="de-d-h">خارج الخطة (${p.noTarget.length})</h4>
+      <p class="small text-muted" style="margin:0">${p.noTarget.map(o =>
+        escapeHtmlSafe(o.ticker) + (o.noPrice ? ' (بلا سعر)' : ' (بلا هدف مسجّل)')).join('، ')}
+      — لا وجهة تُقاس إليها، فلا يُخترع لها هدف (§8). حدّد أهدافها في صفحة «أهداف الأسهم والقطاعات».</p>` : ''}
+    ${renderSectorPlan()}`;
+}
+
+// ── المستوى القطاعي: انحراف كل قطاع عن هدفك ──────────────────────────
+function renderSectorPlan() {
+  const rows = _results || [];
+  const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
+  if (!(total > 0) || !Object.keys(sectorTargets).length) return '';
+  const bySec = {};
+  rows.forEach(r => {
+    const k = String(r.sector || '').trim() || 'غير مصنّف';
+    bySec[k] = (bySec[k] || 0) + (+r.value || 0);
+  });
+  const keys = [...new Set([...Object.keys(bySec), ...Object.keys(sectorTargets)])];
+  const list = keys.map(k => {
+    const cur = (bySec[k] || 0) / total * 100;
+    const tgt = sectorTargets[k];
+    return { k, cur, tgt, gap: tgt != null ? tgt - cur : null,
+             sar: tgt != null ? Math.abs(tgt - cur) / 100 * total : 0 };
+  }).filter(x => x.tgt != null && Math.abs(x.gap) >= 1)
+    .sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap));
+  if (!list.length) return '<h4 class="de-d-h">المستوى القطاعي</h4><p class="small text-muted" style="margin:0">✅ كل قطاع له هدف مسجّل يقع ضمن نقطة مئوية واحدة منه.</p>';
+  return `<h4 class="de-d-h">المستوى القطاعي (${list.length})</h4>
+    <p class="small text-muted" style="margin:0 0 8px">انحراف القطاع لا يُنفَّذ بذاته — يُصحَّح عبر أوامر الأسهم أعلاه. يُعرض ليطابق قرارك على المستويين.</p>
+    ${list.map(x => `<div class="de-alert-line">${x.gap < 0 ? '✂️' : '➕'}
+      <b>${escapeHtmlSafe(x.k)}</b>: ${formatNum(x.cur)}% مقابل هدفك ${formatNum(x.tgt)}%
+      — ${x.gap < 0 ? 'يحتاج تخفيفاً' : 'يحتاج تعزيزاً'} بـ<b class="num">${formatSAR(x.sar)}</b> ر.س</div>`).join('')}`;
+}
+
 function renderSectorCheck(totalValue) {
   const el = document.getElementById('de-sector-check');
   if (!el) return;

@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260822h">
+  <link rel="stylesheet" href="css/style.css?v=20260822i">
   <style>
     /* ── محرّك القرار — ستايل خاص ── */
     .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
@@ -338,6 +338,21 @@
 
     <p id="de-gaps-note" class="small text-muted" style="margin:2px 2px 18px;line-height:1.6"></p>
 
+    <!-- ── 🧭 خطة الوصول إلى أهدافك ── -->
+    <div class="card" id="de-plan-wrap">
+      <div class="section-header">
+        <span class="section-title">🧭 خطة الوصول إلى أهدافك
+          <button class="info-btn info-inline" type="button" onclick="showCardInfo('de-plan')" title="كيف تُبنى الخطة؟">ⓘ</button>
+        </span>
+        <label class="small text-muted" style="display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="de-plan-valaware" checked onchange="renderTargetPlan()">
+          احترم التقييمات العادلة
+        </label>
+      </div>
+      <div id="de-plan-body"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
+    </div>
+
+
     <!-- ── سقف القطاع ── -->
     <div class="card">
       <div class="section-header"><span class="section-title">🏭 تركّز أي قطاع فوق حدّه؟</span></div>
@@ -463,13 +478,35 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260822h"></script>
-  <script src="js/auth.js?v=20260822h"></script>
-  <script src="js/utils.js?v=20260822h"></script>
-  <script src="js/tickerdb.js?v=20260822h"></script>
+  <script src="js/supabase.js?v=20260822i"></script>
+  <script src="js/auth.js?v=20260822i"></script>
+  <script src="js/utils.js?v=20260822i"></script>
+  <script src="js/tickerdb.js?v=20260822i"></script>
   <script>
     // شرح الكارت (نمط showCardInfo المشترك في utils.js)
     window.CARD_INFO = {
+      'de-plan': {
+        title: '🧭 كيف تُبنى خطة الوصول إلى أهدافك؟',
+        body: `
+          <p>هذه الخطة لا تقرّر عنك — تترجم <b>قراراتك أنت</b> إلى أوامر ملموسة بالريال وبعدد الأسهم. مدخلاتها ثلاثة، كلّها من عندك:</p>
+          <div class="info-math">
+            ① <b>أهدافك للأوزان</b> (صفحة الأهداف) — الوجهة.<br>
+            ② <b>قراراتك في المهام</b> (تجميع · احتفاظ · تخفيف · مراقبة · تصفية) — تحكم الاتجاه المسموح لكل سهم.<br>
+            ③ <b>تقييماتك العادلة</b> (حاسبة القيمة العادلة) — تحكم هل يسمح <b>السعر</b> بالتنفيذ الآن.
+          </div>
+          <p><b>قواعد الترتيب والتعارض — من الدستور لا مخترَعة:</b></p>
+          <ul>
+            <li><b>«تصفية» أو هدف صفر</b> ⇒ خروج كامل مهما قال الهدف (P0.1 — يسبق كل شيء، لأنه قرارك الصريح ولا يعتمد على السعر).</li>
+            <li><b>كسر السقف الدستوري</b> ⇒ تخفيف واجب <b>ولو كان السعر تحت العادلة</b> — خطر تركيز لا قرار سعري (§4 الفلتر 5).</li>
+            <li><b>تحت الهدف والسعر فوق العادلة</b> ⇒ الفجوة تُعرض لكن التنفيذ <b>مؤجَّل</b>: الشراء عند النزول مشروط لا آلي (§4 الفلتر 3).</li>
+            <li><b>فشل بوابة الاستدامة</b> ⇒ لا تجميع مهما كبرت الفجوة — النزول هنا إشارة خروج لا إشارة شراء.</li>
+            <li><b>«مراقبة»</b> ⇒ لا مال جديد يدخل حتى ينتهي سبب المراقبة.</li>
+            <li><b>هدفك يعاكس مهمتك</b> (فوق الهدف ومهمته «تجميع»، أو تحته ومهمته «تخفيف») ⇒ <b>يُعلَن كتعارض ولا يُحسم تلقائياً</b>. المحرّك لا ينقض قرارك — الحسم بيدك: عدّل الهدف أو أغلق المهمة.</li>
+            <li><b>تقييم غير موثوق أو أقدم من 180 يوماً</b> ⇒ لا يُبنى عليه منع ولا سماح، ويُعلَن (§8: لا تقدير صامت).</li>
+          </ul>
+          <p><b>الميزانية الذاتية:</b> يجمع ما يوفّره التخفيف والتصفية ويقارنه بما تحتاجه فجوات التجميع — فتعرف كم تموّل الخطة نفسها وكم يحتاج ضخّاً جديداً.</p>
+          <p class="info-note">الهدف الفعّال = الأدنى بين هدفك المسجّل والسقف الدستوري. لا يُرفع هدفك، ولا يُسمح لهدف فوق السقف أن يقود أمر شراء يكسر §1. والأوامر دون 500 ر.س تُسقَط لأن تكلفة الصفقة تأكلها.</p>`
+      },
       'decisionEngine': {
         title: '🧭 كيف يعمل محرّك القرار؟',
         body: `
@@ -592,7 +629,7 @@
       },
     };
   </script>
-  <script src="js/decision-engine.js?v=20260822h"></script>
-  <script src="js/decision-intel.js?v=20260822h"></script>
+  <script src="js/decision-engine.js?v=20260822i"></script>
+  <script src="js/decision-intel.js?v=20260822i"></script>
 </body>
 </html>
