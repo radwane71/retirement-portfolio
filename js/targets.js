@@ -104,9 +104,11 @@ function kvsHtml(items) {
 
 // ══════════════════════════════════════════════════════════════════════
 // الأسقف الدستورية (CLAUDE.md §1) — نفس ثوابت decision-engine.js و watchlist.js
-// ⚖️ قيود صلبة نافذة لا عرضية: تمنع الحفظ فوق السقف (saveAllTargets/saveSectorTargets)
-// وتقصّ الهدف الفعّال في محرّك إعادة التوازن (min(الهدف المحفوظ، السقف)).
-// منطقة السماح تُستخدم للتنبيه فقط — لا تدخل معادلة منع ولا معادلة شراء.
+// ⚖️ الأسقف الدستورية: **لا تمنع الحفظ** (قرار المالك 2026-08-22) — تدوين
+// النيّة حرّ. وتبقى نافذة حيث تُصدر القرارات: تقصّ الهدف الفعّال في محرّك
+// إعادة التوازن وفي «خطة الوصول إلى أهدافك» (min(المحفوظ، السقف)) مع إعلان
+// القصّ، ويرصد محرّك القرار كسر السقف في الأوزان **الفعلية** ويأمر بالتخفيف.
+// منطقة السماح للتنبيه فقط — لا تدخل معادلة منع ولا معادلة شراء.
 // ══════════════════════════════════════════════════════════════════════
 const TG_CAP_SINGLE    = 7;     // سقف السهم الواحد
 const TG_CAP_BLUECHIP  = 12;    // سقف السهم القيادي
@@ -1026,12 +1028,9 @@ function collectSectorCapViolations() {
   return out;
 }
 
-// رسالة المنع: تُسمّي كل صف مخالف وقيمته وسقفه — لا رفض مبهم
-function capViolationMsg(list, what) {
-  return `⛔ لا يمكن الحفظ — ${list.length} ${what} فوق السقف الدستوري (CLAUDE.md §1):\n`
-    + list.map(v => `• ${v.key}: ${v.value.toFixed(1)}% > سقف ${v.cap}%${v.blueChip ? ' (قيادي)' : ''}`).join('\n')
-    + `\nالأسقف قيود صلبة — صحّح الصفوف المُبرَزة ثم أعد الحفظ.`;
-}
+// حُذفت capViolationMsg — لم يعد هناك منع حفظ (قرار المالك 2026-08-22).
+// تُركت الإشارة كي لا يُعاد بناؤها: التجاوز يُعلَّم بـmarkCapViolations ويُنبَّه
+// عليه **بعد** الحفظ، والسقف يُطبَّق حيث تُصدر القرارات لا حيث تُدوَّن النيّة.
 
 // ── مساعد: احسب إجمالي النسب المئوية فقط (بدون مناطق الشراء/البيع) ──
 function sumTargetInputs(tbodyId) {
@@ -1042,22 +1041,31 @@ function sumTargetInputs(tbodyId) {
 }
 
 // ── حفظ أهداف الأسهم ──────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// الحفظ غير مشروط — قرار المالك 2026-08-22
+// ----------------------------------------------------------------------
+// المالك: «خليها تتيح لي أحفظ الأهداف بغض النظر عن الهدف الدستوري… مو أسوي
+// وأعدّل وبالأخير ما يرضى». كان الحفظ يُرفض في أربع حالات: تجاوز سقف السهم،
+// تجاوز سقف القطاع، ومجموع الأسهم > 100%، ومجموع القطاعات > 100%.
+//
+// الأهداف **بيانات المالك ونيّته**، لا مخرَجاً محسوباً. منعُه من تدوينها يعني
+// أن نيّته لا تُسجَّل أصلاً، فيبقى الحقل فارغاً — وهو أسوأ من رقم مخالف
+// **مُعلَن**: الفارغ لا يقول شيئاً، والمخالف يقول «هنا نيّة تخالف سقفك».
+//
+// الدستور لم يُنقَض: السقوف تبقى نافذة **حيث تُصدر القرارات** —
+//   • محرّك التوازن يوزّع على الهدف الفعّال = min(المحفوظ، السقف) ويُعلن القصّ.
+//   • «خطة الوصول إلى أهدافك» في محرّك القرار تفعل الشيء نفسه.
+//   • محرّك القرار يرصد كسر السقف الفعلي في الأوزان ويأمر بالتخفيف.
+// أي: يُسجَّل ما تريد، ويبقى ما يُنفَّذ محكوماً بالسقف ومُعلَناً — لا منع صامت
+// ولا تنفيذ صامت. ⚠️ لا تُعِد شرط المنع.
+// ══════════════════════════════════════════════════════════════════════
 async function saveAllTargets() {
-  // ── الأسقف الدستورية أولاً: قيد صلب يمنع الحفظ (§1) ────
+  // تجاوز السقف: يُعلَّم ويُنبَّه عليه، ولا يمنع الحفظ.
   clearCapHighlights('stock-targets-tbody');
   const capViolations = collectStockCapViolations();
-  if (capViolations.length) {
-    markCapViolations(capViolations);
-    showToast(capViolationMsg(capViolations, 'هدف سهم'), 'error');
-    return;
-  }
+  if (capViolations.length) markCapViolations(capViolations);
 
-  // ── تحقق من الإجمالي ───────────────────────────────────
   const stockSum = sumTargetInputs('stock-targets-tbody');
-  if (stockSum > 100.05) {
-    showToast(`⛔ لا يمكن الحفظ — إجمالي أهداف الأسهم ${stockSum.toFixed(1)}% يتجاوز 100%`, 'error');
-    return;
-  }
 
   // تحقق: هل أهداف الأسهم داخل أي قطاع تتجاوز هدف القطاع؟ (تحذير فقط — لا يوقف الحفظ)
   const violations = validateSectorConsistency();
@@ -1068,8 +1076,14 @@ async function saveAllTargets() {
     showToast(`⚠️ تنبيه: أهداف أسهم تتجاوز هدف القطاع:\n${msgs}\nتم الحفظ على أي حال.`, 'warning');
   }
 
-  if (stockSum < 99.9 && stockSum > 0) {
-    showToast(`⚠️ إجمالي الأهداف ${stockSum.toFixed(1)}% — تبقى ${(100-stockSum).toFixed(1)}% غير موزعة. تم الحفظ.`, 'warning');
+  // تنبيهات بعد الحفظ لا قبله — كلها إعلامية (§8: يُعلَن ولا يُمنَع)
+  if (capViolations.length) {
+    showToast(`⚠️ حُفظ. ${capViolations.length} هدفاً فوق السقف الدستوري — يُنفَّذ عند min(هدفك، السقف) في محرّك التوازن وخطة الوصول، والفارق مُعلَن هناك.`, 'warning');
+  }
+  if (stockSum > 100.05) {
+    showToast(`⚠️ حُفظ. إجمالي أهداف الأسهم ${stockSum.toFixed(1)}% يتجاوز 100% — النِّسب المعروضة تُقاس على مقام أكبر من محفظتك.`, 'warning');
+  } else if (stockSum < 99.9 && stockSum > 0) {
+    showToast(`⚠️ حُفظ. الإجمالي ${stockSum.toFixed(1)}% — تبقى ${(100-stockSum).toFixed(1)}% غير موزعة.`, 'warning');
   }
 
   const { data: { user } = {} } = await supabaseClient.auth.getUser();
@@ -1129,23 +1143,19 @@ async function saveAllTargets() {
 
 // ── حفظ أهداف القطاعات ────────────────────────────────────
 async function saveSectorTargets() {
-  // ── سقف القطاع 25% أولاً: قيد صلب يمنع الحفظ (§1) ──────
+  // تجاوز سقف القطاع: يُعلَّم ويُنبَّه عليه، ولا يمنع الحفظ (انظر الشرح فوق saveAllTargets).
   clearCapHighlights('sector-targets-tbody');
   const secCapViolations = collectSectorCapViolations();
-  if (secCapViolations.length) {
-    markCapViolations(secCapViolations);
-    showToast(capViolationMsg(secCapViolations, 'هدف قطاع'), 'error');
-    return;
-  }
+  if (secCapViolations.length) markCapViolations(secCapViolations);
 
-  // ── تحقق من الإجمالي ───────────────────────────────────
   const secSum = sumTargetInputs('sector-targets-tbody');
-  if (secSum > 100.05) {
-    showToast(`⛔ لا يمكن الحفظ — إجمالي أهداف القطاعات ${secSum.toFixed(1)}% يتجاوز 100%`, 'error');
-    return;
+  if (secCapViolations.length) {
+    showToast(`⚠️ حُفظ. ${secCapViolations.length} قطاعاً فوق سقف ${TG_CAP_SECTOR}% — محرّك القرار يرصد التركيز الفعلي ويأمر بالتخفيف عند تجاوزه.`, 'warning');
   }
-  if (secSum < 99.9 && secSum > 0) {
-    showToast(`⚠️ إجمالي الأهداف ${secSum.toFixed(1)}% — تبقى ${(100-secSum).toFixed(1)}% غير موزعة. تم الحفظ.`, 'warning');
+  if (secSum > 100.05) {
+    showToast(`⚠️ حُفظ. إجمالي أهداف القطاعات ${secSum.toFixed(1)}% يتجاوز 100%.`, 'warning');
+  } else if (secSum < 99.9 && secSum > 0) {
+    showToast(`⚠️ حُفظ. الإجمالي ${secSum.toFixed(1)}% — تبقى ${(100-secSum).toFixed(1)}% غير موزعة.`, 'warning');
   }
 
   const { data: { user } = {} } = await supabaseClient.auth.getUser();
