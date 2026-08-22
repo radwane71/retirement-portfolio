@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260822l">
+  <link rel="stylesheet" href="css/style.css?v=20260822m">
   <style>
     /* ── محرّك القرار — ستايل خاص ── */
     .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
@@ -184,7 +184,7 @@
         <div class="nav-group-body" id="grp-portfolio">
           <a href="dashboard.html"    class="nav-link nav-sub" id="nav-dashboard">   <span class="icon">📊</span><span>لوحة التحكم</span></a>
           <a href="transactions.html" class="nav-link nav-sub" id="nav-transactions"><span class="icon">💹</span><span>سجل المعاملات</span></a>
-          <a href="reconcile.html"     class="nav-link nav-sub" id="nav-reconcile">   <span class="icon">🧾</span><span>تسوية المعاملات</span></a>
+          <!-- رابط «تسوية المعاملات» مُخفى من القائمة — قرار المالك 2026-08-22. الصفحة نفسها (reconcile.html) باقية وتُفتح بالرابط المباشر، ولم تُمسّ بياناتها. -->
           <a href="dividends.html"    class="nav-link nav-sub" id="nav-dividends">   <span class="icon">💰</span><span>الأرباح الموزعة</span></a>
           <a href="cashflows.html"    class="nav-link nav-sub" id="nav-cashflows">   <span class="icon">📈</span><span>التدفقات النقدية</span></a>
           <a href="userdb.html"       class="nav-link nav-sub" id="nav-userdb">      <span class="icon">🗂️</span><span>قاعدة بيانات أسهمي</span></a>
@@ -273,75 +273,20 @@
       <div id="de-thresholds" class="de-thresholds"></div>
     </div>
 
-    <!-- ══ 🧠 طبقة الذكاء — أين أنت الآن ══ -->
-    <div class="dash-divider"><span class="n">١</span> أين أنت الآن — القياس الكامل</div>
-    <div class="stats-grid stats-grid-fill" id="de-intel-kpis">
-      <div class="empty-state"><div class="icon">⏳</div><p>جارٍ قياس محفظتك…</p></div>
-    </div>
-    <p id="de-intel-kpis-note" class="small text-muted" style="margin:8px 2px 18px;line-height:1.7"></p>
+    <!-- ══════════════════════════════════════════════════════════════
+         إعادة ترتيب الصفحة — قرار المالك 2026-08-22:
+         «القرارات المطلوبة اليوم أبغاها فوق فوق فوق كل شيء» · «احذف التكرار:
+         خطة الوصول هي نفس القرارات» · «الباقي يكون مطبوق ولمّا أفتحه ينفتح».
+         الترتيب: القرار أولاً ← القياس ← والباقي مطويّ يُفتح عند الحاجة.
+         لا شيء حُذف من الحساب — الطيّ عرضٌ فقط.
+    ═══════════════════════════════════════════════════════════════ -->
 
-    <!-- ── 🧭 لو أنا مكانك ── -->
-    <div class="card">
-      <div class="section-header">
-        <span class="section-title">🧭 لو أنا مكانك</span>
-        <button class="info-btn" type="button" onclick="showCardInfo('intelAdvice')" title="كيف بُني هذا؟" style="position:static;opacity:.7">ⓘ</button>
-      </div>
-      <div id="de-intel-advice">
-        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ تركيب القرار…</p></div>
-      </div>
-    </div>
-
-    <!-- ── 💵 مستقبل توزيعاتك ── -->
-    <div class="card">
-      <div class="section-header">
-        <span class="section-title">💵 توزيعاتك — أيها يستمر وأيها مهدَّد؟</span>
-        <button class="info-btn" type="button" onclick="showCardInfo('intelDivs')" title="كيف صُنّفت؟" style="position:static;opacity:.7">ⓘ</button>
-      </div>
-      <div id="de-intel-divs">
-        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ تحليل سجل أرباحك…</p></div>
-      </div>
-    </div>
-
-    <!-- ── 🧪 الموثوقية ── -->
-    <div class="card">
-      <div class="section-header">
-        <span class="section-title">🧪 كم أثق بهذه الأرقام — ومتى ترتفع الثقة؟</span>
-        <button class="info-btn" type="button" onclick="showCardInfo('intelReliability')" title="كيف تُحسب؟" style="position:static;opacity:.7">ⓘ</button>
-      </div>
-      <div id="de-intel-reliability">
-        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ حساب الموثوقية…</p></div>
-      </div>
-    </div>
-
-    <div class="dash-divider"><span class="n">٢</span> القرارات المطلوبة اليوم</div>
-
-    <!-- ── شريط الملخص ── -->
+    <!-- ① القرارات المطلوبة اليوم — أعلى الصفحة، مفتوحة دائماً -->
+    <div class="dash-divider"><span class="n">١</span> القرارات المطلوبة اليوم</div>
     <div class="de-summary" id="de-summary"></div>
-
-    <!-- ── 🔴 يحتاج تصرّف الآن ── -->
-    <div class="card" id="de-group-urgent-wrap" style="display:none">
-      <div class="section-header"><span class="section-title">🔴 يحتاج تصرّف منك الآن</span></div>
-      <div id="de-group-urgent" class="de-cards-grid"></div>
-    </div>
-
-    <!-- ── 🟡🔵 راقبه ── -->
-    <div class="card" id="de-group-watch-wrap" style="display:none">
-      <div class="section-header"><span class="section-title">🟡 راقبه عن قرب</span></div>
-      <div id="de-group-watch" class="de-cards-grid"></div>
-    </div>
-
-    <!-- ── 🟢 فرص تجميع ── -->
-    <div class="card" id="de-group-add-wrap" style="display:none">
-      <div class="section-header"><span class="section-title">🟢 فرص تجميع الآن</span></div>
-      <div id="de-group-add" class="de-cards-grid"></div>
-    </div>
-
-    <p id="de-gaps-note" class="small text-muted" style="margin:2px 2px 18px;line-height:1.6"></p>
-
-    <!-- ── 🧭 خطة الوصول إلى أهدافك ── -->
     <div class="card" id="de-plan-wrap">
       <div class="section-header">
-        <span class="section-title">🧭 خطة الوصول إلى أهدافك
+        <span class="section-title">🧭 ماذا أفعل الآن للوصول إلى أهدافي
           <button class="info-btn info-inline" type="button" onclick="showCardInfo('de-plan')" title="كيف تُبنى الخطة؟">ⓘ</button>
         </span>
         <label class="small text-muted" style="display:flex;align-items:center;gap:6px;cursor:pointer">
@@ -351,13 +296,68 @@
       </div>
       <div id="de-plan-body"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
     </div>
+    <p id="de-gaps-note" class="small text-muted" style="margin:2px 2px 18px;line-height:1.6"></p>
 
-
-    <!-- ── سقف القطاع ── -->
-    <div class="card">
-      <div class="section-header"><span class="section-title">🏭 تركّز أي قطاع فوق حدّه؟</span></div>
-      <div id="de-sector-check"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
+    <!-- ② أين أنت الآن — مفتوح -->
+    <div class="dash-divider"><span class="n">٢</span> أين أنت الآن</div>
+    <div class="stats-grid stats-grid-fill" id="de-intel-kpis">
+      <div class="empty-state"><div class="icon">⏳</div><p>جارٍ قياس محفظتك…</p></div>
     </div>
+    <p id="de-intel-kpis-note" class="small text-muted" style="margin:8px 2px 18px;line-height:1.7"></p>
+
+    <!-- ③ الأقسام التفصيلية — كلها مطويّة افتراضياً -->
+    <div class="dash-divider"><span class="n">٣</span> التفاصيل — افتحها عند الحاجة</div>
+
+    <div class="card de-fold">
+      <div class="section-header" style="cursor:pointer" onclick="toggleFold('fold-divs')">
+        <span class="section-title">💵 توزيعاتك — أيها يستمر وأيها مهدَّد؟</span>
+        <button id="btn-fold-divs" class="btn btn-secondary btn-sm" type="button"
+                onclick="event.stopPropagation();toggleFold('fold-divs')">▾ افتح</button>
+      </div>
+      <div id="fold-divs" style="display:none">
+        <div id="de-intel-divs">
+          <div class="empty-state"><div class="icon">⏳</div><p>جارٍ تحليل سجل أرباحك…</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card de-fold">
+      <div class="section-header" style="cursor:pointer" onclick="toggleFold('fold-rel')">
+        <span class="section-title">🧪 كم أثق بهذه الأرقام؟ <span id="de-rel-chip" class="small text-muted" style="font-weight:400"></span></span>
+        <button id="btn-fold-rel" class="btn btn-secondary btn-sm" type="button"
+                onclick="event.stopPropagation();toggleFold('fold-rel')">▾ افتح</button>
+      </div>
+      <div id="fold-rel" style="display:none">
+        <div id="de-intel-reliability">
+          <div class="empty-state"><div class="icon">⏳</div><p>جارٍ حساب الموثوقية…</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card de-fold">
+      <div class="section-header" style="cursor:pointer" onclick="toggleFold('fold-advice')">
+        <span class="section-title">🧭 لو أنا مكانك</span>
+        <button id="btn-fold-advice" class="btn btn-secondary btn-sm" type="button"
+                onclick="event.stopPropagation();toggleFold('fold-advice')">▾ افتح</button>
+      </div>
+      <div id="fold-advice" style="display:none">
+        <div id="de-intel-advice">
+          <div class="empty-state"><div class="icon">⏳</div><p>جارٍ تركيب القرار…</p></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card de-fold">
+      <div class="section-header" style="cursor:pointer" onclick="toggleFold('fold-sector')">
+        <span class="section-title">🏭 تركّز أي قطاع فوق حدّه؟</span>
+        <button id="btn-fold-sector" class="btn btn-secondary btn-sm" type="button"
+                onclick="event.stopPropagation();toggleFold('fold-sector')">▾ افتح</button>
+      </div>
+      <div id="fold-sector" style="display:none">
+        <div id="de-sector-check"><p class="text-muted" style="margin:0">جارٍ الحساب…</p></div>
+      </div>
+    </div>
+
 
     <!-- ── بطاقات كل الأسهم (تفصيلي — مطوي افتراضياً) ── -->
     <div class="card">
@@ -478,10 +478,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260822l"></script>
-  <script src="js/auth.js?v=20260822l"></script>
-  <script src="js/utils.js?v=20260822l"></script>
-  <script src="js/tickerdb.js?v=20260822l"></script>
+  <script src="js/supabase.js?v=20260822m"></script>
+  <script src="js/auth.js?v=20260822m"></script>
+  <script src="js/utils.js?v=20260822m"></script>
+  <script src="js/tickerdb.js?v=20260822m"></script>
   <script>
     // شرح الكارت (نمط showCardInfo المشترك في utils.js)
     window.CARD_INFO = {
@@ -629,7 +629,7 @@
       },
     };
   </script>
-  <script src="js/decision-engine.js?v=20260822l"></script>
-  <script src="js/decision-intel.js?v=20260822l"></script>
+  <script src="js/decision-engine.js?v=20260822m"></script>
+  <script src="js/decision-intel.js?v=20260822m"></script>
 </body>
 </html>

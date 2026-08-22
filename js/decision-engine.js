@@ -851,6 +851,7 @@ function runEngine() {
   renderActionGroups();
   renderSectorCheck(totalValue);
   renderTargetPlan();
+  restoreFolds();
   renderCards();
 
   // حفظ لقطة كاملة لمخرجات المحرّك → user_settings (تُدرَج في تقرير المراجعة وتُنسَخ احتياطياً)
@@ -953,7 +954,18 @@ function renderSummaryStrip(totalValue) {
 }
 
 // ── مجموعات بلغة بسيطة بدل الجدول: 🔴 يحتاج تصرّف · 🟡 راقبه · 🟢 فرص تجميع (الدستور §7) ──
+// ══════════════════════════════════════════════════════════════════════
+// مُعطَّلة — قرار المالك 2026-08-22: «القرارات المطلوبة اليوم هي نفس خطة
+// الوصول إلى أهدافك، ليش التكرار؟ نخلّي واحدة منهم».
+// المجموعات الثلاث (يحتاج تصرّف · راقبه · فرص تجميع) كانت تعرض نفس الأسهم
+// التي تعرضها الخطة بصياغة أخرى. أُزيلت حاوياتها من الصفحة، وأُدمج ما تنفرد
+// به — أوامر الخروج التي يُصدرها المحرّك نفسه (مشغّل ثابت انطبق، أو فشل بوابة
+// الاستدامة) — داخل القسم ① من buildTargetPlan فلا يضيع شيء.
+// ⚠️ لا تُعِد الحاويات ولا تُفعّل هذه الدالة.
+// ══════════════════════════════════════════════════════════════════════
 function renderActionGroups() {
+  return;
+  // eslint-disable-next-line no-unreachable
   const groups = {
     urgent: { severities: ['red'],              el: 'de-group-urgent', wrap: 'de-group-urgent-wrap' },
     watch:  { severities: ['yellow', 'monitor'], el: 'de-group-watch',  wrap: 'de-group-watch-wrap'  },
@@ -1048,6 +1060,24 @@ function buildTargetPlan(valAware) {
         why: zeroTargets.has(r.ticker) && r.taskType === 'liquidation' ? 'هدف صفر + مهمة تصفية'
            : zeroTargets.has(r.ticker) ? 'هدف صفر مقصود' : 'مهمة تصفية مفتوحة',
       }));
+      out.fundedBy += r.value;
+      return;
+    }
+
+    // ①ب أوامر خروج يُصدرها المحرّك نفسه — دُمجت هنا بعد إزالة مجموعات
+    // الإجراءات المكرّرة (2026-08-22). مصدرها الدستور لا الأهداف:
+    //   • مشغّل ثابت انطبق (§1 و§4 الفلتر 5) — يتجاوز أي حساب آخر.
+    //   • فشل بوابة الاستدامة (§4 الفلتر 1) — الخروج واجب بغضّ النظر عن السعر.
+    // لولا هذا الدمج لاختفى أمر خروج حقيقي مع اختفاء المجموعات.
+    if (r.trigger && r.trigger.fired) {
+      out.exits.push(mk({ sar: r.value, shares: r.shares,
+        why: `⚡ انطبق مشغّل ثابت عرّفته أنت — يتجاوز أي حساب آخر. ${r.reason || ''}` }));
+      out.fundedBy += r.value;
+      return;
+    }
+    if (r.sustain && r.sustain.status === 'fail' && r.action === 'exit') {
+      out.exits.push(mk({ sar: r.value, shares: r.shares,
+        why: `🔴 فشل بوابة الاستدامة — الخروج واجب بغضّ النظر عن السعر (§4 الفلتر 1). ${r.sustain.reason || ''}` }));
       out.fundedBy += r.value;
       return;
     }
@@ -1256,6 +1286,41 @@ function trendChip(tr) {
 }
 
 // طيّ/فتح قسم بطاقات كل الأسهم (مطوي افتراضياً لتبسيط الصفحة)
+// ══════════════════════════════════════════════════════════════════════
+// طيّ/فتح الأقسام — قرار المالك 2026-08-22: «الصفحة طويلة وتشتّت، أبغى نفس
+// حركة بطاقة كل شركة مع الأقسام كلها، ولمّا أفتح الصفحة تكون مطبوقة».
+// الحالة تُحفظ محلياً لكل قسم: ما تفتحه يبقى مفتوحاً عند عودتك، وما لم تلمسه
+// يبقى مطويّاً. لا شيء يُحذف من الحساب — الطيّ عرضٌ فقط.
+// ══════════════════════════════════════════════════════════════════════
+const DE_FOLD_KEY = 'de_folds_v1';
+
+function _deFoldState() {
+  try { return JSON.parse(localStorage.getItem(userLsKey(DE_FOLD_KEY)) || '{}') || {}; }
+  catch (_) { return {}; }
+}
+
+function toggleFold(id, force) {
+  const wrap = document.getElementById(id);
+  const btn  = document.getElementById('btn-' + id);
+  if (!wrap) return;
+  const open = force != null ? force : wrap.style.display === 'none';
+  wrap.style.display = open ? '' : 'none';
+  if (btn) btn.textContent = open ? '▴ اطوِ' : '▾ افتح';
+  if (force == null) {
+    const st = _deFoldState();
+    st[id] = open;
+    try { localStorage.setItem(userLsKey(DE_FOLD_KEY), JSON.stringify(st)); } catch (_) {}
+  }
+}
+
+// يُستدعى بعد الرسم: يُعيد ما فتحه المالك سابقاً فقط.
+function restoreFolds() {
+  const st = _deFoldState();
+  ['fold-divs', 'fold-rel', 'fold-advice', 'fold-sector'].forEach(id => {
+    if (st[id]) toggleFold(id, true);
+  });
+}
+
 function toggleAllCards() {
   const wrap = document.getElementById('de-cards-wrap');
   const btn  = document.getElementById('de-cards-toggle');

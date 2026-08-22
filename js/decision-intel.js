@@ -1168,6 +1168,10 @@ window.DecisionIntel = (function () {
     const [cState, cLabel] = tierOf(conf.score);
     const [rState, rLabel] = tierOf(readiness);
 
+    // خلاصة على رأس القسم المطويّ — يراها المالك بلا فتحه (طلب الاختصار 2026-08-22)
+    const chip = document.getElementById('de-rel-chip');
+    if (chip) chip.textContent = `— ${conf.score}% (${cLabel})`;
+
     const meter = (label, pct, sub) => `
       <div class="meter">
         <div class="meter-head"><span class="k">${label}</span><span class="v num">${formatNum(pct, 0)}%</span></div>
