@@ -461,7 +461,8 @@ function renderKPIs() {
   // الصفحة أساسان متعارضان في شاشة واحدة. الآن أساس واحد: أسهمك وتدفقاتها.
   const ddEl = document.getElementById('pk-max-drawdown');
   let _snapMaxDD = null;
-  const _riskSeries = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
+  // AUDIT-FIX 2026-08-22: أساس بلا نقد — النقد الراكد كان يخفّض العائد ويشوّه التراجع.
+  const _riskSeries = _dailyStocksTRSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (ddEl && _riskSeries.length >= 2) {
     const { twrMap, sortedSnaps } = _computeTWR(_riskSeries,
       _riskSeries.covered ? _externalFlows() : _stockFlows());
@@ -494,11 +495,11 @@ function renderKPIs() {
 
   // لقطة للمقاييس ليقرأها تقرير المراجعة بدل إعادة حسابها بصيغ مغايرة
   const _rm = _computeRiskMetrics();
-  const _basisDaily = !!_dailyPortfolioSeries();
+  const _basisDaily = !!_dailyStocksTRSeries();
   _savePerfSnapshot({
     basis: _basisDaily ? 'daily-prices' : 'snapshots',
     basisLabel: _basisDaily
-      ? 'سلسلة يومية مُعاد بناؤها من أسعار الأسهم (أسهم + نقد + توزيعات)'
+      ? 'سلسلة يومية من أسعار الأسهم — أسهمك وحدها بالعائد الإجمالي (بلا نقد)'
       : 'لقطات صافي الثروة — مكوّن الأسهم فقط',
     points: _riskSeries ? _riskSeries.length : 0,
     risk: _rm ? {
@@ -527,10 +528,10 @@ const RISK_FREE_RATE = 0.03;
 //   سورتينو         = (العائد السنوي − RF) ÷ تذبذب الهبوط
 function _computeRiskMetrics() {
   // نفس أساس تبويب المقارنة وأقصى التراجع: أسهمك وحدها وتدفقاتها (لا نقد ولا عقار)
-  const series = _dailyPortfolioSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
+  const series = _dailyStocksTRSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (series.length < 4) return null;
-  const { twrMap, sortedSnaps } = _computeTWR(series,
-    series.covered ? _externalFlows() : _stockFlows());
+  // التدفقات = مشترياتك ومبيعاتك (مجال التدفق = مجال القيمة). التوزيعة عائد لا تدفّق.
+  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows(series.covered || null));
   const pts = sortedSnaps
     .map(s => ({ date: s.date, idx: twrMap[s.date] }))
     .filter(p => p.idx != null && p.idx > 0);
@@ -2033,9 +2034,17 @@ function _dailyPortfolioSeries() {
     addEv(dt, +d.amount || 0);
   });
 
+  // التوزيعات التراكمية وحدها — تُستعمل لبناء أساس «الأسهم فقط بالعائد الإجمالي»
+  const divByDate = {};
+  (_divs || []).forEach(d => {
+    if (!d.date || !coveredSet.has(d.ticker)) return;
+    divByDate[d.date] = (divByDate[d.date] || 0) + (+d.amount || 0);
+  });
+
   const out = [];
   out.covered = coveredSet;
-  let cash = 0, impliedDeposits = 0;
+  let cash = 0, impliedDeposits = 0, divCum = 0;
+  Object.keys(divByDate).filter(d => d < dates[0]).forEach(d => { divCum += divByDate[d]; });
   // أحداث سابقة لأول تاريخ في المحور تُطوى في الرصيد الابتدائي
   Object.keys(evByDate).filter(d => d < dates[0]).sort()
     .forEach(d => { cash += evByDate[d]; });
@@ -2054,11 +2063,50 @@ function _dailyPortfolioSeries() {
       const sh = _sharesAtISO(t, d);
       if (sh > 0) stocks += sh * last[t];
     }
+    divCum += (divByDate[d] || 0);
     const total = stocks + cash;
-    if (total > 0) out.push({ date: d, total_value: total, notes: 'auto', stocks, cash });
+    if (total > 0) out.push({ date: d, total_value: total, notes: 'auto', stocks, cash, divCum });
   }
   out.impliedDeposits = impliedDeposits;
   return out.length >= 2 ? out : null;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// أساس المقارنة: **أسهمك وحدها بالعائد الإجمالي** — لا نقد.
+// AUDIT-FIX 2026-08-22: كان أساس المقارنة `أسهم + نقد` بينما تاسي مؤشر
+// مستثمَر 100%. أي ريال نقد راكد في محفظتك يسحب عائدك للأسفل مقابل المؤشر
+// **ميكانيكياً** — لا لأن اختيارك للأسهم أسوأ. وهذا «سحب النقد» (cash drag)
+// يكبر كلما زاد النقد أو طال ركوده، فيُظهر محفظة متفوّقة وكأنها متأخّرة.
+// والتعليق في _computeRiskMetrics كان يقول أصلاً «أسهمك وحدها — لا نقد»،
+// فالكود هو الذي انحرف عن نيّته حين أُعيد بناء الخطّ يومياً.
+//
+// الأساس الصحيح للمقارنة مع مؤشر أسهم:
+//   القيمة(t) = (أسهمك × أسعارها) + التوزيعات المقبوضة تراكمياً
+//   التدفقات  = مشترياتك (داخل) ومبيعاتك (خارج) — لا إيداعات الوساطة
+// التوزيعة تبقى **عائداً** (تُضاف للقيمة ولا تُعدّ تدفقاً)، فالأساس «عائد
+// إجمالي» يقابل تاسي TRI تماماً. والنقد غير المستثمَر خارج القياس لأنه قرار
+// سيولة لا قرار اختيار أسهم — ويُقاس أثره منفصلاً في «سحب النقد» أدناه.
+// ══════════════════════════════════════════════════════════════════════
+function _dailyStocksTRSeries() {
+  const base = _dailyPortfolioSeries();
+  if (!base) return null;
+  const out = base
+    .map(r => ({ date: r.date, total_value: (+r.stocks || 0) + (+r.divCum || 0),
+                 notes: 'auto', stocks: r.stocks, divCum: r.divCum }))
+    .filter(r => r.total_value > 0);
+  if (out.length < 2) return null;
+  out.covered = base.covered;
+  return out;
+}
+
+// أثر النقد الراكد على العائد — يُقاس ويُعرض بدل أن يُخصم صامتاً من أدائك.
+function _cashDragPct() {
+  const base = _dailyPortfolioSeries();
+  if (!base || base.length < 2) return null;
+  const last = base[base.length - 1];
+  const tot = (+last.stocks || 0) + (+last.cash || 0);
+  if (!(tot > 0)) return null;
+  return { cash: +last.cash || 0, stocks: +last.stocks || 0, pct: (+last.cash || 0) / tot * 100 };
 }
 
 // التدفقات الخارجية للنموذج الجديد: إيداعاتك وسحوباتك الفعلية فقط.
@@ -2329,7 +2377,7 @@ function renderBenchmarkTab() {
   const _snapTotal = (_snapshots || []).length;
   // الأولوية للسلسلة اليومية المُعاد بناؤها من الأسعار — فهي وحدها تُنتج خطاً
   // يومياً حقيقياً قابلاً للمقارنة بمنحنى المؤشر. اللقطات احتياطي فقط.
-  const _daily = _dailyPortfolioSeries();
+  const _daily = _dailyStocksTRSeries();
   const _seriesMode = _daily ? 'daily' : 'snapshots';
   const _rawSeries = _daily || _stocksOnlySeries();
   const _snapUsable = _daily ? _daily.length : _rawSeries.filter(p => p.date !== todayISO()).length;
@@ -2379,7 +2427,7 @@ function renderBenchmarkTab() {
   // التدفقات = مشترياتك ومبيعاتك (المال الداخل للأسهم فعلاً)، لا إيداعات
   // الوساطة — فيتطابق مجال التصحيح مع مجال القيمة المقاسة.
   const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries,
-    _seriesMode === 'daily' ? _externalFlows() : _stockFlows());
+    _seriesMode === 'daily' ? _stockFlows(portSeries.covered || null) : _stockFlows());
 
   const getTwrAt = (date) => {
     const prior = sortedSnaps.filter(s => s.date <= date);
@@ -2603,12 +2651,19 @@ function renderBenchmarkTab() {
           قراراتك عن مشترياتك ومبيعاتك. كلا الخطين مُنسَّبان إلى 100 عند <b>${formatDate(points[0].date)}</b>
           (وهو أول تاريخ تتوفّر فيه القيمتان معاً).`)}
 
-        ${_seriesMode === 'daily' ? noteHtml('📈', `<b>خطّ محفظتك مُعاد بناؤه يوماً بيوم — بالعائد الإجمالي شاملاً توزيعاتك.</b>
-          قيمة كل يوم = <b>(أسهمك × سعر إغلاقها) + النقد داخل محفظتك</b>،
-          والنقد = إيداعاتك − سحوباتك − مشترياتك + مبيعاتك <b>+ توزيعاتك</b>.
-          فالتوزيعة <b>عائد لا تدفّق</b> (سعر السهم ينزل والنقد يرتفع، والقيمة لا تتغيّر)،
-          والشراء والبيع حركة داخلية، والتدفق الخارجي الوحيد إيداعاتك وسحوباتك.
-          <b>${_rawSeries.length}</b> نقطة يومية — وهذا ما يجعل الرقم قابلاً للمقارنة بتاسي «العائد الإجمالي».
+        ${_seriesMode === 'daily' ? noteHtml('📈', `<b>المقارنة على أسهمك وحدها بالعائد الإجمالي — بلا نقد.</b>
+          قيمة كل يوم = <b>(أسهمك × سعر إغلاقها) + توزيعاتك المقبوضة تراكمياً</b>،
+          والتدفقات = مشترياتك ومبيعاتك فقط. فالتوزيعة <b>عائد لا تدفّق</b>، والأساس
+          «عائد إجمالي» يقابل تاسي TRI تماماً. <b>${_rawSeries.length}</b> نقطة يومية.
+          <br><b>لماذا استُبعد النقد:</b> تاسي مؤشر مستثمَر 100%، وأي ريال نقد راكد في
+          محفظتك يسحب عائدك للأسفل <b>ميكانيكياً</b> لا لأن اختيارك للأسهم أسوأ. مقارنة
+          «أسهم + نقد» بمؤشر أسهم تُظهر محفظة متفوّقة وكأنها متأخّرة${(() => {
+            const cd = _cashDragPct();
+            return cd && cd.pct > 0.5
+              ? ` — والنقد عندك الآن <b>${formatSAR(cd.cash)}</b> أي <b>${cd.pct.toFixed(1)}%</b> من محفظتك، وهذا وحده كان يخصم من الرقم المعروض سابقاً`
+              : '';
+          })()}.
+          هذا المربّع يقيس <b>اختيارك للأسهم</b>؛ وأثر قرار السيولة يظهر في القيمة الإجمالية لا هنا.
           ${_rawSeries.impliedDeposits > 0 ? `<br>⚠️ <b>${formatSAR(_rawSeries.impliedDeposits)}</b> إيداعات <b>ضمنية</b>: مشترياتك تجاوزت ما تموّله تدفقاتك المسجّلة، فافترضنا إيداعاً بالفارق بدل تشويه العائد. سجّلها في صفحة التدفقات النقدية ليصير الحساب دقيقاً.` : ''}
           ${_cov.missing.length ? `<br>⚠️ <b>${_cov.missing.length}</b> من ${_cov.total} رمزاً بلا أسعار تاريخية (${_cov.missing.map(esc).join('، ')}) — مستبعَدة من الخطّ، فالقيمة أقلّ من الحقيقية بمقدارها.` : ''}`,
           _cov.missing.length ? 'warn' : '') : ''}
