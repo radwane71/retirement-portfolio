@@ -2152,6 +2152,20 @@ function _flowsBetween(fromISO, toISO) {
 }
 
 // تُرجع { clean, anomalies } — clean بلا النقاط المشبوهة، وanomalies لعرضها
+// AUDIT-FIX 2026-08-22 (حرج): `filter` يُنتج مصفوفة جديدة **بلا** الخصائص
+// المرفقة (`covered` و`impliedDeposits`). فكان `portSeries.covered === undefined`
+// ⇒ `_stockFlows(null)` ⇒ تدفّقات **كل** الرموز بينما القيمة تشمل المُغطّاة فقط
+// ⇒ ضخّ ضخم بلا زيادة قيمة مقابلة ⇒ عائد فترة أقلّ من −100% ⇒ معامل TWR ينقلب
+// سالباً ويبقى كذلك للأبد. هذا سبب الهبوط العمودي إلى −113% في الرسم.
+// القاعدة: أي دالة تُعيد تشكيل السلسلة **تنقل خصائصها معها**.
+function _carrySeriesProps(src, out) {
+  if (src && out) {
+    if (src.covered) out.covered = src.covered;
+    if (src.impliedDeposits != null) out.impliedDeposits = src.impliedDeposits;
+  }
+  return out;
+}
+
 function _screenStocksSeries(series) {
   const anomalies = [];
   if (series.length < 3) return { clean: series, anomalies };
@@ -2173,7 +2187,7 @@ function _screenStocksSeries(series) {
       });
     }
   }
-  return { clean: series.filter((_, i) => keep[i]), anomalies };
+  return { clean: _carrySeriesProps(series, series.filter((_, i) => keep[i])), anomalies };
 }
 
 // تدفقات محفظة الأسهم = المشتريات والمبيعات، لا إيداعات الوساطة.
@@ -2276,7 +2290,13 @@ function _computeTWR(snapshots, cashflows, flowTiming) {
     const denom = flowTiming === 'end' ? startVal : startVal + netCF / 2;
     if (denom > 0) {
       const r = (endVal - startVal - netCF) / denom;
-      factor *= (1 + r);
+      // AUDIT-FIX 2026-08-22: عائد فترة ≤ −100% مستحيل اقتصادياً على محفظة أسهم
+      // (القيمة لا تصير سالبة). ظهوره يعني **خللاً في المدخلات** — غالباً تدفّق
+      // لا يقابله تغيّر في القيمة (مجال التدفقات ≠ مجال القيمة). كان يُضرب في
+      // المعامل فينقلب المؤشر سالباً ويبقى كذلك إلى آخر السلسلة — رقم بلا معنى
+      // يُعرض كأنه عائد. الآن تُسقَط الفترة وتُحصى ويُعلَن العدد.
+      if (1 + r > 0) factor *= (1 + r);
+      else droppedPeriods++;
     } else {
       droppedPeriods++; // AUDIT-FIX (2026-08): كانت تُتخطى بصمت
     }
@@ -2286,7 +2306,7 @@ function _computeTWR(snapshots, cashflows, flowTiming) {
   // AUDIT-FIX (2026-08): تحذير ظاهر (مرة واحدة) بعدد الفترات المُسقطة من TWR
   if (droppedPeriods > 0 && !_twrDropWarned) {
     _twrDropWarned = true;
-    showToast(`⚠️ تم إسقاط ${droppedPeriods} فترة من حساب TWR (مقام ≤ 0 — قيمة بداية أو تدفقات غير سليمة) — راجع اللقطات والتدفقات النقدية`, 'error');
+    showToast(`⚠️ تم إسقاط ${droppedPeriods} فترة من حساب TWR (مقام ≤ 0 أو عائد فترة ≤ −100% — تدفّق لا يقابله تغيّر في القيمة) — راجع اللقطات والتدفقات النقدية`, 'error');
     console.warn(`[performance] TWR: dropped ${droppedPeriods} period(s) with non-positive Modified-Dietz denominator`);
   }
 
