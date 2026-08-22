@@ -1879,6 +1879,26 @@ async function exportMonthlyReviewMD() {
         MONTHS[(d.month || 1) - 1], d.year, SAR(d.amount)
       ]);
       p(mdTable(['التاريخ','الرمز','الاسم','الشهر','السنة','المبلغ'], divRows));
+
+      // AUDIT-FIX 2026-08-22 (تدقيق خارجي #7): حقلا الشهر/السنة يُدخلان يدوياً
+      // وقد يخالفان تاريخ الصرف، فيقع التوزيع في شهر غير شهره في §13 وفي أي رسم
+      // زمني. نُعلن التعارض ولا نصحّحه صامتاً.
+      // **ملاحظة مقصودة:** لا نمنع تاريخ صرف مستقبلياً — تسجيل التوزيع فور
+      // إعلانه بتاريخ صرفه القادم قرار المالك وممارسة قائمة، والتقارير تستبعده
+      // من المستلَم ومن XIRR أصلاً (utils.js/dividendFlowDate).
+      {
+        const _mm = dividends.filter(d => {
+          if (!d.date || !d.year || !d.month) return false;
+          const dt = parseDateLocal(String(d.date));
+          return dt && (dt.getFullYear() !== +d.year || (dt.getMonth() + 1) !== +d.month);
+        });
+        if (_mm.length) {
+          p(`\n> ⚠️ **${_mm.length}** توزيعة وسم شهرها لا يطابق تاريخ صرفها — تقع في الشهر الخطأ في §13 وفي أي رسم زمني للدخل:`);
+          p(mdTable(['الرمز', 'تاريخ الصرف', 'الوسم المسجَّل', 'المبلغ'],
+            _mm.map(d => [d.ticker, d.date, `${MONTHS[(+d.month || 1) - 1]} ${d.year}`, SAR(d.amount)])));
+          p('_الإصلاح: عدّل الشهر/السنة في صفحة الأرباح ليطابقا تاريخ الصرف. الرسوم في صفحة الأرباح تشتقّ الشهر من التاريخ أصلاً (`_divPeriodKey`)، فالتعارض يظهر هنا وفي §13 فقط._');
+        }
+      }
     } else {
       p('_لا توجد أرباح موزعة مسجّلة._');
     }
@@ -1967,7 +1987,13 @@ async function exportMonthlyReviewMD() {
     await tick('العقارات');
     h2('6. العقارات (Real Estate)');
 
-    const activeRE = realEstate.filter(r => r.is_active !== false);
+    // AUDIT-FIX 2026-08-22 (تدقيق خارجي #6): كان الفلتر على `is_active` وحده —
+    // وهو علم **الأرشفة** لا حالة البيع (realestate.js:167 يضبطه عند الأرشفة فقط).
+    // فعقار حالته `sold` ولم يُؤرشف كان يُحتسب بكامل قيمته في إجمالي العقارات
+    // وصافي الثروة وأساس FIRE. صفحة العقارات نفسها تستبعده (realestate.js:52
+    // تفلتر `status !== 'sold'`) — نفس المفهوم بتعريفين. اعتُمد تعريف الصفحة.
+    const _soldRE  = realEstate.filter(r => r.is_active !== false && String(r.status || '').toLowerCase() === 'sold');
+    const activeRE = realEstate.filter(r => r.is_active !== false && String(r.status || '').toLowerCase() !== 'sold');
     if (activeRE.length) {
       const totalPurchase = activeRE.reduce((s, r) => s + +r.purchase_value, 0);
       const totalCurrent  = activeRE.reduce((s, r) => s + +r.current_value, 0);
@@ -1977,6 +2003,11 @@ async function exportMonthlyReviewMD() {
       p(`**إجمالي القيمة الحالية:** ${SAR(totalCurrent)} ر.س  `);
       p(`**إجمالي الإيجار الشهري:** ${SAR(totalRental)} ر.س  `);
       p(`**مكاسب القيمة:** ${SAR(totalCurrent - totalPurchase)} ر.س (${PCT(totalPurchase > 0 ? (totalCurrent - totalPurchase) / totalPurchase * 100 : 0)})`);
+      // AUDIT-FIX 2026-08-22: المباع يُستبعد ويُعلَن — لا يُحذف بصمت (§8).
+      if (_soldRE.length) {
+        const _sv = _soldRE.reduce((a, r) => a + (+r.current_value || 0), 0);
+        p(`\n> ⚠️ **مستبعَد من كل الإجماليات:** ${_soldRE.length} عقاراً حالته «مباع» بقيمة مسجّلة ${SAR(_sv)} ر.س (${_soldRE.map(r => r.name).join('، ')}). كان يُحتسب هنا خطأً بينما لوحة التحكم وصفحة صافي الثروة تستبعدانه — فكان صافي الثروة في هذا التقرير أعلى من التطبيق بمقدار هذه القيمة. **إن كان البيع قد تمّ فعلاً فسجّل متحصّله كأصل نقدي وإلا اختفى من ميزانيتك.**`);
+      }
 
       const reRows = activeRE.map(r => {
         const gain    = +r.current_value - +r.purchase_value;
@@ -2007,6 +2038,36 @@ async function exportMonthlyReviewMD() {
     p('الأوزان المستهدفة لكل سهم وقطاع. الوزن الحالي محسوب من القيمة السوقية الحالية.');
 
     const totalMktNow = holdings.reduce((s, h) => s + +h.shares * +h.current_price, 0);
+
+    // AUDIT-FIX 2026-08-22 (تدقيق خارجي #1): مجموع أهداف الأسهم قد لا يساوي 100%
+    // فيصير كل انحراف معروض محسوباً على مقام غير مكتمل. لا نصحّح أرقامك — نقيس
+    // ونُعلن (§8)، ونبيّن الفرق بالضبط ليكون التصحيح قرارك.
+    {
+      const _stSum  = stockTargets.reduce((a, x) => a + (+x.target_pct || 0), 0);
+      const _secSum = sectorTargets.reduce((a, x) => a + (+x.target_pct || 0), 0);
+      const _bad = [];
+      if (stockTargets.length  && Math.abs(_stSum  - 100) > 0.01) _bad.push(`مجموع أهداف الأسهم = **${_stSum.toFixed(2)}%** (الفرق ${(_stSum - 100 >= 0 ? '+' : '') + (_stSum - 100).toFixed(2)} نقطة)`);
+      if (sectorTargets.length && Math.abs(_secSum - 100) > 0.01) _bad.push(`مجموع أهداف القطاعات = **${_secSum.toFixed(2)}%** (الفرق ${(_secSum - 100 >= 0 ? '+' : '') + (_secSum - 100).toFixed(2)} نقطة)`);
+      // اتساق رأسي: مجموع أهداف أسهم كل قطاع مقابل هدف ذلك القطاع
+      const _bySec = {};
+      stockTargets.forEach(st => {
+        const h = holdings.find(x => x.ticker === st.ticker);
+        const sec = (h && h.sector) ? String(h.sector).trim() : 'غير مصنّف';
+        _bySec[sec] = (_bySec[sec] || 0) + (+st.target_pct || 0);
+      });
+      const _secMismatch = sectorTargets.filter(sc => {
+        const got = _bySec[String(sc.sector || '').trim()];
+        return got != null && Math.abs(got - (+sc.target_pct || 0)) > 0.01;
+      });
+      if (_bad.length || _secMismatch.length) {
+        p(`\n> 🔴 **تحقّق الأهداف فشل — كل انحراف في هذا القسم وفي §10 محسوب على مقام غير مكتمل:**`);
+        _bad.forEach(b => p(`> - ${b}`));
+        _secMismatch.forEach(sc => p(`> - قطاع «${sc.sector}»: مجموع أهداف أسهمه ${(_bySec[String(sc.sector || '').trim()] || 0).toFixed(2)}% ≠ هدف القطاع ${(+sc.target_pct || 0).toFixed(2)}%`));
+        p(`> \n> الإجراء: افتح صفحة «أهداف الأسهم والقطاعات» وأعد التوزيع حتى يساوي المجموع 100%.`);
+      } else if (stockTargets.length) {
+        p(`\n_✅ تحقّق الأهداف: مجموع أهداف الأسهم ${_stSum.toFixed(2)}% ومجموع القطاعات ${_secSum.toFixed(2)}% — متسقان._`);
+      }
+    }
 
     if (stockTargets.length) {
       h3('أهداف الأسهم (مع مناطق الشراء والبيع)');
@@ -3089,14 +3150,23 @@ async function exportMonthlyReviewMD() {
         p(`**إجمالي قيمة المحفظة وقت التشغيل:** ${SAR(deSnap.totalValue)} ر.س`);
 
         h3('الثوابت والقواعد المطبّقة (الدستور §1)');
+        // AUDIT-FIX 2026-08-22: لقطة محفوظة قبل إضافة هذه الحقول كانت تطبع
+        // «undefined%» حرفياً مكان ثوابت الدستور — أسوأ من الصمت لأنها تبدو رقماً.
+        // الدستور §8: ما لا يتوفّر يُعلَن «غير متوفرة» ولا يُقدَّر ولا يُطبع خاماً.
+        const _cv = v => (v == null || v === '' || (typeof v === 'number' && !isFinite(v))) ? null : v;
+        const _cap = (v, unit) => _cv(v) == null ? 'غير متوفرة في اللقطة' : String(v) + (unit || '');
+        const _psz = deSnap.portfolioSize || {};
         p('```');
-        p(`سقف السهم الواحد            : ${deSnap.caps?.single}%`);
-        p(`سقف السهم القيادي (Blue)    : ${deSnap.caps?.blueChip}%`);
-        p(`سقف القطاع                  : ${deSnap.caps?.sector}%`);
-        p(`حجم المحفظة المستهدف        : ${deSnap.portfolioSize?.min}–${deSnap.portfolioSize?.max} سهم (الحالي: ${deSnap.portfolioSize?.current})`);
-        p(`عتبة انحراف الوزن — أخضر ≤  : ${deSnap.thresholds?.green}%`);
-        p(`عتبة انحراف الوزن — أصفر ≤  : ${deSnap.thresholds?.yellow}%`);
+        p(`سقف السهم الواحد            : ${_cap(deSnap.caps?.single, '%')}`);
+        p(`سقف السهم القيادي (Blue)    : ${_cap(deSnap.caps?.blueChip, '%')}`);
+        p(`سقف القطاع                  : ${_cap(deSnap.caps?.sector, '%')}`);
+        p(`حجم المحفظة المستهدف        : ${(_cv(_psz.min) == null || _cv(_psz.max) == null) ? 'غير متوفر في اللقطة' : `${_psz.min}–${_psz.max} سهم`} (الحالي: ${_cap(_psz.current, '')})`);
+        p(`عتبة انحراف الوزن — أخضر ≤  : ${_cap(deSnap.thresholds?.green, '%')}`);
+        p(`عتبة انحراف الوزن — أصفر ≤  : ${_cap(deSnap.thresholds?.yellow, '%')}`);
         p('```');
+        if (_cv(deSnap.caps?.single) == null) {
+          p('_⚠️ اللقطة المحفوظة أقدم من إضافة هذه الحقول — افتح صفحة «محرّك القرار» مرة واحدة لتحديثها._');
+        }
 
         if (deSnap.fixedTriggers?.length) {
           h3('المشغّلات الثابتة (Fixed Triggers) — أولوية عليا فوق كل حساب');
@@ -3280,17 +3350,18 @@ async function exportMonthlyReviewMD() {
       const b = perfSnap && perfSnap.benchmark;
       if (b) {
         p(mdTable(['المقياس','القيمة'], [
-          ['الفترة المشتركة', `${b.from} ← ${b.to}`],
+          ['الفترة المشتركة', (b.from && b.to) ? `${b.from} ← ${b.to}` : 'غير مسجَّلة في اللقطة'],
           ['عائد محفظتك (TWR، تراكمي)', (b.portDelta >= 0 ? '+' : '') + PCT(b.portDelta)],
           ['تاسي — سعري',               (b.tasiDelta >= 0 ? '+' : '') + PCT(b.tasiDelta)],
           ['تاسي — عائد إجمالي (TRI)',  (b.tasiTriDelta >= 0 ? '+' : '') + PCT(b.tasiTriDelta)],
           ['**ألفا مقابل TRI**',        (b.alpha >= 0 ? '+' : '') + PCT(b.alpha)],
           ['ألفا مقابل السعري',         (b.alphaPrice >= 0 ? '+' : '') + PCT(b.alphaPrice)],
-          ['نقاط المقارنة', String(b.points)],
+          ['نقاط المقارنة', b.points == null ? 'غير مسجَّل' : String(b.points)],
           ['أساس المحفظة', perfSnap.basisLabel || '—'],
         ]));
         p(`_المصدر: لقطة صفحة الأداء التاريخي${_snapAge != null ? ` (عمرها ${_snapAge} يوماً)` : ''}. الأرقام هنا **نسخة** منها لا حساباً مستقلاً — فلا يمكن أن تتضارب الصفحتان._`);
-        p(`_الوحدة **تراكمية على الفترة** لا سنوية. وعائد توزيعات تاسي في TRI افتراض ثابت ${(b.tasiDivYield * 100).toFixed(1)}%/سنة مكتوب في الكود، وليس العائد الفعلي للمؤشر._`);
+        // AUDIT-FIX 2026-08-22: لقطة بلا الحقل كانت تطبع «NaN%» — يُعلَن ولا يُطبع خاماً (§8).
+        p(`_الوحدة **تراكمية على الفترة** لا سنوية. وعائد توزيعات تاسي في TRI ${Number.isFinite(+b.tasiDivYield) ? `افتراض ثابت ${(b.tasiDivYield * 100).toFixed(1)}%/سنة مكتوب في الكود، وليس العائد الفعلي للمؤشر` : 'غير مسجَّل في هذه اللقطة — أعد فتح صفحة الأداء لتسجيله'}._`);
         if (_snapAge != null && _snapAge > 7) {
           p(`_⏰ اللقطة عمرها ${_snapAge} يوماً — افتح صفحة الأداء لتحديثها قبل الاعتماد على هذه الأرقام._`);
         }
@@ -3349,7 +3420,24 @@ async function exportMonthlyReviewMD() {
           }
           gaps.sort((x, y) => x - y);
           const med = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 999;
-          if (med <= 45) freq = 12; else if (med <= 105) freq = 4; else if (med <= 210) freq = 2;
+          let inferred = 1;
+          if (med <= 45) inferred = 12; else if (med <= 105) inferred = 4; else if (med <= 210) inferred = 2;
+          // AUDIT-FIX 2026-08-22 (تدقيق خارجي #4): الوسيط على فجوة واحدة أو فجوتين
+          // كان يقلب موزّعاً **سنوياً** إلى «شهري» لمجرد تسجيلين متقاربين (دفعة
+          // مرحلية + ختامية، أو إعلان ثم صرف). والعتبة تعتمد على الدورية:
+          // (365÷12)×1.75 = 53 يوماً — فيُستبعد السهم «منقطعاً» بعد 81 يوماً وهو
+          // يوزّع مرة في السنة. النتيجة: صفوف تختفي من جدول الدخل بلا سبب حقيقي.
+          // الحارس: الدورية العالية تحتاج شاهدين — عدد فجوات كافٍ **و** عدد دفعات
+          // فعلي في آخر 12 شهراً يطابقها. وإلا نهبط لأقرب دورية تدعمها البيانات.
+          const _ttmCount = divs.filter(d => {
+            const dt = dateOf(d);
+            return dt && dt.getTime() <= nowTs && dt.getTime() >= nowTs - 365 * 86400000;
+          }).length;
+          const _minPays = { 12: 6, 4: 3, 2: 2, 1: 1 };
+          freq = inferred;
+          while (freq > 1 && (gaps.length < 2 || _ttmCount < _minPays[freq])) {
+            freq = freq === 12 ? 4 : freq === 4 ? 2 : 1;
+          }
         }
 
         // DPS لكل دفعة = المبلغ ÷ الأسهم وقتها (المستلَم فقط — لا تواريخ مستقبلية)
@@ -3414,8 +3502,14 @@ async function exportMonthlyReviewMD() {
       const rk = perfSnap && perfSnap.risk;
       if (rk) {
         const pct = v => (v == null ? '—' : (v * 100).toFixed(1) + '%');
+        // AUDIT-FIX 2026-08-22 (تدقيق خارجي #10): كانت المقاييس تُعرض بلا عدد
+        // مشاهدات. تذبذب على 17 فترة ليس تقديراً بل ضجيج — الخطأ المعياري
+        // للانحراف المعياري ≈ σ÷√(2n)، أي ±17% من القيمة عند n=17 مقابل ±9%
+        // عند n=60. العدد يُعرض دائماً، والتحذير يظهر تحت 30.
+        const _nObs = +perfSnap.points || 0;
         p('```');
         p(`أساس القياس                 : ${perfSnap.basisLabel || '—'}`);
+        p(`عدد المشاهدات               : ${_nObs || 'غير مسجَّل'}${_nObs && _nObs < 30 ? `  ⚠️ غير كافٍ إحصائياً — الخطأ المعياري للتذبذب عند n=${_nObs} يقارب ±${(100 / Math.sqrt(2 * _nObs)).toFixed(0)}% من القيمة` : ''}`);
         p(`${rk.shortSpan ? 'العائد التراكمي (المدة < سنة)' : 'العائد السنوي'}      : ${pct(rk.annReturn)}`);
         p(`التذبذب ${rk.shortSpan ? 'على المدة' : 'السنوي'}          : ${pct(rk.annVol)}`);
         p(`تذبذب الهبوط                : ${pct(rk.annDownside)}`);
@@ -3423,7 +3517,8 @@ async function exportMonthlyReviewMD() {
         p(`Sortino = (العائد−RF)÷الهبوط : ${rk.sortino == null ? '—' : rk.sortino.toFixed(2)}`);
         p(`العائد الخالي من المخاطر RF : ${((perfSnap.riskFree ?? 0.03) * 100).toFixed(0)}% (افتراض مكتوب في الكود)`);
         p(`أقصى تراجع                  : ${perfSnap.maxDrawdown == null ? '—' : perfSnap.maxDrawdown.toFixed(2) + '%'}`);
-        p(`عدد الفترات المستخدَمة       : ${rk.nReturns} (من ${rk.nSnaps} نقطة)`);
+        // AUDIT-FIX 2026-08-22: لقطة أقدم من إضافة العدّادين كانت تطبع «undefined».
+        p(`عدد الفترات المستخدَمة       : ${rk.nReturns ?? 'غير مسجَّل'} (من ${rk.nSnaps ?? 'غير مسجَّل'} نقطة)`);
         p('```');
         p(`_المصدر: لقطة صفحة الأداء${_snapAge != null ? ` (عمرها ${_snapAge} يوماً)` : ''} — نسخة لا حساب مستقل._`);
       } else {
@@ -3580,8 +3675,22 @@ async function exportMonthlyReviewMD() {
       const wd12 = cf12.filter(c => c.type === 'withdrawal').reduce((s, c) => s + +c.amount, 0);
       const hasCf12 = cf12.length > 0;
       const monthlyContrib = hasCf12 ? (dep12 - wd12) / 12 : 0;
+      // AUDIT-FIX 2026-08-22 (تدقيق خارجي #9): متوسط آخر 12 شهراً يبتلع الضخّات
+      // الاستثنائية غير المتكررة، فيصير مدخل إسقاط FIRE أضعاف خطتك المعلنة —
+      // والنتيجة «على المسار 🟢» طمأنينة زائفة. نفصل الاعتيادي عن الاستثنائي:
+      // أي إيداع يتجاوز 3× وسيط الإيداعات يُصنَّف ضخّة ويُستبعد من **المعدّل**
+      // (ولا يُحذف من رصيدك — هو داخل الأصول الحالية أصلاً).
+      const _deps12 = cf12.filter(c => c.type === 'deposit').map(c => +c.amount || 0).sort((a, b) => a - b);
+      const _medDep = _deps12.length ? _deps12[Math.floor(_deps12.length / 2)] : 0;
+      const _lumps  = _medDep > 0 ? _deps12.filter(v => v > _medDep * 3) : [];
+      const _lumpSum = _lumps.reduce((a, v) => a + v, 0);
+      const _ordinaryMonthly = hasCf12 ? ((dep12 - _lumpSum) - wd12) / 12 : 0;
       if (hasCf12) {
         p(`صافي المساهمة آخر 12 شهراً: ${SAR(dep12 - wd12)} ر.س → **${SAR(monthlyContrib)} ر.س/شهر** (إيداعات ${SAR(dep12)} − سحوبات ${SAR(wd12)}).`);
+        if (_lumps.length) {
+          p(`منها **${_lumps.length}** ضخّة استثنائية (أكبر من 3× الوسيط ${SAR(_medDep)}) بإجمالي ${SAR(_lumpSum)} ر.س.  `);
+          p(`**المساهمة الاعتيادية بعد استبعادها: ${SAR(_ordinaryMonthly)} ر.س/شهر** — هذه هي المناسبة للإسقاط المستقبلي، لأن الضخّة لا تتكرر بحكم تعريفها.`);
+        }
       } else {
         p('_لا توجد تدفقات نقدية مسجّلة في آخر 12 شهراً._');
       }
@@ -3665,17 +3774,34 @@ async function exportMonthlyReviewMD() {
         const fireBase = _totalMkt + portfolioCash + _sukukActive;
         if (yearsLeft > 0) {
           const g = Math.pow(1.05, yearsLeft);
-          const projAssets = fireBase * g + (monthlyContrib * 12) * ((g - 1) / 0.05);
-          const ratio = fireNumber > 0 ? projAssets / fireNumber * 100 : 0;
+          const _proj = ann => fireBase * g + ann * ((g - 1) / 0.05);
+          const _ratio = ann => (fireNumber > 0 ? _proj(ann) / fireNumber * 100 : 0);
+          // AUDIT-FIX 2026-08-22 (تدقيق خارجي #9): سيناريو واحد مبني على متوسط
+          // آخر 12 شهراً كان يعطي رقماً أعلى بأضعاف من الخطة المعلنة. نعرض
+          // السيناريوهات جنباً إلى جنب — القارئ يرى الفرق بدل أن يرث افتراضاً.
+          const _planMonthly = +(retGoal.planned_monthly || 0);
+          const _scen = [
+            { lbl: 'متوسط آخر 12 شهراً (يشمل الضخّات)', ann: monthlyContrib * 12 },
+          ];
+          if (_lumps && _lumps.length) _scen.push({ lbl: 'المساهمة الاعتيادية (بلا ضخّات)', ann: _ordinaryMonthly * 12 });
+          if (_planMonthly > 0) _scen.push({ lbl: 'خطتك المعلنة', ann: _planMonthly * 12 });
           p('```');
           p(`الأصول الحالية المؤهلة (أسهم+نقد+صكوك): ${SAR(fireBase)} ر.س`);
-          p(`المساهمة السنوية المفترضة           : ${SAR(monthlyContrib * 12)} ر.س`);
           p(`نمو تخطيطي متحفّظ                   : 5% سنوياً`);
           p(`السنوات المتبقية حتى ${retGoal.target_year}          : ${yearsLeft}`);
-          p(`الأصول المتوقعة عند التقاعد          : ${SAR(projAssets)} ر.س`);
           p(`رقم FIRE المطلوب                    : ${SAR(fireNumber)} ر.س`);
-          p(`نسبة الوصول المتوقعة                : ${ratio.toFixed(0)}%  ${ratio >= 100 ? '✅ على المسار' : ratio >= 80 ? '🟡 قريب' : '🔴 متأخر'}`);
           p('```');
+          p(mdTable(['سيناريو المساهمة', 'سنوياً', `الأصول المتوقعة ${retGoal.target_year}`, 'نسبة الوصول', 'الحكم'],
+            _scen.map(x => {
+              const r = _ratio(x.ann);
+              return [x.lbl, SAR(x.ann), SAR(_proj(x.ann)), r.toFixed(0) + '%',
+                r >= 100 ? '✅ على المسار' : r >= 80 ? '🟡 قريب' : '🔴 متأخر'];
+            })));
+          if (_scen.length === 1) {
+            p(`_السيناريو الوحيد المتاح مبني على متوسط آخر 12 شهراً. لتقدير أصدق سجّل «المساهمة الشهرية المخطّطة» في صفحة التقاعد — عندها يظهر السيناريو المخطّط بجانبه._`);
+          } else {
+            p(`_الفارق بين السيناريوهات ليس خطأ حساب: المعادلة واحدة والمدخل مختلف. **اعتمد الأدنى** في التخطيط ما لم تكن الضخّات الاستثنائية متكررة فعلاً._`);
+          }
         } else { p('_سنة التقاعد المستهدفة في الماضي أو الحاضر._'); }
       } else {
         p('_يحتاج: هدف FIRE + سنة تقاعد + تدفقات نقدية مسجّلة في آخر 12 شهراً._');
@@ -3708,7 +3834,13 @@ async function exportMonthlyReviewMD() {
       const efficiency = _totalComm > 0 ? (totalPnL + _totalDiv) / _totalComm : null;
 
       p('```');
-      p(`Div ROI (توزيعات ÷ تكلفة الشراء) : ${divROI.toFixed(1)}%  ← نسبة استرداد رأس المال عبر التوزيعات وحدها`);
+      // AUDIT-FIX 2026-08-22 (تدقيق خارجي #8): الوسم «تكلفة الشراء» كان يحتمل
+      // مقامين — إجمالي المشتريات التاريخية (شاملة المراكز المصفّاة) أو تكلفة
+      // الحيازات القائمة — والفرق بينهما كبير. المقام مكتوب صراحةً الآن، ويُعرض
+      // النظيران معاً فلا يبقى تأويل.
+      const _divROIHeld = _totalCost > 0 ? _totalDiv / _totalCost * 100 : 0;
+      p(`Div ROI ÷ إجمالي المشتريات التاريخية : ${divROI.toFixed(1)}%  (المقام ${SAR(_totalBuys)} — يشمل المراكز المصفّاة)`);
+      p(`Div ROI ÷ تكلفة الحيازات القائمة     : ${_divROIHeld.toFixed(1)}%  (المقام ${SAR(_totalCost)} — رأس المال المنشغل الآن)`);
       p(`سنوات التعادل بالتوزيعات          : ${breakEvenYrs == null ? '—' : breakEvenYrs.toFixed(1) + ' سنة'}  (تكلفة الحيازة ÷ الدخل المتوقع سنوياً)`);
       p(`الدخل التوزيعي المتوقع (Forward)  : ${SAR(_fwd.total)} ر.س/سنة  (مجموع DPS آخر 12 شهراً × أسهمك الحالية — نفس تعريف اللوحة وصفحة الأرباح)`);
       if (_fwd.stale && _fwd.stale.length) {
@@ -3721,6 +3853,26 @@ async function exportMonthlyReviewMD() {
         p(`- ${efficiency >= 20 ? '✅ ممتاز' : efficiency >= 10 ? '🟡 جيد' : '⚠️ منخفض'}: كل ريال عمولة قابله ${efficiency.toFixed(1)} ريال ربح إجمالي.`);
       }
 
+      // AUDIT-FIX 2026-08-22 (تدقيق خارجي #5): DPS المشتقّ من مبلغ مسجَّل ناقص أو
+      // من دفعة واحدة في سنة يعطي عائداً غير معقول — وسهم عائده 0.19% أو 40%
+      // يمرّ صامتاً اليوم. لا نصحّح رقمك (§8) بل نقيس ونُعلن ليكون التصحيح قرارك.
+      // النطاق المعقول للسوق السعودي: 0.5%–15% عائداً، و0%–200% نسبة توزيع.
+      {
+        const _susp = [];
+        _fwd.rows.forEach(r => {
+          const h = holdings.find(x => x.ticker === r.ticker);
+          const price = h ? +h.current_price : 0;
+          if (!(price > 0) || !(r.dps > 0)) return;
+          const y = r.dps / price * 100;
+          if (y < 0.5)  _susp.push([r.ticker, r.name, formatNum(r.dps, 4), formatNum(price, 2), y.toFixed(2) + '%', '🔴 عائد أقل من 0.5% — الأرجح أن المبلغ المسجَّل دفعة جزئية أو الدورية ناقصة']);
+          else if (y > 15) _susp.push([r.ticker, r.name, formatNum(r.dps, 4), formatNum(price, 2), y.toFixed(2) + '%', '🔴 عائد فوق 15% — الأرجح توزيع استثنائي غير متكرر أو سعر قديم']);
+        });
+        if (_susp.length) {
+          h3('⚠️ فحص معقولية التوزيع لكل سهم');
+          p(`**${_susp.length}** سهماً عائده المحسوب خارج النطاق المعقول (0.5%–15%). الدخل المتوقَّع أعلاه مبني عليها كما هي — راجعها في صفحة الأرباح قبل الاعتماد على المجموع:`);
+          p(mdTable(['الرمز', 'الاسم', 'DPS سنوي محسوب', 'السعر', 'العائد', 'الملاحظة'], _susp));
+        }
+      }
       if (_fwd.rows.length) {
         h3('الدخل التوزيعي المتوقع لكل سهم');
         const frows = _fwd.rows.sort((a, b) => b.projected - a.projected).map(r => [
@@ -4524,6 +4676,13 @@ async function exportMonthlyReviewMD() {
       const _ih = await syncedGet('decision_intel_history_v1', []);
       const _ihArr = Array.isArray(_ih) ? _ih : [];
       p('قياس واحد يومياً (سقف 400) لكل ما تقيسه طبقة الذكاء. الغرض: أن يكون تحسّن الموثوقية **مقيساً** لا موعوداً — الأرقام أدناه هي الفرق الفعلي بين أول قياس وآخره.');
+      // AUDIT-FIX 2026-08-22 (تدقيق خارجي #2): «ألفا» هنا و«ألفا» في §29 رقمان
+      // مختلفان بحق، وكان الاسم واحداً فبدا الأمر تناقضاً. **كلاهما مقابل TRI** —
+      // فتشخيص «أحدهما سعري» غير صحيح. الفرق الحقيقي في المنهج والوحدة:
+      p('> ⚠️ **هذا الرقم لا يساوي «ألفا» في §29، وليس تناقضاً — بل مقياسان مختلفان بوحدتين مختلفتين. كلاهما مقابل تاسي بالعائد الإجمالي (TRI):**  ');
+      p('> - **§29 — ألفا مقابل TRI:** فرق *تراكمي على الفترة المشتركة* بين TWR محفظتك وعائد المؤشر. يجيب: «كم تقدّمتُ على المؤشر إجمالاً؟» ولا يتأثر بتوقيت ضخّاتك.  ');
+      p('> - **§39.4 — فرقك عن تاسي:** فرق *سنوي (XIRR)* بينك وبين المؤشر **لو ضخخت فيه نفس مبالغك في نفس تواريخها**. يجيب: «هل كان اختياري للأسهم أفضل من شراء المؤشر بنفس سلوكي؟» ويتأثر بالتوقيت عمداً.  ');
+      p('> \n> الأول يقيس المحفظة، والثاني يقيس قراراتك. **لا يصحّ توحيدهما** — حذف أحدهما يفقد سؤالاً مختلفاً. راجع §29 للرقم التراكمي.');
       if (_ihArr.length >= 2) {
         const _a = _ihArr[0], _z = _ihArr[_ihArr.length - 1];
         const _dlt = (x, y, isPct) => (x == null || y == null) ? '—'
@@ -4533,7 +4692,7 @@ async function exportMonthlyReviewMD() {
           ['عدد القياسات المحفوظة', String(_ihArr.length)],
           ['قيمة المحفظة', _dlt(_a.value, _z.value)],
           ['عائدك السنوي (XIRR)', _dlt(_a.xirr, _z.xirr, true)],
-          ['فرقك عن تاسي (ألفا)', _dlt(_a.alpha, _z.alpha, true)],
+          ['فرقك عن تاسي — XIRR سنوي بتدفقاتك', _dlt(_a.alpha, _z.alpha, true)],
           ['دخلك القادم (Forward)', _dlt(_a.fwdIncome, _z.fwdIncome)],
           ['الدخل المهدَّد', _dlt(_a.atRisk, _z.atRisk)],
           ['ثقة البيانات', _dlt(_a.confidence, _z.confidence, true)],
