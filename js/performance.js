@@ -2123,7 +2123,17 @@ function _externalFlows() {
 function _dailyCoverage() {
   const tickers = [...new Set((_tx || []).map(t => t.ticker).filter(Boolean))];
   const missing = tickers.filter(t => !_priceMapOf(t));
-  return { total: tickers.length, missing };
+  // AUDIT-FIX 2026-08-22: رمز أسعاره تبدأ بعد أول شراء له — جزء من تاريخك معه
+  // خارج نطاق القياس. يُحقن دخوله كتدفّق (لا كربح) في _stockFlows، لكن يبقى
+  // واجباً إعلانه: الفترة السابقة لأول سعر غير مقيسة أصلاً.
+  const lateEntry = tickers.filter(t => {
+    const from = _firstPriceDateOf(t);
+    if (!from) return false;
+    const firstBuy = (_tx || []).filter(x => x.ticker === t && x.type === 'buy' && x.date)
+      .map(x => x.date).sort()[0];
+    return firstBuy && firstBuy < from;
+  }).map(t => ({ ticker: t, from: _firstPriceDateOf(t) }));
+  return { total: tickers.length, missing, lateEntry };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2189,7 +2199,7 @@ function _firstPriceDateOf(ticker) {
 }
 
 function _stockFlows(coveredSet) {
-  return (_tx || []).filter(t => {
+  const out = (_tx || []).filter(t => {
     if (!t.date || (t.type !== 'buy' && t.type !== 'sell')) return false;
     if (!coveredSet) return true;                       // مسار اللقطات: كما كان
     if (!coveredSet.has(t.ticker)) return false;        // رمز غير مُقيَّم → تدفّقه مستبعَد
@@ -2198,6 +2208,38 @@ function _stockFlows(coveredSet) {
   })
     .map(t => ({ date: t.date, type: t.type === 'buy' ? 'deposit' : 'withdrawal', amount: +t.total || 0 }))
     .filter(f => f.amount > 0);
+
+  // ══════════════════════════════════════════════════════════════════════
+  // AUDIT-FIX 2026-08-22 — «الربح الوهمي» عند بدء الأسعار بعد الشراء:
+  // إسقاط الصفقات السابقة لأول سعر معروف (السطور أعلاه) كان يترك القيمة بلا
+  // تدفّق مقابل. فسهم اشتريتَه بـ50,000 وأسعاره تبدأ بعد أشهر يدخل السلسلة
+  // فجأةً بقيمته السوقية كاملةً، وTWR يقرأ القفزة **ربحاً**. قياس فعلي بمحفظة
+  // سعرها ثابت (عائدها الحقيقي صفر): الصفحة كانت تعرض **+500%**.
+  //
+  // العلاج: دخول السهم إلى نطاق القياس **تدفّق داخل**، لا ربح. نحقن تدفّقاً
+  // اصطناعياً واحداً في أول يوم سعر، بقيمة **السوق** للأسهم المملوكة عندها
+  // (لا بتكلفتها — فالفارق بين التكلفة والسوق تحقّق قبل بدء القياس ولا يخصّه).
+  // والبيوعات السابقة مطروحة أصلاً داخل _sharesAtISO فلا تُحتسب مرتين.
+  // ملاحظة: إن كان أول يوم سعر هو أول يوم في السلسلة، فالتدفّق يقع عند نقطة
+  // البداية ويُستبعد من الفترة الأولى (شرط `c.date > startDate` في _computeTWR)
+  // فيصير رأس مال ابتدائياً — وهو الصحيح.
+  // ══════════════════════════════════════════════════════════════════════
+  if (coveredSet) {
+    coveredSet.forEach(tk => {
+      const from = _firstPriceDateOf(tk);
+      if (!from) return;
+      const hadEarlier = (_tx || []).some(t =>
+        t.ticker === tk && t.date && t.date < from && (t.type === 'buy' || t.type === 'sell'));
+      if (!hadEarlier) return;
+      const sh = (typeof _sharesAtISO === 'function') ? _sharesAtISO(tk, from) : 0;
+      if (!(sh > 0)) return;
+      const arr = _priceMapOf(tk);
+      const px = (arr && arr.length) ? +arr[0][1] : 0;
+      const mv = sh * px;
+      if (mv > 0) out.push({ date: from, type: 'deposit', amount: mv, synthetic: true, ticker: tk });
+    });
+  }
+  return out;
 }
 
 // flowTiming: 'mid' افتراض منتصف الفترة (ديتز المعدَّل) — للقطات المتباعدة التي
@@ -2683,7 +2725,8 @@ function renderBenchmarkTab() {
           })()}.
           هذا المربّع يقيس <b>اختيارك للأسهم</b>؛ وأثر قرار السيولة يظهر في القيمة الإجمالية لا هنا.
           ${_rawSeries.impliedDeposits > 0 ? `<br>⚠️ <b>${formatSAR(_rawSeries.impliedDeposits)}</b> إيداعات <b>ضمنية</b>: مشترياتك تجاوزت ما تموّله تدفقاتك المسجّلة، فافترضنا إيداعاً بالفارق بدل تشويه العائد. سجّلها في صفحة التدفقات النقدية ليصير الحساب دقيقاً.` : ''}
-          ${_cov.missing.length ? `<br>⚠️ <b>${_cov.missing.length}</b> من ${_cov.total} رمزاً بلا أسعار تاريخية (${_cov.missing.map(esc).join('، ')}) — مستبعَدة من الخطّ، فالقيمة أقلّ من الحقيقية بمقدارها.` : ''}`,
+          ${_cov.missing.length ? `<br>⚠️ <b>${_cov.missing.length}</b> من ${_cov.total} رمزاً بلا أسعار تاريخية (${_cov.missing.map(esc).join('، ')}) — مستبعَدة من الخطّ، فالقيمة أقلّ من الحقيقية بمقدارها.` : ''}
+          ${(_cov.lateEntry && _cov.lateEntry.length) ? `<br>ℹ️ <b>${_cov.lateEntry.length}</b> رمزاً أسعاره التاريخية تبدأ بعد أول شراء لك (${_cov.lateEntry.map(x => esc(x.ticker) + ' — من ' + esc(x.from)).join('، ')}). يدخل القياس يوم أول سعر <b>بقيمته السوقية كتدفّق لا كربح</b>، وما قبل ذلك التاريخ غير مقيس. اضغط «🔄 جلب تاسي تلقائياً» لتمديد الأسعار إن توفّرت.` : ''}`,
           _cov.missing.length ? 'warn' : '') : ''}
 
         ${_snapSkipped > 0 ? noteHtml('📉', `<b>تغطية قصيرة: ${_snapUsable} من ${_snapTotal} لقطة تحمل قيمة أسهم.</b>
