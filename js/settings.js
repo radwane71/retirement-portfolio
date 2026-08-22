@@ -2099,6 +2099,28 @@ async function exportMonthlyReviewMD() {
       p(mdTable(['الرمز','الهدف %','الحالي %','الفرق','حالة الوزن','سعر الشراء','سعر البيع','السعر الحالي','منطقة السعر'], stRows));
     }
 
+    // ADDED 2026-08-22: تواريخ تحديد الأهداف وموعد إعادة دراستها (صفحة الأهداف).
+    // الرقم بلا تاريخ لا يُعرف عمره — والتقرير كان يسرد الأهداف بلا ذكر متى وُضعت.
+    {
+      const _rv = await syncedGet('target_review_dates_v1', null);
+      const _row = (lbl, r) => {
+        if (!r || (!r.setAt && !r.dueAt)) return [lbl, '—', '—', '⚪ لم تُسجَّل'];
+        const _d = x => { const p = parseDateLocal(x); return p ? Math.round((p - today) / 86400000) : null; };
+        const left = r.dueAt ? _d(r.dueAt) : null;
+        const st = left == null ? '🟡 بلا موعد مراجعة'
+                 : left < 0 ? `🔴 تأخّرت ${Math.abs(left)} يوماً`
+                 : left <= 30 ? `🟡 بعد ${left} يوماً` : `🟢 بعد ${left} يوماً`;
+        return [lbl, r.setAt || '—', r.dueAt || '—', st];
+      };
+      if (_rv) {
+        h3('تواريخ تحديد الأهداف وإعادة دراستها');
+        p(mdTable(['المجموعة', 'حُدِّدت في', 'تُراجَع في', 'الحالة'], [
+          _row('أهداف الأسهم', _rv.stocks), _row('أهداف القطاعات', _rv.sectors),
+        ]));
+        p('_مصدرها صفحة «أهداف الأسهم والقطاعات» — يكتبها المالك بنفسه. الهدف المتأخّر عن موعد مراجعته قرار قديم لم يُعَد النظر فيه._');
+      }
+    }
+
     if (sectorTargets.length) {
       h3('أهداف القطاعات');
       const secValMap = {};

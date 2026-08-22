@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260822g">
+  <link rel="stylesheet" href="css/style.css?v=20260822h">
   <style>
     /* ══ صفحة الأهداف — كل لون من رموز التصميم، لا قيم سداسية مكتوبة يدوياً ══ */
 
@@ -130,6 +130,17 @@
       .sum-tags { max-width: none; }
     }
   </style>
+  <style>
+    /* صندوق تواريخ تحديد الأهداف وإعادة دراستها */
+    .tg-review-box{background:var(--bg-2);border:1px solid var(--border);border-radius:10px;
+      padding:10px 12px;margin:0 0 14px}
+    .tg-review-row{display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px}
+    .tg-review-f{display:flex;align-items:center;gap:6px;font-size:.82rem;color:var(--text-2)}
+    .tg-review-f input[type=date]{background:var(--bg-1);color:var(--text);
+      border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:.82rem;font-family:inherit}
+    .tg-review-state{font-size:.8rem;font-weight:700;margin-inline-start:auto}
+    .tg-review-note{margin:8px 0 0;line-height:1.6}
+  </style>
 </head>
 <body>
   <aside class="sidebar">
@@ -241,6 +252,26 @@
           <button class="btn btn-primary btn-sm" onclick="saveAllTargets()">حفظ الأهداف</button>
         </div>
       </div>
+
+      <!-- تواريخ التحديد وإعادة الدراسة (أهداف الأسهم) -->
+      <div class="tg-review-box" id="tgrev-stocks">
+        <div class="tg-review-row">
+          <label class="tg-review-f">
+            <span>حدّدت هذه الأهداف في</span>
+            <input type="date" id="tgrev-stocks-set" onchange="saveReviewDates('stocks')">
+          </label>
+          <label class="tg-review-f">
+            <span>يُعاد دراستها في</span>
+            <input type="date" id="tgrev-stocks-due" onchange="saveReviewDates('stocks')">
+          </label>
+          <button class="btn btn-secondary btn-sm" type="button"
+                  onclick="setReviewToday('stocks')" title="يضبط تاريخ اليوم ويقترح موعد المراجعة بعد 180 يوماً (الدورة الدستورية §5)">
+            اليوم + 180 يوماً
+          </button>
+          <span class="tg-review-state" id="tgrev-stocks-state"></span>
+        </div>
+        <p class="small text-muted tg-review-note" id="tgrev-stocks-note"></p>
+      </div>
       <p class="small text-muted mb-4 sect-sub">
         الأسهم مُستوردة من <a href="userdb.html" class="link-accent">قاعدة بياناتك</a> — الوزن الحالي يُحسب من قيمة الأسهم المملوكة.
         عمود الوزن يعرض الرقم ومعه مقياس: التعبئة = الوزن الحالي · العلامة الداكنة = هدفك · الخط الأحمر = السقف الدستوري.
@@ -287,6 +318,26 @@
           <button class="info-btn info-inline" type="button" onclick="showCardInfo('sector-targets')" title="ما فائدة أهداف القطاعات؟">ⓘ</button>
         </span>
         <button class="btn btn-primary btn-sm" onclick="saveSectorTargets()">حفظ الأهداف</button>
+      </div>
+
+      <!-- تواريخ التحديد وإعادة الدراسة (أهداف القطاعات) -->
+      <div class="tg-review-box" id="tgrev-sectors">
+        <div class="tg-review-row">
+          <label class="tg-review-f">
+            <span>حدّدت هذه الأهداف في</span>
+            <input type="date" id="tgrev-sectors-set" onchange="saveReviewDates('sectors')">
+          </label>
+          <label class="tg-review-f">
+            <span>يُعاد دراستها في</span>
+            <input type="date" id="tgrev-sectors-due" onchange="saveReviewDates('sectors')">
+          </label>
+          <button class="btn btn-secondary btn-sm" type="button"
+                  onclick="setReviewToday('sectors')" title="يضبط تاريخ اليوم ويقترح موعد المراجعة بعد 180 يوماً (الدورة الدستورية §5)">
+            اليوم + 180 يوماً
+          </button>
+          <span class="tg-review-state" id="tgrev-sectors-state"></span>
+        </div>
+        <p class="small text-muted tg-review-note" id="tgrev-sectors-note"></p>
       </div>
       <p class="small text-muted mb-4 sect-sub">
         نسبة كل قطاع محسوبة من إجمالي قيمة الأسهم المملوكة — والخط الأحمر على المقياس هو سقف القطاع الدستوري 25%.
@@ -378,10 +429,10 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260822g"></script>
-  <script src="js/auth.js?v=20260822g"></script>
-  <script src="js/utils.js?v=20260822g"></script>
-  <script src="js/tickerdb.js?v=20260822g"></script>
-  <script src="js/targets.js?v=20260822g"></script>
+  <script src="js/supabase.js?v=20260822h"></script>
+  <script src="js/auth.js?v=20260822h"></script>
+  <script src="js/utils.js?v=20260822h"></script>
+  <script src="js/tickerdb.js?v=20260822h"></script>
+  <script src="js/targets.js?v=20260822h"></script>
 </body>
 </html>

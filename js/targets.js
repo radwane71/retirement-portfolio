@@ -155,6 +155,7 @@ async function init() {
   if (!user) return;
   setActiveNav('nav-targets');
   await loadAll();
+  await loadReviewDates();
 }
 
 // تحليل نص نطاق القيمة العادلة — نسخة حرفية من decision-engine.js/parseFairValueRange
@@ -170,6 +171,115 @@ function _tgParseRange(str) {
   const vals = nums.map(Number).filter(n => n > 0);
   if (!vals.length) return null;
   return { avg: vals.reduce((a, b) => a + b, 0) / vals.length, min: Math.min(...vals), max: Math.max(...vals) };
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// تواريخ تحديد الأهداف وموعد إعادة دراستها — بطلب المالك 2026-08-22
+// ----------------------------------------------------------------------
+// هدف الوزن ليس رقماً أبدياً: يُحدَّد في لحظة بقناعة، ويُعاد النظر فيه دورياً.
+// بلا تاريخ لا يعرف المالك متى وضع الرقم ولا متى يراجعه، فيصير الهدف موروثاً
+// بلا مراجعة. نحفظ لكل مجموعة (أسهم / قطاعات) تاريخين يكتبهما هو بنفسه.
+//
+// التخزين في user_settings ليتزامن عبر الأجهزة ويدخل النسخة الاحتياطية تلقائياً
+// (الجدول يُصدَّر كاملاً بلا قائمة بيضاء).
+// الاقتراح الافتراضي 180 يوماً = دورة المراجعة النصف سنوية في الدستور §5،
+// وهو **اقتراح** يملأ الخانة لا قيد — للمالك أن يكتب أي تاريخ.
+// ══════════════════════════════════════════════════════════════════════
+const TG_REVIEW_KEY = 'target_review_dates_v1';
+const TG_REVIEW_CYCLE_DAYS = 180;
+let tgReviewDates = { stocks: {}, sectors: {} };
+
+function _tgIsoLocal(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+async function loadReviewDates() {
+  try {
+    const v = await loadUserSetting(TG_REVIEW_KEY);
+    if (v && typeof v === 'object') {
+      tgReviewDates = { stocks: v.stocks || {}, sectors: v.sectors || {} };
+    }
+  } catch (_) { /* الشبكة/الصلاحيات — نكمل بالفارغ */ }
+  ['stocks', 'sectors'].forEach(k => {
+    const set = document.getElementById(`tgrev-${k}-set`);
+    const due = document.getElementById(`tgrev-${k}-due`);
+    if (set) set.value = tgReviewDates[k]?.setAt || '';
+    if (due) due.value = tgReviewDates[k]?.dueAt || '';
+    renderReviewState(k);
+  });
+}
+
+async function saveReviewDates(kind) {
+  const setEl = document.getElementById(`tgrev-${kind}-set`);
+  const dueEl = document.getElementById(`tgrev-${kind}-due`);
+  const setAt = setEl ? setEl.value : '';
+  const dueAt = dueEl ? dueEl.value : '';
+  // تحقّق واحد فقط: الترتيب الزمني. لا نفرض دورة ولا نمنع تاريخاً — القرار للمالك.
+  if (setAt && dueAt && dueAt < setAt) {
+    showToast('موعد إعادة الدراسة قبل تاريخ التحديد — صحّح الترتيب', 'error');
+    renderReviewState(kind);
+    return;
+  }
+  tgReviewDates[kind] = { setAt: setAt || null, dueAt: dueAt || null };
+  try {
+    await saveUserSetting(TG_REVIEW_KEY, tgReviewDates);
+    showToast('حُفظ ✓', 'success');
+  } catch (e) {
+    showToast('تعذّر الحفظ: ' + (e?.message || e), 'error');
+  }
+  renderReviewState(kind);
+}
+
+function setReviewToday(kind) {
+  const now = new Date();
+  const due = new Date(now.getFullYear(), now.getMonth(), now.getDate() + TG_REVIEW_CYCLE_DAYS);
+  const setEl = document.getElementById(`tgrev-${kind}-set`);
+  const dueEl = document.getElementById(`tgrev-${kind}-due`);
+  if (setEl) setEl.value = _tgIsoLocal(now);
+  if (dueEl) dueEl.value = _tgIsoLocal(due);
+  saveReviewDates(kind);
+}
+
+function renderReviewState(kind) {
+  const stEl = document.getElementById(`tgrev-${kind}-state`);
+  const noteEl = document.getElementById(`tgrev-${kind}-note`);
+  if (!stEl && !noteEl) return;
+  const rec = tgReviewDates[kind] || {};
+  const setAt = rec.setAt, dueAt = rec.dueAt;
+
+  if (!setAt && !dueAt) {
+    if (stEl) { stEl.textContent = '⚪ بلا تاريخ'; stEl.style.color = 'var(--text-2)'; }
+    if (noteEl) noteEl.innerHTML = 'لم تسجّل متى حدّدت هذه الأهداف ولا متى تراجعها — سجّلهما لتعرف عمر قرارك.';
+    return;
+  }
+
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = iso => {
+    const d = parseDateLocal(iso); if (!d) return null;
+    return Math.round((d - today) / 86400000);
+  };
+  const ageDays = setAt ? -days(setAt) : null;      // موجب = مضى
+  const leftDays = dueAt ? days(dueAt) : null;      // سالب = تأخّر
+
+  let icon, color, txt;
+  if (leftDays == null)      { icon = '🟡'; color = 'var(--st-warn)';  txt = 'بلا موعد مراجعة'; }
+  else if (leftDays < 0)     { icon = '🔴'; color = 'var(--st-bad)';   txt = `تأخّرت ${Math.abs(leftDays)} يوماً`; }
+  else if (leftDays <= 30)   { icon = '🟡'; color = 'var(--st-warn)';  txt = `المراجعة بعد ${leftDays} يوماً`; }
+  else                       { icon = '🟢'; color = 'var(--st-good)';  txt = `المراجعة بعد ${leftDays} يوماً`; }
+  if (stEl) { stEl.textContent = `${icon} ${txt}`; stEl.style.color = color; }
+
+  const parts = [];
+  if (setAt)  parts.push(`حُدِّدت في <b>${esc(setAt)}</b>${ageDays != null && ageDays >= 0 ? ` (عمر القرار ${ageDays} يوماً)` : ''}`);
+  if (dueAt)  parts.push(`موعد إعادة الدراسة <b>${esc(dueAt)}</b>`);
+  if (setAt && dueAt) {
+    const span = Math.round((parseDateLocal(dueAt) - parseDateLocal(setAt)) / 86400000);
+    parts.push(`المدة بينهما ${span} يوماً${span > TG_REVIEW_CYCLE_DAYS ? ` — أطول من الدورة النصف سنوية في دستورك (${TG_REVIEW_CYCLE_DAYS} يوماً)` : ''}`);
+  }
+  if (leftDays != null && leftDays < 0) {
+    parts.push('<b>الأهداف أدناه تجاوزت موعد مراجعتها</b> — الأرقام المعروضة قرار قديم لم يُعَد النظر فيه.');
+  }
+  if (noteEl) noteEl.innerHTML = parts.join(' · ');
 }
 
 async function loadAll() {
