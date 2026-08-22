@@ -465,7 +465,8 @@ function renderKPIs() {
   const _riskSeries = _dailyStocksTRSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (ddEl && _riskSeries.length >= 2) {
     const { twrMap, sortedSnaps } = _computeTWR(_riskSeries,
-      _riskSeries.covered ? _externalFlows() : _stockFlows());
+      _stockFlows(_riskSeries.covered || null),
+      _riskSeries.covered ? 'end' : 'mid');
     // sortedSnaps is ISO-date ordered & de-duplicated by day; twrMap[date] = index (base 100)
     let peak = twrMap[sortedSnaps[0].date] ?? 100;
     let maxDD = 0;
@@ -531,7 +532,8 @@ function _computeRiskMetrics() {
   const series = _dailyStocksTRSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
   if (series.length < 4) return null;
   // التدفقات = مشترياتك ومبيعاتك (مجال التدفق = مجال القيمة). التوزيعة عائد لا تدفّق.
-  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows(series.covered || null));
+  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows(series.covered || null),
+    series.covered ? 'end' : 'mid');
   const pts = sortedSnaps
     .map(s => ({ date: s.date, idx: twrMap[s.date] }))
     .filter(p => p.idx != null && p.idx > 0);
@@ -2198,7 +2200,22 @@ function _stockFlows(coveredSet) {
     .filter(f => f.amount > 0);
 }
 
-function _computeTWR(snapshots, cashflows) {
+// flowTiming: 'mid' افتراض منتصف الفترة (ديتز المعدَّل) — للقطات المتباعدة التي
+//             لا نعرف توقيت التدفق داخلها.
+//             'end' التدفق في نهاية الفترة — للسلسلة اليومية، حيث **نعرف** التوقيت:
+//             الأسهم المشتراة يوم D تدخل القيمة بسعر إغلاق D نفسه.
+//
+// AUDIT-FIX 2026-08-22: كان المقام دائماً `startVal + netCF/2`، وهو خطأ صريح على
+// السلسلة اليومية ويُنقص العائد كلما اشتريت. مثال محسوب يدوياً:
+//   بداية اليوم: 10 أسهم × 110 = 1,100. السعر يقفل على 111. تشتري 500 سهم بـ55,500.
+//   نهاية اليوم: 510 × 111 = 56,610. العائد الحقيقي = 111/110 − 1 = 0.909%
+//     (الأسهم الجديدة اشتُريت عند الإغلاق فلم تكسب شيئاً ذلك اليوم).
+//   بالمقام الصحيح  (1,100)        : 10 ÷ 1,100  = 0.909%  ✅
+//   بمقام منتصف الفترة (28,850)     : 10 ÷ 28,850 = 0.035%  ❌ يبتلع 96% من عائد اليوم
+// والخطأ **تراكمي**: يتكرر كل يوم فيه شراء، فمحفظة تضخّ بانتظام تظهر أسوأ من
+// حقيقتها مقابل مؤشر لا تدفّقات فيه. اختبار حياد التوقيت (twr-verify.js ②) يمسكه:
+// TWR يجب ألّا يتغيّر بتغيّر جدول شرائك، وكان يتغيّر 0.54 نقطة.
+function _computeTWR(snapshots, cashflows, flowTiming) {
   // خطوة أولى: سلسلة متجانسة الأساس، ثم لقطة واحدة فقط لكل يوم لتجنب تشويه الحسابات
   const sorted = _deduplicateSnapsByDay(_selectConsistentSnapshots(snapshots));
   if (!sorted.length) return { twrMap: {}, sortedSnaps: sorted, suspiciousPeriods: [] };
@@ -2220,8 +2237,8 @@ function _computeTWR(snapshots, cashflows) {
       .filter(c => c.date > startDate && c.date <= endDate)
       .reduce((s, c) => s + (c.type === 'deposit' ? +c.amount : -+c.amount), 0);
 
-    // Modified Dietz: مقام = قيمة البداية + نصف التدفق (افتراض منتصف الفترة)
-    const denom = startVal + netCF / 2;
+    // المقام حسب توقيت التدفق المعروف (انظر شرح flowTiming أعلاه)
+    const denom = flowTiming === 'end' ? startVal : startVal + netCF / 2;
     if (denom > 0) {
       const r = (endVal - startVal - netCF) / denom;
       factor *= (1 + r);
@@ -2427,7 +2444,8 @@ function renderBenchmarkTab() {
   // التدفقات = مشترياتك ومبيعاتك (المال الداخل للأسهم فعلاً)، لا إيداعات
   // الوساطة — فيتطابق مجال التصحيح مع مجال القيمة المقاسة.
   const { twrMap, sortedSnaps, suspiciousPeriods } = _computeTWR(portSeries,
-    _seriesMode === 'daily' ? _stockFlows(portSeries.covered || null) : _stockFlows());
+    _stockFlows(_seriesMode === 'daily' ? (portSeries.covered || null) : null),
+    _seriesMode === 'daily' ? 'end' : 'mid');
 
   const getTwrAt = (date) => {
     const prior = sortedSnaps.filter(s => s.date <= date);
