@@ -999,7 +999,12 @@ function computeDiversification(positions) {
   const n = items.length;
   const weights = items.map(p => +p.value / totalVal);
   const hhi = weights.reduce((s, w) => s + w * w, 0);          // 1/n .. 1.0
-  const effectiveN = Math.max(1, Math.round(1 / hhi));         // N_فعّال
+  // AUDIT-FIX 2026-08-22: التقريب للعرض فقط. كان الرقم المقرَّب يُقارَن بعتبة
+  // Evans & Archer (≥15)، فمحفظة عددها الفعّال 14.5 تُقرَّب إلى 15 وتُمنح
+  // «بلغت نطاق التنويع الموصى به ✓» وهي دونه فعلاً. التقريب قبل المقارنة
+  // بعتبة يقلب الحكم — نُبقي الدقيق للمقارنات والتقدّم، والمقرَّب للعرض.
+  const effectiveNExact = Math.max(1, 1 / hhi);
+  const effectiveN = Math.max(1, Math.round(1 / hhi));         // N_فعّال (للعرض)
 
   // إحصاءات القطاعات
   const secMap = {};
@@ -1067,7 +1072,7 @@ function computeDiversification(positions) {
     : '';
 
   return {
-    totalVal, n, hhi, effectiveN,
+    totalVal, n, hhi, effectiveN, effectiveNExact,
     secMap, sectorCount, secHHI, effSectors,
     top1Pct, top1Name,
     topSectorName, topSectorPct, topSectorCount,

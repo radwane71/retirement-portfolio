@@ -1677,7 +1677,7 @@ function renderDiversificationCard() {
     label:  h.ticker,
   })));
   const {
-    n, hhi, effectiveN, sectorCount, secHHI,
+    n, hhi, effectiveN, effectiveNExact, sectorCount, secHHI,
     top1Pct, top1Name, gaugePos, zoneLabel,
     corrWarn, corrMsg,
   } = div;
@@ -1715,12 +1715,15 @@ function renderDiversificationCard() {
 
   // ── حلقة التقدّم نحو نطاق Evans & Archer (15 سهماً متوازناً) ──
   const targetN     = 15;
-  const progressPct = Math.min(100, effectiveN / targetN * 100);
+  // AUDIT-FIX 2026-08-22: المقارنة والتقدّم بالقيمة **الدقيقة** لا المقرَّبة —
+  // 14.5 كانت تُقرَّب إلى 15 فتُمنح «بلغت النطاق ✓» وهي دونه.
+  const _effExact   = (typeof effectiveNExact === 'number' && isFinite(effectiveNExact)) ? effectiveNExact : effectiveN;
+  const progressPct = Math.min(100, _effExact / targetN * 100);
   const circ        = 314.159;                       // 2π·50
   const dashoff     = circ * (1 - progressPct / 100);
-  const progressTxt = effectiveN >= targetN
+  const progressTxt = _effExact >= targetN
     ? 'بلغت نطاق التنويع الموصى به ✓'
-    : `${progressPct.toFixed(0)}% من نطاق التنويع الموصى به (${targetN} سهماً)`;
+    : `${progressPct.toFixed(0)}% من نطاق التنويع الموصى به (${targetN} سهماً — عددك الفعّال ${_effExact.toFixed(1)})`;
 
   // ── مقياسا توازن التوزيع — أعلى = أكثر توازناً = أفضل (عكس التركّز) ──
   // توازن = كم هي متقاربة أوزان المراكز؛ 100% = أوزان متساوية تماماً.
@@ -1730,7 +1733,7 @@ function renderDiversificationCard() {
   const effSectors = secHHI > 0 ? 1 / secHHI : sectorCount;
   const balSectors = Math.round(Math.min(1, effSectors / sectorCount) * 100);
   const hhiPct     = hhi * 100, secPct = secHHI * 100;
-  const ev         = _divRiskRemoved(effectiveN);   // تقدير المخاطر المُزالة (أبحاث)
+  const ev         = _divRiskRemoved(_effExact);   // تقدير المخاطر المُزالة (أبحاث) — بالقيمة الدقيقة
   const _mDiv      = assessMetricMaturity('diversification', { stockCount: n });
 
   el.innerHTML = cardHead(
