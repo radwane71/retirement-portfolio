@@ -2020,3 +2020,10 @@ textarea::placeholder {
   .brow .br-track { grid-column: 1 / -1; }
   .zrail { padding: 30px 4px 46px; }
 }
+
+/* ── طبقة التنقية: إخفاء نصوص الشرح خلف زر واحد (js/declutter.js) ──
+   النص يبقى في الصفحة ويُقرأ بضغطة — الإخفاء عرضٌ لا حذف.
+   ما يحمل تحذيراً أو حالة bad/warn لا يُعلَّم أصلاً فلا يُخفى. */
+body.prose-off [data-prose="1"] { display: none !important; }
+#prose-toggle { opacity: .85; }
+#prose-toggle:hover { opacity: 1; }
