@@ -950,23 +950,21 @@ window.DecisionIntel = (function () {
       { cls: perf.xirr == null ? '' : perf.xirr >= 0 ? 'text-success' : 'text-danger',
         badge: maturityBadge(retM.level, retM.reason), info: 'intelPerf' }));
 
-    if (bench.status === 'ok') {
-      cards.push(statCard('🏁 تاسي بنفس فلوسك',
-        bench.xirrTri != null ? `${sgn(bench.xirrTri)}%` : '—',
-        `لو حطّيت نفس المبالغ بنفس التواريخ في المؤشر (عائد إجمالي بافتراض توزيعات سوق ${(TASI_DIV_YIELD * 100).toFixed(1)}%)`,
-        { info: 'intelBench' }));
-      cards.push(statCard('⚖️ الفرق (ألفا)',
-        bench.alpha != null ? `${sgn(bench.alpha)}%` : '—',
-        bench.alpha == null ? 'غير قابل للحساب'
-          : bench.alpha >= 0 ? 'أنت متقدّم على المؤشر بنفس التدفقات' : 'المؤشر متقدّم عليك بنفس التدفقات',
-        { cls: bench.alpha == null ? '' : bench.alpha >= 0 ? 'text-success' : 'text-danger',
-          badge: maturityBadge(retM.level, retM.reason), info: 'intelBench' }));
-    } else {
-      cards.push(statCard('🏁 مقارنة تاسي', 'غير متوفرة',
-        `${E(bench.reason)}<div class="mt-2"><button class="btn btn-secondary btn-sm" type="button"
-           onclick="DecisionIntel.fetchTasi(this)">🔄 اجلب تاسي الآن</button></div>`,
-        { info: 'intelBench' }));
-    }
+    // ══════════════════════════════════════════════════════════════════
+    // أُزيلت كرتا «تاسي بنفس فلوسك» و«الفرق (ألفا)» — قرار المالك 2026-08-22.
+    // ------------------------------------------------------------------
+    // السبب كما ذكره: الرقم **مستنبَط** لا مقيس. بناؤه يقوم على سلسلة افتراضات
+    // متراكمة: سعر المؤشر يوم كل صفقة (بالاستيفاء عند غياب اليوم)، وتحويل كل
+    // مبلغ إلى «وحدات مؤشر» وهمية، و**افتراض ثابت مكتوب في الكود** لعائد
+    // توزيعات السوق لبناء العائد الإجمالي. كل حلقة من هذه تُدخل خطأً، وحاصلها
+    // يُعرض كرقم واحد قاطع بجانب أرقام مقيسة من معاملاتك الحقيقية.
+    //
+    // القاعدة التي أرساها المالك: **لا يُعرض رقم لسنا واثقين منه 100%.**
+    // 99.9% غير مقبولة. الرقم المستنبَط يُحذف لا يُحاط بتحذير.
+    //
+    // ⚠️ لا تُعِد هذه الكروت. الاحتساب الداخلي (computeBenchmark) باقٍ لأن
+    // سجل القياس التاريخي يعتمد بنيته، لكنه **لا يُعرض** في أي مكان.
+    // ══════════════════════════════════════════════════════════════════
 
     cards.push(statCard('💵 دخل التوزيعات القادم',
       `${formatNum(income.total)} ر.س`,
@@ -987,10 +985,19 @@ window.DecisionIntel = (function () {
         ? `ضخّ ${formatNum(perf.deposits)} · سحب ${formatNum(perf.withdrawals)} ر.س`
         : 'لا سجل تدفقات — سجّلها في صفحة التدفقات النقدية ليصير عمر رأس المال دقيقاً'));
 
-    cards.push(statCard('🔮 العائد المتوقّع سنوياً',
-      pctTxt(outlook.totalExpected, 1),
-      `نمو سعري ${pctTxt(outlook.blended, 1)} + توزيعات ${pctTxt(outlook.fwdYield, 1)} · وزن أدائك في المزج ${formatNum(outlook.perfWeight * 100, 1)}%`,
-      { info: 'intelOutlook' }));
+    // أُزيل كرت «العائد المتوقّع سنوياً» — قرار المالك 2026-08-22.
+    // مبنيّ على **نفس المكوّن المرفوض**: ثابت MARKET_CAP_BENCHMARK (نمو تاسي
+    // السعري 4.4% لفترة تاريخية لا تخصّ فترة المالك) ممزوجاً بنموّه الشخصي
+    // المشتقّ من عيّنة قصيرة. الحاصل تنبؤ لا قياس.
+    // القاعدة: ما لسنا واثقين منه 100% لا يُعرض. ⚠️ لا تُعِد الكرت.
+    // يبقى **الدخل المتوقَّع من التوزيعات** معروضاً في قسمه لأنه مجموع DPS
+    // فعلي من سجلّك × أسهمك الحالية — لا افتراض سوق فيه.
+
+    // بدل التوقّع: عائدك التوزيعي الحالي — رقم مقيس بالكامل من بياناتك.
+    cards.push(statCard('💵 عائدك التوزيعي الحالي',
+      pctTxt(outlook.fwdYield, 1),
+      'الدخل السنوي المتوقَّع من حيازاتك ÷ قيمتها السوقية — كلاهما من بياناتك، بلا افتراض سوق',
+      { info: 'intelIncome' }));
 
     el.innerHTML = cards.join('');
 
@@ -998,8 +1005,6 @@ window.DecisionIntel = (function () {
     if (line) {
       const bits = [];
       bits.push(`أُعيد الحساب الآن (${isoOf(new Date())}) من بياناتك الحيّة — لا رقم مجمَّد في هذه الصفحة.`);
-      if (bench.status === 'ok' && bench.lastAgeDays > 21)
-        bits.push(`⚠️ آخر نقطة تاسي محفوظة عمرها ${bench.lastAgeDays} يوماً (${bench.lastDate}) — حدّثها من صفحة الأداء ليصير الفرق دقيقاً.`);
       if (I.errs && I.errs.length) bits.push(`⚠️ تعذّر تحميل: ${E(I.errs.join('، '))}.`);
       line.innerHTML = bits.join(' ');
     }
@@ -1242,13 +1247,12 @@ window.DecisionIntel = (function () {
       ${kvs([
         ['قيمة المحفظة', delta(entry.value, prev.value)],
         ['عائدك السنوي', delta(entry.xirr, prev.xirr, true)],
-        ['فرقك عن تاسي', delta(entry.alpha, prev.alpha, true)],
+
         ['دخلك القادم', delta(entry.fwdIncome, prev.fwdIncome)],
         ['الدخل المهدَّد', delta(entry.atRisk, prev.atRisk)],
         ['ثقة البيانات', delta(entry.confidence, prev.confidence, true)],
       ])}
       ${spark(last30.map(e => e.confidence), 'ثقة البيانات (آخر 30 قياساً)')}
-      ${spark(last30.map(e => e.alpha), 'الفرق عن تاسي')}
       ${spark(last30.map(e => e.fwdIncome), 'الدخل السنوي القادم')}`;
   }
 

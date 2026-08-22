@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260822j">
+  <link rel="stylesheet" href="css/style.css?v=20260822k">
   <style>
     .perf-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
     .perf-tab  { padding:7px 16px; border-radius:var(--radius); border:1px solid var(--border);
@@ -246,7 +246,10 @@
       <button class="perf-tab"        onclick="showPerfTab('closed')"  id="ptab-closed">📕 المراكز المغلقة</button>
       <button class="perf-tab"        onclick="showPerfTab('timeline')" id="ptab-timeline">📅 التايم لاين الشهري</button>
       <button class="perf-tab"        onclick="showPerfTab('monthly-chart')" id="ptab-monthly-chart">📈 الرسم البياني</button>
-      <button class="perf-tab"        onclick="showPerfTab('benchmark')"    id="ptab-benchmark">📊 مقارنة بالمؤشر</button>
+      <!-- أُزيل تبويب «مقارنة بالمؤشر» — قرار المالك 2026-08-22:
+           آلية الحساب تقوم على استيفاء سعر المؤشر وافتراض عائد توزيعات
+           سوق ثابت مكتوب في الكود، فالناتج مُستنبَط لا مقيس.
+           القاعدة: ما لسنا واثقين منه 100% لا يُعرض. ⚠️ لا تُعِد التبويب. -->
       <button class="perf-tab"        onclick="showPerfTab('div-metrics')"  id="ptab-div-metrics">💰 مؤشرات التوزيعات</button>
       <button class="perf-tab"        onclick="showPerfTab('behavioral')"   id="ptab-behavioral">🧠 تحليل السلوك</button>
     </div>
@@ -417,88 +420,7 @@
     </div>
 
     <!-- ── TAB: Benchmark ── -->
-    <div id="pview-benchmark" class="card" style="display:none">
-      <div class="section-header">
-        <span class="section-title">📊 مقارنة أداء محفظتك بمؤشر تاسي</span>
-        <span class="small text-muted">كلا الخطّين مُنسَّبان إلى 100 عند أول نقطة مشتركة</span>
-      </div>
-
-      <!-- input مخفي للاستيراد CSV -->
-      <input type="file" id="bm-csv-input" accept=".csv,text/csv" style="display:none"
-             onchange="importBenchmarkFromCSV(this)">
-
-      <!-- ① الطريق الأسرع: الجلب التلقائي -->
-      <div class="bm-toolbar mb-4">
-        <button class="btn btn-primary" id="bm-fetch-btn" onclick="fetchTasiAuto()">🔄 جلب تاسي تلقائياً</button>
-        <label class="small text-muted" for="bm-range">المدى</label>
-        <select id="bm-range" class="form-control" title="طول السلسلة التاريخية المطلوبة من الدالة السحابية">
-          <option value="1y">سنة</option>
-          <option value="2y">سنتان</option>
-          <option value="5y" selected>5 سنوات</option>
-        </select>
-        <button class="btn btn-secondary btn-sm" onclick="showBenchmarkInfo()" title="كيف يعمل هذا التبويب؟">ⓘ</button>
-      </div>
-
-      <!-- تقرير الجلب / تحذير النشر / الفشل الصريح -->
-      <div id="bm-fetch-report"></div>
-
-      <!-- ② الإدخال اليدوي و CSV — يبقيان كما هما -->
-      <details class="perf-details mb-4">
-        <summary>✋ الإدخال اليدوي واستيراد/تصدير CSV — يعملان كما هما</summary>
-        <div class="dt-body stack">
-          <div class="bm-toolbar">
-            <button class="btn btn-secondary btn-sm" onclick="document.getElementById('bm-csv-input').value='';document.getElementById('bm-csv-input').click()">⬆ استيراد CSV</button>
-            <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير CSV</button>
-            <span class="small text-muted">الصيغة: <code>Date, OPEN, CLOSE</code> بتواريخ <code>MM/DD/YYYY</code> أو <code>YYYY-MM-DD</code></span>
-          </div>
-          <div class="bm-toolbar">
-            <div>
-              <label class="small text-muted" for="bm-date">التاريخ</label>
-              <input type="date" id="bm-date" class="form-control">
-            </div>
-            <div>
-              <label class="small text-muted" for="bm-value">قيمة الإغلاق (CLOSE)</label>
-              <input type="number" id="bm-value" class="form-control" placeholder="مثال: 10991.09" step="0.01">
-            </div>
-            <button class="btn btn-primary" onclick="addBenchmarkEntry()">+ إضافة</button>
-          </div>
-          <div class="note"><span class="ic">✋</span><div>
-            كل نقطة تُدخلها هنا (أو تستوردها من ملفك) تُوسَم <b>يدوية</b> — <b>لن يدوسها الجلب التلقائي أبداً</b>.
-            لإرجاع نقطة للتحديث الآلي اضغط 🔄 بجانبها في جدول البيانات أدناه.
-          </div></div>
-        </div>
-      </details>
-
-      <!-- الرسم البياني -->
-      <div id="bm-chart-wrap" style="display:none">
-        <canvas id="benchmark-chart"></canvas>
-      </div>
-      <div id="bm-empty" class="bm-empty">
-        <div class="icon">📊</div>
-        <p>أضف قيمتين على الأقل لمؤشر تاسي لعرض الرسم البياني<br>
-        <span class="small">يحتاج أيضاً وجود لقطات صافي الثروة من الداشبورد</span></p>
-      </div>
-
-      <!-- ملخص الأداء المقارن -->
-      <div id="bm-summary" style="display:none"></div>
-
-      <!-- جدول بيانات تاسي -->
-      <div id="bm-entries-wrap" style="display:none">
-        <div class="section-header mt-2">
-          <span class="section-title small">بيانات مؤشر تاسي <span id="bm-entries-count" class="small text-muted"></span></span>
-          <div class="bm-acts">
-            <button class="btn btn-secondary btn-sm" onclick="exportBenchmarkCSV()">⬇ تصدير</button>
-            <button class="btn btn-danger btn-sm"    onclick="clearAllBenchmark()">حذف الكل</button>
-          </div>
-        </div>
-        <div class="table-wrapper">
-          <table>
-            <thead><tr><th>التاريخ</th><th>قيمة تاسي</th><th data-nosort title="يُحسب مقابل الصف التالي زمنياً — يفقد معناه إذا أُعيد ترتيب الصفوف">التغيير</th><th title="✋ يدوي = أدخلته بنفسك ولا يُداس · 🔄 تلقائي = من الدالة السحابية · 🌱 مضمّن = بيانات البذرة">المصدر</th><th></th></tr></thead>
-            <tbody id="bm-entries-tbody"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
+    <!-- كتلة «مقارنة بالمؤشر» محذوفة — انظر التعليق عند أزرار التبويبات. -->
 
     <!-- ── TAB: Dividend Metrics ── -->
     <div id="pview-div-metrics" class="card" style="display:none">
@@ -563,9 +485,9 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260822j"></script>
-  <script src="js/auth.js?v=20260822j"></script>
-  <script src="js/utils.js?v=20260822j"></script>
-  <script src="js/performance.js?v=20260822j"></script>
+  <script src="js/supabase.js?v=20260822k"></script>
+  <script src="js/auth.js?v=20260822k"></script>
+  <script src="js/utils.js?v=20260822k"></script>
+  <script src="js/performance.js?v=20260822k"></script>
 </body>
 </html>

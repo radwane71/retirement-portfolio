@@ -236,13 +236,12 @@ async function init() {
 // ── Tab switcher ──────────────────────────────────────────────────────
 function showPerfTab(tab) {
   _activeTab = tab;
-  ['open','closed','timeline','monthly-chart','benchmark','div-metrics','behavioral'].forEach(t => {
+  ['open','closed','timeline','monthly-chart','div-metrics','behavioral'].forEach(t => {
     const view = document.getElementById(`pview-${t}`);
     const btn  = document.getElementById(`ptab-${t}`);
     if (view) view.style.display = t === tab ? '' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   });
-  if (tab === 'benchmark')   initBenchmarkTab();
   if (tab === 'div-metrics') renderDividendMetrics();
   if (tab === 'behavioral')  renderBehavioralAudit();
 }
@@ -2376,6 +2375,19 @@ function _renderTasiFetchReport(bmEntries) {
 
 // ── رسم التبويب كاملاً ────────────────────────────────────────
 function renderBenchmarkTab() {
+  // ══════════════════════════════════════════════════════════════════
+  // مُعطَّلة — قرار المالك 2026-08-22: أُزيل تبويب «مقارنة بالمؤشر» كاملاً.
+  // آلية الحساب تقوم على استيفاء سعر المؤشر عند غياب اليوم، وتحويل كل صفقة
+  // إلى «وحدات مؤشر» وهمية، و**افتراض ثابت مكتوب في الكود** لعائد توزيعات
+  // السوق لبناء العائد الإجمالي. حاصل هذه السلسلة رقم **مُستنبَط لا مقيس**،
+  // وكان يُعرض بالأحمر بجانب أرقام مقيسة من معاملات حقيقية.
+  //
+  // القاعدة: ما لسنا واثقين منه 100% لا يُعرض. لا تحذيراً ولا حاشية — يُحذف.
+  // الدالة تبقى (يستدعيها مسار جلب تاسي) لكنها **تخرج فوراً**.
+  // ⚠️ لا تُعِد تفعيلها ولا تُعِد عناصر التبويب إلى performance.html.
+  // ══════════════════════════════════════════════════════════════════
+  return;
+  // eslint-disable-next-line no-unreachable
   const bmEntries = _loadBenchmark();  // [{ date, value, src }] مرتبة
   const snapshots = [..._snapshots].sort((a, b) => a.date.localeCompare(b.date));
 
