@@ -2048,6 +2048,16 @@ body.prose-off [data-prose="1"] { display: none !important; }
 .zs-row[data-k="trim"] .zs-val{color:var(--st-warn)}
 .zs-row[data-k="buy"]{border-inline-start-color:var(--st-good)}
 .zs-row[data-k="buy"] .zs-val{color:var(--st-good)}
-.zs-now{background:var(--bg-1);border:1px dashed var(--border);border-inline-start:3px solid var(--text)}
+.zs-now{background:var(--bg-1);border:1px solid var(--border);border-inline-start:4px solid var(--text)}
 .zs-now .zs-lbl{color:var(--text);font-weight:700}
-.zs-now .zs-val{color:var(--text);font-size:1rem}
+.zs-now .zs-val{color:var(--text);font-size:1rem;font-weight:800}
+/* لون سطر «السعر الآن» يتبع المنطقة التي بلغها.
+   الخلفية من رموز ‎--st-*-dim‎ (شفافية ~13%) — مُشبَعة بما يكفي للتمييز
+   وهادئة بما يكفي ألّا تصرخ، خصوصاً الأحمر. ولأنها رموز تصميم لا ألوان
+   سطرية، تتبدّل مع الوضع الفاتح/الداكن بلا شيفرة إضافية. */
+.zs-now[data-zone="buy"] {background:var(--st-good-dim);border-color:var(--st-good);border-inline-start-color:var(--st-good)}
+.zs-now[data-zone="buy"]  .zs-lbl,.zs-now[data-zone="buy"]  .zs-val{color:var(--st-good)}
+.zs-now[data-zone="trim"]{background:var(--st-warn-dim);border-color:var(--st-warn);border-inline-start-color:var(--st-warn)}
+.zs-now[data-zone="trim"] .zs-lbl,.zs-now[data-zone="trim"] .zs-val{color:var(--st-warn)}
+.zs-now[data-zone="exit"]{background:var(--st-bad-dim);border-color:var(--st-bad);border-inline-start-color:var(--st-bad)}
+.zs-now[data-zone="exit"] .zs-lbl,.zs-now[data-zone="exit"] .zs-val{color:var(--st-bad)}

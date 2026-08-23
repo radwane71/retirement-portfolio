@@ -3197,8 +3197,14 @@ function renderPriceZonesCard() {
     steps.push({ v: r.price, lbl: 'السعر الآن', k: 'now', now: true });
     steps.sort((a, b) => b.v - a.v);                    // الأغلى أعلى
 
+    // لون سطر «السعر الآن» يتبع المنطقة التي بلغها فعلاً — طلب المالك 2026-08-23.
+    // نُعيد استعمال `urgency` المحسوبة أصلاً للفرز، فلا معيار ثانٍ يتفرّع عنه:
+    //   4 تصفية · 3 تخفيف · 2 تجميع · 0 خارج كل المنطقة
+    // الألوان من رموز التصميم (‎--st-*-dim‎ خلفيةً و‎--st-*‎ حدّاً ونصّاً) لا
+    // ألوان سطرية: هادئة بالتصميم، وتتبدّل مع الوضع الفاتح/الداكن تلقائياً.
+    const nowZone = r.urgency === 4 ? 'exit' : r.urgency === 3 ? 'trim' : r.urgency === 2 ? 'buy' : 'none';
     const body = steps.map(st => `
-      <div class="zs-row${st.now ? ' zs-now' : ''}" data-k="${st.k}">
+      <div class="zs-row${st.now ? ' zs-now' : ''}" data-k="${st.k}"${st.now ? ` data-zone="${nowZone}"` : ''}>
         <span class="zs-lbl">${st.now ? '◀ ' : ''}${st.lbl}</span>
         <span class="zs-val num">${formatNum(st.v)}</span>
       </div>`).join('');
