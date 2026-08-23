@@ -2072,7 +2072,13 @@ function _chip(label, state, txt) {
 function healthChipsHtml(r, fin) {
   const c = [];
   const susMap = { pass: ['g', 'سليمة'], watch: ['y', 'تحت المراقبة'], fail: ['r', 'متدهورة'], unknown: ['n', 'غير متوفرة'] };
-  const [ss, st] = susMap[r.sustain.status] || ['n', 'غير متوفرة'];
+  let [ss, st] = susMap[r.sustain.status] || ['n', 'غير متوفرة'];
+  // م.41 و43 — «تحت المراقبة» بسبب بوابة تختلف عن «تحت المراقبة» لضعف
+  // مؤشر. إخفاء السبب يجعل المالك يظنّ أن الإشارة لم تُرصد أصلاً.
+  if (r.sustain.gatedBy === 'م.41') st = 'موقوفة — عمق التاريخ (م.41)';
+  else if (r.sustain.gatedBy === 'م.43' && r.sustain.confirm) {
+    st = `تنتظر التأكيد ${r.sustain.confirm.have}/${r.sustain.confirm.need} (م.43)`;
+  }
   c.push(_chip('الاستدامة', ss, st));
 
   if (r.fairValue != null) {
@@ -2366,6 +2372,23 @@ function openDetailCard(ticker) {
       Object.values(sus.autoSrc).map(E).join(' · ') + '</span>';
   }
   if (sus.trend && sus.trend.note) susBody += `<br>اتجاه التوزيع: ${E(sus.trend.note)}`;
+
+  // ══════════════════════════════════════════════════════════════════
+  // م.51 — شكل المخرَج يُلزم بسطرين لا يظهران في جدول منفصل:
+  //   → المنطقة: […] في [المقياس المنطبق]
+  //   → القراءات المؤكِّدة: [n من m المطلوبة]
+  // عرضهما في سجل مستقل لا يكفي: القرار يُقرأ هنا، فالقيد الذي يحكمه
+  // يجب أن يُقرأ هنا أيضاً.
+  // ══════════════════════════════════════════════════════════════════
+  if (sus.gatedBy === 'م.41' && sus.depth) {
+    susBody += `<br><b>⏸️ الفلتر 0 (م.41):</b> ${E(sus.depth.why)}`;
+  }
+  if (sus.confirm && sus.confirm.known && sus.confirm.need > 0) {
+    const c = sus.confirm;
+    susBody += `<br><b>القراءات المؤكِّدة:</b> <span class="num">${c.have}</span> من `
+             + `<span class="num">${c.need}</span> المطلوبة — ${E(c.label)} `
+             + `(${({ decisive:'قاطعة', strong:'قوية', medium:'متوسطة', weak:'ضعيفة' })[c.cls]}، م.43)`;
+  }
   out.push(_dRow(susStatus, `الفلتر 1 — بوابة الاستدامة (${SUS_BADGE[sus.status]})`, susBody));
   out.push(_dRow('neutral', `مقياس الاستدامة لنوع الأصل (${E(ASSET_LABEL[r.assetType])})`, E(SUSTAIN_METRIC[r.assetType])));
 
