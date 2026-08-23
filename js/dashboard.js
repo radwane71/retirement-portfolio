@@ -3113,7 +3113,14 @@ function renderPriceZonesCard() {
   holdings.forEach(h => {
     const zone     = stockZones[h.ticker] || {};
     const trimFrom = trimZonesMap[h.ticker] ?? null;
-    if (zone.entry_price == null && zone.exit_price == null && trimFrom == null) return;
+    // قرار المالك المسجّل في «التقييمات العادلة» — تصفية/تخفيف/مراقبة…
+    const taskType = stockTaskMap[h.ticker] || null;
+    const isLiq    = taskType === 'liquidation';
+    // AUDIT 2026-08-23 — بلاغ المالك: «عندي سبعة أسهم قرّرت تصفيتها في
+    // التقييمات العادلة، وما تبيّن لي هنا». كان الفلتر يشترط وجود منطقة سعرية،
+    // فالسهم المُقرَّر تصفيته بلا مناطق **يختفي من البطاقة كلياً** — وهو أوْلى
+    // الأسهم بالظهور. الآن: قرارك بالتصفية يُدخله ولو بلا أي منطقة.
+    if (zone.entry_price == null && zone.exit_price == null && trimFrom == null && !isLiq) return;
     const price = +h.current_price;
 
     // نقاط السكة (نفس المصادر والشروط السابقة — لا تغيير في الحساب)
@@ -3141,9 +3148,15 @@ function renderPriceZonesCard() {
       urgency = Math.max(urgency, 4);
       tags.push(tagHtml('🔴', `في منطقة تصفية — السعر ${formatNum(price)} ≥ ${formatNum(zone.exit_price)}`, 'bad'));
     }
-    if (!tags.length) tags.push(tagHtml('⚪', 'خارج كل المناطق — لا إجراء', ''));
+    // قرارك المسجّل يتقدّم على الموقع السعري في الترتيب — هو قرار لا إشارة.
+    if (isLiq) {
+      urgency = 5;
+      tags.unshift(tagHtml('🚨', 'قرارك: تصفية — مسجَّل في التقييمات العادلة', 'bad'));
+    }
+    // بين التجميع والتخفيف: لا منطقة فعّالة ⇒ الرسالة صريحة بلا لبس
+    if (!tags.length) tags.push(tagHtml('⚪', 'لا تتخذ أي إجراء', ''));
 
-    rows.push({ ticker: h.ticker, name: h.name, pts, price, tags: tags.join(''), urgency });
+    rows.push({ ticker: h.ticker, name: h.name, pts, price, tags: tags.join(''), urgency, isLiq });
   });
 
   if (!rows.length) {
@@ -3202,15 +3215,19 @@ function renderPriceZonesCard() {
     //   4 تصفية · 3 تخفيف · 2 تجميع · 0 خارج كل المنطقة
     // الألوان من رموز التصميم (‎--st-*-dim‎ خلفيةً و‎--st-*‎ حدّاً ونصّاً) لا
     // ألوان سطرية: هادئة بالتصميم، وتتبدّل مع الوضع الفاتح/الداكن تلقائياً.
-    const nowZone = r.urgency === 4 ? 'exit' : r.urgency === 3 ? 'trim' : r.urgency === 2 ? 'buy' : 'none';
+    const nowZone = r.urgency >= 4 ? 'exit' : r.urgency === 3 ? 'trim' : r.urgency === 2 ? 'buy' : 'none';
     const body = steps.map(st => `
       <div class="zs-row${st.now ? ' zs-now' : ''}" data-k="${st.k}"${st.now ? ` data-zone="${nowZone}"` : ''}>
         <span class="zs-lbl">${st.now ? '◀ ' : ''}${st.lbl}</span>
         <span class="zs-val num">${formatNum(st.v)}</span>
       </div>`).join('');
 
-    return `<div class="zone-card">
+    // بطاقة التصفية تُميَّز بحافة وخلفية خفيفة وعلامة تنبيه — ليلتقطها الطرف
+    // في تصفّح سريع بلا قراءة (طلب المالك: «خليني أنتبه له وأنا معدّي بسرعة»).
+    const alarm = r.urgency >= 4;
+    return `<div class="zone-card${alarm ? ' zc-alarm' : ''}">
       <div class="zc-head">
+        ${alarm ? '<span class="zc-bell" title="يحتاج انتباهك الآن">🚨</span>' : ''}
         <strong class="text-accent num">${esc(r.ticker)}</strong>
         <span class="zc-name">${esc(r.name || '')}</span>
       </div>
