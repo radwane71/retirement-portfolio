@@ -7,18 +7,18 @@ let editingWlId  = null;
 
 // الأسقف الدستورية (CLAUDE.md §1) — نفس ثوابت محرّك القرار (decision-engine.js)
 // ══════════════════════════════════════════════════════════════════════
-// تحديث الأسقف — قرار المالك 2026-08-23
+// السقوف — من الدستور v3.0 (م.25 نظام الفئات الأربع)
 // ----------------------------------------------------------------------
-// السقف صار **15% لكل سهم بلا استثناء**، وتمييز «القيادي» بسقف أعلى أُلغي:
-// الثابتان متساويان عمداً. علم `blueChip` باقٍ لأن triggers المالك تشير
-// إليه (أرامكو)، لكنه لم يعد يرفع سقفاً. حجم المحفظة 15–20 سهماً،
-// وعدد القطاعات المستهدف 8 فأكثر. ⚠️ المصدر: CLAUDE.md §1.
+// ⚠️ لا أرقام هنا. كل ثابت يُقرأ من js/constitution.js — المصدر الوحيد.
+// السقف لم يعد رقماً واحداً ولا لافتة «قيادي» يدوية، بل **فئة تُحسب من
+// أرقام السهم**: قيمة سوقية · ملكية سيادية · توزيع متصل · تغطية.
+// السهم بلا مدخلات كافية يبقى **غير مصنَّف** ولا يُفرَض عليه سقف —
+// م.21: «ممنوع تخفيض وزن بسبب غياب بيان عند المحرك».
 // ══════════════════════════════════════════════════════════════════════
-const WL_CAP_SINGLE   = 15;    // سقف السهم الواحد — لكل الأسهم
-const WL_CAP_BLUECHIP = 15;    // مساوٍ عمداً: تمييز القيادي أُلغي
-const WL_CAP_BUFFER   = 0.75;  // منطقة سماح السهم
-const WL_CAP_SECTOR   = 25;    // سقف القطاع
-const WL_SECTOR_BUFFER = 1.25; // منطقة سماح القطاع
+const WL_CAP_BUFFER    = CAP_BUFFER;
+const WL_CAP_SECTOR    = SECTOR_CAP;
+const WL_SECTOR_BUFFER = 2.5;          // م.28 — نطاق «تنبيه فقط»
+const WL_CAP_UNKNOWN   = CAT.A.cap;    // م.21 — لا معاقبة بنقص بيانات
 
 // هل السهم قيادي؟ — نفس منطق decision-engine.js: علم blueChip اليدوي من
 // إعدادات المحرّك (decision_engine_v1)، وأرامكو 2222 قيادية افتراضياً.
@@ -273,12 +273,14 @@ function analyzeWatchImpact(w) {
   const isNewSector     = !_baseDiv.secMap[sec];
   const secTarget       = +sectorTargets[sec] || 0;
   const overTarget      = secTarget > 0 && secWeightAfter > secTarget + 0.05;
-  const bigPosition     = posWeightAfter > 15;     // TARGET_TOP1 = 15% (نفس معيار لوحة التحكم)
+  const bigPosition     = posWeightAfter > CAT.A.cap;   // فوق أعلى سقف فئة (م.25)
 
-  // AUDIT-FIX (2026-08): الأسقف الدستورية (CLAUDE.md §1) على الوزن المتوقع بعد الشراء —
-  // كانت غائبة عن التحليل: سقف السهم 7% (قيادي 12%) + سماح 0.75، وسقف القطاع 25% + سماح 1.25
-  const blueChip     = wlIsBlueChip(w.ticker);
-  const singleCap    = blueChip ? WL_CAP_BLUECHIP : WL_CAP_SINGLE;
+  // الأسقف الدستورية على الوزن المتوقع بعد الشراء. v3.0: السقف من **فئة**
+  // السهم (م.25) لا من لافتة «قيادي». غير المصنَّف يأخذ سقف أعلى فئة مؤقتاً —
+  // لا يُمنع شراءٌ بسبب نقص بيانات عند المحرّك (م.21).
+  const _wc          = classifyStock(engineCfg[w.ticker] || {});
+  const blueChip     = wlIsBlueChip(w.ticker);          // علم trigger فقط
+  const singleCap    = _wc.known ? _wc.cap : WL_CAP_UNKNOWN;
   const overCap      = posWeightAfter > singleCap + WL_CAP_BUFFER;
   const overSectorCap = secWeightAfter > WL_CAP_SECTOR + WL_SECTOR_BUFFER;
 

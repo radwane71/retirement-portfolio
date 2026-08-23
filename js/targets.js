@@ -111,21 +111,22 @@ function kvsHtml(items) {
 // منطقة السماح للتنبيه فقط — لا تدخل معادلة منع ولا معادلة شراء.
 // ══════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════
-// تحديث الأسقف — قرار المالك 2026-08-23
+// السقوف — من الدستور v3.0 (م.25 نظام الفئات الأربع)
 // ----------------------------------------------------------------------
-// السقف صار **15% لكل سهم بلا استثناء**، وتمييز «القيادي» بسقف أعلى أُلغي:
-// الثابتان متساويان عمداً. علم `blueChip` باقٍ لأن triggers المالك تشير
-// إليه (أرامكو)، لكنه لم يعد يرفع سقفاً. حجم المحفظة 15–20 سهماً،
-// وعدد القطاعات المستهدف 8 فأكثر. ⚠️ المصدر: CLAUDE.md §1.
+// ⚠️ لا أرقام هنا. كل ثابت يُقرأ من js/constitution.js — المصدر الوحيد.
+// السقف لم يعد رقماً واحداً ولا لافتة «قيادي» يدوية، بل **فئة تُحسب من
+// أرقام السهم**: قيمة سوقية · ملكية سيادية · توزيع متصل · تغطية.
+// السهم بلا مدخلات كافية يبقى **غير مصنَّف** ولا يُفرَض عليه سقف —
+// م.21: «ممنوع تخفيض وزن بسبب غياب بيان عند المحرك».
 // ══════════════════════════════════════════════════════════════════════
-const TG_CAP_SINGLE    = 15;    // سقف السهم الواحد — لكل الأسهم
-const TG_CAP_BLUECHIP  = 15;    // مساوٍ عمداً: تمييز القيادي أُلغي
-const TG_CAP_BUFFER    = 0.75;  // منطقة سماح السهم
-const TG_CAP_SECTOR    = 25;    // سقف القطاع
-const TG_SECTOR_BUFFER = 1.25;  // منطقة سماح القطاع
-const TG_SIZE_MIN      = 15;    // أدنى حجم محفظة مستهدف
-const TG_SIZE_MAX      = 20;    // أقصى حجم محفظة مستهدف
-const TG_SECTORS_MIN   = 8;     // أدنى عدد قطاعات مستهدف
+const TG_CAP_BUFFER    = CAP_BUFFER;    // م.25
+const TG_CAP_SECTOR    = SECTOR_CAP;   // م.28
+const TG_SECTOR_BUFFER = 2.5;          // م.28 — 25→27.5 «تنبيه فقط لا تصحيح»
+const TG_SIZE_MIN      = SIZE_MIN;     // م.29
+const TG_SIZE_MAX      = SIZE_MAX;     // م.29
+const TG_SECTORS_MIN   = SECTORS_MIN;  // م.29
+// السقف الافتراضي لغير المصنَّف: أعلى فئة، فلا يُعاقَب بنقص بيانات (م.21)
+const TG_CAP_UNKNOWN   = CAT.A.cap;
 
 let engineCfg = {};   // ticker → مدخلات محرّك القرار (منها علم «قيادي» blueChip)
 
@@ -137,7 +138,14 @@ function tgIsBlueChip(ticker) {
   if (cfg.blueChip === false) return false;
   return ticker === '2222';
 }
-function tgCapOf(ticker) { return tgIsBlueChip(ticker) ? TG_CAP_BLUECHIP : TG_CAP_SINGLE; }
+// فئة السهم من مدخلاته المحفوظة في بطاقة محرّك القرار (م.25)
+function tgCategoryOf(ticker) { return classifyStock(engineCfg[ticker] || {}); }
+// السقف = سقف الفئة. غير المصنَّف يأخذ سقف أعلى فئة **مؤقتاً** حتى تكتمل
+// بياناته — لأن فرض سقف أدنى بسبب نقصٍ عند المحرّك معاقبةٌ للمالك (م.21).
+function tgCapOf(ticker) {
+  const c = tgCategoryOf(ticker);
+  return c.known ? c.cap : TG_CAP_UNKNOWN;
+}
 
 // ── معرّف DOM موحّد لحقل هدف السهم (تناظر كتابة/قراءة) ─────────
 // تُستخدم في التوليد (render) والقراءة (save/validate) معاً — أي محرف خاص
@@ -678,7 +686,7 @@ function renderStockTargets() {
   // يبدأ من سقف القيادي + هامش كي تظهر خطوط السقف دائماً، ويتمدّد فقط إذا
   // تجاوزه وزن أو هدف فعلي. سلّم واحد ⇒ الشريط الأطول = وزن أكبر حقيقةً.
   const _stScaleMax = Math.max(
-    TG_CAP_BLUECHIP + 3,
+    CAT.A.cap + 3,      // أعلى سقف فئة + هامش (م.25)
     ...allStocks.map(s => Math.max(getStockWeight(s.ticker), stockTargets[s.ticker] || 0) * 1.12)
   );
 
@@ -703,7 +711,11 @@ function renderStockTargets() {
     const zoneCell = (mergedVal, taskVal) =>
       mergedVal ? `${fmtZone(mergedVal)} ${srcTag(!!taskVal)}` : fmtZone(mergedVal);
 
-    const capNote = `السقف ${TG_CAP_SINGLE}%`;   // سقف واحد للجميع منذ 2026-08-23
+    // م.25: الوسم يذكر الفئة والسقف معاً — الرقم بلا فئته لا يُفسَّر
+    const _c = tgCategoryOf(s.ticker);
+    const capNote = _c.known
+      ? `الفئة ${_c.short} — السقف ${_c.cap}%`
+      : `❌ غير مصنَّف — ${_c.missing.join('، ')} (م.20)`;
     const meterCell = s.planned
       ? '<div class="small text-muted">لم يُشترَ بعد — لا وزن</div>'
       : weightMeterHtml({
@@ -1506,8 +1518,8 @@ function runRebalancing() {
     `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — هدفك ${c.savedTarget}% · السقف الدستوري ${c.capPct}%${c.blueChip ? ' (قيادي)' : ''} · فوقه بـ<b>${(c.savedTarget - c.capPct).toFixed(2)} نقطة</b></li>`);
   const capNote = capNoteItems.length ? noteHtml('⚠️',
     `<strong>أهداف فوق السقف الدستوري — تُنفَّذ كما حدّدتها:</strong> المحرّك يوزّع نحو <b>هدفك المحفوظ</b>،
-     لا نحو min(هدفك، السقف). الدستور §1 يضع السقف عند ${TG_CAP_SINGLE}% للسهم و${TG_CAP_BLUECHIP}% للقيادي،
-     وهذه الأسهم فوقه بقرارك الصريح (2026-08-23). تُعرَض هنا لتبقى تحت عينك، ولا تُقصّ.
+     لا نحو min(هدفك، سقف الفئة). سقوف م.25: أ ${CAT.A.cap}% · ب ${CAT.B.cap}% · ج ${CAT.C.cap}% · د ${CAT.D.cap}%.
+     وهذه الأسهم فوق سقف فئتها بقرارك الصريح. <b>م.31: التجاوز صالح دورة واحدة</b> ثم يُجدَّد صراحةً أو يُقصّ.
      <ul class="sum-ul">${capNoteItems.join('')}</ul>`, 'warn') : '';
 
   if (!candidates.length) {

@@ -6,12 +6,12 @@
 // صراحةً (ممنوع التقدير الصامت — الدستور §8).
 // ══════════════════════════════════════════════════════════════════════
 
-// ── 1. الثوابت اللي ما تتغير (الدستور §1) — ممنوع تعديلها من الواجهة ──
-const CAPS = Object.freeze({ single: 7, blueChip: 12, sector: 25 });
-// منطقة سماح (الدستور §1): زيادة مسموحة فوق السقف بدون تنبيه — سهم/قيادي 0.75، قطاع 1.25
-const CAP_BUFFER = 0.75;
-const SECTOR_BUFFER = 1.25;
-const PORTFOLIO_SIZE = Object.freeze({ min: 18, max: 25 });
+// ── 1. ثوابت الدستور v3.0 — تُقرأ من js/constitution.js ولا تُكتب هنا ──
+// السقف لم يعد رقماً واحداً: هو **سقف الفئة** المحسوبة من أرقام السهم
+// (م.25). ما دون ذلك أسماء مستعارة للمصدر الواحد، لا نسخ منه.
+const CAPS = Object.freeze({ sector: SECTOR_CAP });   // م.28
+const SECTOR_BUFFER = 2.5;   // م.28 — 25→27.5 «تنبيه فقط لا تصحيح»
+const PORTFOLIO_SIZE = Object.freeze({ min: SIZE_MIN, max: SIZE_MAX });   // م.29
 
 // نص مختصر لخطة الأسعار (للعرض في الجداول)
 function zonesText(z) {
@@ -167,9 +167,14 @@ function isBlueChip(h) {
   const cfg = engineCfg[h.ticker] || {};
   if (cfg.blueChip === true)  return true;
   if (cfg.blueChip === false) return false;
-  return h.ticker === '2222'; // أرامكو قيادية بحكم trigger الوزن 12%
+  return h.ticker === '2222'; // أرامكو — بحكم trigger المالك لا بحكم فئة
 }
-function capOf(h) { return isBlueChip(h) ? CAPS.blueChip : CAPS.single; }
+
+// م.25 — فئة السهم من أرقامه المحفوظة في بطاقته
+function categoryOf(h) { return classifyStock(engineCfg[h.ticker] || {}); }
+// السقف = سقف الفئة. غير المصنَّف يأخذ سقف أعلى فئة **مؤقتاً**: فرض سقف
+// أدنى بسبب نقص بيانات عند المحرّك معاقبةٌ للمالك، وم.21 تمنعها صراحةً.
+function capOf(h) { const c = categoryOf(h); return c.known ? c.cap : CAT.A.cap; }
 
 // رقم صالح من حقل نصّي (أو null)
 function numOf(v) { if (v == null || v === '') return null; const n = +v; return isFinite(n) ? n : null; }
@@ -473,6 +478,7 @@ function evaluateHolding(h, ctx) {
     fvUnreliable: !!(val && val.unreliable), fvCV: val ? val.cv : null,
     xirr: stockFinancials(h.ticker).xirr,
     blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
+    category: categoryOf(h),                 // م.25 — الفئة وسببها وما ينقصها
   };
 
   // ── P0.1: قرار تصفية صريح منك — هدف صفر أو مهمة «تصفية» ────────────
@@ -1731,7 +1737,7 @@ function kpiTilesHtml(r, fin) {
 
   const wTone = r.overCap ? 'r' : r.devBand === 'red' ? 'r' : r.devBand === 'yellow' ? 'y' : 'g';
   t.push(_tile('وزنه في المحفظة', formatNum(r.weight) + '%',
-    `السقف ${formatNum(r.cap)}%${r.blueChip ? ' (قيادي)' : ''}` +
+    `السقف ${formatNum(r.cap)}% ${r.category && r.category.known ? `(الفئة ${r.category.short})` : '(غير مصنَّف — م.20)'}` +
     (r.hasTarget ? ` · هدفك ${formatNum(r.targetWeight)}%` : ' · بلا هدف مسجّل'), wTone));
 
   t.push(_tile('عائدك الفعلي (سنوي)',
@@ -1970,7 +1976,7 @@ function manualCfgHtml(ticker) {
     fundamentals: ['الأساسيات',     { healthy: '✅ سليمة', soft: '🟡 ضعف ربع واحد', deteriorating: '🔴 تدهور مستمر' }],
     divSignal:    ['إشارة التوزيع', { stable: '✅ مستقر', temp: '🟡 تأجيل/تخفيف مؤقت', cut: '🔴 قطع مؤكّد' }],
     assetType:    ['نوع الأصل',     ASSET_LABEL],
-    blueChip:     ['سهم قيادي',     { true: 'نعم (علم trigger)', false: 'لا' }],
+    blueChip:     ['سهم قيادي',     { true: 'نعم (علم trigger — لا يحدّد فئة)', false: 'لا' }],
   };
   const rows = Object.keys(LBL).filter(k => cfg[k] != null && cfg[k] !== '').map(k => {
     const [label, map] = LBL[k];
@@ -2141,7 +2147,7 @@ function openDetailCard(ticker) {
       `لا هدف وزن مسجّل لهذا السهم. سجّله في صفحة «أهداف الأسهم». نُراقب السقف فقط.`));
   }
   out.push(_dRow(r.overCap ? 'bad' : 'ok', 'السقف الدستوري للوزن (§1)',
-    `الوزن ${formatNum(r.weight)}% مقابل السقف ${formatNum(r.cap)}%${r.blueChip ? ' (قيادي)' : ''} + منطقة سماح ${CAP_BUFFER}% (حتى ${formatNum(r.cap + CAP_BUFFER)}%) → ${r.overCap ? 'كُسر — يفرض التخفيف (الفلتر 4)' : 'ضمن السقف'}`));
+    `الوزن ${formatNum(r.weight)}% مقابل السقف ${formatNum(r.cap)}% ${r.category && r.category.known ? `(الفئة ${r.category.short})` : '(غير مصنَّف)'} + منطقة سماح ${CAP_BUFFER}% (حتى ${formatNum(r.cap + CAP_BUFFER)}%) → ${r.overCap ? 'كُسر — يفرض التخفيف (الفلتر 4)' : 'ضمن السقف'}`));
 
   // سقف القطاع (§4 على مستوى المحفظة)
   const secPct = sectorPctOf(h.sector, totalValue);
@@ -2296,6 +2302,14 @@ function openStockCard(ticker) {
 
   setSelect('de-card-assettype', cfg.assetType || '');
   setSelect('de-card-bluechip', cfg.blueChip === true ? 'yes' : cfg.blueChip === false ? 'no' : '');
+  // مدخلات التصنيف (م.25) — الفارغ يبقى فارغاً ولا يُملأ بصفر
+  const setNum = (id, val) => { const el = document.getElementById(id); if (el) el.value = (val == null ? '' : val); };
+  setNum('de-card-mcap',   cfg.marketCapB);
+  setNum('de-card-sov',    cfg.sovereignPct);
+  setNum('de-card-streak', cfg.streakYears);
+  setNum('de-card-cov',    cfg.coverage);
+  setSelect('de-card-fund', cfg.isManagedFund === true ? 'yes' : '');
+  renderCardCategory();
   setSelect('de-card-covered', cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered]  || '');
   setSelect('de-card-healthy', cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy] || '');
   setSelect('de-card-cut',     cfg.divSignal    || ({ no: 'stable', yes: 'temp' })[cfg.divCut]       || '');
@@ -2349,6 +2363,37 @@ function openStockCard(ticker) {
 function setSelect(id, val) { const el = document.getElementById(id); if (el) el.value = val; }
 function closeStockCard() { document.getElementById('de-card-modal').style.display = 'none'; _cardTicker = null; }
 
+// ══════════════════════════════════════════════════════════════════════
+// م.25 — تصنيف الفئة من الأرقام، معروضاً حيّاً في بطاقة السهم
+// ----------------------------------------------------------------------
+// يُعاد الحساب مع كل تعديل حقل، فيرى المالك أثر الرقم على السقف قبل الحفظ.
+// وحين ينقص مدخل، يُعرَض ما ينقص بالضبط — لا فئة مُخمَّنة (م.20 و21).
+// ══════════════════════════════════════════════════════════════════════
+function renderCardCategory() {
+  const el = document.getElementById('de-card-catresult');
+  if (!el || typeof classifyStock !== 'function') return;
+  const g = id => { const x = document.getElementById(id); return x ? x.value.trim() : ''; };
+  const num = v => { const n = parseFloat(v); return (v !== '' && isFinite(n)) ? n : undefined; };
+  const r = classifyStock({
+    marketCapB: num(g('de-card-mcap')), sovereignPct: num(g('de-card-sov')),
+    streakYears: num(g('de-card-streak')), coverage: num(g('de-card-cov')),
+    isManagedFund: g('de-card-fund') === 'yes',
+  });
+  el.innerHTML = r.known
+    ? `<b style="color:var(--st-good)">${escapeHtmlSafe(r.label)}</b> — السقف <b class="num">${r.cap}%</b>
+       <div class="text-muted" style="font-size:.74rem;margin-top:2px">${escapeHtmlSafe(r.why)}</div>`
+    : `<b style="color:var(--st-warn)">❌ غير مصنَّف</b>
+       <div class="text-muted" style="font-size:.74rem;margin-top:2px">${escapeHtmlSafe(r.why)}</div>
+       <div class="text-muted" style="font-size:.74rem">لا يُفرَض سقف، ولا يُنزَّل السهم لفئة أدنى بسبب النقص (م.21).</div>`;
+}
+// إعادة الحساب فور الكتابة — بلا حفظ
+document.addEventListener('input', e => {
+  if (e.target && /^de-card-(mcap|sov|streak|cov|fund)$/.test(e.target.id)) renderCardCategory();
+});
+document.addEventListener('change', e => {
+  if (e.target && e.target.id === 'de-card-fund') renderCardCategory();
+});
+
 async function saveStockCard(e) {
   if (e) e.preventDefault();
   if (!_cardTicker) return;
@@ -2358,6 +2403,15 @@ async function saveStockCard(e) {
   cfg.assetType   = v('de-card-assettype') || undefined;
   const bc = v('de-card-bluechip');
   cfg.blueChip    = bc === 'yes' ? true : bc === 'no' ? false : undefined;
+  // م.25 — مدخلات التصنيف. الفارغ يُحذف ولا يُخزَّن صفراً: الصفر رقمٌ
+  // يقود قراراً، والفراغ إعلانُ نقص (م.20).
+  const numOf = id => { const raw = v(id).trim(); const n = parseFloat(raw);
+                        return (raw !== '' && isFinite(n)) ? n : undefined; };
+  cfg.marketCapB   = numOf('de-card-mcap');
+  cfg.sovereignPct = numOf('de-card-sov');
+  cfg.streakYears  = numOf('de-card-streak');
+  cfg.coverage     = numOf('de-card-cov');
+  cfg.isManagedFund = v('de-card-fund') === 'yes' ? true : undefined;
   cfg.divCoverage  = v('de-card-covered') || undefined;
   cfg.fundamentals = v('de-card-healthy') || undefined;
   cfg.divSignal    = v('de-card-cut') || undefined;

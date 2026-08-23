@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823s">
+  <link rel="stylesheet" href="css/style.css?v=20260823t">
   <style>
     /* ── محرّك القرار — ستايل خاص ── */
     .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
@@ -405,11 +405,44 @@
             </select>
           </div>
           <div class="form-group">
-            <label>سهم قيادي؟ (علم trigger — لا يرفع السقف)</label>
+            <label>سهم قيادي؟ (علم trigger — لا يحدّد الفئة)</label>
             <select id="de-card-bluechip">
               <option value="">— تلقائي —</option>
               <option value="yes">نعم — قيادي</option>
               <option value="no">لا</option>
+            </select>
+          </div>
+
+          <!-- ══ مدخلات تصنيف الفئة — المادة 25 ══
+               الفئة (والسقف معها) تُحسب من هذه الأربعة، لا من لافتة يدوية:
+               «كل سهم يقنع صاحبه أنه قيادي». الحقل الفارغ يُعلَن «غير متوفر»
+               ولا يُقدَّر ولا يُنزِّل الفئة (م.20 و21). -->
+          <div class="form-group full" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
+            <label style="font-weight:700;color:var(--accent)">تصنيف الفئة (المادة 25)</label>
+            <small class="text-muted" style="display:block;font-size:.74rem;margin-top:2px">من ملف تداول ✅. الفارغ يبقى «غير متوفر ❌» ولا يُخمَّن.</small>
+            <div id="de-card-catresult" class="small" style="margin-top:6px"></div>
+          </div>
+          <div class="form-group">
+            <label>القيمة السوقية (مليار ريال)</label>
+            <input type="number" id="de-card-mcap" step="0.01" min="0" placeholder="مثال: 6400">
+          </div>
+          <div class="form-group">
+            <label>الملكية السيادية (%)</label>
+            <input type="number" id="de-card-sov" step="0.1" min="0" max="100" placeholder="الدولة / PIF / المعاشات">
+          </div>
+          <div class="form-group">
+            <label>التوزيع المتصل (سنوات)</label>
+            <input type="number" id="de-card-streak" step="1" min="0" placeholder="بلا انقطاع كامل">
+          </div>
+          <div class="form-group">
+            <label>تغطية التوزيع (نسبة)</label>
+            <input type="number" id="de-card-cov" step="0.01" min="0" placeholder="مثال: 0.92">
+          </div>
+          <div class="form-group">
+            <label>صندوق مُدار برسوم؟</label>
+            <select id="de-card-fund">
+              <option value="">— لا —</option>
+              <option value="yes">نعم — صندوق مُدار (فئة د تلقائياً)</option>
             </select>
           </div>
 
@@ -478,12 +511,13 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260823s"></script>
-  <script src="js/auth.js?v=20260823s"></script>
-  <script src="js/utils.js?v=20260823s"></script>
-  <script src="js/declutter.js?v=20260823s"></script>
-  <script src="js/navtoggle.js?v=20260823s"></script>
-  <script src="js/tickerdb.js?v=20260823s"></script>
+  <script src="js/supabase.js?v=20260823t"></script>
+  <script src="js/auth.js?v=20260823t"></script>
+  <script src="js/utils.js?v=20260823t"></script>
+  <script src="js/constitution.js?v=20260823t"></script>
+  <script src="js/declutter.js?v=20260823t"></script>
+  <script src="js/navtoggle.js?v=20260823t"></script>
+  <script src="js/tickerdb.js?v=20260823t"></script>
   <script>
     // شرح الكارت (نمط showCardInfo المشترك في utils.js)
     window.CARD_INFO = {
@@ -631,7 +665,7 @@
       },
     };
   </script>
-  <script src="js/decision-engine.js?v=20260823s"></script>
-  <script src="js/decision-intel.js?v=20260823s"></script>
+  <script src="js/decision-engine.js?v=20260823t"></script>
+  <script src="js/decision-intel.js?v=20260823t"></script>
 </body>
 </html>
