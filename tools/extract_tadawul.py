@@ -126,6 +126,26 @@ def parse(path):
         for b in re.findall(r'^-\s*(.+)$', am.group(1), re.M):
             alerts.append(re.sub(r'\*\*', '', b).strip())
 
+    # ── حارس الربحية التالفة ────────────────────────────────────────
+    # بعض الإيداعات تضع **صافي الدخل** في خانة ربحية السهم. القصيم 2021
+    # أعطت 291,872.24 ريالاً للسهم، وملف المصدر نفسه يقول عنها «غير منطقية
+    # (رقم بحجم صافي الربح). استُبعدت» — وأخذتُها أنا. وسهمٌ سعودي مدرج لا
+    # تبلغ ربحيته مئات الألوف.
+    #
+    # م.20 يمنع التقدير الصامت: لا نصلحها ولا نخترع بديلاً — نُسقطها
+    # ونُعلن الإسقاط في التنبيهات. والمُطبَّعة تُحسب من صافي الدخل ÷ أسهم
+    # اليوم فلا تتأثر أصلاً.
+    for y in sorted(years):
+        e = years[y].get('eps')
+        if e is not None and abs(e) > 500:
+            years[y].pop('eps', None)
+            alerts.append(f'ربحية السهم لسنة {y} أُسقطت: {e:,.2f} ريال للسهم '
+                          f'رقمٌ بحجم صافي الدخل لا بحجم ربحية سهم — '
+                          f'الإيداع وضع الصافي في خانة الربحية (م.20).')
+    for q in quarters:
+        if q.get('eps') is not None and abs(q['eps']) > 500:
+            q['eps'] = None
+
     return {
         'ticker': code, 'name': name,
         'sector': (sec.group(1).strip() if sec else None),
@@ -167,120 +187,9 @@ const TADAWUL_EXTRACTED_AT = '{today}';
 const TADAWUL_SOURCE_FILES = {tot_files};
 '''
 
-tail = '''
-// ══════════════════════════════════════════════════════════════════════
-// مشتقّات جاهزة للمحرّك — كلها من الأرقام أعلاه، لا تقدير
-// ══════════════════════════════════════════════════════════════════════
-
-// السنوات التي فيها توزيع فعليّ (م.41 — عمق التاريخ)
-function tdDividendYears(ticker) {
-  const r = TADAWUL_DATA[ticker];
-  if (!r) return [];
-  return Object.keys(r.years)
-    .filter(y => (r.years[y].dps > 0) || (r.years[y].divPaid && Math.abs(r.years[y].divPaid) > 0))
-    .map(Number).sort((a, b) => a - b);
-}
-
-// سنوات التوزيع المتصل حتى آخر سنة فيها بيانات (م.25 و2)
-// «الخفض لا يقطع الاتصال؛ الانقطاع الكامل يصفّره» — م.2.
-function tdDividendStreak(ticker) {
-  const ys = tdDividendYears(ticker);
-  if (!ys.length) return 0;
-  let streak = 1;
-  for (let i = ys.length - 1; i > 0; i--) {
-    if (ys[i] - ys[i - 1] === 1) streak++;
-    else break;
-  }
-  return streak;
-}
-
-// آخر تغطية توزيع من التدفق الحر (م.42-أ — أعلى أفضل)
-function tdLatestCoverage(ticker) {
-  const r = TADAWUL_DATA[ticker];
-  if (!r) return null;
-  const ys = Object.keys(r.years).map(Number).sort((a, b) => b - a);
-  for (const y of ys) if (r.years[y].fcfCover != null) return { year: y, value: r.years[y].fcfCover };
-  return null;
-}
-
-// ══════════════════════════════════════════════════════════════════════
-// م.35 — ربحية مُطبَّعة 5–7 سنوات، على أساس **مُعاد البيان** (م.22)
-// ----------------------------------------------------------------------
-// «سابك بربحيتها اللحظية 0.50 تعطي قيمة عادلة 4 ريال؛ وبالمطبّعة 2.90
-// تعطي 34.5. الفرق ثمانية أضعاف.»
-//
-// ⚠️ **لا يُؤخذ متوسط `eps` الخام**: جرير جزّأت 10:1 في 2023 (8.36 قبلها
-// و0.81 بعدها)، فمتوسطها الخام 4.53 — رقمٌ لا يصف أي سنة. وم.22 تمنع
-// المقارنة التاريخية بلا إعادة بيان.
-//
-// الأساس هنا: **الربح العائد للمساهمين ÷ عدد الأسهم الحالي** — نسبة
-// محصَّنة ضد التجزئة والمنحة لأن البسط والمقام كلاهما من اليوم.
-// ══════════════════════════════════════════════════════════════════════
-function tdNormalizedEps(ticker, minYears) {
-  const r = TADAWUL_DATA[ticker];
-  if (!r) return null;
-  const need = minYears || 5;
-  const shNow = tdLatest(ticker, 'sharesM');
-  if (!shNow || !(shNow.value > 0)) {
-    return { value: null, years: 0, basis: null,
-             why: 'عدد الأسهم غير متاح — لا يمكن إعادة البيان (م.22 و20)' };
-  }
-  const rows = Object.keys(r.years).map(Number).sort((a, b) => b - a)
-    .map(y => ({ y, ni: r.years[y].niParent ?? r.years[y].netIncome }))
-    .filter(x => x.ni != null).slice(0, 7);
-  if (rows.length < need) {
-    return { value: null, years: rows.length, basis: null,
-             why: `يلزم ${need} سنوات على الأقل، والمتاح ${rows.length} (م.35)` };
-  }
-  const eps = rows.map(x => x.ni / (shNow.value * 1e6));
-  const avg = eps.reduce((a, b) => a + b, 0) / eps.length;
-  return {
-    value: avg, years: eps.length, basis: 'restated',
-    from: rows[rows.length - 1].y, to: rows[0].y, sharesM: shNow.value,
-    why: `متوسط ${eps.length} سنوات على أساس مُعاد البيان `
-       + `(الربح ÷ ${shNow.value.toFixed(0)} مليون سهم اليوم) — م.35 و22`,
-  };
-}
-
-// آخر قيمة متاحة لحقل ما، ومعها سنتها — لئلا يُعرض رقم بلا تاريخه
-function tdLatest(ticker, field) {
-  const r = TADAWUL_DATA[ticker];
-  if (!r) return null;
-  const ys = Object.keys(r.years).map(Number).sort((a, b) => b - a);
-  for (const y of ys) if (r.years[y][field] != null) return { year: y, value: r.years[y][field] };
-  return null;
-}
-
-// سلسلة DPS المعدّلة للتجزئة — الأساس الصحيح لنمو التوزيع (م.22)
-function tdDpsSeries(ticker) {
-  const r = TADAWUL_DATA[ticker];
-  if (!r) return [];
-  return Object.keys(r.years).map(Number).sort((a, b) => a - b)
-    .map(y => ({ year: y, dps: r.years[y].dpsAdj ?? r.years[y].dps ?? null }))
-    .filter(x => x.dps != null);
-}
-
-// مدخلات تصنيف الفئة الجاهزة من تداول (م.25) — القيمة السوقية تحتاج سعراً
-function tdCategoryInputs(ticker, price) {
-  const r = TADAWUL_DATA[ticker];
-  if (!r) return null;
-  const sh = tdLatest(ticker, 'sharesM');
-  const cov = tdLatestCoverage(ticker);
-  return {
-    streakYears: tdDividendStreak(ticker) || undefined,
-    coverage: cov ? cov.value : undefined,
-    marketCapB: (sh && price > 0) ? +(sh.value * price / 1000).toFixed(2) : undefined,
-    _src: { streak: 'تداول ✅', coverage: cov ? `تداول ✅ ${cov.year}` : null,
-            marketCap: (sh && price > 0) ? `⚙️ ${sh.value}م سهم × ${price}` : null },
-  };
-}
-
-if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { TADAWUL_DATA, TADAWUL_EXTRACTED_AT, TADAWUL_SOURCE_FILES,
-    tdDividendYears, tdDividendStreak, tdLatestCoverage, tdNormalizedEps,
-    tdLatest, tdDpsSeries, tdCategoryInputs };
-}
-'''
+# المشتقّات مصدرها ملفٌ مستقل — لا قالبٌ هنا. تعديلها في tools/tadawul-lib.js.
+LIB = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tadawul-lib.js')
+tail = '\n' + io.open(LIB, encoding='utf-8').read()
 
 io.open(OUT, 'w', encoding='utf-8', newline='').write(hdr + tail)
 print('كُتب:', OUT)

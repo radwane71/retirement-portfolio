@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824i">
+  <link rel="stylesheet" href="css/style.css?v=20260824j">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -302,6 +302,7 @@
             <input type="text" id="stockName" placeholder="يُملأ تلقائياً أو أدخله يدوياً">
           </div>
         </div>
+        <div id="tdPanel" style="display:none;margin-bottom:14px;"></div>
         <div style="margin-bottom:14px;"></div>
 
         <div class="ig">
@@ -645,14 +646,14 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260824i"></script>
-  <script src="js/auth.js?v=20260824i"></script>
-  <script src="js/utils.js?v=20260824i"></script>
-  <script src="js/constitution.js?v=20260824i"></script>
-  <script src="js/constitution-data.js?v=20260824i"></script>
-  <script src="js/tadawul-data.js?v=20260824i"></script>
-  <script src="js/declutter.js?v=20260824i"></script>
-  <script src="js/navtoggle.js?v=20260824i"></script>
+  <script src="js/supabase.js?v=20260824j"></script>
+  <script src="js/auth.js?v=20260824j"></script>
+  <script src="js/utils.js?v=20260824j"></script>
+  <script src="js/constitution.js?v=20260824j"></script>
+  <script src="js/constitution-data.js?v=20260824j"></script>
+  <script src="js/tadawul-data.js?v=20260824j"></script>
+  <script src="js/declutter.js?v=20260824j"></script>
+  <script src="js/navtoggle.js?v=20260824j"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -2372,6 +2373,7 @@
     // ── البحث التلقائي عن اسم الشركة من قاعدة بيانات الأسهم ──
     async function lookupStockName() {
       const ticker = (document.getElementById('stockTicker').value || '').trim().toUpperCase();
+      renderTadawulPanel(ticker);
       if (!ticker) return;
       const nameEl = document.getElementById('stockName');
       if (nameEl.value.trim()) return; // لا تتجاوز ما أدخله المستخدم يدوياً
@@ -2382,6 +2384,92 @@
         const { data: h }  = await supabaseClient.from('holdings').select('name').eq('ticker', ticker).maybeSingle();
         if (h?.name)  { nameEl.value = h.name; }
       } catch (_) {}
+    }
+
+    // ═══ مدخلات تداول الرسمية (م.15/1) ══════════════════════
+    // الدستور يضع إيداعات تداول في قمة المصادر، والحاسبة كانت تبدأ
+    // من قيم افتراضية (EPS = 5.0 · FCF = 3.0). هذه اللوحة تعرض الرقم
+    // الرسمي وسنته ووسمه، ولا تملأ شيئاً إلا بضغطة منك — الملكية
+    // للمدخل تبقى لك (م.23).
+    const TD_TAG = { official: '✅', derived: '⚙️' };
+    let _tdCurrent = null;
+
+    function renderTadawulPanel(ticker) {
+      const el = document.getElementById('tdPanel');
+      if (!el) return;
+      _tdCurrent = null;
+      if (!ticker || typeof tdValuationInputs !== 'function') { el.style.display = 'none'; return; }
+      const v = tdValuationInputs(ticker);
+      if (!v) { el.style.display = 'none'; return; }
+      _tdCurrent = v;
+
+      const LBL = { eps: 'الربح للسهم EPS', normEps: 'EPS مُطبَّع (م.35)',
+                    fcf: 'التدفق الحر للسهم', normFcf: 'FCF مُطبَّع (م.35)',
+                    bvps: 'القيمة الدفترية للسهم', dps: 'التوزيع للسهم DPS' };
+      const rows = Object.entries(v.fields).map(([k, f]) =>
+        [`${TD_TAG[f.tag] || ''} ${LBL[k] || k}`,
+         `${f.value.toFixed(2)} <span style="opacity:.6;font-weight:400">ر.س · ${f.year}</span>`]);
+
+      const g = (typeof tdDpsGrowth === 'function') ? tdDpsGrowth(ticker) : null;
+      if (g && g.value != null) {
+        rows.push(['⚙️ نمو التوزيع المركّب',
+          `${(g.value * 100).toFixed(1)}% <span style="opacity:.6;font-weight:400">${g.from}–${g.to}</span>`]);
+      }
+
+      let warn = '';
+      (v.missing || []).forEach(m => { warn += `<div>• <strong>${LBL[m.k] || m.k}</strong> — ${escHist(m.why)}</div>`; });
+      if (g && g.value == null) warn += `<div>• <strong>نمو التوزيع</strong> — ${escHist(g.why)}</div>`;
+      if (g && g.caution)    warn += `<div>• ${escHist(g.caution)}</div>`;
+      if (g && g.volatileWhy) warn += `<div>• ${escHist(g.volatileWhy)}</div>`;
+      warn += `<div>• <strong>الدين الصافي</strong> — ${escHist(v.netDebtNote)}</div>`;
+
+      const isReit = document.getElementById('companyType').value === 'reit';
+      const reitNote = isReit
+        ? noteHtml('🏢', 'وضع الريت يقيس على <strong>FFO/AFFO</strong> (م.33)، وهذه الإيداعات لا تحملهما — '
+                       + 'ما يُملأ أدناه أرقام عامة لا تُغني عن FFO.', 'warn')
+        : '';
+
+      el.style.display = '';
+      el.innerHTML = noteHtml('📗',
+          `<strong>بيانات تداول الرسمية — ${escHist(v.name)}</strong>`
+        + `<div style="opacity:.75;font-size:.85em;margin-top:2px">`
+        + `${escHist(v.sector || '')} · ${v.sharesM ? v.sharesM.toFixed(0) + ' مليون سهم' : ''}`
+        + ` · مستخرجة من ${TADAWUL_SOURCE_FILES} ملف إيداع</div>`
+        + kvsHtml(rows)
+        + `<button class="btn btn-sm" style="margin-top:10px" onclick="applyTadawulPrefill()">`
+        + `⬇️ املأ الحقول من تداول</button>`, 'info')
+        + reitNote
+        + (warn ? noteHtml('⚠️', `<strong>لم تُستخرج — تُدخَل يدوياً (م.20):</strong>${warn}`, 'warn') : '');
+    }
+
+    // الملء بضغطة واحدة، وما يُملأ يُعلَن — لا يتغير حقل بلا ذكره.
+    function applyTadawulPrefill() {
+      if (!_tdCurrent) return;
+      const f = _tdCurrent.fields, type = document.getElementById('companyType').value;
+      const done = [];
+      const set = (id, val, label) => {
+        const el = document.getElementById(id);
+        if (!el || val == null) return;
+        el.value = (+val).toFixed(2);
+        done.push(label);
+      };
+
+      if (type === 'bank') {
+        set('bankEps', f.eps  && f.eps.value,  'EPS');
+        set('bvps',    f.bvps && f.bvps.value, 'القيمة الدفترية');
+        set('bankDps', f.dps  && f.dps.value,  'التوزيع');
+      } else {
+        set('eps',       f.eps     && f.eps.value,     'EPS');
+        set('fcf',       f.fcf     && f.fcf.value,     'FCF');
+        set('normEps',   f.normEps && f.normEps.value, 'EPS مُطبَّع');
+        set('normFcf',   f.normFcf && f.normFcf.value, 'FCF مُطبَّع');
+        set('bookValue', f.bvps    && f.bvps.value,    'القيمة الدفترية');
+        set('dividends', f.dps     && f.dps.value,     'التوزيع');
+      }
+      if (typeof runFieldChecks === 'function') runFieldChecks();
+      showToast(done.length
+        ? `📗 مُلئ من تداول: ${done.join(' · ')} — راجِعها قبل الحساب`
+        : 'لا يوجد ما يُملأ لهذا النوع', done.length ? 'success' : 'info');
     }
 
     function captureInputs() {

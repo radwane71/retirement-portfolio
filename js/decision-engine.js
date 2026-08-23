@@ -538,7 +538,12 @@ function sustainabilityOf(h) {
     // الإشارة القاطعة (م.44) تتجاوز البوابة: انقطاع التوزيع واقعةٌ لا
     // تحتاج عمقاً تاريخياً لتُقرأ.
     // ══════════════════════════════════════════════════════════════════
-    const depth = depthGate(divByTicker[h.ticker] || [], (engineCfg[h.ticker] || {}).divHistoryYears);
+    // م.41 — العمق من ثلاثة مصادر: سجل توزيعاتك · إدخالك اليدوي ·
+    // **سنوات تداول** (م.15/1 أعلى المصادر). أعمقها يحكم — لأن البوابة
+    // تسأل «هل لدينا أربع سنوات؟» لا «من أين جاءت».
+    const _tdYears = (typeof tdDividendYears === 'function') ? tdDividendYears(h.ticker).length : 0;
+    const _manual  = (engineCfg[h.ticker] || {}).divHistoryYears;
+    const depth = depthGate(divByTicker[h.ticker] || [], Math.max(+_manual || 0, _tdYears));
     if (!stopped && !depth.pass) {
       return { ...base, status: 'watch', gatedBy: 'م.41', depth,
                reason: `${base.reason} — لكن ${depth.why}` };
