@@ -3084,10 +3084,9 @@ function showPriceZoneAlert({ ticker, label, price, zone, name }) {
 
 // سكة المناطق لسهم واحد — نفس منطق priceRulerHtml في decision-engine.js:
 // نطاق lo/hi يضم كل النقاط + السعر، بهامش 15% من المدى، وتسميات بصفّين متبادلين.
-// compact=true ⇒ سكّة **رأسية** ضيّقة تُوضع بجانب الأرقام داخل البطاقة.
-// الرأسي هو الشكل الصحيح هنا: المحور سعر، والأعلى أغلى — فيقرأ الترتيب
-// بلا تسميات ممتدّة، ويأخذ عرضاً ثابتاً صغيراً بدل الشاشة كلها.
-function _zoneRailHtml(pts, price, compact) {
+// السكّة الأفقية الأصلية — لم تعد مستعملة في «مناطق الدخول والخروج» بعد
+// اعتماد سُلَّم السعر (2026-08-23)، وتُركت لأي مستدعٍ آخر.
+function _zoneRailHtml(pts, price) {
   if (!pts.length || !(price > 0)) return '';
   const vals = pts.map(p => p.v).concat([price]);
   let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -3101,16 +3100,6 @@ function _zoneRailHtml(pts, price, compact) {
       <span class="zrail-tick" data-k="${p.k}" style="left:${pos(p.v).toFixed(1)}%"></span>
       <span class="zrail-lbl" data-row="${i % 2}" style="left:${pos(p.v).toFixed(1)}%">${p.lbl}<b>${formatNum(p.v)}</b></span>`).join('');
 
-  if (compact) {
-    // رأسي: 0% أسفل (الأرخص) و100% أعلى (الأغلى)
-    const vmarks = sorted.map(p =>
-      `<span class="zvr-tick" data-k="${p.k}" style="bottom:${pos(p.v).toFixed(1)}%"
-             title="${p.lbl} ${formatNum(p.v)}"></span>`).join('');
-    return `<div class="zvrail" title="محور السعر — الأعلى أغلى">
-        <div class="zvr-track">${vmarks}
-          <span class="zvr-now" style="bottom:${pos(price).toFixed(1)}%"></span>
-        </div></div>`;
-  }
   return `<div class="zrail"><div class="zrail-track">${marks}
       <span class="zrail-now" style="left:${pos(price).toFixed(1)}%"><b>${formatNum(price)}</b><i>السعر الآن</i></span>
     </div></div>`;
@@ -3182,30 +3171,45 @@ function renderPriceZonesCard() {
   // نظرة واحدة، وتُعرض ثلاث أو أربع بطاقات في مساحة صفّ واحد سابقاً.
   // لا تغيير في أي حساب — العرض وحده.
   // ══════════════════════════════════════════════════════════════════
-  const zoneNum = (lbl, v, k) =>
-    `<div class="zc-num" data-k="${k}"><span>${lbl}</span><b class="num">${formatNum(v)}</b></div>`;
+  // ══════════════════════════════════════════════════════════════════
+  // «سُلَّم السعر» — أُعيد التصميم 2026-08-23 بعد ملاحظة المالك:
+  // «ما أنا قادر أميّز هو الآن تجميع ولا تخفيف ولا تصفية… السكّة والدائرة
+  //  ما أفهمها».
+  //
+  // المحاولة السابقة وضعت سكّة رأسية ملوّنة **بعيدة** عن الأرقام، وأرقاماً
+  // في عمودين بترتيب عشوائي. فكان على العين أن تربط لوناً على سكّة برقم في
+  // عمود مقابل — عملٌ ذهني لا يؤدّيه القارئ، ولا يقول أين هو الآن.
+  //
+  // البديل يحذف السكّة كلياً: **قائمة واحدة مرتّبة بالسعر تنازلياً**،
+  // والسعر الحالي **مُدرَج داخلها في موضعه الصحيح**. فتصير قراءة الموقع
+  // بديهية: ما فوقه أغلى وما تحته أرخص، وسطره مُبرَز بسهم «أنت هنا».
+  // لا رموز تحتاج تفسيراً، ولا ربط بصري بين عنصرين متباعدين.
+  // لا تغيير في أي حساب — العرض وحده.
+  // ══════════════════════════════════════════════════════════════════
+  const ZK = {
+    exit: { lbl: 'تصفية', k: 'exit' },
+    trim: { lbl: 'تخفيف', k: 'trim' },
+    buy:  { lbl: 'تجميع', k: 'buy'  },
+  };
 
   el.innerHTML = `<div class="zone-cards">${rows.map(r => {
-    const byK = {};
-    r.pts.forEach(p => { byK[p.k] = p.v; });
-    const nums = [
-      byK.buy  != null ? zoneNum('تجميع', byK.buy,  'buy')  : '',
-      byK.trim != null ? zoneNum('تخفيف', byK.trim, 'trim') : '',
-      byK.exit != null ? zoneNum('تصفية', byK.exit, 'exit') : '',
-    ].join('');
+    const steps = r.pts.map(p => ({ v: p.v, lbl: (ZK[p.k] || {}).lbl || p.lbl, k: p.k, now: false }));
+    steps.push({ v: r.price, lbl: 'السعر الآن', k: 'now', now: true });
+    steps.sort((a, b) => b.v - a.v);                    // الأغلى أعلى
+
+    const body = steps.map(st => `
+      <div class="zs-row${st.now ? ' zs-now' : ''}" data-k="${st.k}">
+        <span class="zs-lbl">${st.now ? '◀ ' : ''}${st.lbl}</span>
+        <span class="zs-val num">${formatNum(st.v)}</span>
+      </div>`).join('');
+
     return `<div class="zone-card">
       <div class="zc-head">
         <strong class="text-accent num">${esc(r.ticker)}</strong>
         <span class="zc-name">${esc(r.name || '')}</span>
       </div>
       <div class="zc-tags">${r.tags}</div>
-      <div class="zc-body">
-        ${_zoneRailHtml(r.pts, r.price, true)}
-        <div class="zc-nums">
-          <div class="zc-num zc-now"><span>السعر الآن</span><b class="num">${formatNum(r.price)}</b></div>
-          ${nums}
-        </div>
-      </div>
+      <div class="zs-ladder">${body}</div>
     </div>`;
   }).join('')}</div>`;
 }

@@ -2028,31 +2028,26 @@ body.prose-off [data-prose="1"] { display: none !important; }
 #prose-toggle { opacity: .85; }
 #prose-toggle:hover { opacity: 1; }
 
-/* ── مناطق الدخول والخروج: بطاقات مدمجة بدل صفوف بعرض الشاشة ──
-   طلب المالك 2026-08-23. السكّة رأسية ضيّقة والأرقام بجانبها، والبطاقات
-   تتوزّع في شبكة تملأ العرض. لا تغيير في أي حساب — عرضٌ فقط. */
-.zone-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(320px,1fr))}
+/* ── مناطق الدخول والخروج: سُلَّم السعر (2026-08-23) ──
+   قائمة واحدة مرتّبة بالسعر تنازلياً، والسعر الحالي مُدرَج في موضعه ومُبرَز.
+   حُذفت السكّة والدائرة: كانتا رمزين يحتاجان تفسيراً ولا يقولان أين أنت. */
+.zone-cards{display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr))}
 .zone-card{background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:10px 12px}
 .zc-head{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
 .zc-name{font-size:.82rem;color:var(--text-2)}
 .zc-tags{margin:6px 0 8px;display:flex;flex-wrap:wrap;gap:4px}
-.zc-body{display:flex;align-items:stretch;gap:12px}
-.zc-nums{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;align-content:center}
-.zc-num{display:flex;flex-direction:column;line-height:1.35}
-.zc-num span{font-size:.68rem;color:var(--text-muted)}
-.zc-num b{font-size:.92rem}
-.zc-num[data-k="buy"]  b{color:var(--st-good)}
-.zc-num[data-k="trim"] b{color:var(--st-warn)}
-.zc-num[data-k="exit"] b{color:var(--st-bad)}
-.zc-now b{color:var(--text)}
-.zc-now{grid-column:1 / -1;border-bottom:1px dashed var(--border);padding-bottom:5px;margin-bottom:2px}
 
-/* السكّة الرأسية المدمجة */
-.zvrail{width:26px;flex:0 0 26px;display:flex;align-items:stretch;justify-content:center}
-.zvr-track{position:relative;width:4px;background:var(--border);border-radius:2px;min-height:74px}
-.zvr-tick{position:absolute;left:50%;width:12px;height:2px;transform:translate(-50%,50%);border-radius:1px}
-.zvr-tick[data-k="buy"]  {background:var(--st-good)}
-.zvr-tick[data-k="trim"] {background:var(--st-warn)}
-.zvr-tick[data-k="exit"] {background:var(--st-bad)}
-.zvr-now{position:absolute;left:50%;width:16px;height:16px;transform:translate(-50%,50%);
-  border-radius:50%;background:var(--bg-1);border:2px solid var(--text);box-shadow:0 0 0 2px var(--bg-2)}
+.zs-ladder{display:flex;flex-direction:column;gap:2px}
+.zs-row{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:5px 8px;border-radius:6px;border-inline-start:3px solid transparent;font-size:.84rem}
+.zs-row .zs-lbl{color:var(--text-2)}
+.zs-row .zs-val{font-weight:700}
+.zs-row[data-k="exit"]{border-inline-start-color:var(--st-bad)}
+.zs-row[data-k="exit"] .zs-val{color:var(--st-bad)}
+.zs-row[data-k="trim"]{border-inline-start-color:var(--st-warn)}
+.zs-row[data-k="trim"] .zs-val{color:var(--st-warn)}
+.zs-row[data-k="buy"]{border-inline-start-color:var(--st-good)}
+.zs-row[data-k="buy"] .zs-val{color:var(--st-good)}
+.zs-now{background:var(--bg-1);border:1px dashed var(--border);border-inline-start:3px solid var(--text)}
+.zs-now .zs-lbl{color:var(--text);font-weight:700}
+.zs-now .zs-val{color:var(--text);font-size:1rem}
