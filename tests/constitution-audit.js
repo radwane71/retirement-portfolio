@@ -46,7 +46,10 @@ A(5,  'engine', 'الأمان = استمرارية التوزيع لا تقلب 
 A(6,  'engine', 'الهدف المركّب: عائد + استمرارية معاً', true, 'قاعدة سلوك');
 A(7,  'code',   'المعالم الرقمية (الضخ 8,000 · المحفظة 1.31M · FIRE 1.8M)',
   inF('js/constitution.js', /MONTHLY_INJECTION   = 8000/) && inF('js/constitution.js', /GOAL_PORTFOLIO      = 1310000/)
-  && inF('js/constitution.js', /GOAL_FIRE           = 1800000/), 'constitution.js');
+  && inF('js/constitution.js', /GOAL_FIRE           = 1800000/)
+  && inF('js/forecast.js', /function renderConstitutionMilestones/)
+  && inF('js/forecast.js', /renderConstitutionMilestones\(h\)/),
+  'معروضة في الرؤية المستقبلية مقابل موقعك');
 A(8,  'code',   'أثر الضخ: التصحيح بالضخ لا بالبيع',
   inF('js/constitution.js', /DEV_PUMP   = 3\.0/) && inF('js/constitution.js', /action: 'pump'/), 'deviationBandOf');
 A(9,  'code',   'القيد الجغرافي — لا انتقاد ولا خصم',
@@ -72,7 +75,11 @@ A(16, 'doc',    'سبب تقديم تداول على التراكر (توثيق�
 A(17, 'doc',    'صيغ الملفات — Word محوَّل مرفوض', inF('CLAUDE.md', /الترميز العربي مكسور/), 'CLAUDE.md');
 A(18, 'code',   'حداثة البيانات (سعر 7 · محلل 90 · بيتا 180)',
   inF('js/constitution.js', /FRESH_DAYS = \{ price: 7, analystTarget: 90, beta: 180/)
-  && inF('js/constitution-data.js', /function tvStale/), 'FRESH_DAYS + tvStale');
+  && inF('js/constitution-data.js', /function tvStale/)
+  // ⚠️ الحدّ كان 21 يوماً محلياً — ثلاثة أضعاف ما يجيزه الدستور
+  && inF('js/decision-engine.js', /PRICE_DECISION_MAX_DAYS = FRESH_DAYS\.price/)
+  && inF('js/decision-engine.js', /const st = tvStale\(tv\(h\.current_price/),
+  'الحدّ من الوحدة، والفحص بدالتها لا بحساب موازٍ');
 A(19, 'code',   'وسم كل رقم ✅⚙️⚠️❌',
   inF('js/constitution.js', /DATA_TAG = \{/) && inF('js/constitution-data.js', /function canDriveWeight/)
   && inF('js/decision-engine.js', /weakInputs/), 'tv + canDriveWeight + عمود المدخلات الضعيفة');
@@ -144,8 +151,12 @@ A(41, 'code',   'الفلتر 0 — بوابة عمق التاريخ + نقاط 
   && inF('js/decision-engine.js', /const depth = depthGate\(divByTicker/)
   && inF('decision-engine.html', /id="de-card-histyears"/), 'depthGate قبل حكم الفشل');
 A(42, 'code',   'الفلتر 1 — بوابة الاستدامة بالمناطق',
-  inF('js/constitution.js', /SUSTAIN_NORMAL/) && inF('js/constitution.js', /SUSTAIN_REIT/)
-  && inF('js/constitution.js', /CUT_BANDS/) && inF('js/constitution.js', /BRIDGE_ADJ/), 'النطاقات الأربعة');
+  inF('js/constitution.js', /function sustainZoneOf/) && inF('js/constitution.js', /function dividendCutBand/)
+  && inF('js/decision-engine.js', /zoneInfo = sustainZoneOf\(/)
+  && inF('js/decision-engine.js', /cutBand = \(trend && trend\.changePct/)
+  // القص الحادّ (50–99%) فشلٌ فوري لا مراقبة
+  && inF('js/decision-engine.js', /cutBand\.action === 'failNow'/),
+  'المناطق ومُعدِّل الميزانية والقص المتدرّج — مطبَّقة لا معرَّفة');
 A(43, 'code',   'قاعدة التأكيد بالقراءات 1/2/3',
   inF('js/constitution-data.js', /function confirmationOf/)
   && inF('js/decision-engine.js', /gatedBy: 'م\.43'/)
@@ -153,7 +164,9 @@ A(43, 'code',   'قاعدة التأكيد بالقراءات 1/2/3',
 A(44, 'code',   'الإشارات القاطعة الخمس',
   require(R + 'js/constitution.js').DECISIVE_SIGNALS.length === 5
   && inF('js/decision-engine.js', /if \(!stopped && !depth\.pass\)/), 'خمس + تتجاوز بوابة العمق');
-A(45, 'code',   'الفلتر 1-ب — بوابة الخسارة المحققة',
+A(45, 'code',   'الفلتر 1-ب — بوابة الخسارة المحققة + مراجعة السعر كل دورة',
+  inF('js/decision-engine.js', /function renderDeferredReview/)
+  && inF('js/decision-engine.js', /reviewExitPrice\(\+d\.exitPrice, state\)/) &&
   inF('js/constitution-data.js', /function deferredVerdict/)
   && inF('js/constitution-data.js', /function validateExitPrice/)
   && inF('js/decision-engine.js', /out\.deferredExit\.push/)
@@ -166,8 +179,11 @@ A(48, 'code',   'الفلتر 3 — سقف القيمة بخمس مناطق',
   inF('js/constitution.js', /key: 'opportunity'/) && inF('js/constitution.js', /key: 'liquidate'/)
   && inF('js/decision-engine.js', /const band   = valueBandOf/), 'VALUE_BANDS + _planFairVerdict');
 A(49, 'code',   'الفلتر 4 — نطاقات انحراف الوزن ±1.5 / 3',
-  inF('js/constitution.js', /DEV_IGNORE = 1\.5/) && inF('js/constitution.js', /function deviationBandOf/),
-  'deviationBandOf');
+  inF('js/constitution.js', /DEV_IGNORE = 1\.5/) && inF('js/constitution.js', /function deviationBandOf/)
+  && inF('js/decision-engine.js', /const devBand = deviationBandOf\(gapPct\)/)
+  // م.58 — لا بيع لتصحيح ما يعالجه الضخّ
+  && inF('js/decision-engine.js', /devBand\.action !== 'active' && !r\.overCap/),
+  'النطاقات تحجب البيع فعلاً في نطاق الضخّ');
 A(50, 'code',   'سلّم الأولوية عند التعارض',
   inF('js/decision-engine.js', /P0\.1|يسبق كل شيء/) && inF('js/decision-engine.js', /out\.conflicts\.push/),
   'ترتيب المسارات + بند التعارض');
@@ -203,14 +219,16 @@ A(58, 'code',   'التصحيح بالضخ قبل البيع',
 A(59, 'code',   'الدورة الشاملة كل 6 أشهر',
   inF('js/constitution.js', /CYCLE_DAYS = 183/) && inF('js/settings.js', /REVIEW_CYCLE_DAYS/), 'CYCLE_DAYS');
 A(60, 'code',   'المراجعة الربعية المختصرة',
-  inF('js/constitution.js', /QUARTER_DAYS = 92/) && inF('js/constitution-data.js', /function deferredQuarterlyCheck/),
-  'deferredQuarterlyCheck');
+  inF('js/constitution.js', /QUARTER_DAYS = 92/) && inF('js/constitution-data.js', /function deferredQuarterlyCheck/)
+  && inF('js/decision-engine.js', /function quarterlyReviewDue/)
+  && inF('js/decision-engine.js', /deferredQuarterlyCheck\(zones, stopped\)/),
+  'الاستحقاق يُحسب من سجل التدقيق والمراقبة موصولة');
 A(61, 'engine', 'المشغّلات الطارئة تكسر الدورة', true, 'قاعدة سلوك');
 
 // ── الباب العاشر: مرحلة السحب ──
 A(62, 'code',   'التحول التلقائي لمرحلة السحب',
-  inF('js/constitution.js', /function portfolioPhase/) && inF('js/constitution.js', /WITHDRAW_START_YEAR = 2048/),
-  'portfolioPhase');
+  inF('js/constitution.js', /function portfolioPhase/) && inF('js/constitution.js', /WITHDRAW_START_YEAR = 2048/)
+  && inF('js/forecast.js', /portfolioPhase\(new Date\(\)\)/), 'المرحلة معروضة ومحسوبة');
 A(63, 'doc',    'قواعد مرحلة الانتقال 2045–2047',
   inF('js/constitution.js', /TRANSITION_END_YEAR = 2047/), 'الثابت معرَّف — القواعد تُفعَّل عند بلوغها');
 A(64, 'doc',    'قواعد مرحلة السحب 2048+',

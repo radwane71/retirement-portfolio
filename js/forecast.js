@@ -85,7 +85,7 @@ function addDcaPeriod(amount = 0, years = 5) {
   row.id = `dca-row-${id}`;
   row.innerHTML = `
     <span class="dca-label">فترة ${id}</span>
-    <input type="number" class="dca-amount" placeholder="المبلغ / شهر — 8000 مثلاً" value="${amount || ''}" min="0" step="100" oninput="debouncedDcaInput()">
+    <input type="number" class="dca-amount" placeholder="المبلغ / شهر — الدستور: ${MONTHLY_INJECTION} (م.7)" value="${amount || ''}" min="0" step="100" oninput="debouncedDcaInput()">
     <span class="dca-label" style="min-width:auto">لمدة</span>
     <input type="number" class="dca-years" placeholder="سنوات" value="${years || ''}" min="0.5" step="0.5" style="max-width:80px" oninput="debouncedDcaInput()">
     <span class="dca-label" style="min-width:auto">سنة</span>
@@ -2320,6 +2320,42 @@ function closePlanReport() {
 }
 
 // ── Render historical summary ──────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// م.7 و1 — معالم الدستور الرقمية، وموقعك منها اليوم
+// ----------------------------------------------------------------------
+// المعالم كانت أرقاماً في وحدة الدستور بلا أن يراها المالك في الصفحة
+// التي تُسقط مستقبله. عرضها هنا يجعل الإسقاط مقروءاً **مقابل الهدف**
+// لا في فراغ — وم.62 تتحوّل بها المحفظة تلقائياً لمرحلة السحب.
+//
+// ⚠️ عرض لا حكم: لا يُخصم شيء ولا تُصدر إشارة. الفارق يُعرَض ليُعرَف.
+// ══════════════════════════════════════════════════════════════════════
+function renderConstitutionMilestones(h) {
+  const el = document.getElementById('constitution-milestones');
+  if (!el || typeof GOAL_PORTFOLIO !== 'number') return;
+  const cur   = +h.currentValue || 0;
+  const phase = portfolioPhase(new Date());
+  const fwd   = +h.fwdAnnualIncome || 0;
+  const goalY = GOAL_MONTHLY_INCOME * 12;
+  const pctOf = (a, b) => b > 0 ? Math.min(100, a / b * 100) : 0;
+  const row = (label, now, target, unit, art) => `
+    <div class="kv"><span>${label} <span class="text-muted" style="font-size:.7rem">${art}</span></span>
+      <b class="num">${fmt(now)}${unit} <span class="text-muted" style="font-weight:400">من ${fmt(target)}${unit}
+      (${pctOf(now, target).toFixed(0)}%)</span></b></div>`;
+  el.innerHTML = noteHtml('📜',
+    `<strong>معالم الدستور — أين أنت منها اليوم</strong>
+     <div class="kvs" style="margin-top:6px">
+       ${row('قيمة المحفظة', cur, GOAL_PORTFOLIO, ' ر.س', 'م.7')}
+       ${row('الدخل السنوي من التوزيعات', fwd, goalY, ' ر.س', 'م.4')}
+       ${row('هدف FIRE', cur, GOAL_FIRE, ' ر.س', 'م.7')}
+       <div class="kv"><span>الضخّ الشهري المقرَّر <span class="text-muted" style="font-size:.7rem">م.7</span></span>
+         <b class="num">${fmt(MONTHLY_INJECTION)} ر.س</b></div>
+       <div class="kv"><span>المرحلة الحالية <span class="text-muted" style="font-size:.7rem">م.1</span></span>
+         <b>${esc(phase.label)} — حتى ${phase.key === 'accumulation' ? ACCUM_END_YEAR : phase.key === 'transition' ? TRANSITION_END_YEAR : HORIZON_YEAR}</b></div>
+     </div>
+     <div class="text-muted" style="font-size:.74rem;margin-top:4px">عرضٌ لا حكم: لا يُخصم شيء ولا تُصدر إشارة (م.9).</div>`,
+    '');
+}
+
 function renderHistSummary() {
   const h = _hist;
   const badge = document.getElementById('hist-period-badge');
@@ -2373,6 +2409,7 @@ function renderHistSummary() {
     { val: String(h.holdingsCount),       lbl: 'عدد الأسهم' },
   ];
 
+  renderConstitutionMilestones(h);   // م.7 و1
   const el = document.getElementById('hist-summary');
   const cell = i => `
     <div class="hist-item">

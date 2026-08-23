@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824c">
+  <link rel="stylesheet" href="css/style.css?v=20260824d">
   <style>
     /* ── Scenario Cards ── */
     .scenario-grid {
@@ -503,6 +503,8 @@
         <summary style="cursor:pointer;font-size:.82rem;color:var(--text-2)">أرقام تاريخية إضافية (٦) ▾</summary>
         <div class="hist-summary" id="hist-summary-rest" style="margin-top:8px"></div>
       </details>
+      <!-- م.7 — معالم الدستور الرقمية وموقعك منها -->
+      <div id="constitution-milestones" style="margin-top:12px"></div>
       <!-- الأساس (معيار تاسي) مقابل أداؤك — وسم تشخيصي صريح -->
       <div id="growth-basis-note" style="margin-top:12px"></div>
     </div>
@@ -617,7 +619,7 @@
       </div>
       <div class="inp-group" style="max-width:320px">
         <label id="goal-amount-label">قيمة المحفظة المستهدفة (ر.س)</label>
-        <input type="number" id="inp-goal-amount" step="10000" min="0" placeholder="مثال: 1,000,000"
+        <input type="number" id="inp-goal-amount" step="10000" min="0" placeholder="هدف الدستور: 1,310,000 (م.7)"
                oninput="debouncedRunForecast()">
       </div>
     </div>
@@ -838,13 +840,13 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260824c"></script>
-  <script src="js/auth.js?v=20260824c"></script>
-  <script src="js/utils.js?v=20260824c"></script>
-  <script src="js/constitution.js?v=20260824c"></script>
-  <script src="js/constitution-data.js?v=20260824c"></script>
-  <script src="js/declutter.js?v=20260824c"></script>
-  <script src="js/navtoggle.js?v=20260824c"></script>
-  <script src="js/forecast.js?v=20260824c"></script>
+  <script src="js/supabase.js?v=20260824d"></script>
+  <script src="js/auth.js?v=20260824d"></script>
+  <script src="js/utils.js?v=20260824d"></script>
+  <script src="js/constitution.js?v=20260824d"></script>
+  <script src="js/constitution-data.js?v=20260824d"></script>
+  <script src="js/declutter.js?v=20260824d"></script>
+  <script src="js/navtoggle.js?v=20260824d"></script>
+  <script src="js/forecast.js?v=20260824d"></script>
 </body>
 </html>

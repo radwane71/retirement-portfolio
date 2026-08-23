@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824c">
+  <link rel="stylesheet" href="css/style.css?v=20260824d">
   <style>
     /* ── محرّك القرار — ستايل خاص ── */
     .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
@@ -308,7 +308,9 @@
         <span id="de-ledger-badge" class="small text-muted"></span>
       </summary>
       <div style="margin-top:14px">
-        <h4 class="de-d-h">تركيز العامل الواحد (م.30)</h4>
+        <h4 class="de-d-h">مراجعة قائمة الخروج المؤجل (م.45 و60)</h4>
+        <div id="de-deferred-review"></div>
+        <h4 class="de-d-h" style="margin-top:16px">تركيز العامل الواحد (م.30)</h4>
         <div id="de-govexp"></div>
         <h4 class="de-d-h" style="margin-top:16px">القراءات المؤكِّدة (م.43)</h4>
         <div id="de-readings"></div>
@@ -581,14 +583,14 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260824c"></script>
-  <script src="js/auth.js?v=20260824c"></script>
-  <script src="js/utils.js?v=20260824c"></script>
-  <script src="js/constitution.js?v=20260824c"></script>
-  <script src="js/constitution-data.js?v=20260824c"></script>
-  <script src="js/declutter.js?v=20260824c"></script>
-  <script src="js/navtoggle.js?v=20260824c"></script>
-  <script src="js/tickerdb.js?v=20260824c"></script>
+  <script src="js/supabase.js?v=20260824d"></script>
+  <script src="js/auth.js?v=20260824d"></script>
+  <script src="js/utils.js?v=20260824d"></script>
+  <script src="js/constitution.js?v=20260824d"></script>
+  <script src="js/constitution-data.js?v=20260824d"></script>
+  <script src="js/declutter.js?v=20260824d"></script>
+  <script src="js/navtoggle.js?v=20260824d"></script>
+  <script src="js/tickerdb.js?v=20260824d"></script>
   <script>
     // شرح الكارت (نمط showCardInfo المشترك في utils.js)
     window.CARD_INFO = {
@@ -736,7 +738,7 @@
       },
     };
   </script>
-  <script src="js/decision-engine.js?v=20260824c"></script>
-  <script src="js/decision-intel.js?v=20260824c"></script>
+  <script src="js/decision-engine.js?v=20260824d"></script>
+  <script src="js/decision-intel.js?v=20260824d"></script>
 </body>
 </html>

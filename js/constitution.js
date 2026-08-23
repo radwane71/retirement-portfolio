@@ -89,6 +89,54 @@ const CUT_BANDS = [
   { max: Infinity, key: 'stop',     label: 'انقطاع',    action: 'article46' },
 ];
 
+// م.42 — تصنيف نسبة التغطية إلى منطقة، مع مُعدِّل الميزانية (42-ب)
+// ----------------------------------------------------------------------
+// `ratio` للشركات العادية = التوزيع ÷ التدفق الحر (أعلى أفضل).
+// وللريتات = التوزيع ÷ التدفق التشغيلي **نسبةً مئوية** (أقل أفضل).
+// `bridgeYears` سنوات الجسر: ≥5 ترفع منطقة، <2 تخفضها (42-ب) — والرفع
+// مقصود: ميزانيةٌ نظيفة تحتمل توزيعاً غير مغطّى مؤقّتاً، والعكس بالعكس.
+const ZONE_ORDER = ['red', 'orange', 'yellow', 'green'];   // الأسوأ أولاً
+function sustainZoneOf(ratio, isReit, bridgeYears) {
+  if (ratio == null || !isFinite(ratio)) {
+    return { zone: null, known: false, reads: 0, action: 'declare',
+             why: 'نسبة التغطية غير متوفرة — تُعلَن ولا تُقدَّر (م.20)' };
+  }
+  const table = isReit ? SUSTAIN_REIT : SUSTAIN_NORMAL;
+  const base = isReit
+    ? table.find(b => ratio <= b.max)
+    : table.find(b => ratio >= b.min);
+  let z = base || table[table.length - 1];
+  let shifted = null;
+  const by = parseFloat(bridgeYears);
+  // 42-ب إلزامي في 🟡 و🟠 فقط
+  if (isFinite(by) && (z.zone === 'yellow' || z.zone === 'orange')) {
+    const adj = BRIDGE_ADJ.find(a => by >= a.min);
+    if (adj && adj.shift !== 0) {
+      const i = ZONE_ORDER.indexOf(z.zone);
+      const j = Math.max(0, Math.min(ZONE_ORDER.length - 1, i + adj.shift));
+      if (j !== i) {
+        shifted = { from: z.zone, to: ZONE_ORDER[j], years: by };
+        z = table.find(b => b.zone === ZONE_ORDER[j]) || z;
+      }
+    }
+  }
+  return {
+    zone: z.zone, known: true, reads: z.reads, action: z.action, shifted,
+    why: `${({ green:'🟢', yellow:'🟡', orange:'🟠', red:'🔴' })[z.zone]} `
+       + `${isReit ? 'التوزيع ÷ التدفق التشغيلي' : 'التوزيع ÷ التدفق الحر'} = `
+       + `${isReit ? ratio.toFixed(0) + '%' : ratio.toFixed(2)} (م.42${isReit ? '-ج' : '-أ'})`
+       + (shifted ? ` — رُفعت/خُفضت منطقة بسنوات الجسر ${shifted.years} (م.42-ب)` : ''),
+  };
+}
+
+// م.42-هـ — حجم قص التوزيع إلى إجراء متدرّج
+function dividendCutBand(cutPct) {
+  const c = Math.abs(parseFloat(cutPct));
+  if (!isFinite(c)) return null;
+  const b = CUT_BANDS.find(x => c <= x.max) || CUT_BANDS[CUT_BANDS.length - 1];
+  return { ...b, cutPct: c, why: `قص ${c.toFixed(0)}% — ${b.label} (م.42-هـ)` };
+}
+
 // ── م.43: قاعدة التأكيد — لا إشارة من قراءة واحدة إلا القاطعة ──
 const CONFIRM_READS = { decisive: 1, strong: 2, medium: 3, weak: 0 };
 
@@ -337,6 +385,7 @@ if (typeof module !== 'undefined' && module.exports) {
     FRESH_DAYS, DATA_TAG, MIN_BUY_SAR, MAX_NAMES_PER_BATCH, CYCLE_DAYS, QUARTER_DAYS,
     OVERRIDE_VALID_DAYS, RATING_DIMS,
     GOV_EXPOSURE, GOV_DEFAULT, govExposure,
+    ZONE_ORDER, sustainZoneOf, dividendCutBand,
     classifyStock, applyHysteresis, capOfCategory, sectorBandOf, valueBandOf,
     deviationBandOf, positionSizeVerdict, isBanned, isNoAccumulate,
     portfolioPhase, trueBreakEven, overrideStatus,

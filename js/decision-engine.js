@@ -58,7 +58,9 @@ let zeroTargets = new Set();
 // لكل رمز وتاريخه في user_settings، ونقارن به عند كل تشغيل.
 const PRICE_WATCH_KEY = 'price_watch_v1';
 const PRICE_JUMP_PCT = 25;          // قفزة/هبوط يومي يفوقها = مشبوه حتى يُراجَع
-const PRICE_DECISION_MAX_DAYS = 21; // أقدم من ذلك: لا يُبنى عليه قرار سعري
+// م.18 — حدّ حداثة السعر من وحدة الدستور، لا رقماً محلياً.
+// «بيانات تجاوزت الحد تُعلَّم ⚠️ ولا يُبنى عليها قرار وزن.»
+const PRICE_DECISION_MAX_DAYS = FRESH_DAYS.price; // أقدم من ذلك: لا يُبنى عليه قرار سعري
 let priceWatch = {};                // ticker → { p: آخر سعر مرصود, d: تاريخه }
 let priceAlerts = {};               // ticker → { kind, msg }
 
@@ -100,8 +102,10 @@ function buildPriceAlerts() {
 
     // ② سعر قديم لا يصلح أساساً لقرار
     if (!priceAlerts[h.ticker] && !h.price_manual && h.price_updated_at) {
-      const age = Math.floor((Date.now() - new Date(h.price_updated_at).getTime()) / 86400000);
-      if (age > PRICE_DECISION_MAX_DAYS) {
+      // نفس دالة الحداثة التي تحكم بقية الأرقام (م.18) — لا حساب موازٍ
+      const st = tvStale(tv(h.current_price, 'external', 'التراكر', h.price_updated_at), 'price');
+      const age = st.ageDays;
+      if (st.stale) {
         priceAlerts[h.ticker] = { kind: 'stale',
           msg: `آخر تحديث لسعر هذا السهم قبل ${age} يوماً (الحدّ ${PRICE_DECISION_MAX_DAYS}). `
             + `الوزن والانحراف وهامش القيمة العادلة كلها مبنية عليه، فلا يُبنى عليه قرار بيع أو شراء. `
@@ -393,6 +397,8 @@ function sustainabilityOf(h) {
   let fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
   let sig = cfg.divSignal    || ({ no: 'stable',   yes: 'temp' })[cfg.divCut];
   const autoSrc = {}; // محور → مصدر الاشتقاق الآلي (للوسم)
+  let zoneInfo = null; // م.42 — المنطقة المحسوبة ومصدرها (تُعرَض في المخرَج، م.51)
+  let cutBand  = null; // م.42-هـ — حجم قص التوزيع وإجراؤه المتدرّج
 
   // ① من آخر تقييم: الأساسيات (EPS/FFO) والتغطية حسب نوع الأصل — أقصاه أصفر
   const val = valByTicker[h.ticker];
@@ -413,6 +419,14 @@ function sustainabilityOf(h) {
       // إسمنت/بتروكيماويات ← تغطية FCF (لا EPS)؛ REIT ← FFO؛ البقية ← EPS.
       const isCement = assetTypeOf(h) === 'cement_petro';
       const fcf = numOf(inp.fcf);
+      // ══════════════════════════════════════════════════════════════
+      // م.42 — النسبة تُصنَّف بنطاقات الدستور، لا بعتبة 1.0 ثنائية
+      // ------------------------------------------------------------
+      // كان: `payout <= 1.0 ? 'covered' : 'weak'` — عتبةٌ واحدة تجعل
+      // 1.01 و1.60 سواءً. م.42 تفرّق: 🟢 ≥1.00 · 🟡 0.85–1.00 ·
+      // 🟠 0.60–0.85 (خفض فئة بعد قراءتين) · 🔴 <0.60 (فشل بعد قراءتين).
+      // والمنطقة تُحفظ في `zoneInfo` فتظهر في المخرَج كما تُلزم م.51.
+      // ══════════════════════════════════════════════════════════════
       if (isCement) {
         // AUDIT-FIX (2026-08): عند غياب/سلبية FCF كان القياس يسقط لـ EPS خلافاً
         // للدستور §3 — الآن تُعلن «تغطية FCF غير متوفرة» صراحةً (§8) بلا قياس بديل.
@@ -421,18 +435,27 @@ function sustainabilityOf(h) {
           // وحدات مشكوك فيها → لا تُحسب تغطية من رقم لا نثق بوحدته (§8)
           covNote = `⚠️ ${unitDoubt}. صحّح الرقم في حاسبة القيمة العادلة ليصير "للسهم الواحد"، أو أدخل التغطية يدوياً.`;
         } else if (fcf != null && fcf > 0) {
-          const payout = div / fcf;
-          cov = payout <= 1.0 ? 'covered' : 'weak';
-          autoSrc.cov = `تقييم: توزيع/FCF = ${(payout * 100).toFixed(0)}%`;
+          // م.42-أ: النسبة الدستورية = التغطية (FCF ÷ التوزيع)، لا العكس
+          const coverRatio = fcf / div;
+          zoneInfo = sustainZoneOf(coverRatio, false, (engineCfg[h.ticker] || {}).bridgeYears);
+          cov = zoneInfo.zone === 'green' ? 'covered'
+              : zoneInfo.zone === 'yellow' ? 'weak'
+              : zoneInfo.zone === 'orange' ? 'weak' : 'uncovered';
+          autoSrc.cov = `تقييم: ${zoneInfo.why}`;
         } else {
           covNote = 'تغطية FCF غير متوفرة (الدستور §3: الإسمنت/البتروكيماويات تُقاس بتغطية FCF لا EPS — أدخل FCF في التقييم أو التغطية يدوياً)';
         }
       } else {
         const coverBase = earn != null && earn > 0 ? earn : null;
         if (coverBase != null) {
-          const payout = div / coverBase;
-          cov = payout <= 1.0 ? 'covered' : 'weak';  // توزيع فوق مصدر التغطية → مراقبة
-          autoSrc.cov = `تقييم: توزيع/${isReit ? 'FFO' : 'EPS'} = ${(payout * 100).toFixed(0)}%`;
+          // الريت يُقاس بنسبة التوزيع من التدفق (م.42-ج، أقل أفضل)،
+          // وغيره بتغطية التوزيع (م.42-أ، أعلى أفضل).
+          zoneInfo = isReit
+            ? sustainZoneOf(div / coverBase * 100, true, (engineCfg[h.ticker] || {}).bridgeYears)
+            : sustainZoneOf(coverBase / div, false, (engineCfg[h.ticker] || {}).bridgeYears);
+          cov = zoneInfo.zone === 'green' ? 'covered'
+              : (zoneInfo.zone === 'yellow' || zoneInfo.zone === 'orange') ? 'weak' : 'uncovered';
+          autoSrc.cov = `تقييم: ${zoneInfo.why}`;
         }
       }
     }
@@ -440,8 +463,22 @@ function sustainabilityOf(h) {
 
   // ② من سجل الأرباح الفعلي: إشارة التوزيع — أقصاه أصفر
   const trend = dividendTrendOf(h.ticker);
-  if (!sig && trend) {
-    if (trend.signal === 'cut' || trend.signal === 'stopped')         { sig = 'temp';   autoSrc.sig = `أرباح: ${trend.note}`; }
+  // ══════════════════════════════════════════════════════════════════
+  // م.42-هـ — قص التوزيع: استجابة **متدرّجة** لا ثنائية
+  // ------------------------------------------------------------------
+  // كان أي قص ≥25% يُصنَّف `temp` بلا تمييز. م.42-هـ تفرّق: ≤10% تعديل
+  // (مراقبة) · 10–25% تخفيض (ربع فئة) · 25–50% قص جوهري (فئة كاملة +
+  // إعادة تسعير) · 50–99% قص حاد (فشل فوري) · 100% انقطاع (م.46).
+  // الفرق عملي: قصٌّ 30% وقصٌّ 80% كانا يُعامَلان سواءً، والثاني فشلٌ
+  // فوري بنصّ المادة لا مراقبة.
+  // ══════════════════════════════════════════════════════════════════
+  cutBand = (trend && trend.changePct != null && trend.changePct < 0)
+    ? dividendCutBand(trend.changePct) : null;
+  if (cutBand && cutBand.action === 'failNow') {
+    sig = 'cut';                                   // فشل فوري (50–99%)
+    autoSrc.sig = `أرباح: ${cutBand.why} — فشل فوري (م.42-هـ)`;
+  } else if (!sig && trend) {
+    if (trend.signal === 'cut' || trend.signal === 'stopped')         { sig = 'temp';   autoSrc.sig = `أرباح: ${cutBand ? cutBand.why : trend.note}`; }
     else if (trend.signal === 'growing' || trend.signal === 'stable') { sig = 'stable'; autoSrc.sig = `أرباح: ${trend.note}`; }
   }
   // وإلا: تقييم حديث بتوزيع قائم وموجب = لا إشارة قطع (مستقر) — استدلال معلَن
@@ -461,7 +498,7 @@ function sustainabilityOf(h) {
   if (stopped) sigKeys.unshift('divStopped');
 
   if (structural.length || stopped) {
-    const base = { reason: (stopped ? ['انقطاع التوزيع كلياً'] : []).concat(structural).join('، '),
+    const base = { zoneInfo, cutBand, reason: (stopped ? ['انقطاع التوزيع كلياً'] : []).concat(structural).join('، '),
                    trend, autoSrc, signalKeys: sigKeys };
 
     // ══════════════════════════════════════════════════════════════════
@@ -495,12 +532,12 @@ function sustainabilityOf(h) {
   if (cov === 'weak') soft.push('ضعف تغطية التوزيع' + tag('cov'));
   if (fun === 'soft') soft.push('ضعف بالأساسيات' + tag('fun'));
   if (sig === 'temp') soft.push('انخفاض/تأجيل توزيع' + tag('sig'));
-  if (soft.length) return { status: 'watch', reason: soft.join('، '), trend, autoSrc };
+  if (soft.length) return { status: 'watch', reason: soft.join('، '), trend, autoSrc, zoneInfo, cutBand };
 
   if (cov === 'covered' && fun === 'healthy' && sig === 'stable') {
-    return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع', trend, autoSrc };
+    return { status: 'pass', reason: 'التوزيع مغطّى + أساسيات سليمة + لا إشارة قطع', trend, autoSrc, zoneInfo, cutBand };
   }
-  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة' + (covNote ? ` — ${covNote}` : ''), trend, autoSrc };
+  return { status: 'unknown', reason: 'بيانات الاستدامة غير مكتملة' + (covNote ? ` — ${covNote}` : ''), trend, autoSrc, zoneInfo, cutBand };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -961,10 +998,20 @@ async function loadAll() {
 
 // عتبات ألوان التنبيهات من الإعدادات (نفس مفاتيح لوحة التحكم) — قابلة للتغيير
 // أخضر = انحراف ضمن الهدف · أصفر = تنبيه · أحمر = إجراء. تُقرأ كل تشغيل فتتأقلم.
+// ══════════════════════════════════════════════════════════════════════
+// م.49 — نطاقات انحراف الوزن: القيم الافتراضية دستورية لا اختيارية
+// ----------------------------------------------------------------------
+// «± 1.5% مطلق ⇒ لا إجراء · 1.5–3% ⇒ تصحيح بالضخّ والتوزيعات فقط، لا بيع
+// · > 3% ⇒ تصحيح نشط».
+//
+// عتبات التنبيه كانت 1 و3 من إعدادات المستخدم. صار الافتراض دستورياً
+// (1.5 و3)، ويبقى تجاوزه ممكناً لمن غيّره عمداً — لكن **حدّ منع البيع
+// في النطاق 1.5–3% غير قابل للتجاوز**: هو قاعدة لا تفضيل عرض.
+// ══════════════════════════════════════════════════════════════════════
 function alertThresholds() {
-  const g = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const y = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
-  return { green: isFinite(g) && g > 0 ? g : 1, yellow: isFinite(y) && y > 0 ? y : 3 };
+  const g = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? DEV_IGNORE);
+  const y = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP);
+  return { green: isFinite(g) && g > 0 ? g : DEV_IGNORE, yellow: isFinite(y) && y > 0 ? y : DEV_PUMP };
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -991,6 +1038,7 @@ function runEngine() {
   renderSectorCheck(totalValue);
   renderTargetPlan();
   renderLedgers();
+  renderDeferredReview();   // م.45 و60
   restoreFolds();
   renderCards();
 
@@ -1513,6 +1561,23 @@ function buildTargetPlan(valAware) {
     const expired = _planTargetExpired(r);
 
     // ② فوق الهدف ⇒ تخفيف
+    // ══════════════════════════════════════════════════════════════════
+    // م.49 و58 — التصحيح بالضخّ يسبق التصحيح بالبيع
+    // ------------------------------------------------------------------
+    // «ممنوع البيع لتصحيح انحراف يمكن للضخّ معالجته خلال دورتين» — والضخّ
+    // 96,000 سنوياً = 42% من المحفظة (م.8)، فانحراف نقطتين يذوب وحده.
+    // بيعُه يولّد عمولة وخسارةً محقّقة محتملة لتصحيح ما كان سيُصحَّح مجاناً.
+    // ══════════════════════════════════════════════════════════════════
+    const devBand = deviationBandOf(gapPct);
+    if (gapPct < 0 && devBand.action !== 'active' && !r.overCap) {
+      // فوق الهدف لكن ضمن ما يعالجه الضخّ — ولا كسرَ سقفٍ يفرض التخفيف
+      if (devBand.action === 'pump') {
+        out.deferred.push(mk({ sar, shares, gapPct,
+          why: `فوق هدفك بـ${formatNum(-gapPct)} نقطة — ${devBand.label}. `
+             + 'الضخّ الشهري يعالجه خلال دورتين بلا عمولة ولا خسارة محقّقة (م.58).' }));
+      }
+      return;
+    }
     if (gapPct < 0 && sar >= PLAN_MIN_SAR) {
       if (r.taskType === 'accumulation') {
         out.conflictSar += sar;
@@ -1535,6 +1600,7 @@ function buildTargetPlan(valAware) {
 
     // ③ تحت الهدف ⇒ تجميع، بشرط أن يسمح السعر وقرارك
     // م.57: حدّ الشراء 2,000 ر.س لا 500 — «تجزئة الضخّ تولّد عمولات وتُضعف الأثر»
+    if (gapPct > 0 && devBand.action === 'none') return;   // م.49 — ضمن ±1.5%
     if (gapPct > 0 && sar >= MIN_BUY_SAR) {
       // م.28 — قطاع بين 27.5% و30%: «وقف الإضافة للقطاع». التجميع هنا
       // يزيد تركيزاً بلغ نطاق الوقف، فيُؤجَّل ويُعلَن سببه القطاعي.
@@ -1785,6 +1851,79 @@ function renderTargetPlan() {
         escapeHtmlSafe(o.ticker) + (o.noPrice ? ' (بلا سعر)' : ' (بلا هدف مسجّل)')).join('، ')}
       — لا وجهة تُقاس إليها، فلا يُخترع لها هدف (§8). حدّد أهدافها في صفحة «أهداف الأسهم والقطاعات».</p>` : ''}
     ${renderSectorPlan()}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// م.45 و60 — المراجعة الربعية الإلزامية لقائمة الخروج المؤجل
+// ----------------------------------------------------------------------
+// «المراقبة الربعية الإلزامية: حقوق الملكية في 🟠 لثلاث قراءات أو 🔴
+// لقراءتين ⇒ خروج بأفضل سعر خلال سنة · انقطاع التوزيع ⇒ م.46.»
+// و«مراجعة سعر الخروج كل دورة»: تحسّنت +10% · ثابتة كما هي · 🟠 −15% ·
+// 🔴 لقراءتين إلى التعادل · انقطع التوزيع فالسعر يُلغى.
+//
+// تُعرَض كـ**إجراء مطلوب** لا كجدول: القائمة بلا مراجعة دورية تتحوّل إلى
+// أرشيف، وسعرٌ وُضع قبل سنة لا يمثّل الشركة اليوم.
+// ══════════════════════════════════════════════════════════════════════
+// م.60 — هل حان موعد المراجعة الربعية المختصرة؟
+// «إلزامية، وتشمل ثلاثة بنود: قائمة الخروج المؤجل · المشغّلات الطارئة ·
+// الأسهم في 🟠 أو 🔴 التي تنتظر تأكيداً.» تُقاس من آخر قيد في سجل التدقيق.
+function quarterlyReviewDue() {
+  const last = (auditLog || []).filter(e => e.ts).pop();
+  if (!last) return { due: true, days: null, why: 'لا سجل تدقيق بعد — شغّل المراجعة الأولى (م.60)' };
+  const days = Math.floor((Date.now() - new Date(last.ts).getTime()) / 86400000);
+  return days >= QUARTER_DAYS
+    ? { due: true, days, why: `مضى ${days} يوماً على آخر قيد — تجاوز الربع (${QUARTER_DAYS} يوماً)، والمراجعة الربعية إلزامية (م.60)` }
+    : { due: false, days, why: `آخر قيد قبل ${days} يوماً — المراجعة الربعية القادمة بعد ${QUARTER_DAYS - days} يوماً (م.60)` };
+}
+
+function renderDeferredReview() {
+  const el = document.getElementById('de-deferred-review');
+  if (!el) return;
+  const q = quarterlyReviewDue();
+  const qNote = noteHtml(q.due ? '⏰' : '🗓️',
+    `<strong>المراجعة الربعية (م.60):</strong> ${escapeHtmlSafe(q.why)}`
+    + (q.due ? '<br>بنودها ثلاثة: قائمة الخروج المؤجل · المشغّلات الطارئة (م.61) · ما ينتظر تأكيداً في 🟠 أو 🔴.' : ''),
+    q.due ? 'warn' : '');
+  const tks = Object.keys(deferredExits || {});
+  if (!tks.length) {
+    el.innerHTML = qNote + noteHtml('📭', 'قائمة الخروج المؤجل فارغة — لا سهم فيها يُراجَع (م.45).', '');
+    return;
+  }
+  const rows = tks.map(tk => {
+    const d = deferredExits[tk] || {};
+    const r = (_results || []).find(x => x.ticker === tk);
+    const zones = (d.equityZones || []);
+    const stopped = !!(r && r.sustain && r.sustain.trend && r.sustain.trend.signal === 'stopped');
+    const q = deferredQuarterlyCheck(zones, stopped);
+    // مراجعة السعر كل دورة — الحالة من منطقة الاستدامة الحالية
+    const zNow = r && r.sustain && r.sustain.zoneInfo && r.sustain.zoneInfo.zone;
+    const state = stopped ? 'divStopped'
+      : zones.slice(-2).filter(x => x === 'red').length >= 2 ? 'redTwice'
+      : zNow === 'orange' ? 'orange'
+      : zNow === 'green' ? 'improved' : 'stable';
+    const rev = d.exitPrice != null ? reviewExitPrice(+d.exitPrice, state) : null;
+    return { tk, d, q, rev, state };
+  });
+  const urgent = rows.filter(x => x.q.urgent);
+  el.innerHTML = qNote +
+    (urgent.length ? noteHtml('⛔',
+      `<strong>${urgent.length} سهماً يستوجب تسريع الخروج (م.45):</strong>`
+      + `<ul class="sum-ul">${urgent.map(x =>
+          `<li><strong>${escapeHtmlSafe(x.tk)}</strong> — ${escapeHtmlSafe(x.q.why)}</li>`).join('')}</ul>`, 'bad') : '')
+    + `<div class="table-wrapper"><table><thead><tr>
+        <th>الرمز</th><th>سعر الخروج</th><th>التعادل الحقيقي</th><th>مراجعة الدورة (م.45)</th><th>المراقبة الربعية (م.60)</th>
+       </tr></thead><tbody>${rows.map(x => `<tr>
+        <td><b>${escapeHtmlSafe(x.tk)}</b></td>
+        <td class="num">${x.d.exitPrice != null ? formatNum(x.d.exitPrice) : '—'}</td>
+        <td class="num">${x.d.breakEven != null ? formatNum(x.d.breakEven) : '—'}</td>
+        <td class="small">${x.rev
+            ? (x.rev.cancel ? '⛔ يُلغى السعر — تُطبَّق م.46'
+             : x.rev.toBreakEven ? `↓ إلى التعادل ${x.d.breakEven != null ? formatNum(x.d.breakEven) : '—'}`
+             : x.rev.price !== +x.d.exitPrice ? `→ <b>${formatNum(x.rev.price)}</b> · ${escapeHtmlSafe(x.rev.why)}`
+             : escapeHtmlSafe(x.rev.why))
+            : '<span class="text-muted">لا سعر مسجَّل — حدِّده في بطاقة السهم</span>'}</td>
+        <td class="small" style="color:var(--st-${x.q.urgent ? 'bad' : 'good'})">${escapeHtmlSafe(x.q.why)}</td>
+       </tr>`).join('')}</tbody></table></div>`;
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2539,6 +2678,12 @@ function openDetailCard(ticker) {
   // عرضهما في سجل مستقل لا يكفي: القرار يُقرأ هنا، فالقيد الذي يحكمه
   // يجب أن يُقرأ هنا أيضاً.
   // ══════════════════════════════════════════════════════════════════
+  // م.51 — «→ المنطقة: […] في [المقياس المنطبق]»
+  if (sus.zoneInfo && sus.zoneInfo.known) {
+    susBody += `<br><b>المنطقة:</b> ${E(sus.zoneInfo.why)}`
+             + (sus.zoneInfo.reads > 0
+                 ? ` — يحتاج <b>${sus.zoneInfo.reads}</b> قراءتين للتأكيد (م.43)` : '');
+  }
   if (sus.gatedBy === 'م.41' && sus.depth) {
     susBody += `<br><b>⏸️ الفلتر 0 (م.41):</b> ${E(sus.depth.why)}`;
   }
