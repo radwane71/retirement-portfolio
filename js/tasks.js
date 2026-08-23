@@ -219,6 +219,7 @@ function renderValGrid(gridId, tasks) {
 }
 
 // ══════════════════════════════════════════════════════════════════════
+// (غير مستعملة بعد اعتماد سُلَّم السعر 2026-08-23 — تُركت لأي استعمال لاحق)
 // السعر الحالي مقابل خطة الأسعار — سكة المناطق (.zrail)
 // المنطق منسوخ من priceRulerHtml() في js/decision-engine.js:
 // نطاق lo/hi يضم كل النقاط + السعر بهامش 15% من المدى، ودالة pos تقصّه
@@ -313,12 +314,45 @@ function priceHeroHtml(t, h, price) {
   </div>`;
 }
 
-// السكة أو رسالة إرشادية إن لم تُدخل أي منطقة سعرية
-function priceRailBlock(t, tk, price) {
-  const pts = zonePointsOf(t, fairOf(tk));
-  return pts.length
-    ? zoneRailHtml(pts, price)
-    : noteHtml('📐', 'لا مناطق سعرية مُدخلة — أضف سعر تجميع أو تخفيف أو تصفية لتظهر السكة.', '');
+// ══════════════════════════════════════════════════════════════════════
+// سُلَّم السعر — نُقل من لوحة التحكم بطلب المالك 2026-08-23 بعد اعتماده هناك.
+// ----------------------------------------------------------------------
+// السكّة الأفقية (.zrail) كانت تعرض ثلاث نقاط بعرض الكرت كاملاً، وتطلب من
+// العين ربط علامة على سكّة بتسمية تحتها. البديل المعتمد: **قائمة واحدة
+// مرتّبة بالسعر تنازلياً والسعر الحالي مُدرَج في موضعه** — فيُقرأ الموقع من
+// الترتيب نفسه بلا رموز تحتاج تفسيراً.
+//
+// **فرق هذه الصفحة عن اللوحة (طلب المالك: «حافظ على البيانات الأكثر»):**
+//   • نقطة رابعة هي **القيمة العادلة** من حاسبة التقييم — تدخل السُّلَّم
+//     بلونها المحايد ووسم يميّزها عن مناطق قرارك.
+//   • **حدّ التخفيف الأعلى** (trim_to) إن أُدخل — نطاق التخفيف له طرفان هنا.
+//   • كل ما عدا ذلك في الكرت (الأوزان، الملاحظات، الحالة، الأزرار) باقٍ كما هو.
+// ══════════════════════════════════════════════════════════════════════
+const ZS_ORDER = { exit: 'تصفية', trimTo: 'أعلى التخفيف', trim: 'تخفيف', fair: 'القيمة العادلة', buy: 'تجميع' };
+
+function priceLadderHtml(t, tk, price) {
+  const z = zonesOf(t);
+  const fair = fairOf(tk);
+  const steps = [];
+  if (z.liquidate)  steps.push({ v: z.liquidate,  k: 'exit'   });
+  if (z.trimTo)     steps.push({ v: z.trimTo,     k: 'trimTo' });
+  if (z.trimFrom)   steps.push({ v: z.trimFrom,   k: 'trim'   });
+  if (fair)         steps.push({ v: fair,         k: 'fair'   });
+  if (z.accumulate) steps.push({ v: z.accumulate, k: 'buy'    });
+  if (!steps.length)
+    return noteHtml('📐', 'لا مناطق سعرية مُدخلة — أضف سعر تجميع أو تخفيف أو تصفية ليظهر السُّلَّم.', '');
+  if (price > 0) steps.push({ v: price, k: 'now', now: true });
+  steps.sort((a, b) => b.v - a.v);                       // الأغلى أعلى
+
+  const zp = zonePositionOf(t, price);
+  const zone = zp.state === 'bad' ? 'exit' : zp.state === 'warn' ? 'trim'
+             : zp.state === 'good' ? 'buy' : 'none';
+
+  return `<div class="zs-ladder">${steps.map(st => `
+    <div class="zs-row${st.now ? ' zs-now' : ''}" data-k="${st.k}"${st.now ? ` data-zone="${zone}"` : ''}>
+      <span class="zs-lbl">${st.now ? '◀ السعر الآن' : ZS_ORDER[st.k]}</span>
+      <span class="zs-val num">${formatNum(st.v)}</span>
+    </div>`).join('')}</div>`;
 }
 
 // كتلة السعر الحالي + السكة داخل الكرت
@@ -327,7 +361,7 @@ function currentPriceBlock(t, h) {
   if (edge) return edge;
   const tk = (t.ticker || '').trim().toUpperCase();
   const price = priceOf(h);
-  return priceHeroHtml(t, h, price) + priceRailBlock(t, tk, price);
+  return priceHeroHtml(t, h, price) + priceLadderHtml(t, tk, price);
 }
 
 function buildCard(t) {
@@ -375,9 +409,10 @@ function buildCard(t) {
   if (trimFrom) priceRows.push(`<div class="vc-price-row"><span class="pr-label">⚖️ تخفيف عند</span><span class="pr-val pr-trim">${formatSAR(trimFrom)}</span></div>`);
   if (liqVal)   priceRows.push(`<div class="vc-price-row"><span class="pr-label">🔴 متضخّم — تصفية فوق</span><span class="pr-val pr-liq">${formatSAR(liqVal)}</span></div>`);
 
-  const pricesHtml = priceRows.length
-    ? `<div class="vc-prices">${priceRows.join('')}</div>`
-    : '';
+  // قائمة الأسعار المنفصلة أُزيلت: السُّلَّم يعرض القيم نفسها **ومعها موقع
+  // السعر بينها**، فإبقاؤها تكرارٌ يطيل الكرت بلا معلومة جديدة.
+  // (priceRows أعلاه ما زالت تُبنى لأن النافذة التفصيلية تستعملها.)
+  const pricesHtml = '';
 
   // ── Date ──
   const wasEdited = t.updated_at && t.created_at && t.updated_at.slice(0,10) !== t.created_at.slice(0,10);
@@ -521,9 +556,11 @@ function vdRailHtml(t, h, tk) {
   if (edge) return edge;
   const price = priceOf(h);
   const fair  = fairOf(tk);
-  return priceRailBlock(t, tk, price) +
+  // النافذة التفصيلية تستعمل السُّلَّم نفسه — مصدر واحد للعرض، فلا يتفرّع
+  // شكلان لنفس المعلومة ويختلفان بعد أي تعديل.
+  return priceLadderHtml(t, tk, price) +
     (fair == null
-      ? noteHtml('🧮', 'لا قيمة عادلة محفوظة لهذا السهم — احسبها في صفحة «القيمة العادلة للأسهم» لتظهر كنقطة على السكة.', '')
+      ? noteHtml('🧮', 'لا قيمة عادلة محفوظة لهذا السهم — احسبها في صفحة «القيمة العادلة للأسهم» لتظهر في السُّلَّم.', '')
       : '');
 }
 
