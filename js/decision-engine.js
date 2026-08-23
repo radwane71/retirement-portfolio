@@ -1106,8 +1106,28 @@ function renderActionGroups() {
 //     ويُعلَن (§8: لا تقدير صامت).
 // ══════════════════════════════════════════════════════════════════════
 
-// الحدّ الأدنى لأمر يستحق التنفيذ — ما دونه تكلفة الصفقة تأكله
+// الحدّ الأدنى لأمر **بيع** يستحق التنفيذ — ما دونه تكلفة الصفقة تأكله.
+// أوامر الشراء لها حدّها الدستوري الأعلى (م.57 — MIN_BUY_SAR = 2,000).
 const PLAN_MIN_SAR = 500;
+
+// ══════════════════════════════════════════════════════════════════════
+// م.54 — نقاط الأولوية للتجميع: العجز × مُعامِل الفئة × مُعامِل المنطقة
+// ----------------------------------------------------------------------
+// ⚠️ لا تخلطها بحقل `priority` في صفوف التقييم: ذاك **رتبة خطورة**
+// (0 = trigger ثابت … 9 = احتفظ) وترتيبه تصاعدي. هذه نقاطٌ ترتيبها
+// تنازلي. اسمان مختلفان لأن دمجهما في اسم واحد هو بالضبط الخطأ الذي
+// وقع سابقاً مع `overCap` (وزن كاسر مقابل هدف متجاوز).
+//
+// نفس معادلة js/targets.js حرفياً — محرّكان يرتّبان بترتيب واحد.
+// ══════════════════════════════════════════════════════════════════════
+function planPointsOf(r, gapPct) {
+  const cat  = r.category || { known: false, boost: 1 };
+  const band = (r.fairValue > 0 && r.price > 0)
+    ? valueBandOf(r.price / r.fairValue, r.fvCV != null ? r.fvCV : null) : null;
+  const catBoost  = cat.known ? cat.boost : 1.00;   // م.21 — لا عقوبة على النقص
+  const zoneBoost = band ? band.boost : 1.00;
+  return gapPct * catBoost * zoneBoost;
+}
 
 // ══════════════════════════════════════════════════════════════════════
 // أثر التنفيذ على جيبك — طلب المالك 2026-08-23:
@@ -1266,6 +1286,7 @@ function buildTargetPlan(valAware) {
   const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
   const out = { exits: [], trims: [], adds: [], deferred: [], conflicts: [],
                 noTarget: [], deferredExit: [],      // م.45 — قائمة الخروج المؤجل
+                batchDeferred: [],                   // م.57 — خارج الدفعة الواحدة
                 total, fundedBy: 0, needed: 0,
                 deferredSar: 0, conflictSar: 0 };
   if (!(total > 0)) return out;
@@ -1420,7 +1441,8 @@ function buildTargetPlan(valAware) {
     }
 
     // ③ تحت الهدف ⇒ تجميع، بشرط أن يسمح السعر وقرارك
-    if (gapPct > 0 && sar >= PLAN_MIN_SAR) {
+    // م.57: حدّ الشراء 2,000 ر.س لا 500 — «تجزئة الضخّ تولّد عمولات وتُضعف الأثر»
+    if (gapPct > 0 && sar >= MIN_BUY_SAR) {
       // BUGFIX 2026-08-23: كان `out.needed += sar` هنا — **قبل** فحوص التأجيل
       // والتعارض، فيدخل المبلغ المؤجَّل (سعر فوق العادلة · مراقبة · فشل
       // استدامة) والمتعارض في «تحتاج X ر.س» وأنت لن تنفّذها. النتيجة: احتياج
@@ -1454,6 +1476,7 @@ function buildTargetPlan(valAware) {
       }
       out.needed += sar;                                  // المُنفَّذ وحده
       out.adds.push(mk({ sar, shares, gapPct, capped, expired,
+        points: planPointsOf(r, gapPct),      // م.54 — تُستعمل في الترتيب أدناه
         fairOk: fair.ok, fairUsable: fair.usable,
         why: fair.usable ? fair.why : `${fair.why} — التنفيذ على مسؤوليتك، لا مرجع سعري`,
         priority: gapPct * (fair.usable && fair.ok ? 1 + Math.min(0.5, fair.margin / 100) : 1) }));
@@ -1462,7 +1485,14 @@ function buildTargetPlan(valAware) {
   });
 
   out.trims.sort((a, b) => (b.forced === a.forced ? b.sar - a.sar : (b.forced ? 1 : -1)));
-  out.adds.sort((a, b) => b.priority - a.priority);
+  // م.54 — الترتيب بنقاط الدستور، وم.57 — الدفعة الواحدة اسمان
+  out.adds.sort((a, b) => (b.points || 0) - (a.points || 0));
+  if (out.adds.length > MAX_NAMES_PER_BATCH) {
+    out.batchDeferred = out.adds.slice(MAX_NAMES_PER_BATCH);
+    out.adds = out.adds.slice(0, MAX_NAMES_PER_BATCH);
+    // المؤجَّل لا يُحتسب في «تحتاج X ر.س»: لن تنفّذه هذه الدفعة
+    out.batchDeferred.forEach(o => { out.needed -= (o.sar || 0); });
+  }
   out.exits.sort((a, b) => b.sar - a.sar);
   return out;
 }
@@ -1635,6 +1665,15 @@ function renderTargetPlan() {
       ${p.deferredExit.map(o => line(o, 'deferredExit')).join('')}` : ''}
     ${block('② تخفيف — ممّ تموّل', p.trims, 'trim')}
     ${block('③ تجميع — أين تضع المال', p.adds, 'add')}
+    ${p.batchDeferred.length ? `<h4 class="de-d-h">③ب مؤجَّل للدفعة القادمة — م.57 (${p.batchDeferred.length})</h4>
+      <div class="note" data-state="warn" style="margin-bottom:8px">
+        <span class="ic">📦</span>
+        <div>الحدّ الأقصى <b>${MAX_NAMES_PER_BATCH}</b> اسمين في الدفعة الواحدة، والحدّ الأدنى للشراء
+        <b>${SAR(MIN_BUY_SAR)}</b> ر.س — «تجزئة الضخّ على خمسة أسماء تولّد خمس عمولات وتُضعف الأثر».
+        هذه <b>لم تسقط من خطتك</b>: ترتيبها بنقاط م.54 (العجز × الفئة × منطقة السعر)
+        وتأخذ دورها في الدفعة التالية. ومبالغها <b>خارج</b> حساب «تحتاج».</div>
+      </div>
+      ${p.batchDeferred.map(o => line(o, 'add')).join('')}` : ''}
     ${block('④ مؤجَّل — الفجوة قائمة والتنفيذ ممنوع الآن', p.deferred, 'defer')}
     ${block('⑤ تعارض بين هدفك وقرارك — الحسم بيدك', p.conflicts, 'conflict')}
     ${p.noTarget.length ? `<h4 class="de-d-h">خارج الخطة (${p.noTarget.length})</h4>

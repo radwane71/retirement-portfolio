@@ -19,6 +19,9 @@ let totalValue    = 0;
 // آخر تقييم عادل لكل رمز من سجل حاسبة القيمة العادلة (valuation_history_v1)
 // ticker → { fairValueAvg, fairValueRange, marginText, models, date, companyType }
 let valuationLatest = {};
+// م.53/4 — قائمة الخروج المؤجل، من المفتاح نفسه الذي يكتبه محرّك القرار.
+// محرّكان يقرآن سجلاً واحداً: لو نسخ كلٌّ منهما قائمته لاختلفا في اليوم نفسه.
+let tgDeferredExits = {};
 
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
 window.CARD_INFO = {
@@ -367,6 +370,8 @@ async function loadAll() {
   // المصدر نفسه الذي تحفظ فيه صفحة حاسبة القيمة العادلة سجلّها (user_settings).
   // السجل مرتّب بالأحدث أولاً (unshift)، فأول عملية نصادفها لكل رمز هي الأحدث.
   valuationLatest = {};
+  try { tgDeferredExits = (await loadUserSetting('deferred_exits_v1')) || {}; }
+  catch (_) { tgDeferredExits = {}; }
   try {
     const hist = await loadUserSetting('valuation_history_v1');
     if (Array.isArray(hist)) {
@@ -1241,6 +1246,36 @@ function exportTargetsCSV() {
 // فوق سهم فجوته أكبر فعلياً.
 const PLANNED_PRIORITY_BOOST = 1.15;
 
+// ══════════════════════════════════════════════════════════════════════
+// م.54 — نقاط الأولوية: العجز × مُعامِل الفئة × مُعامِل منطقة السعر
+// ----------------------------------------------------------------------
+// «السيولة تذهب للأعلى نقاطاً، بحد أقصى سهمين في الدفعة الشهرية الواحدة».
+//
+// كان الترتيب `gap × effScore` — والعامل الثاني درجةٌ مشتقّة من **أسعار
+// المالك في المهام** (تجميع/تخفيف)، لا من منطقة القيمة العادلة التي
+// تسمّيها المادة. الدرجة القديمة لم تُهدَر: بقيت مرشِّحاً اختيارياً
+// («ضمن منطقة الشراء») وفاصلاً عند التساوي — لكن **الترتيب** صار دستورياً.
+//
+// غير المصنَّف يأخذ مُعامِلاً محايداً 1.00 لا 0.80: تنزيله لأدنى مُعامِل
+// عقوبةٌ على نقص بيانات عند المحرّك، وم.21 تمنعها.
+// والسهم بلا تقييم عادل يأخذ 1.00 كذلك — ويُعلَن أن منطقته غير محسوبة.
+// ══════════════════════════════════════════════════════════════════════
+function tgPriorityOf(ticker, gap, price) {
+  const cat  = tgCategoryOf(ticker);
+  const fv   = valuationLatest[ticker]?.fairValueAvg;
+  const band = (fv > 0 && price > 0) ? valueBandOf(price / fv, null) : null;
+  const catBoost  = cat.known ? cat.boost : 1.00;
+  const zoneBoost = band ? band.boost : 1.00;
+  return {
+    priority: gap * catBoost * zoneBoost,
+    cat, band, catBoost, zoneBoost,
+    // م.55/4 — ممنوع توجيه سيولة لسهم في المنطقة 🟡 أو 🔴
+    blockedByZone: !!(band && (band.key === 'trim' || band.key === 'liquidate')),
+    why: `العجز ${formatNum(gap)} نقطة × الفئة ${cat.known ? cat.short : '؟'} (${catBoost})`
+       + ` × ${band ? `${band.icon} ${band.label} (${zoneBoost})` : 'بلا تقييم عادل (1.00)'}`,
+  };
+}
+
 // ⚖️ محرك إعادة التوازن — Rebalancing Engine
 // ══════════════════════════════════════════════════════════════
 
@@ -1452,7 +1487,11 @@ function runRebalancing() {
         inZone: true,                         // لا سعر سوقي ⇒ لا فلتر منطقة شراء
         val: { score: 1, label: '⚪ بلا سعر سوقي', reason: 'سهم مخطّط — لا حكم سعري (§8)' },
         effScore: 1,
-        priority: targetPct * PLANNED_PRIORITY_BOOST,
+        // المخطّط: وزنه 0 فالعجز = هدفه كاملاً. مرجعه السعري لا يصلح
+        // للحكم السعري (دوران منطقي)، فمُعامِل المنطقة محايد ويُعلَن.
+        priority: tgPriorityOf(sk.ticker, targetPct, 0).priority * PLANNED_PRIORITY_BOOST,
+        prWhy: tgPriorityOf(sk.ticker, targetPct, 0).why + ' × نيّة الدخول (1.15)',
+        cat: tgCategoryOf(sk.ticker), band: null, blockedByZone: false,
       };
     });
 
@@ -1485,18 +1524,31 @@ function runRebalancing() {
       const zone        = stockZones[h.ticker] || {};
       const inZone      = !zone.entry_price || +h.current_price <= +zone.entry_price;
       const val         = valuationScore(h.ticker, +h.current_price);
-      // الدرجة الفعّالة: 1 عند إيقاف مراعاة التقييم (سلوك قديم بالضبط)
+      // الدرجة القديمة (من أسعارك في المهام) صارت مرشِّحاً وفاصلَ تساوٍ لا ترتيباً
       const effScore    = valAware ? val.score : 1;
-      // الأولوية = الفجوة × جاذبية السعر → سهم قريب من المتضخم يهبط للأسفل ولو فجوته كبيرة
-      const priority    = gap * effScore;
+      const pr          = tgPriorityOf(h.ticker, gap, +h.current_price);
       return { ...h, currentPct, savedTarget, capPct, targetPct, overCap, overExpired,
-               blueChip: tgIsBlueChip(h.ticker), gap, inZone, val, effScore, priority };
+               blueChip: tgIsBlueChip(h.ticker), gap, inZone, val, effScore,
+               priority: pr.priority, prWhy: pr.why, cat: pr.cat, band: pr.band,
+               blockedByZone: pr.blockedByZone };
     });
 
-  const candidates = [...candidatesAll, ...plannedAll]
-    .filter(c => c.gap > 0.05)                             // فقط الناقص فعلاً (فوق 0.05%)
-    .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
-    .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
+  // ══════════════════════════════════════════════════════════════════
+  // م.53 أهلية التلقي · م.55 ممنوعات التوجيه — الاستبعاد يُعلَن لا يُكتم
+  // ------------------------------------------------------------------
+  // م.55/4: ممنوع توجيه سيولة لسهم في المنطقة 🟡 أو 🔴 من م.48.
+  // م.53/4: وممنوع لسهم في **قائمة الخروج المؤجل** — سهمٌ تنتظر خروجه
+  //         لا تضخّ فيه، وإلا رفعتَ ما قرّرتَ تصغيره.
+  // ══════════════════════════════════════════════════════════════════
+  const _pool = [...candidatesAll, ...plannedAll].filter(c => c.gap > 0.05);
+  const zoneBlocked = _pool.filter(c => c.blockedByZone);
+  const deferBlocked = _pool.filter(c => !c.blockedByZone && tgDeferredExits[c.ticker]);
+  const candidates = _pool
+    .filter(c => !c.blockedByZone)                         // م.55/4
+    .filter(c => !tgDeferredExits[c.ticker])               // م.53/4
+    .filter(c => !entryFilter || c.inZone)                 // مرشِّح اختياري (أسعارك في المهام)
+    // م.54 — الترتيب بالنقاط. عند التساوي تفصل درجة أسعارك (effScore).
+    .sort((a, b) => (b.priority - a.priority) || (b.effScore - a.effScore));
 
   // م.31 — تجاوزان مختلفان حكماً: ساري يُنفَّذ ويُعلَن، ومنقضٍ قُصَّ ويُعلَن سببه.
   const overCapList  = candidatesAll.filter(c => c.overCap);
@@ -1525,6 +1577,8 @@ function runRebalancing() {
         + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`)
     + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي`
     + (overCapList.length ? ` · <b>${overCapList.length} سهماً هدفه فوق سقف فئته</b> (تجاوز ساري — م.31)` : '')
+    + (zoneBlocked.length ? ` · <b>${zoneBlocked.length} سهماً في منطقة 🟡/🔴</b> (${zoneBlocked.map(c => esc(c.ticker)).join('، ')}) — ممنوع توجيه سيولة إليه (م.55/4)` : '')
+    + (deferBlocked.length ? ` · <b>${deferBlocked.length} سهماً في قائمة الخروج المؤجل</b> (${deferBlocked.map(c => esc(c.ticker)).join('، ')}) — لا يُضخّ في سهم تنتظر خروجه (م.53/4)` : '')
     + (() => {
         // م.12 و55 — يُعلَن الاستبعاد ولا يختفي السهم بصمت (م.20 في الروح)
         const b = [...holdings, ...userStocks].map(x => x.ticker)
@@ -1575,7 +1629,6 @@ function runRebalancing() {
         <ul class="sum-ul">${list}</ul>
         <div class="small text-muted mt-2">💡 أوقف «مراعاة موقع السعر من التقييم» لتجاهل التقييم والتوزيع بالفجوة فقط، أو انتظر نزول الأسعار لمناطق التجميع.</div>`, 'warn')}
       ${capNote}
-    ${expiredNote}
       ${scopeNote}
     </div>`;
     return;
@@ -1615,22 +1668,59 @@ function runRebalancing() {
     return list.map((c, i) => ({ ...c, allocated: alloc[i] }));
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // م.57 — تكاليف التنفيذ: حدّ أدنى 2,000 ر.س وسهمان في الدفعة الواحدة
+  // ------------------------------------------------------------------
+  // «تجزئة الضخ 8,000 على خمسة أسماء تولّد خمس عمولات وتُضعف الأثر.»
+  //
+  // القيد يُطبَّق **قبل** حساب عدد الأسهم لا بعده: قصّه بعد البناء يترك
+  // ميزانية معلّقة بلا وجهة. فنقصر المرشّحين على الأعلى نقاطاً (م.54)
+  // ثم نعيد التوزيع عليهم وحدهم، فتذهب الميزانية كاملة لا أن تتبخّر.
+  //
+  // ولا يُكتم المؤجَّل: من سقط بالحدّ يُعلَن باسمه وبسببه، فيعرف المالك
+  // أنه مؤجَّل للدفعة القادمة لا محذوف من الخطة.
+  // ══════════════════════════════════════════════════════════════════
+  const _batchCut = [];        // ما أُجِّل للدفعة القادمة، ومعه سببه
+  function applyExecutionLimits(cands) {
+    const ranked = [...cands].sort((a, b) => (b.priority - a.priority) || (b.effScore - a.effScore));
+    const keep = ranked.slice(0, MAX_NAMES_PER_BATCH);
+    ranked.slice(MAX_NAMES_PER_BATCH).forEach(c => _batchCut.push({
+      ticker: c.ticker, name: c.name,
+      why: `خارج أعلى ${MAX_NAMES_PER_BATCH} نقاطاً في هذه الدفعة (م.57)`,
+    }));
+    return keep;
+  }
+  // بعد التوزيع: من نصيبه دون الحدّ الأدنى لا يُشترى — العمولة تأكله
+  function dropBelowMin(allocs) {
+    const out = [];
+    allocs.forEach(c => {
+      if (c.allocated > 0 && c.allocated < MIN_BUY_SAR) {
+        if (!_batchCut.some(x => x.ticker === c.ticker)) _batchCut.push({
+          ticker: c.ticker, name: c.name,
+          why: `نصيبه ${formatSAR(c.allocated)} ر.س دون الحدّ الأدنى ${formatSAR(MIN_BUY_SAR)} (م.57)`,
+        });
+      } else out.push(c);
+    });
+    return out;
+  }
+
   // ── التوزيع على «مقام» معطى: maxAlloc ثم الطريقة ────────────
   // maxAlloc = (الهدف الفعّال% / 100) × المقام − قيمة السهم الحالية
   function allocateOn(basisTotal) {
-    const cands = candidates.map(c => ({
+    _batchCut.length = 0;                    // تُعاد الحسبة في كل تمريرة
+    const cands = applyExecutionLimits(candidates).map(c => ({
       ...c,
       maxAlloc: Math.max(0, (c.targetPct / 100) * basisTotal - (+c.shares * +c.current_price)),
     }));
     if (method === 'gap') {
-      // بالتناسب مع الأولوية (الفجوة × جاذبية السعر) + تمرير الفائض
-      return cascadeAllocate(cands, budget, c => c.priority);
+      // بالتناسب مع نقاط م.54 + تمرير الفائض، ثم إسقاط ما دون الحدّ الأدنى
+      return dropBelowMin(cascadeAllocate(cands, budget, c => c.priority));
     }
     if (method === 'equal') {
       // توزيع متساوٍ بين المؤهّلين — عند مراعاة التقييم نستبعد القريب من المتضخم (درجة ≤ 0.15)
       const eligible = valAware ? cands.filter(c => c.effScore > 0.15) : cands;
       const pool = eligible.length ? eligible : cands;
-      return cascadeAllocate(pool, budget, () => 1);
+      return dropBelowMin(cascadeAllocate(pool, budget, () => 1));
     }
     // الأولى بالأولوية (فجوة × تقييم) — تمرير الفائض للتالي بالترتيب
     const out = [];
@@ -1640,7 +1730,7 @@ function runRebalancing() {
       const amt = Math.min(remaining, c.maxAlloc);
       if (amt > 0) { out.push({ ...c, allocated: amt }); remaining -= amt; }
     }
-    return out;
+    return dropBelowMin(out);
   }
 
   // ── احسب عدد الأسهم القابل للشراء (تقريب للأسفل دائماً) ────
@@ -1739,6 +1829,7 @@ function runRebalancing() {
           ['المتبقي نقداً', formatSAR(leftover)],
           ['عدد الأسهم المختلفة', `${rows.length} سهم`],
           ['أهداف فوق سقف الفئة', capNoteItems.length ? `${capNoteItems.length} سهم (ساري)` : 'لا شيء'],
+          ['مؤجَّل للدفعة القادمة (م.57)', _batchCut.length ? `${_batchCut.length} سهم` : 'لا شيء'],
           ['تجاوزات قُصَّت (م.31)', expiredList.length ? `${expiredList.length} سهم` : 'لا شيء'],
           ['مقام «الوزن بعد»', `${formatSAR(actualTotal)} (القيمة + المُنفَق فعلاً)`],
         ])}
@@ -1746,6 +1837,14 @@ function runRebalancing() {
     </div>
 
     ${capNote}
+    ${expiredNote}
+    ${_batchCut.length ? noteHtml('📦',
+      `<strong>مؤجَّل للدفعة القادمة (م.57):</strong> الحدّ الأدنى لأي شراء
+       <b>${formatSAR(MIN_BUY_SAR)}</b> ر.س، والحدّ الأقصى <b>${MAX_NAMES_PER_BATCH}</b> اسمين في الدفعة الواحدة —
+       «تجزئة الضخّ على خمسة أسماء تولّد خمس عمولات وتُضعف الأثر». هذه الأسهم
+       <b>لم تُحذف من خطتك</b>، بل انتظرت دورها بحسب نقاط م.54:
+       <ul class="sum-ul">${_batchCut.map(x =>
+         `<li><strong>${esc(x.ticker)}</strong> ${esc(x.name || '')} — ${esc(x.why)}</li>`).join('')}</ul>`, 'warn') : ''}
 
     ${overShoot.length ? noteHtml('⛔', `<strong>خلل يستوجب المراجعة:</strong>
       ${overShoot.map(r => `<strong>${esc(r.ticker)}</strong> سيصل وزنه ${r.newPct.toFixed(2)}% متجاوزاً <b>هدفك ${r.targetPct}%</b> + سماح ${TG_CAP_BUFFER}%`).join(' · ')}.
