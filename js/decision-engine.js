@@ -1150,17 +1150,35 @@ function _planTargetExpired(r) {
             && !_planOverrideStatus().valid);
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// م.48 — سقف القيمة بخمس مناطق، لا حكم ثنائي «فوق/تحت العادلة»
+// ----------------------------------------------------------------------
+// كان الشرط `margin > 0` أي السعر **تحت** العادلة تماماً. م.48 تنقضه
+// صراحةً: «سعر التجميع يوضع عند القيمة العادلة أو **أعلى قليلاً**، لا
+// تحتها بهوامش أمان مبالغة. الهدف ألا تضيع فرص.» فمنطقة التجميع تمتد
+// حتى 1.05 من العادلة، والاحتفاظ حتى 1.20، ثم التخفيف ثم التصفية.
+//
+// وم.39 تُوسّع النطاقات بمعامل الثقة: تشتّت النماذج العالي يعني أن حدود
+// المناطق نفسها غير دقيقة، فتُرخى بدل أن تُطبَّق بحدّة زائفة.
+// ══════════════════════════════════════════════════════════════════════
 function _planFairVerdict(r) {
-  // هل السعر يسمح بالتجميع الآن؟ يرجع {ok, why, usable}
   if (r.fairValue == null)  return { ok: null, usable: false, why: 'بلا تقييم عادل مسجّل' };
   if (r.fvUnreliable)       return { ok: null, usable: false, why: 'التقييم مُعلَّم غير موثوق (تشتّت النماذج)' };
   if (r.valStale)           return { ok: null, usable: false, why: `التقييم أقدم من ${VAL_STALE_DAYS} يوماً` };
+  if (!(r.fairValue > 0))   return { ok: null, usable: false, why: 'قيمة عادلة غير صالحة' };
+
+  const ratio  = r.price / r.fairValue;
+  const band   = valueBandOf(ratio, r.fvCV != null ? r.fvCV : null);
   const margin = (r.fairValue - r.price) / r.fairValue * 100;   // موجب = تحت العادلة
+  // م.53/3 — مؤهل للتلقي في 🟢🟢 و🟢 و⚪ (وم.55/4 تمنع 🟡 و🔴)
+  const ok = band.key === 'opportunity' || band.key === 'accumulate' || band.key === 'fair';
+  const widenTxt = band.widen > 0
+    ? ` (النطاقات موسَّعة ${Math.round(band.widen * 100)}% — ثقة ${band.confidence === 'low' ? 'منخفضة' : 'متوسطة'} بالتشتّت، م.39)`
+    : '';
   return {
-    ok: margin > 0, usable: true, margin,
-    why: margin > 0
-      ? `السعر ${formatNum(r.price)} تحت العادلة ${formatNum(r.fairValue)} بـ${formatNum(margin)}%`
-      : `السعر ${formatNum(r.price)} فوق العادلة ${formatNum(r.fairValue)} بـ${formatNum(-margin)}%`,
+    ok, usable: true, margin, ratio, band,
+    why: `${band.icon} ${band.label} — السعر ${formatNum(r.price)} = ${formatNum(ratio, 2)}× العادلة `
+       + `${formatNum(r.fairValue)} (م.48)${widenTxt}`,
   };
 }
 

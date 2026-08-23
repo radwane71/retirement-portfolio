@@ -1420,9 +1420,13 @@ function runRebalancing() {
   //     أسهم غير ممكن — لا يُحذف بصمت.
   // ══════════════════════════════════════════════════════════════════
   const _heldSet = new Set(holdings.map(h => h.ticker));
+  // م.12: الاستبعادات الدائمة ممنوعة في **أي** مخرَج ولو استوفت كل الفلاتر.
+  // م.55/5: سدافكو 2270 — لا تجميع مهما كانت الإشارات، بقرار المالك الصريح.
+  const _blocked = tk => isBanned(tk) || isNoAccumulate(tk);
   const plannedAll = (includePlanned ? userStocks : [])
     .filter(sk => !_heldSet.has(sk.ticker) && stockTargets[sk.ticker] > 0
-                  && taskMap[sk.ticker] !== 'liquidation' && !zeroTargets.has(sk.ticker))
+                  && taskMap[sk.ticker] !== 'liquidation' && !zeroTargets.has(sk.ticker)
+                  && !_blocked(sk.ticker))
     .map(sk => {
       const z   = stockZones[sk.ticker] || {};
       const tz  = taskZonesMap[sk.ticker] || {};
@@ -1454,7 +1458,8 @@ function runRebalancing() {
 
   const candidatesAll = holdings
     .filter(h => stockTargets[h.ticker] > 0 && +h.current_price > 0
-                 && taskMap[h.ticker] !== 'liquidation')
+                 && taskMap[h.ticker] !== 'liquidation'
+                 && !_blocked(h.ticker))          // م.12 و55
     .map(h => {
       const currentPct  = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
       // ══════════════════════════════════════════════════════════════
@@ -1519,7 +1524,15 @@ function runRebalancing() {
       : `<strong>نطاق المحرّك: الأسهم المملوكة فقط.</strong> يوزّع على ما له وزن حالي قابل للقياس وهدف محدَّد وسعر حالي > 0.`
         + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`)
     + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي`
-    + (overCapList.length ? ` · <b>${overCapList.length} سهماً هدفه فوق السقف الدستوري</b> (يُنفَّذ كما حدّدتَه)` : '')
+    + (overCapList.length ? ` · <b>${overCapList.length} سهماً هدفه فوق سقف فئته</b> (تجاوز ساري — م.31)` : '')
+    + (() => {
+        // م.12 و55 — يُعلَن الاستبعاد ولا يختفي السهم بصمت (م.20 في الروح)
+        const b = [...holdings, ...userStocks].map(x => x.ticker)
+          .filter((tk, i, a) => a.indexOf(tk) === i && _blocked(tk));
+        return b.length
+          ? ` · <b>${b.length} سهماً مستبعَداً من التوجيه</b> (${b.map(tk => `${esc(tk)} — ${esc(BANNED_TICKERS[tk] || NO_ACCUMULATE[tk])}`).join('، ')})`
+          : '';
+      })()
     + (_liq.length ? ` · <b>${_liq.length} سهماً مهمّته «تصفية»</b> (${_liq.map(esc).join('، ')}) — قرارك بالخروج منه يتقدّم على أي توصية شراء` : '')
     + `.`, '');
 
