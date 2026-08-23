@@ -268,5 +268,199 @@ t('رمز غير معروف يرجع null', T.tdValuationInputs('9999') === null
   }
 }
 
+// ── 6) بطاقة التوزيعات الرسمية — تشغيل فعليّ ─────────────────────────
+{
+  const els = {};
+  const mkEl = () => ({ _html: '', value: '', style: {}, dataset: {},
+    classList: { add() {}, remove() {}, contains: () => false },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); },
+    textContent: '', setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { return c; }, addEventListener() {}, focus() {}, remove() {},
+    querySelector: () => null, querySelectorAll: () => [] });
+  const byId = (id) => (els[id] = els[id] || mkEl());
+
+  const modals = [];
+  const ctx = {
+    console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map, WeakMap,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+    requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', body: mkEl(), documentElement: mkEl(),
+      getElementById: byId, querySelector: () => null, querySelectorAll: () => [],
+      createElement: mkEl, addEventListener() {}, createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { href: 'http://x/', pathname: '/', search: '', hash: '' },
+    navigator: { userAgent: 'node' }, matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    alert() {}, confirm: () => true, getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null,
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; },
+    XLSX: { utils: {}, write: () => '' },
+  };
+  ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
+  vm.createContext(ctx);
+
+  let loadErr = null;
+  try {
+    ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js',
+     'js/tadawul-data.js', 'js/dividends.js']
+      .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f }));
+  } catch (e) { loadErr = e.constructor.name + ': ' + e.message; }
+  t('صفحة التوزيعات تُحمَّل بلا خطأ', loadErr === null, loadErr);
+  ctx.openInfoModal = (ti, b) => modals.push([ti, b]);
+
+  t('بطاقة التوزيعات الرسمية معرَّفة', typeof ctx.renderTadawulDividends === 'function');
+
+  if (typeof ctx.renderTadawulDividends === 'function') {
+    // (أ) بلا حيازات: تُرسَم كاملةً بأسهم تداول، لا تنهار
+    let err = null;
+    try { ctx.renderTadawulDividends(); } catch (e) { err = e.constructor.name + ': ' + e.message; }
+    t('الرسم بلا حيازات لا يرمي', err === null, err);
+
+    // (ب) مع حيازات: المملوك أولاً والباقي باهتاً
+    ctx.holdings = [{ ticker: '4190' }, { ticker: '4002' }, { ticker: 'ZZZZ' }];
+    try { ctx.renderTadawulDividends(); } catch (e) { err = e.constructor.name + ': ' + e.message; }
+    t('الرسم مع حيازات لا يرمي', err === null, err);
+
+    const h = byId('td-div-body')._html;
+    t('البطاقة ظاهرة', byId('td-div-card').style.display === '', byId('td-div-card').style.display);
+    t('الجدول فيه محتوى', h.length > 1000, 'الطول = ' + h.length);
+    t('الأعمدة سنوات فعلية', /<th class="num">20\d\d<\/th>/.test(h));
+    t('يذكر أسهماً مملوكة', /4190/.test(h) && /جرير/.test(h));
+    t('غير المملوك موسوم', /خارج المحفظة/.test(h));
+    t('رمزٌ ليس في تداول لا يُخترع له صفّ', !/ZZZZ/.test(h));
+    t('التقلّب موسوم 🔴', /🔴/.test(h), 'سدافكو يجب أن تظهر');
+    t('الطرف الشاذّ موسوم 🟡', /🟡/.test(h));
+    t('التوزيع فوق الأرباح موسوم ⚠️', /⚠️/.test(h));
+    t('تغطية FCF معروضة', /×<\/td>/.test(h));
+    t('لا NaN ولا undefined في المخرَج', !/NaN|undefined/.test(h),
+      (h.match(/NaN|undefined/g) || []).join(' '));
+
+    // النسبة المعروضة هي عين ما تعطيه الدالة
+    const g = T.tdDpsGrowth('4190');
+    t('نمو جرير المعروض = المحسوب',
+      h.includes(`+${(g.value * 100).toFixed(1)}%`), (g.value * 100).toFixed(1));
+  }
+
+  if (typeof ctx.showTdDivInfo === 'function') {
+    let err = null;
+    try { ctx.showTdDivInfo(); } catch (e) { err = e.constructor.name + ': ' + e.message; }
+    t('نافذة الشرح تُفتح بلا خطأ', err === null, err);
+    t('الشرح يذكر عدد الإيداعات',
+      modals.length === 1 && new RegExp(String(T.TADAWUL_SOURCE_FILES)).test(modals[0][1]),
+      JSON.stringify(modals.map(m => m[0])));
+  }
+
+  // التحذير القديم «بيانات أرباح غير متوفرة في التطبيق» صار كاذباً
+  {
+    const src = fs.readFileSync(ROOT + 'js/dividends.js', 'utf8');
+    t('التحذير القديم عن غياب بيانات الأرباح صُحِّح',
+      !/غير متوفرة في التطبيق/.test(src));
+  }
+}
+
+// ── 7) بطاقة نمو التوزيع في الرؤية المستقبلية — تشغيل فعليّ ─────────
+{
+  const els = {};
+  const mkEl = () => ({ _html: '', value: '', style: {}, dataset: {},
+    classList: { add() {}, remove() {}, contains: () => false },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); },
+    textContent: '', setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { return c; }, addEventListener() {}, focus() {}, remove() {},
+    querySelector: () => null, querySelectorAll: () => [] });
+  const byId = (id) => (els[id] = els[id] || mkEl());
+
+  const ctx = {
+    console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map, WeakMap,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+    requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', body: mkEl(), documentElement: mkEl(),
+      getElementById: byId, querySelector: () => null, querySelectorAll: () => [],
+      createElement: mkEl, addEventListener() {}, createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { href: 'http://x/', pathname: '/', search: '', hash: '' },
+    navigator: { userAgent: 'node' }, matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    alert() {}, confirm: () => true, getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null,
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; },
+  };
+  ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
+  vm.createContext(ctx);
+
+  let loadErr = null;
+  try {
+    ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js',
+     'js/tadawul-data.js', 'js/forecast.js']
+      .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f }));
+  } catch (e) { loadErr = e.constructor.name + ': ' + e.message; }
+  t('صفحة الرؤية تُحمَّل بلا خطأ', loadErr === null, loadErr);
+  t('بطاقة نمو التوزيع معرَّفة', typeof ctx.renderTadawulDivGrowth === 'function');
+
+  if (typeof ctx.renderTadawulDivGrowth === 'function') {
+    const run = (h) => { let e = null;
+      try { ctx.renderTadawulDivGrowth(h); } catch (x) { e = x.constructor.name + ': ' + x.message; }
+      return e; };
+
+    t('بلا بيانات لا يرمي', run(null) === null && byId('td-divgrowth')._html === '');
+    t('بحيازات فارغة لا يرمي', run({ holdingRows: [] }) === null);
+    t('برموز خارج تداول: لا بطاقة',
+      run({ holdingRows: [{ ticker: 'ZZZZ', value: 1000 }] }) === null
+      && byId('td-divgrowth')._html === '');
+
+    // مزيج: نظيف (1010) · متقلّب (2270) · خارج تداول (ZZZZ)
+    const err = run({ holdingRows: [
+      { ticker: '1010', value: 60000 },
+      { ticker: '2270', value: 30000 },
+      { ticker: 'ZZZZ', value: 10000 },
+    ]});
+    t('الرسم بمزيج لا يرمي', err === null, err);
+
+    const html = byId('td-divgrowth')._html;
+    t('البطاقة فيها محتوى', html.length > 400, 'الطول = ' + html.length);
+    t('لا NaN ولا undefined', !/NaN|undefined/.test(html),
+      (html.match(/NaN|undefined/g) || []).join(' '));
+    t('يذكر تغطية الإيداعات', /تغطية الإيداعات/.test(html));
+    t('التغطية 90% لا 100%', /90% من قيمة المحفظة/.test(html),
+      (html.match(/\d+% من قيمة المحفظة/) || [])[0]);
+    t('غير المغطّى مُعلَن بالاسم', /ZZZZ/.test(html));
+    t('المتقلّب موسوم 🔴', /🔴/.test(html));
+    t('يُعلن أن الإسقاط يفترض عائداً ثابتاً', /عائد توزيع ثابت/.test(html));
+    t('يُعلن أنه لا يغيّر الحساب', /لا يغيّره|يبقى كما هو/.test(html));
+
+    // الترجيح صحيح: 1010 بوزن 2/3 و2270 بوزن 1/3 من المغطّى
+    const g1 = T.tdDpsGrowth('1010').value, g2 = T.tdDpsGrowth('2270').value;
+    const want = (60000 * g1 + 30000 * g2) / 90000;
+    t('المرجَّح بالقيمة صحيح حسابياً',
+      html.includes(`+${(want * 100).toFixed(1)}%`), (want * 100).toFixed(1) + '%');
+
+    // «النظيف» يستبعد المتقلّب ⇒ يساوي نمو 1010 وحده
+    t('المرجَّح النظيف يستبعد المتقلّب',
+      html.includes(`+${(g1 * 100).toFixed(1)}%`) && /النظيف فقط \(1 من 2\)/.test(html),
+      (g1 * 100).toFixed(1) + '%');
+
+    // كل الحيازات نظيفة ⇒ لا صفّ «النظيف فقط» منفصلاً بعدد ناقص
+    run({ holdingRows: [{ ticker: '1010', value: 100 }] });
+    t('محفظة نظيفة كلها: العدّ 1 من 1',
+      /النظيف فقط \(1 من 1\)/.test(byId('td-divgrowth')._html));
+  }
+
+  // الحيازات تُمرَّر فعلاً من جالب البيانات — وإلا البطاقة صامتة أبداً
+  {
+    const src = fs.readFileSync(ROOT + 'js/forecast.js', 'utf8');
+    t('holdingRows مُمرَّرة من الجالب', /holdingRows: hRows\.map/.test(src));
+    t('البطاقة مُستدعاة في الرسم', /renderTadawulDivGrowth\(h\)/.test(src));
+  }
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

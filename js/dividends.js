@@ -114,6 +114,7 @@ function renderAll() {
   renderTable();
   renderIncomeChart();
   renderDividendQuality();
+  renderTadawulDividends();
 }
 
 // مجموع التوزيعات الفعلية خلال آخر 12 شهراً (TTM) — العُرف المالي المعتمد
@@ -1746,8 +1747,12 @@ function showDivQualityInfo() {
     '⚠️ مهم — ما لا تقيسه هذه الدرجة:',
     'هذه درجة «سجلّ تاريخي» (Track Record) لا «أمان مستقبلي».',
     'الأمان الحقيقي للتوزيع يحتاج نسبة التوزيع (Payout Ratio) وتغطية',
-    'التدفق النقدي الحر (FCF) — وهي بيانات أرباح غير متوفرة في التطبيق.',
+    'التدفق النقدي الحر (FCF) — وهما لا يدخلان في هذه الدرجة.',
     'شركة بسجلّ ممتاز قد توزّع 100% من أرباحها = توزيع غير آمن رغم الدرجة العالية.',
+    '',
+    'لكنهما **متوفران** الآن في بطاقة «تاريخ التوزيع الرسمي» أسفل الصفحة،',
+    'من إيداعات تداول: كل سنة وُزِّع فيها فوق الأرباح موسومة ⚠️.',
+    'الدرجة هنا تبقى عن دخلك أنت؛ والأمان يُقرأ هناك.',
   ];
   openInfoModal('🏆 درجة جودة التوزيعات — المنهجية',
     lines.slice(1).map(l => l === '' ? '<div style="height:6px"></div>' : `<p style="margin:0 0 4px">${esc(l)}</p>`).join(''));
@@ -1815,3 +1820,103 @@ function toggleArchivedSection() {
 }
 
 init();
+
+// ══════════════════════════════════════════════════════════════════════
+// 📗 تاريخ التوزيع الرسمي من إيداعات تداول (م.15/1)
+// ----------------------------------------------------------------------
+// جدول الجودة أعلاه يقيس **دخلك أنت**: نوافذه تبدأ من أول توزيعة استلمتها،
+// فسهمٌ اشتريتَه قبل عام تبقى درجته «مبدئية» مهما كان تاريخ الشركة نظيفاً.
+// هذا الجدول يقيس **الشركة**: خمس أو ست سنوات من إيداعاتها، معدّلةً
+// للتجزئة (م.22). ولا يدخل في درجتك — الدرجة عن محفظتك لا عن السوق.
+// ══════════════════════════════════════════════════════════════════════
+function renderTadawulDividends() {
+  const card = document.getElementById('td-div-card');
+  const el   = document.getElementById('td-div-body');
+  if (!card || !el) return;
+  if (typeof TADAWUL_DATA === 'undefined' || typeof tdDpsSeries !== 'function') {
+    card.style.display = 'none'; return;
+  }
+
+  // المحفظة أولاً، ثم بقية ما في تداول
+  const held = [...new Set((holdings || []).map(h => String(h.ticker || '').trim()))].filter(Boolean);
+  const all  = Object.keys(TADAWUL_DATA);
+  const list = [...all.filter(t => held.includes(t)), ...all.filter(t => !held.includes(t))];
+  if (!list.length) { card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  const years = [...new Set(list.flatMap(tk => tdDpsSeries(tk).map(x => x.year)))].sort();
+  const body = list.map(tk => {
+    const r = TADAWUL_DATA[tk], g = tdDpsGrowth(tk);
+    const byYear = Object.fromEntries(tdDpsSeries(tk).map(x => [x.year, x.dps]));
+    const mine = held.includes(tk);
+
+    const cells = years.map(y => {
+      const v = byYear[y];
+      if (v == null) return '<td class="num text-muted" title="لا توزيع مسجَّل في الإيداعات لهذه السنة">—</td>';
+      const yr = r.years[y] || {};
+      const hot = yr.payoutPct != null && yr.payoutPct > 100;
+      return `<td class="num"${hot ? ` title="نسبة التوزيع ${yr.payoutPct.toFixed(0)}% — وُزِّع فوق أرباح السنة"` : ''}`
+           + `${hot ? ' style="color:var(--warning)"' : ''}>${v.toFixed(2)}${hot ? ' ⚠️' : ''}</td>`;
+    }).join('');
+
+    let growth;
+    if (g.value == null) {
+      growth = `<td class="text-muted" title="${esc(g.why || '')}">—</td>`;
+    } else {
+      const pct = `${g.value >= 0 ? '+' : ''}${(g.value * 100).toFixed(1)}%`;
+      if (g.volatile) growth = `<td title="${esc(g.volatileWhy)}" style="color:var(--warning);cursor:help">${pct} 🔴</td>`;
+      else if (g.caution) growth = `<td title="${esc(g.caution)}" style="color:var(--warning);cursor:help">${pct} 🟡</td>`;
+      else growth = `<td style="color:${g.value >= 0 ? 'var(--success)' : 'var(--danger)'}">${pct}</td>`;
+    }
+
+    const cov = (typeof tdLatestCoverage === 'function') ? tdLatestCoverage(tk) : null;
+    const covTd = cov
+      ? `<td class="num" title="تغطية التوزيع من التدفق الحر، ${cov.year} — أعلى أفضل (م.42-أ)"`
+        + ` style="color:${cov.value >= 1 ? 'var(--success)' : 'var(--warning)'};cursor:help">${cov.value.toFixed(2)}×</td>`
+      : '<td class="text-muted" title="التدفق الحر غير مستخرَج لهذا السهم (م.20)">—</td>';
+
+    return `<tr${mine ? '' : ' style="opacity:.55"'}>`
+      + `<td><strong class="text-accent">${esc(tk)}</strong>`
+      + `${mine ? '' : '<span class="small text-muted"> (خارج المحفظة)</span>'}</td>`
+      + `<td>${esc(r.name)}</td>${cells}${growth}${covTd}`
+      + `<td class="num small text-muted">${r.sourceFiles || '—'}</td></tr>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="table-wrapper">
+      <table>
+        <thead><tr>
+          <th>الرمز</th><th>الاسم</th>
+          ${years.map(y => `<th class="num">${y}</th>`).join('')}
+          <th>النمو المركّب<br><span class="small text-muted">معدَّل للتجزئة</span></th>
+          <th class="num">تغطية FCF<br><span class="small text-muted">آخر سنة</span></th>
+          <th class="num">إيداعات</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+    </div>
+    ${noteHtml('🔎',
+      '<strong>🔴 متقلّب</strong> — السلسلة تقفز، فمعدّل النمو يفترض مساراً لا وجود له. '
+    + '<strong>🟡 طرف شاذّ</strong> — سنة البداية أو النهاية دفعةٌ استثنائية تقلب الاتجاه. '
+    + '<strong>⚠️</strong> بجوار رقم — وُزِّع فوق أرباح تلك السنة. '
+    + 'مرِّر المؤشر على أيٍّ منها لتفصيله.', 'info')}`;
+}
+
+function showTdDivInfo() {
+  const n = (typeof TADAWUL_SOURCE_FILES !== 'undefined') ? TADAWUL_SOURCE_FILES : '—';
+  const p = (h) => `<p style="margin:0 0 8px">${h}</p>`;
+  openInfoModal('📗 تاريخ التوزيع الرسمي — المصدر والمنهجية',
+      p(`مستخرَج من <strong>${n} إيداعاً</strong> رسمياً لدى تداول — وهو أعلى `
+      + `المصادر في الدستور (م.15/1).`)
+    + p(`<strong>لماذا يختلف عن جدول الجودة فوقه؟</strong> ذاك يقيس التوزيعات التي `
+      + `<em>وصلتك</em>، فيبدأ من يوم شرائك. وهذا يقيس ما <strong>أعلنته الشركة</strong> — `
+      + `خمس أو ست سنوات، ولو سبقت ملكيتك بأعوام. سهمٌ درجته «مبدئية» فوق قد يكون `
+      + `تاريخه هنا نظيفاً تماماً.`)
+    + p(`الأرقام <strong>معدَّلة للتجزئة</strong> (م.22): جرير جزّأت 10:1 في 2023، `
+      + `فبلا تعديل تقرأ 7.70 ر.س ثم 0.82 وتظنّه قطعاً بنسبة 89% — وهو تجزئة لا قطع.`)
+    + p(`<strong>النمو المركّب لا يُعرض عارياً.</strong> هو يمسك طرفَي المدى ويفترض `
+      + `مساراً بينهما، وذلك يكذب حين تقفز السلسلة أو يكون أحد طرفيها دفعةً استثنائية. `
+      + `في الحالتين يُوسَم ويُذكر السبب — ولا يُصلَح سرّاً (م.20 و23).`)
+    + p(`<strong>تغطية FCF</strong> — التدفق النقدي الحر ÷ التوزيع المدفوع (م.42-أ). `
+      + `تحت 1× يعني أن توزيع تلك السنة لم يخرج من تدفق السنة نفسها.`));
+}

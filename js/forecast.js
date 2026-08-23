@@ -781,6 +781,11 @@ async function loadHistoricalData() {
     currentYear: today.getFullYear(),
     divByYear,
     holdingsCount: hRows.length,
+    // الرمز والقيمة السوقية لكل حيازة — يحتاجهما ترجيح نمو التوزيع (م.15/1)
+    holdingRows: hRows.map(r => ({
+      ticker: String(r.ticker || '').trim(),
+      value: (+r.shares || 0) * (+r.current_price || 0),
+    })).filter(r => r.ticker && r.value > 0),
     confidenceScore,
     divYears: _conf.divYears,
     fireGoal,
@@ -2344,6 +2349,97 @@ function closePlanReport() {
 //
 // ⚠️ عرض لا حكم: لا يُخصم شيء ولا تُصدر إشارة. الفارق يُعرَض ليُعرَف.
 // ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// 📗 نمو التوزيع الفعلي لمكوّناتك — من إيداعات تداول (م.15/1)
+// ----------------------------------------------------------------------
+// **الإسقاط يفترض عائد توزيع ثابتاً** عبر خمس وثلاثين سنة: التوزيعات =
+// نسبة مئوية من قيمة المحفظة، فتنمو بنمو رأس المال ولا شيء غيره.
+// هذا افتراضٌ مريح لا معطى، وله اتجاهان يكذّبانه:
+//
+// • شركاتك ترفع توزيعها أسرع من نموّها السعري ⇒ الإسقاط **يبخس** دخلك.
+// • أو تخفضه ⇒ الإسقاط **يبالغ**، وهذا الأخطر لأنه هدف تقاعدٍ لا رقم زينة.
+//
+// البطاقة لا تغيّر الإسقاط ولا تحرّك رقماً — تضع الافتراض بجوار ما فعلته
+// شركاتك فعلاً في خمس سنوات، ويبقى القرار قرارك (م.23).
+// ══════════════════════════════════════════════════════════════════════
+function renderTadawulDivGrowth(h) {
+  const el = document.getElementById('td-divgrowth');
+  if (!el) return;
+  if (typeof TADAWUL_DATA === 'undefined' || typeof tdDpsGrowth !== 'function') {
+    el.innerHTML = ''; return;
+  }
+  const rows = (h && h.holdingRows) || [];
+  if (!rows.length) { el.innerHTML = ''; return; }
+
+  const covered = [], uncovered = [];
+  rows.forEach(r => {
+    const g = TADAWUL_DATA[r.ticker] ? tdDpsGrowth(r.ticker) : null;
+    if (g && g.value != null) covered.push({ ...r, g });
+    else uncovered.push({ ...r, why: g ? g.why : 'لا إيداعات مستخرَجة لهذا الرمز' });
+  });
+  if (!covered.length) { el.innerHTML = ''; return; }
+
+  // الترجيح بالقيمة السوقية — سهمٌ وزنه 1% لا يساوي سهماً وزنه 12%
+  const wSum = covered.reduce((s, r) => s + r.value, 0);
+  const wAvg = covered.reduce((s, r) => s + r.value * r.g.value, 0) / wSum;
+  const clean = covered.filter(r => !r.g.volatile && !r.g.caution);
+  const cleanW = clean.reduce((s, r) => s + r.value, 0);
+  const cleanAvg = cleanW > 0
+    ? clean.reduce((s, r) => s + r.value * r.g.value, 0) / cleanW : null;
+
+  const coveredPct = wSum / rows.reduce((s, r) => s + r.value, 0) * 100;
+  const pct = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(1)}%`;
+  const capRate = (typeof _scenarios !== 'undefined' && _scenarios && _scenarios[1])
+    ? _scenarios[1].capRate : null;
+
+  const list = covered.slice().sort((a, b) => b.value - a.value).map(r => {
+    const flag = r.g.volatile ? ' 🔴' : (r.g.caution ? ' 🟡' : '');
+    const tip  = r.g.volatileWhy || r.g.caution || r.g.why || '';
+    return `<span title="${esc(tip)}" style="display:inline-block;margin:2px 0 2px 10px;
+      font-size:.78rem;cursor:${tip ? 'help' : 'default'}">
+      <b>${esc(TADAWUL_DATA[r.ticker].name)}</b>
+      <span style="color:${r.g.value >= 0 ? 'var(--st-good)' : 'var(--st-bad)'}">${pct(r.g.value)}</span>${flag}
+      <span class="text-muted">(${(r.value / wSum * 100).toFixed(0)}% من المغطّى)</span></span>`;
+  }).join('');
+
+  // المقارنة الحاسمة: نمو التوزيع مقابل النمو السعري الذي يقود الإسقاط
+  let verdict = '';
+  if (capRate != null && cleanAvg != null) {
+    const d = cleanAvg - capRate;
+    verdict = Math.abs(d) < 0.01
+      ? `<strong>الاثنان متقاربان</strong> (فارق ${pct(Math.abs(d))} فقط) — افتراض العائد الثابت متماسك هنا.`
+      : d > 0
+        ? `توزيع شركاتك ينمو <strong>أسرع</strong> من النمو السعري المفترض بـ${pct(d)} سنوياً — `
+          + `فالإسقاط على الأرجح <strong>يبخس</strong> دخلك المستقبلي.`
+        : `توزيع شركاتك ينمو <strong>أبطأ</strong> من النمو السعري المفترض بـ${pct(-d)} سنوياً — `
+          + `فالإسقاط على الأرجح <strong>يبالغ</strong> في دخلك المستقبلي. وهذا اتجاه الخطر.`;
+  }
+
+  el.innerHTML = noteHtml('📗',
+      `<strong>نمو التوزيع الفعلي لمكوّناتك</strong> `
+    + `<span class="text-muted" style="font-size:.75rem">— من إيداعات تداول، معدَّلاً للتجزئة (م.22)</span>`
+    + kvsHtml([
+        ['المرجَّح بالقيمة (كل المغطّى)', pct(wAvg)],
+        cleanAvg != null
+          ? [`المرجَّح — النظيف فقط (${clean.length} من ${covered.length})`, pct(cleanAvg)]
+          : null,
+        capRate != null ? ['النمو السعري المفترض في الإسقاط', pct(capRate)] : null,
+        ['تغطية الإيداعات', `${coveredPct.toFixed(0)}% من قيمة المحفظة`],
+      ])
+    + `<div style="margin-top:8px;line-height:1.9">${list}</div>`
+    + (verdict ? `<div style="margin-top:8px">${verdict}</div>` : '')
+    + `<div style="margin-top:8px;font-size:.78rem" class="text-muted">`
+    + `الإسقاط يفترض <strong>عائد توزيع ثابتاً</strong>، أي أن توزيعاتك تنمو بنمو `
+    + `رأس المال لا بسياسة الشركات. هذه البطاقة تقيس الافتراض ولا تغيّره — `
+    + `الرقم المُستخدَم في الحساب يبقى كما هو (م.23).`
+    + (uncovered.length
+        ? `<br>غير مغطّى: ${uncovered.length} رمزاً — ${esc(uncovered.map(u => u.ticker).join('، '))} (م.20).`
+        : '')
+    + `<br>🔴 سلسلة متقلّبة · 🟡 طرف شاذّ — مرِّر المؤشر للتفصيل. `
+    + `المرجَّح «النظيف» يستبعدهما.</div>`,
+    'info');
+}
+
 function renderConstitutionMilestones(h) {
   const el = document.getElementById('constitution-milestones');
   if (!el || typeof GOAL_PORTFOLIO !== 'number') return;
@@ -2460,6 +2556,7 @@ function renderHistSummary() {
   ];
 
   renderConstitutionMilestones(h);   // م.7 و1
+  renderTadawulDivGrowth(h);         // م.15/1
   const el = document.getElementById('hist-summary');
   const cell = i => `
     <div class="hist-item">
