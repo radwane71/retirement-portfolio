@@ -1182,18 +1182,20 @@ function renderStats() {
       // AUDIT-FIX (2026-08-21): كانت العتبات عامة (خطر ≥25%، مرتفع ≥15%) فتصف
       // بـ«تركيز صحي» وزناً يسمّيه دستورك كسراً للسقف. النظام القائم على قواعد
       // يفقد قيمته إن خالفت واجهته قاعدته، فالعتبات دستورية.
-      // 2026-08-23: السقف صار 15% لكل سهم وتمييز القيادي أُلغي — فدرجتان بدل
-      // ثلاث: اقتراب من السقف، ثم كسر فوق السقف + منطقة السماح.
-      const _capHard = 15 + 0.75, _capNear = 13;
+      // v3.0 م.25: السقف من **فئة** السهم لا رقم واحد. البطاقة تعرض «أكبر
+      // مركز» بلا معرفة فئته هنا، فتُقاس على سقف أعلى فئة (أ) — وهو الحدّ
+      // الذي لا يجوز تجاوزه لأي سهم كائناً ما كان. الفئة الحقيقية وسقفها
+      // يظهران في محرّك القرار حيث تُتّخذ القرارات.
+      const _capHard = CAT.A.cap + CAP_BUFFER, _capNear = CAT.A.cap - 2;
       concEl.className = 'value num ' + (s.largestPosPct > _capHard ? 'text-danger'
         : s.largestPosPct > _capNear ? 'text-accent' : 'text-success');
       const nm = s.largestHolding.name ? `${s.largestHolding.ticker} — ${s.largestHolding.name}` : s.largestHolding.ticker;
       setText('stat-concentration-name', 'أكبر مركز: ' + nm);
       setText('stat-concentration-sub', `أكبر 5 مراكز: ${s.top5Pct.toFixed(1)}% من قيمة الأسهم`);
       setHtml('stat-concentration-tag', s.largestPosPct > _capHard
-        ? tagHtml('🔴', 'فوق السقف الدستوري 15%', 'bad')
+        ? tagHtml('🔴', `فوق أعلى سقف فئة (${CAT.A.cap}%)`, 'bad')
         : s.largestPosPct > _capNear
-          ? tagHtml('⚠️', 'يقترب من السقف 15%', 'warn')
+          ? tagHtml('⚠️', `يقترب من أعلى سقف فئة (${CAT.A.cap}%)`, 'warn')
           : tagHtml('✅', 'ضمن السقف الدستوري', 'good'));
     } else {
       concEl.textContent = '—';
@@ -1492,10 +1494,10 @@ function renderPortfolioHealthCard() {
 
   // T1: عدد الأسهم
   if (stockCount < 5)
-    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. حجم المحفظة المستهدف في دستورك: 15–20 سهماً` });
-  else if (stockCount < 15)
-    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — دون الحد الأدنى في دستورك (15–20 سهماً). استمر بالإضافة بأوزان متوازنة` });
-  else if (stockCount > 20)
+    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. حجم المحفظة المستهدف في دستورك: ${SIZE_MIN}–${SIZE_MAX} سهماً (م.29)` });
+  else if (stockCount < SIZE_MIN)
+    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — دون الحد الأدنى في دستورك (${SIZE_MIN}–${SIZE_MAX} سهماً). استمر بالإضافة بأوزان متوازنة` });
+  else if (stockCount > SIZE_GRACE_MAX)
     tips.push({ lvl:'yellow', txt: `${stockCount} سهماً — راجع كل سهم: هل تعرفه وتتابعه؟ الأسهم التي لا تعرفها جيداً تزيد المخاطر لا تقللها` });
 
   // T2: عدد القطاعات
@@ -1509,10 +1511,10 @@ function renderPortfolioHealthCard() {
   // T3: تركيز أكبر سهم
   // 2026-08-23: العتبات كانت 30%/20% وهي أعلى من السقف الدستوري نفسه —
   // فكان السهم عند 18% «سليماً» هنا و«كاسراً للسقف» في البطاقة المجاورة.
-  if (top1Pct > 15 + 0.75)
-    tips.push({ lvl:'red',    txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — فوق السقف الدستوري 15%. خفّضه لإرجاع الوزن إلى السقف` });
-  else if (top1Pct > 13)
-    tips.push({ lvl:'yellow', txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — يقترب من السقف الدستوري 15%. راقبه عند أي إضافة` });
+  if (top1Pct > CAT.A.cap + CAP_BUFFER)
+    tips.push({ lvl:'red',    txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — فوق أعلى سقف فئة (${CAT.A.cap}%، م.25). خفّضه لإرجاع الوزن إلى سقف فئته` });
+  else if (top1Pct > CAT.A.cap - 2)
+    tips.push({ lvl:'yellow', txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — يقترب من أعلى سقف فئة. راجع فئته في محرّك القرار` });
 
   // T4: تركيز قطاعي
   // AUDIT-FIX (2026-08-21): كانت العتبات 50%/38% وتنصح بـ«دون 35%» بينما الدستور
@@ -1965,9 +1967,9 @@ function showDiversificationAnalysis() {
   // ── معايير "تنوع ممتاز" ──────────────────────────────────────
   // HHI < 5% → N_eff > 20، وعامل القطاعات يجب أن يكون عالياً
   const TARGET_HHI     = 0.067;  // N_eff ≥ 15 — Evans & Archer (1968): 15 سهم تُزيل 90% من المخاطر القابلة للتنويع
-  const TARGET_TOP1    = 15;     // % - أكبر مركز (السقف الدستوري §1 — واحد للجميع منذ 2026-08-23)
+  const TARGET_TOP1    = CAT.A.cap;   // % - أكبر مركز = أعلى سقف فئة (م.25)
   const TARGET_TOP3    = 45;     // % - أكبر 3
-  const TARGET_SECTORS = 8;      // قطاعات كحد أدنى (§1 — رُفع من 4 بقرار المالك 2026-08-23)
+  const TARGET_SECTORS = SECTORS_MIN;  // قطاعات كحد أدنى (م.29)
   const TARGET_TOPSEC  = 25;     // % - أكبر قطاع (السقف الدستوري §1)
   const TARGET_SECFACT = 0.85;   // معامل القطاعات المطلوب
 
