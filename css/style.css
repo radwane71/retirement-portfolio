@@ -2090,3 +2090,16 @@ body.nav-collapsed #nav-toggle{right:10px}
 @media (prefers-reduced-motion: reduce){
   .sidebar,.main,#nav-toggle{transition:none}
 }
+
+/* ══ بطاقة قابلة للطيّ ══
+   نفس مظهر .card، لكن العنوان يفتح ويغلق. تُستعمل حيث تكون البطاقة كلها
+   شرحاً يُقرأ مرة (نفضة 2026-08-23) — النصّ يبقى في الصفحة ويُقرأ بضغطة. */
+details.card > summary{cursor:pointer;list-style:none;user-select:none}
+details.card > summary::-webkit-details-marker{display:none}
+details.card > summary::marker{content:''}
+details.card > summary:hover{opacity:.85}
+details.card > summary h2{margin:0}
+details.card[open] > summary{margin-bottom:14px}
+
+/* جدول تفصيل المصاريف: مطويّ حتى يُطلب — الرسم الدائري فوقه يقول الشيء نفسه */
+#bd-toggle:not(:checked) ~ .calc-tbl{display:none}

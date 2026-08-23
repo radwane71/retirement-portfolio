@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823n">
+  <link rel="stylesheet" href="css/style.css?v=20260823p">
   <style>
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .calc-input-group { margin-bottom: 16px; }
@@ -203,9 +203,13 @@
 
       <div class="breakdown-table-wrap">
         <div class="table-hdr">
-          <h3>📋 تفصيل المصاريف</h3>
+          <!-- الجدول مطويّ افتراضياً (نفضة 2026-08-23): يعرض نفس أرقام
+               الرسم الدائري فوقه بشكل ثانٍ. زرّ التصدير يبقى خارج الطيّ
+               لأنه ينفّذ إجراءً لا يشرح شيئاً. -->
+          <h3 style="margin:0"><label for="bd-toggle" style="cursor:pointer">📋 تفصيل المصاريف <span class="text-muted" style="font-size:.8rem">▾</span></label></h3>
           <button class="export-btn" onclick="exportToCSV()">تصدير CSV</button>
         </div>
+        <input type="checkbox" id="bd-toggle" hidden>
         <table class="calc-tbl">
           <thead><tr><th>البند</th><th>المبلغ الشهري</th><th>النسبة المئوية</th><th>التمثيل البصري</th></tr></thead>
           <tbody id="breakdownBody"></tbody>
@@ -217,11 +221,11 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260823n"></script>
-  <script src="js/auth.js?v=20260823n"></script>
-  <script src="js/utils.js?v=20260823n"></script>
-  <script src="js/declutter.js?v=20260823n"></script>
-  <script src="js/navtoggle.js?v=20260823n"></script>
+  <script src="js/supabase.js?v=20260823p"></script>
+  <script src="js/auth.js?v=20260823p"></script>
+  <script src="js/utils.js?v=20260823p"></script>
+  <script src="js/declutter.js?v=20260823p"></script>
+  <script src="js/navtoggle.js?v=20260823p"></script>
   <script>
     async function init() {
       const user = await requireAuth();

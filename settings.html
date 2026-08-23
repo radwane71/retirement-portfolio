@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823n">
+  <link rel="stylesheet" href="css/style.css?v=20260823p">
   <style>
     /* صناديق تقارير النسخ الاحتياطي — تعتمد نظام التصميم وحده (صفر لون مكتوب يدوياً).
        .info-table تفرض عرض 40% على أول عمود وهو غير مناسب لجداول التقارير متعددة الأعمدة. */
@@ -319,6 +319,8 @@
         ومفاتيح أي مستخدم آخر على نفس الجهاز.
         وجدول <code>consent_logs</code> (سجل الموافقة على الشروط) — سجل قانوني ثابت لا يُحذف ولا يُستعاد بحكم تصميمه.
       </div>
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;font-size:.85rem;font-weight:600;color:var(--text-2)">ما الذي تشمله النسخة بالضبط؟ (41 مصدراً) ▾</summary>
       <table class="info-table">
         <tbody>
           <tr><th colspan="2" style="background:var(--bg-3);color:var(--accent);padding:6px 12px;font-size:0.8rem">☁️ Supabase — البيانات الرئيسية</th></tr>
@@ -365,6 +367,7 @@
           <tr><td><em>أي مفتاح آخر</em></td><td>يُلتقط تلقائياً بالمسح الحرفي الشامل — لا يعتمد على هذه القائمة</td></tr>
         </tbody>
       </table>
+      </details>
     </div>
 
     <!-- ── Monthly Review MD Export ── -->
@@ -453,12 +456,12 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260823n"></script>
-  <script src="js/auth.js?v=20260823n"></script>
-  <script src="js/utils.js?v=20260823n"></script>
-  <script src="js/declutter.js?v=20260823n"></script>
-  <script src="js/navtoggle.js?v=20260823n"></script>
-  <script src="js/settings.js?v=20260823n"></script>
+  <script src="js/supabase.js?v=20260823p"></script>
+  <script src="js/auth.js?v=20260823p"></script>
+  <script src="js/utils.js?v=20260823p"></script>
+  <script src="js/declutter.js?v=20260823p"></script>
+  <script src="js/navtoggle.js?v=20260823p"></script>
+  <script src="js/settings.js?v=20260823p"></script>
   <script>
     (async () => {
       const { data: { user } } = await supabaseClient.auth.getUser();
