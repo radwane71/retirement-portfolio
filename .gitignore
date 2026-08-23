@@ -1,3 +1,6 @@
 node_modules/
 package-lock.json
 .env
+
+# مخرجات مِحكّ التقارير — تُولَّد محلياً ولا تُرفع
+out*.md
