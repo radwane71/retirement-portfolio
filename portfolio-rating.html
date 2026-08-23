@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823p">
+  <link rel="stylesheet" href="css/style.css?v=20260823q">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -190,20 +190,13 @@
         <div class="conflict-warning" id="sectorConflict">⚠️ تناقض: اخترت تنويعاً قطاعياً عالياً لكن نسبة القطاع الأكبر مرتفعة جداً. سيُطبَّق خصم إضافي.</div>
       </div>
 
-      <!-- 4. الجغرافي -->
-      <div class="rule-section">
-        <h3>🌍 التوزيع الجغرافي</h3>
-        <div class="calc-input-group">
-          <label>النطاق الغالب لمحفظتك</label>
-          <select id="geographicDistribution">
-            <option value="">اختر</option>
-            <option value="local-only">محلية فقط (السعودية)</option>
-            <option value="regional">إقليمية (خليج / عربي)</option>
-            <option value="international">دولية (أسواق عالمية فقط)</option>
-            <option value="diversified">متنوعة (محلي + دولي)</option>
-          </select>
-          <p class="field-hint">هذا البُعد محايد ولا يدخل في الحساب — المحفظة 100% سعودية بقرار المالك (دستور CLAUDE.md §1) ولا يُخصم عليه.</p>
-        </div>
+      <!-- البُعد الجغرافي حُذف 2026-08-23 بموافقة المالك.
+           كان حقلاً يُملأ ويظهر في التفصيل بعبارة «محايد — خارج التقييم» ثم
+           لا يقود أي قرار: وزنه صفر بالتصميم (الدستور §1 — المحفظة 100%
+           سعودية بقرار المالك ولا تُنتقد لغياب التنويع الجغرافي). سؤالٌ لا
+           تُغيّر إجابته شيئاً هو حشو مهما صغُر.
+           ملاحظة: خرائط التسمية في js/settings.js بقيت — فلقطة تقييم قديمة
+           محفوظة ما زالت تعرض الحقل في تقريرها كما سُجّل يومها. -->
       </div>
 
       <!-- 5. أصول الحماية -->
@@ -304,11 +297,11 @@
   <!-- AUDIT-FIX (2026-08): تثبيت إصدار Chart.js بدل التعويم على @4 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260823p"></script>
-  <script src="js/auth.js?v=20260823p"></script>
-  <script src="js/utils.js?v=20260823p"></script>
-  <script src="js/declutter.js?v=20260823p"></script>
-  <script src="js/navtoggle.js?v=20260823p"></script>
+  <script src="js/supabase.js?v=20260823q"></script>
+  <script src="js/auth.js?v=20260823q"></script>
+  <script src="js/utils.js?v=20260823q"></script>
+  <script src="js/declutter.js?v=20260823q"></script>
+  <script src="js/navtoggle.js?v=20260823q"></script>
   <script>
     let breakdownChartInst = null;
 
@@ -316,7 +309,7 @@
     const RATING_SNAPSHOT_KEY = 'portfolio_rating_snapshot_v1';
     const RATING_FIELDS = [
       'individualStocks','reitCount','etfCount','bondCount',
-      'largestStockPercentage','largestSectorPercentage','geographicDistribution',
+      'largestStockPercentage','largestSectorPercentage',
       'goldPercentage','hasCash','sectorDiversification','investmentHorizon',
       'usesLeverage','leverageRatio'
     ];
@@ -471,9 +464,6 @@
       const assetClasses = (is>0?1:0)+(ec>0?1:0)+(rc>0?1:0)+(bc>0?1:0);
       const asScore = assetClasses >= 3 ? 1.0 : assetClasses === 2 ? 0.6 : assetClasses === 1 ? 0.3 : 0;
       addDim(`فئات الأصول (${assetClasses} فئة)`, asScore, 1.0, compAnswered);
-
-      // 7. التوزيع الجغرافي — محايد (CLAUDE.md §1: المحفظة 100% سعودية بقرار المالك)
-      breakdown.push({ label: 'التوزيع الجغرافي', neutral: true });
 
       // 8. احتياطي الكاش (0–0.5)
       addDim('احتياطي الكاش', cash === 'yes' ? 0.5 : 0, 0.5, cash !== '');
@@ -671,7 +661,7 @@
       ['individualStocks','reitCount','etfCount','bondCount',
        'largestStockPercentage','largestSectorPercentage','leverageRatio']
         .forEach(id => document.getElementById(id).value = '');
-      ['geographicDistribution','goldPercentage','hasCash',
+      ['goldPercentage','hasCash',
        'sectorDiversification','investmentHorizon','usesLeverage']
         .forEach(id => document.getElementById(id).value = '');
       ['smartFeedback','scoreBreakdown','leverageWarning','leverageRatioGroup','sectorConflict','etfNotice']

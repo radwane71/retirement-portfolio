@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823p">
+  <link rel="stylesheet" href="css/style.css?v=20260823q">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -527,10 +527,11 @@
         <div style="overflow-x:auto;"><table id="sensitivityTable"></table></div>
       </div>
 
+      <!-- بطاقات الدين والسيولة وROE حُذفت 2026-08-23 بموافقة المالك: كانت
+           تعيد عرض ما أُدخل في قسم «النسب المالية (للعرض)» في الشاشة نفسها
+           بلا أي معالجة — والقسم مُسمّى «للعرض» ولا يدخل أي نموذج. الحقول
+           باقية لأنها تُحفظ في السجل ويُقارَن تطوّرها عبر الزمن. -->
       <div class="dashboard-grid">
-        <div class="dash-card"><h4>نسبة الدين</h4>     <div class="dash-val" id="dashboardDebt">-</div></div>
-        <div class="dash-card"><h4>نسبة السيولة</h4>  <div class="dash-val" id="dashboardLiquidity">-</div></div>
-        <div class="dash-card"><h4>جودة الأرباح ROE</h4><div class="dash-val" id="dashboardEarnings">-</div></div>
         <div class="dash-card"><h4>هامش الأمان</h4>   <div class="dash-val" id="dashboardMargin">-</div></div>
       </div>
     </div>
@@ -640,11 +641,11 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260823p"></script>
-  <script src="js/auth.js?v=20260823p"></script>
-  <script src="js/utils.js?v=20260823p"></script>
-  <script src="js/declutter.js?v=20260823p"></script>
-  <script src="js/navtoggle.js?v=20260823p"></script>
+  <script src="js/supabase.js?v=20260823q"></script>
+  <script src="js/auth.js?v=20260823q"></script>
+  <script src="js/utils.js?v=20260823q"></script>
+  <script src="js/declutter.js?v=20260823q"></script>
+  <script src="js/navtoggle.js?v=20260823q"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -1393,9 +1394,9 @@
             bankEl.innerHTML = `🛡️ <strong>فلاتر أمان البنك:</strong><br>${safetyFlags.join('<br>')}`;
           } else bankEl.style.display = 'none';
 
-          document.getElementById('dashboardDebt').textContent      = nplVal ? `NPL ${nplVal}%` : '—';
-          document.getElementById('dashboardLiquidity').textContent  = ldrVal ? `LDR ${ldrVal}%` : '—';
-          document.getElementById('dashboardEarnings').textContent   = parseFloat(document.getElementById('bankRoe').value) ? `ROE ${document.getElementById('bankRoe').value}%` : '—';
+          // بطاقات NPL/LDR/ROE أُزيلت مع أخواتها 2026-08-23: صدى لما أُدخل
+          // في حقول البنك أعلاه. فلاتر الأمان (bankSafetyWarning) هي ما
+          // يقرأ هذه الأرقام فعلاً ويحوّلها إلى إنذار — وهي باقية كما هي.
         } else {
           const epsSpot       =  parseFloat(document.getElementById('eps').value)         || 0;
           const fcfSpot       =  parseFloat(document.getElementById('fcf').value)         || 0;
@@ -1559,12 +1560,6 @@
         const chart_values = Object.fromEntries(Object.entries(values)
           .filter(([k, v]) => v !== null && v > 0 && isFinite(v) && avgNames.includes(k)));
         createModelsChart(chart_values);
-        // مؤشرات اللوحة العامة — لا تُطبَّق على البنك (له مؤشراته NPL/LDR/ROE المضبوطة أعلاه)
-        if (companyType !== 'bank') {
-          document.getElementById('dashboardDebt').textContent      = `${document.getElementById('debtRatio').value}%`;
-          document.getElementById('dashboardLiquidity').textContent  = parseFloat(document.getElementById('liquidityRatio').value).toFixed(1);
-          document.getElementById('dashboardEarnings').textContent   = `${document.getElementById('earningsQuality').value}%`;
-        }
         document.getElementById('resultsSection').style.display = 'block';
         document.getElementById('loadingOverlay').classList.add('hidden');
         document.getElementById('resultsSection').scrollIntoView({behavior:'smooth'});

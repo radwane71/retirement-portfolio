@@ -2970,7 +2970,12 @@ async function exportMonthlyReviewMD() {
     book('C');
     await tick('متابعة كندة');
     h2('22. متابعة كندة الخاصة (School Kanda)');
-    {
+    // بعد ترحيل 2026-08-23 صارت كندة طفلاً في school_tracker_v2، ويبقى المفتاح
+    // القديم في المتصفّح كنسخة مجمّدة. عرضه هنا يُظهر البيانات نفسها مرّتين في
+    // تقرير واحد — فيُكتفى بسطر يشير إلى موضعها الجديد.
+    if (localStorage.getItem('school_kanda_migrated_v1') === '1') {
+      p('_رُحِّلت بيانات كندة إلى «متابعة المدرسة» (القسم 21) بتاريخ 2026-08-23 — تُقرأ هناك، والمفتاح القديم محفوظ في المتصفّح كنسخة مجمّدة._');
+    } else {
       const kanda = lsGet('school_kanda_v1', { profile:{name:'كندة',birth:''}, lifeGoals:[], schoolGoals:[], years:[], subjects:[], grades:{} });
       const kp = kanda.profile || {};
       p(`**الاسم:** ${kp.name || 'كندة'}${kp.birth ? ' | تاريخ الميلاد: ' + kp.birth : ''}`);

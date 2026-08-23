@@ -36,6 +36,79 @@ let yearEditId    = null;
 let gradeCtx      = null;  // { yearId, termId, subjectId }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// ترحيل صفحة كندة المستقلّة — 2026-08-23
+// ─────────────────────────────────────────────────────────────────────────────
+// كانت school-kanda.html نسخة مصغّرة من هذه الصفحة لطفل واحد، بلا رابط من أي
+// صفحة، وتخزّن في localStorage وحده بلا مزامنة سحابية — أي أن مسح الكاش يمحو
+// سنوات درجات. الدمج يُنهي التكرار **ويُنقذ البيانات** إلى user_settings.
+//
+// الترحيل يجري في متصفّح المالك لا في الشيفرة: نقرأ المفتاح القديم كما هو،
+// نحوّل الشكل، ونحفظ. ولا يُكرَّر — عَلَمٌ في localStorage يمنع ذلك، ونفحص
+// وجود طفل مُرحَّل احتياطاً لو ضاع العَلَم.
+//
+// **فروق البنية التي يعالجها التحويل:**
+//   • الحالة: كندة تخزّن نصاً عربياً، وهذه الصفحة رمزاً — تُترجم.
+//   • السنة: كندة بلا فصول، وهذه تحتاج `terms[]` بمعرّفات. نولّد ثلاثة
+//     فصول بمعرّفات 't1','t2','t3' — وهي **نفس** مفاتيح الدرجات في كندة،
+//     فتنطبق خريطة الدرجات حرفياً بلا أي تحويل ولا فقدان.
+//   • المادة: تكسب `max:100` و`color` (لم يكونا في كندة).
+// ═══════════════════════════════════════════════════════════════════════════════
+const KANDA_KEY      = 'school_kanda_v1';
+const KANDA_DONE_KEY = 'school_kanda_migrated_v1';
+const KANDA_ST = { 'قيد التنفيذ':'active', 'مكتمل':'done', 'مؤجل':'delayed', 'ملغي':'cancel' };
+
+function migrateKanda() {
+  try {
+    if (localStorage.getItem(KANDA_DONE_KEY) === '1') return false;
+    const raw = localStorage.getItem(KANDA_KEY);
+    if (!raw) { localStorage.setItem(KANDA_DONE_KEY, '1'); return false; }
+    const k = JSON.parse(raw);
+    if (!k || typeof k !== 'object') { localStorage.setItem(KANDA_DONE_KEY, '1'); return false; }
+
+    const name = (k.profile?.name || 'كندة').trim() || 'كندة';
+    // حارس ثانٍ: لو العَلَم ضاع ولكن الطفل مُرحَّل أصلاً، لا نُنشئ نسخة ثانية
+    if ((store.children || []).some(c => c._fromKanda || c.name === name)) {
+      localStorage.setItem(KANDA_DONE_KEY, '1');
+      return false;
+    }
+
+    const goal = g => ({
+      id: g.id || uid(), desc: g.desc || '', year: g.year || '',
+      status: KANDA_ST[g.status] || 'active',
+      cat: '', priority: 2, progress: 0, amount: 0, notes: '',
+    });
+
+    const child = {
+      id: uid(), _fromKanda: true,
+      name, emoji: '👧', birth: k.profile?.birth || '', school: '', grade: '', notes: '',
+      lifeGoals:   (k.lifeGoals   || []).map(goal),
+      schoolGoals: (k.schoolGoals || []).map(goal),
+      // معرّفات الفصول = مفاتيح الدرجات القديمة نفسها ⇒ grades تُنقل كما هي
+      years: (k.years || []).map(y => ({
+        id: y.id, label: y.label || '', class: y.class || '', school: y.school || '',
+        terms: [{ id: 't1', label: 'الفصل الأول' },
+                { id: 't2', label: 'الفصل الثاني' },
+                { id: 't3', label: 'الفصل الثالث' }],
+      })),
+      subjects: (k.subjects || []).map(sb => ({ id: sb.id, name: sb.name || '', max: 100, color: '#60a5fa' })),
+      grades: k.grades || {},
+      extraFields: [], attendance: [], behavior: [], homework: [], exams: [],
+    };
+
+    if (!store.children) store.children = [];
+    store.children.push(child);
+    persist();
+    localStorage.setItem(KANDA_DONE_KEY, '1');
+    const nY = child.years.length, nG = child.lifeGoals.length + child.schoolGoals.length;
+    showToast(`تم نقل بيانات ${name} إلى هذه الصفحة (${nY} سنة · ${nG} هدف) — وصارت تُنسخ سحابياً ✓`, 'success');
+    return true;
+  } catch (e) {
+    console.warn('ترحيل كندة تعذّر:', e);
+    return false;   // لا نضع العَلَم — تُعاد المحاولة في الفتحة القادمة
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // Boot
 // ═══════════════════════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', async () => {
@@ -45,6 +118,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   const remote = await loadUserSetting(SCH_KEY);
   store = remote || loadLocal();
   try { localStorage.setItem(userLsKey(SCH_KEY), JSON.stringify(store)); } catch {}
+  migrateKanda();          // ترحيل صفحة كندة المستقلّة (تُشغَّل مرة واحدة)
   cleanupOrphanGrades();   // تنظيف درجات يتيمة خلّفها حذف المواد من المستوى الخاطئ سابقاً
   buildEmojiPicker();
   renderChildrenBar();

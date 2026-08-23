@@ -640,7 +640,7 @@ function renderOpenPositions() {
   if (!tbody) return;
 
   if (!open.length) {
-    tbody.innerHTML = `<tr><td colspan="11"><div class="empty-state"><div class="icon">📗</div><p>لا توجد مراكز مفتوحة</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="icon">📗</div><p>لا توجد مراكز مفتوحة</p></div></td></tr>`;
     return;
   }
 
@@ -660,7 +660,6 @@ function renderOpenPositions() {
       <td class="num">${fmtN(p.remainingShares)}${isPartial ? ' <span class="small text-accent">(جزئي)</span>' : ''}</td>
       <td class="num text-muted">${formatSAR(p.avgCost)}</td>
       <td class="num text-accent">${p.currentPrice != null ? formatSAR(p.currentPrice) : '—'}</td>
-      <td class="num">${formatSAR(costOfRem)}</td>
       <td class="num text-accent bold">${p.marketValue != null ? formatSAR(p.marketValue) : '—'}</td>
       <td class="num ${pnlCls} bold">${p.unrealizedPnL != null ? formatSAR(p.unrealizedPnL, true) : '—'}</td>
       <td class="num ${pnlCls}">${p.unrealizedPct != null ? p.unrealizedPct.toFixed(2) + '%' : '—'}</td>
@@ -684,8 +683,11 @@ function renderOpenPositions() {
   }, 0);
   const totalRetPct = totalRetBasis > 0 ? totalRet / totalRetBasis * 100 : null;
   tfoot.innerHTML = `<tr class="t-total">
-    <td colspan="5"><strong class="small">الإجمالي</strong></td>
-    <td class="num bold">${formatSAR(totalCost)}</td>
+    <!-- عمود «التكلفة الكلية» حُذف 2026-08-23 بموافقة المالك: كان حاصل ضرب
+         عمودين مجاورين له في الصف نفسه (متوسط التكلفة × الأسهم) في جدول من
+         12 عموداً يفرض تمريراً أفقياً. الإجمالي بقي هنا حيث يُقرأ فعلاً. -->
+    <td colspan="5"><strong class="small">الإجمالي</strong>
+      <span class="small text-muted">· تكلفة الحيازات ${formatSAR(totalCost)}</span></td>
     <td class="num bold text-accent">${formatSAR(totalMkt)}</td>
     <td class="num bold ${totalUPnL>=0?'text-success':'text-danger'}">${formatSAR(totalUPnL,true)}</td>
     <td class="num ${totalUPnL>=0?'text-success':'text-danger'}">${totalUPct.toFixed(2)}%</td>
