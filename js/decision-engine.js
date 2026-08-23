@@ -2586,8 +2586,15 @@ function openStockCard(ticker) {
   setNum('de-card-histyears', cfg.divHistoryYears);
   setSelect('de-card-erosion', cfg.equityEroding === true ? 'yes' : '');
   buildCardMarks(cfg.cyclicalMarks || {});
+  // م.45 — سعر الخروج المؤجل وسنداته (من deferred_exits_v1 لا من إعدادات السهم)
+  const dx = deferredExits[ticker] || {};
+  setNum('de-card-exitprice',    dx.exitPrice);
+  setNum('de-card-exit-analyst', (dx.bases || {}).analystTarget);
+  setNum('de-card-exit-book',    (dx.bases || {}).bookValue);
+  setNum('de-card-exit-mult',    (dx.bases || {}).justMultiple);
   renderCardCategory();
   renderCardFilter0(ticker);
+  renderCardExitCheck(ticker);
   setSelect('de-card-covered', cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered]  || '');
   setSelect('de-card-healthy', cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy] || '');
   setSelect('de-card-cut',     cfg.divSignal    || ({ no: 'stable', yes: 'temp' })[cfg.divCut]       || '');
@@ -2674,6 +2681,36 @@ function renderCardCyclical() {
     + `<div class="text-muted" style="font-size:.74rem;margin-top:2px">${escapeHtmlSafe(r.why)}</div>`;
 }
 
+// م.2 — التعادل الحقيقي للسهم المعروض في البطاقة
+function _cardBreakEven(ticker) {
+  const h = holdings.find(x => x.ticker === ticker);
+  if (!h) return null;
+  const divs = (divByTicker[ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+  return trueBreakEven(+h.avg_price, divs, +h.shares);
+}
+
+// م.45 — فحص حيّ لسعر الخروج: يُرى سبب الرفض قبل الضغط على «حفظ»
+function renderCardExitCheck(ticker) {
+  const el = document.getElementById('de-card-exitcheck');
+  if (!el) return;
+  const g = id => { const x = document.getElementById(id); return x ? x.value.trim() : ''; };
+  const n = v => { const x = parseFloat(v); return (v !== '' && isFinite(x)) ? x : undefined; };
+  const be = _cardBreakEven(ticker);
+  const price = n(g('de-card-exitprice'));
+  const beTxt = be != null
+    ? `التعادل الحقيقي <b class="num">${formatNum(be)}</b> ر.س <span class="text-muted">(متوسط تكلفتك ناقص ما استُرِدّ توزيعاً — م.2)</span>`
+    : '<span class="text-muted">التعادل الحقيقي غير متاح (لا حيازة أو بيانات ناقصة)</span>';
+  if (price == null) { el.innerHTML = beTxt; return; }
+  const chk = validateExitPrice(price, be, {
+    analystTarget: n(g('de-card-exit-analyst')),
+    bookValue:     n(g('de-card-exit-book')),
+    justMultiple:  n(g('de-card-exit-mult')),
+  });
+  el.innerHTML = beTxt + '<br>' + (chk.ok
+    ? `<b style="color:var(--st-good)">✅ سعر صالح</b> <span class="text-muted">— مسنود بـ: ${chk.bases.map(escapeHtmlSafe).join('، ')}</span>`
+    : `<b style="color:var(--st-bad)">⛔ لا يُحفَظ</b> <span class="text-muted">— ${chk.errors.map(escapeHtmlSafe).join(' · ')}</span>`);
+}
+
 // م.41 — حالة بوابة العمق للسهم المعروض، من سجل توزيعاتك + الإدخال اليدوي
 function renderCardFilter0(ticker) {
   const el = document.getElementById('de-card-depth');
@@ -2706,6 +2743,7 @@ document.addEventListener('input', e => {
   if (!e.target) return;
   if (/^de-card-(mcap|sov|streak|cov|fund)$/.test(e.target.id)) renderCardCategory();
   if (e.target.id === 'de-card-histyears') renderCardFilter0(_cardTicker);
+  if (/^de-card-exit(price|-analyst|-book|-mult)$/.test(e.target.id)) renderCardExitCheck(_cardTicker);
 });
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'de-card-fund') renderCardCategory();
@@ -2738,6 +2776,34 @@ async function saveStockCard(e) {
     if (el && el.checked) marks[m.key] = true;
   });
   cfg.cyclicalMarks = Object.keys(marks).length ? marks : undefined;
+
+  // ══════════════════════════════════════════════════════════════════
+  // م.45 — سعر الخروج المؤجل: يُفحَص قبل الحفظ ولا يُحفَظ مخالفاً
+  // ------------------------------------------------------------------
+  // الرفض هنا مقصود وليس تشدّداً: سعرٌ بلا سند ليس قراراً، وسعرٌ عند
+  // التعادل بالضبط «هروب لا قرار» بنصّ المادة. حفظُهما يجعل القائمة
+  // تبدو مُدارة وهي ليست كذلك.
+  // ══════════════════════════════════════════════════════════════════
+  const exitPrice = numOf('de-card-exitprice');
+  if (exitPrice != null) {
+    const bases = {
+      analystTarget: numOf('de-card-exit-analyst'),
+      bookValue:     numOf('de-card-exit-book'),
+      justMultiple:  numOf('de-card-exit-mult'),
+    };
+    const be = _cardBreakEven(_cardTicker);
+    const chk = validateExitPrice(exitPrice, be, bases);
+    if (!chk.ok) { showToast('⛔ ' + chk.errors.join(' · '), 'error'); return; }
+    deferredExits[_cardTicker] = {
+      ...(deferredExits[_cardTicker] || {}),
+      exitPrice, bases, breakEven: be,
+      setOn: new Date().toISOString().slice(0, 10),
+    };
+    await cdSave('deferred', deferredExits);
+  } else if (deferredExits[_cardTicker]) {
+    delete deferredExits[_cardTicker];
+    await cdSave('deferred', deferredExits);
+  }
   cfg.divCoverage  = v('de-card-covered') || undefined;
   cfg.fundamentals = v('de-card-healthy') || undefined;
   cfg.divSignal    = v('de-card-cut') || undefined;

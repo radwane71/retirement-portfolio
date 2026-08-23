@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823y">
+  <link rel="stylesheet" href="css/style.css?v=20260823z">
   <style>
     /* ── محرّك القرار — ستايل خاص ── */
     .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
@@ -480,6 +480,32 @@
             <div id="de-card-marks" style="display:flex;flex-direction:column;gap:4px;margin-top:4px"></div>
             <div id="de-card-cyclical" class="small" style="margin-top:6px"></div>
           </div>
+          <!-- ══ المادة 45 — سعر الخروج المؤجل ══
+               يُوضَع **عند القيمة لا عند التعادل**: «وضعه عند التعادل
+               بالضبط هروب لا قرار» — 22,400 ريال ضاعت على سبع حيازات.
+               يلزم سند من ثلاثة، والحفظ يرفض ما يخالف. -->
+          <div class="form-group full" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
+            <label style="font-weight:700;color:var(--accent)">سعر الخروج المؤجل (المادة 45)</label>
+            <small class="text-muted" style="display:block;font-size:.74rem;margin-top:2px">يُملأ فقط لسهم فشل الفلتر 1 وسعره تحت التعادل الحقيقي.</small>
+            <div id="de-card-exitcheck" class="small" style="margin-top:6px"></div>
+          </div>
+          <div class="form-group">
+            <label>سعر الخروج</label>
+            <input type="number" id="de-card-exitprice" step="0.01" min="0" placeholder="عند القيمة لا التعادل">
+          </div>
+          <div class="form-group">
+            <label>هدف محلل (≤ 90 يوماً)</label>
+            <input type="number" id="de-card-exit-analyst" step="0.01" min="0" placeholder="سند اختياري">
+          </div>
+          <div class="form-group">
+            <label>القيمة الدفترية للسهم</label>
+            <input type="number" id="de-card-exit-book" step="0.01" min="0" placeholder="سند اختياري">
+          </div>
+          <div class="form-group">
+            <label>المكرر المبرر</label>
+            <input type="number" id="de-card-exit-mult" step="0.01" min="0" placeholder="سند اختياري">
+          </div>
+
           <div class="form-group">
             <label>حقوق الملكية تتآكل؟ (م.46)</label>
             <select id="de-card-erosion">
@@ -553,14 +579,14 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260823y"></script>
-  <script src="js/auth.js?v=20260823y"></script>
-  <script src="js/utils.js?v=20260823y"></script>
-  <script src="js/constitution.js?v=20260823y"></script>
-  <script src="js/constitution-data.js?v=20260823y"></script>
-  <script src="js/declutter.js?v=20260823y"></script>
-  <script src="js/navtoggle.js?v=20260823y"></script>
-  <script src="js/tickerdb.js?v=20260823y"></script>
+  <script src="js/supabase.js?v=20260823z"></script>
+  <script src="js/auth.js?v=20260823z"></script>
+  <script src="js/utils.js?v=20260823z"></script>
+  <script src="js/constitution.js?v=20260823z"></script>
+  <script src="js/constitution-data.js?v=20260823z"></script>
+  <script src="js/declutter.js?v=20260823z"></script>
+  <script src="js/navtoggle.js?v=20260823z"></script>
+  <script src="js/tickerdb.js?v=20260823z"></script>
   <script>
     // شرح الكارت (نمط showCardInfo المشترك في utils.js)
     window.CARD_INFO = {
@@ -708,7 +734,7 @@
       },
     };
   </script>
-  <script src="js/decision-engine.js?v=20260823y"></script>
-  <script src="js/decision-intel.js?v=20260823y"></script>
+  <script src="js/decision-engine.js?v=20260823z"></script>
+  <script src="js/decision-intel.js?v=20260823z"></script>
 </body>
 </html>
