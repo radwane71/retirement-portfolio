@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823x">
+  <link rel="stylesheet" href="css/style.css?v=20260823y">
   <style>
     /* ── محرّك القرار — ستايل خاص ── */
     .de-summary { display:flex; flex-wrap:wrap; gap:12px; margin-bottom:18px; }
@@ -298,6 +298,23 @@
     </div>
     <p id="de-gaps-note" class="small text-muted" style="margin:2px 2px 18px;line-height:1.6"></p>
 
+    <!-- ══ سجلّا الدستور: القراءات (م.43) والتدقيق (م.72) — مطويّان ══
+         مطويّان عمداً: هما ذاكرة النظام لا شاشة قرار. يُفتحان عند المراجعة
+         الربعية (م.60) وعند التحقّق من أن إشارةً اكتمل تأكيدها. -->
+    <details class="card mb-6" id="de-ledgers">
+      <summary class="section-header" style="cursor:pointer;list-style:none;margin-bottom:0">
+        <span class="section-title">📒 سجلّا الدستور — القراءات وسجل التدقيق
+          <span class="text-muted" style="font-size:.8rem">▾</span></span>
+        <span id="de-ledger-badge" class="small text-muted"></span>
+      </summary>
+      <div style="margin-top:14px">
+        <h4 class="de-d-h">القراءات المؤكِّدة (م.43)</h4>
+        <div id="de-readings"></div>
+        <h4 class="de-d-h" style="margin-top:16px">سجل التدقيق (م.72)</h4>
+        <div id="de-audit"></div>
+      </div>
+    </details>
+
     <!-- ② أين أنت الآن — مفتوح -->
     <div class="dash-divider"><span class="n">٢</span> أين أنت الآن</div>
     <div class="stats-grid stats-grid-fill" id="de-intel-kpis">
@@ -446,6 +463,31 @@
             </select>
           </div>
 
+          <!-- ══ الفلتر 0 — المادة 41: بوابة عمق التاريخ ══
+               «ممنوع الحكم بفشل الاستدامة قبل استخراج التوزيعات المدفوعة
+               فعلياً لأربع سنوات». وعند التراجع: نقاط تفصل الدوري عن البنيوي. -->
+          <div class="form-group full" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
+            <label style="font-weight:700;color:var(--accent)">الفلتر 0 — عمق التاريخ (المادة 41)</label>
+            <small class="text-muted" style="display:block;font-size:.74rem;margin-top:2px">نسبة التوزيع في نصف سنة تقيس <b>لحظة</b>. تاريخ خمس سنوات يقيس <b>سياسة</b>.</small>
+            <div id="de-card-depth" class="small" style="margin-top:6px"></div>
+          </div>
+          <div class="form-group">
+            <label>سنوات التوزيع المستخرَجة يدوياً</label>
+            <input type="number" id="de-card-histyears" step="1" min="0" placeholder="من قوائم التدفقات">
+          </div>
+          <div class="form-group full">
+            <label style="font-size:.8rem">علامات «دوري لا بنيوي» — كل علامة نقطة</label>
+            <div id="de-card-marks" style="display:flex;flex-direction:column;gap:4px;margin-top:4px"></div>
+            <div id="de-card-cyclical" class="small" style="margin-top:6px"></div>
+          </div>
+          <div class="form-group">
+            <label>حقوق الملكية تتآكل؟ (م.46)</label>
+            <select id="de-card-erosion">
+              <option value="">— لا —</option>
+              <option value="yes">نعم — تتآكل</option>
+            </select>
+          </div>
+
           <div class="form-group full" style="border-top:1px solid var(--border);padding-top:10px;margin-top:2px">
             <label style="font-weight:700;color:var(--accent)">بوابة الاستدامة (الفلتر 1)</label>
             <small class="text-muted" style="display:block;font-size:.74rem;margin-top:2px">تُملأ آلياً من تقييمك وسجل أرباحك (أقصاه مراقبة) — وإدخالك يتجاوزها. «مزمن/مؤكّد» → تصفية</small>
@@ -511,14 +553,14 @@
   <div class="toast" id="toast"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260823x"></script>
-  <script src="js/auth.js?v=20260823x"></script>
-  <script src="js/utils.js?v=20260823x"></script>
-  <script src="js/constitution.js?v=20260823x"></script>
-  <script src="js/constitution-data.js?v=20260823x"></script>
-  <script src="js/declutter.js?v=20260823x"></script>
-  <script src="js/navtoggle.js?v=20260823x"></script>
-  <script src="js/tickerdb.js?v=20260823x"></script>
+  <script src="js/supabase.js?v=20260823y"></script>
+  <script src="js/auth.js?v=20260823y"></script>
+  <script src="js/utils.js?v=20260823y"></script>
+  <script src="js/constitution.js?v=20260823y"></script>
+  <script src="js/constitution-data.js?v=20260823y"></script>
+  <script src="js/declutter.js?v=20260823y"></script>
+  <script src="js/navtoggle.js?v=20260823y"></script>
+  <script src="js/tickerdb.js?v=20260823y"></script>
   <script>
     // شرح الكارت (نمط showCardInfo المشترك في utils.js)
     window.CARD_INFO = {
@@ -666,7 +708,7 @@
       },
     };
   </script>
-  <script src="js/decision-engine.js?v=20260823x"></script>
-  <script src="js/decision-intel.js?v=20260823x"></script>
+  <script src="js/decision-engine.js?v=20260823y"></script>
+  <script src="js/decision-intel.js?v=20260823y"></script>
 </body>
 </html>

@@ -306,6 +306,40 @@ function dividendTrendOf(ticker) {
 // مهم: الكشف الآلي أقصاه «أصفر/مراقبة» — التصفية (الأحمر) تتطلب تأكيدك اليدوي.
 // النتيجة: fail=تدهور مؤكّد→تصفية · watch=قلق→مراقبة · pass=سليم · unknown=ناقص
 // ══════════════════════════════════════════════════════════════════════
+// م.43 · 45 · 72 — سجلات تعيش عبر الدورات، تُحمَّل مرة في loadAll()
+let readingsLog   = {};   // { ticker: { signalKey: [قراءات] } }
+let deferredExits = {};   // { ticker: {…} } — قائمة الخروج المؤجل
+let auditLog      = [];   // قيود م.72
+
+// ══════════════════════════════════════════════════════════════════════
+// م.43 — تسجيل القراءة آلياً عند كل رصد
+// ----------------------------------------------------------------------
+// «القراءة» فترةٌ لا حدث: `pushReading` ترفض تكرار الربع نفسه، فتشغيل
+// المحرّك عشر مرات في ربع واحد يسجّل قراءة واحدة. بلا هذا الشرط يكتمل
+// «التأكيد» من نقرة زرّ مكرَّرة، وهو نقيض المادة تماماً.
+// ══════════════════════════════════════════════════════════════════════
+async function recordReadings(rows) {
+  let log = readingsLog, changed = false;
+  const today = new Date();
+  (rows || []).forEach(r => {
+    const keys = (r.sustain && r.sustain.signalKeys) || [];
+    keys.forEach(k => {
+      const before = ((log[r.ticker] || {})[k] || []).length;
+      log = pushReading(log, r.ticker, k, {
+        date: today.toISOString().slice(0, 10),
+        zone: r.sustain.status,
+        note: r.sustain.reason || null,
+      });
+      if (((log[r.ticker] || {})[k] || []).length !== before) changed = true;
+    });
+  });
+  if (changed) { readingsLog = log; await cdSave('readings', log); }
+  return changed;
+}
+function readingsFor(ticker, signalKey) {
+  return ((readingsLog[ticker] || {})[signalKey]) || [];
+}
+
 function sustainabilityOf(h) {
   const cfg = engineCfg[h.ticker] || {};
   let cov = cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
@@ -371,10 +405,44 @@ function sustainabilityOf(h) {
 
   // مستوى أحمر (مزمن/مؤكّد) لا يأتي إلا من إدخالك اليدوي
   const structural = [];
-  if (cov === 'uncovered')     structural.push('التوزيع غير مغطّى بشكل مزمن');
-  if (fun === 'deteriorating') structural.push('تدهور أساسيات مستمر / EPS سالب متكرر');
-  if (sig === 'cut')           structural.push('قطع توزيع مؤكّد');
-  if (structural.length) return { status: 'fail', reason: structural.join('، '), trend, autoSrc };
+  const sigKeys = [];
+  if (cov === 'uncovered')     { structural.push('التوزيع غير مغطّى بشكل مزمن'); sigKeys.push('coverageRed'); }
+  if (fun === 'deteriorating') { structural.push('تدهور أساسيات مستمر / EPS سالب متكرر'); sigKeys.push('epsNegative'); }
+  if (sig === 'cut')           { structural.push('قطع توزيع مؤكّد'); sigKeys.push('divCutOver25'); }
+  // انقطاع كامل إشارة **قاطعة** (م.44) — لا تمرّ عبر التأكيد ولا عبر م.41
+  const stopped = !!(trend && trend.signal === 'stopped');
+  if (stopped) sigKeys.unshift('divStopped');
+
+  if (structural.length || stopped) {
+    const base = { reason: (stopped ? ['انقطاع التوزيع كلياً'] : []).concat(structural).join('، '),
+                   trend, autoSrc, signalKeys: sigKeys };
+
+    // ══════════════════════════════════════════════════════════════════
+    // م.41 — بوابة عمق التاريخ **تسبق** الحكم بالفشل
+    // ------------------------------------------------------------------
+    // «ممنوع الحكم بفشل الاستدامة قبل استخراج التوزيعات المدفوعة فعلياً
+    // لأربع سنوات». والدستور يوثّق الخطأ الذي تمنعه: حُكم على جرير
+    // والقصيم وسدافكو وكهرباء بأنها خطرة من لقطة نصف سنة واحدة.
+    //
+    // الإشارة القاطعة (م.44) تتجاوز البوابة: انقطاع التوزيع واقعةٌ لا
+    // تحتاج عمقاً تاريخياً لتُقرأ.
+    // ══════════════════════════════════════════════════════════════════
+    const depth = depthGate(divByTicker[h.ticker] || [], (engineCfg[h.ticker] || {}).divHistoryYears);
+    if (!stopped && !depth.pass) {
+      return { ...base, status: 'watch', gatedBy: 'م.41', depth,
+               reason: `${base.reason} — لكن ${depth.why}` };
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // م.43 — قاعدة التأكيد: لا تنفيذ من قراءة واحدة إلا القاطعة
+    // ══════════════════════════════════════════════════════════════════
+    const conf = confirmationOf(sigKeys[0], readingsFor(h.ticker, sigKeys[0]));
+    if (conf.known && !conf.confirmed) {
+      return { ...base, status: 'watch', gatedBy: 'م.43', depth, confirm: conf,
+               reason: `${base.reason} — ${conf.why}` };
+    }
+    return { ...base, status: 'fail', depth, confirm: conf };
+  }
 
   const soft = [];
   if (cov === 'weak') soft.push('ضعف تغطية التوزيع' + tag('cov'));
@@ -466,6 +534,7 @@ function evaluateHolding(h, ctx) {
 
   const base = {
     ticker: h.ticker, name: h.name, sector: h.sector, shares: +h.shares,
+    avgCost: +h.avg_price || 0,             // م.45 — أساس التعادل الحقيقي
     weight, cap, price, value, assetType, zones, taskType,
     taskConflict: (taskConflicts[h.ticker] || 0) > 1 ? taskConflicts[h.ticker] : null,
     sustain: sus, targetWeight, hasTarget: hasExplicitTarget,
@@ -723,6 +792,11 @@ async function loadAll() {
   try { _planOverrideDates = await loadUserSetting('target_review_dates_v1'); }
   catch (_) { _planOverrideDates = null; }
 
+  // م.43 — سجل القراءات، وم.45 قائمة الخروج المؤجل، وم.72 سجل التدقيق
+  readingsLog   = (await cdLoad('readings', {})) || {};
+  deferredExits = (await cdLoad('deferred', {})) || {};
+  auditLog      = (await cdLoad('audit', [])) || [];
+
   // سجل الأرباح الفعلي لكل رمز — مصدر كشف اتجاه التوزيع آلياً
   divByTicker = {};
   (rDiv.data || []).forEach(d => {
@@ -859,10 +933,15 @@ function runEngine() {
 
   _results = holdings.map(h => evaluateHolding(h, ctx));
 
+  // م.43 — تُسجَّل قراءة واحدة لكل إشارة في كل ربع. تشغيل المحرّك مراراً
+  // في الربع نفسه لا يزيد العدّاد (pushReading يرفض تكرار الفترة).
+  recordReadings(_results);
+
   renderSummaryStrip(totalValue);
   renderActionGroups();
   renderSectorCheck(totalValue);
   renderTargetPlan();
+  renderLedgers();
   restoreFolds();
   renderCards();
 
@@ -1186,7 +1265,8 @@ function buildTargetPlan(valAware) {
   const rows = _results || [];
   const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
   const out = { exits: [], trims: [], adds: [], deferred: [], conflicts: [],
-                noTarget: [], total, fundedBy: 0, needed: 0,
+                noTarget: [], deferredExit: [],      // م.45 — قائمة الخروج المؤجل
+                total, fundedBy: 0, needed: 0,
                 deferredSar: 0, conflictSar: 0 };
   if (!(total > 0)) return out;
 
@@ -1258,9 +1338,43 @@ function buildTargetPlan(valAware) {
       }
       return;   // action='hold' — المشغّل انطبق والوزن دون هدفه، لا إجراء
     }
+    // ══════════════════════════════════════════════════════════════════
+    // م.45 — الفلتر 1-ب: بوابة الخسارة المحققة
+    // ------------------------------------------------------------------
+    // «عند فشل الفلتر 1، الخروج **لا يُنفَّذ فوراً** بل يمر بهذه البوابة
+    // إلزامياً.» وم.11 القاعدة المطلقة: لا بيع تحت متوسط التكلفة أبداً.
+    //
+    // والمقياس **التعادل الحقيقي** لا متوسط التكلفة: ما استُرِدّ توزيعاً
+    // رأسُ مال عاد فعلاً، وتجاهله يؤجّل خروجاً صار مربحاً.
+    //
+    // استثناء م.46 وحده يكسر القاعدة: انقطاع توزيع + فشل الفلتر 1 + تآكل
+    // حقوق ملكية. «التوزيع أجر الانتظار؛ حين ينقطع تصبح تحتفظ بأصل خاسر
+    // بلا دخل وقيمته تنزل — هذه خسارة صامتة لا صبر.»
+    // ══════════════════════════════════════════════════════════════════
     if (r.sustain && r.sustain.status === 'fail' && r.action === 'exit') {
-      out.exits.push(mk({ sar: r.value, shares: r.shares,
-        why: `🔴 فشل بوابة الاستدامة — الخروج واجب بغضّ النظر عن السعر (§4 الفلتر 1). ${r.sustain.reason || ''}` }));
+      const divs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+      const gate = deferredVerdict(price, r.avgCost, divs, r.shares);
+      const a46  = article46Applies(
+        !!(r.sustain.trend && r.sustain.trend.signal === 'stopped'),
+        true,
+        (engineCfg[r.ticker] || {}).equityEroding === true);
+
+      if (gate.action === 'defer' && !a46.applies) {
+        const saved = deferredExits[r.ticker] || {};
+        out.deferredExit.push(mk({
+          sar: r.value, shares: r.shares, breakEven: gate.breakEven,
+          exitPrice: saved.exitPrice != null ? +saved.exitPrice : null,
+          why: `⏸️ ${gate.why}`,
+          fix: saved.exitPrice != null
+            ? `سعر الخروج المسجَّل ${formatNum(saved.exitPrice)} — يُراجَع كل دورة (م.45).`
+            : 'حدِّد سعر خروج **عند القيمة لا عند التعادل**، مسنوداً بهدف محلل حديث أو القيمة الدفترية أو المكرر المبرر (م.45).',
+        }));
+        return;   // لا يدخل fundedBy: لم يُنفَّذ بيع
+      }
+      out.exits.push(mk({ sar: r.value, shares: r.shares, breakEven: gate.breakEven,
+        why: a46.applies
+          ? `⛔ ${a46.why}`
+          : `🔴 فشل بوابة الاستدامة، و${gate.why} — الخروج واجب (م.42 و45). ${r.sustain.reason || ''}` }));
       out.fundedBy += r.value;
       return;
     }
@@ -1353,11 +1467,62 @@ function buildTargetPlan(valAware) {
   return out;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// م.72 — سجل التدقيق: كل إشارة تُسجَّل ببياناتها ومصادرها
+// ----------------------------------------------------------------------
+// «التاريخ | الرمز | المادة المنطبقة | البيانات المستخدمة ومصادرها |
+// القرار | ما إذا نُفِّذ.»
+//
+// السجل ليس أرشيفاً تجميلياً: م.38 تمنع تحريك درجة التقييم بلا تغيّر
+// موثَّق، وم.71 تُلزم بمراجعة الخروج المؤجل **بالنسخة السارية وقت
+// المراجعة**. كلاهما غير قابل للفحص بلا سجل مؤرَّخ.
+//
+// القيد يُكتب مرة لكل (سهم · مادة · قرار) في اليوم — إعادة فتح الصفحة
+// عشر مرات لا تُنتج عشرة قيود لنفس القرار.
+// ══════════════════════════════════════════════════════════════════════
+async function recordAudit(plan) {
+  if (!plan) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  const seen = new Set(auditLog.filter(e => (e.ts || '').slice(0, 10) === today)
+                               .map(e => `${e.ticker}|${e.article}|${e.decision}`));
+  const add = [];
+  const push = (o, article, decision, executed) => {
+    const key = `${o.ticker}|${article}|${decision}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    const r = (_results || []).find(x => x.ticker === o.ticker) || {};
+    add.push(auditEntry({
+      ts: new Date().toISOString(), ticker: o.ticker, article, decision, executed,
+      signal: (r.sustain && r.sustain.signalKeys && r.sustain.signalKeys[0]) || null,
+      inputs: [
+        { name: 'السعر',          tv: tv(r.price, 'external', 'التراكر') },
+        { name: 'الوزن',          tv: tv(r.weight, 'derived', 'القيمة ÷ إجمالي المحفظة') },
+        { name: 'سقف الفئة',      tv: tv(r.cap, 'derived', r.category && r.category.known ? `الفئة ${r.category.short} (م.25)` : 'غير مصنَّف') },
+        { name: 'القيمة العادلة', tv: tv(r.fairValue, 'derived', 'حاسبة التقييم') },
+        { name: 'التعادل الحقيقي', tv: tv(o.breakEven, 'derived', 'متوسط التكلفة − التوزيع/سهم (م.2)') },
+      ],
+      note: o.why || null,
+    }));
+  };
+  (plan.exits || []).forEach(o => push(o, 'م.42 و45', 'خروج كامل', false));
+  (plan.deferredExit || []).forEach(o => push(o, 'م.45', 'خروج مؤجَّل', false));
+  (plan.trims || []).forEach(o => push(o, 'م.49', `تخفيف إلى ${formatNum(o.target)}%`, false));
+  (plan.adds || []).forEach(o => push(o, 'م.53 و54', `تجميع إلى ${formatNum(o.target)}%`, false));
+
+  if (!add.length) return false;
+  let log = auditLog;
+  add.forEach(e => { log = pushAudit(log, e); });
+  auditLog = log;
+  await cdSave('audit', log);
+  return true;
+}
+
 function renderTargetPlan() {
   const el = document.getElementById('de-plan-body');
   if (!el) return;
   const valAware = document.getElementById('de-plan-valaware')?.checked !== false;
   const p = buildTargetPlan(valAware);
+  recordAudit(p);   // م.72 — كل إشارة تُسجَّل (مرة لكل قرار في اليوم)
 
   if (!(p.total > 0)) {
     el.innerHTML = '<p class="text-muted" style="margin:0">لا حيازات لبناء خطة عليها.</p>';
@@ -1367,7 +1532,8 @@ function renderTargetPlan() {
   const SAR = v => formatSAR(v);
   const line = (o, kind) => {
     const badge = { exit: '🔻 تصفية كاملة', trim: '✂️ خفّف', add: '➕ جمّع',
-                    defer: '⏸️ مؤجَّل', conflict: '⚠️ تعارض' }[kind];
+                    defer: '⏸️ مؤجَّل', conflict: '⚠️ تعارض',
+                    deferredExit: '⏸️ خروج مؤجَّل (م.45)' }[kind];
     const amt = o.sar != null
       ? `<b class="num">${SAR(o.sar)}</b> ر.س${o.price > 0 ? ` ≈ <b class="num">${formatNum(o.shares, 0)}</b> سهم` : ''}`
       : '';
@@ -1408,6 +1574,9 @@ function renderTargetPlan() {
         <b>${badge}: ${escapeHtmlSafe(o.ticker)}</b> ${escapeHtmlSafe(o.name || '')}${to}<br>
         <span class="small">${amt}</span>
         ${pnlHtml}
+        ${o.breakEven != null ? `<div class="small num" style="margin-top:3px">
+          التعادل الحقيقي <b>${formatNum(o.breakEven)}</b> ر.س
+          <span class="text-muted">(متوسط تكلفتك ناقص ما استُرِدّ توزيعاً — م.2)</span></div>` : ''}
         <div class="small text-muted" style="margin-top:3px;line-height:1.6">${o.why || ''}${
           o.fairNote ? `<br>${o.fairNote}` : ''}${
           o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
@@ -1455,6 +1624,15 @@ function renderTargetPlan() {
     ${budget}
     ${nothing ? '<p class="small" style="margin:12px 0 0">✅ <b>لا أمر مطلوب الآن.</b> كل سهم له هدف مسجّل يقع ضمن هدفه، ولا مهمة تصفية مفتوحة.</p>' : ''}
     ${block('① قرارك بالخروج — يسبق كل شيء', p.exits, 'exit')}
+    ${p.deferredExit.length ? `<h4 class="de-d-h">①ب قائمة الخروج المؤجل — م.45 (${p.deferredExit.length})</h4>
+      <div class="note" data-state="warn" style="margin-bottom:8px">
+        <span class="ic">🛡️</span>
+        <div>هذه أسهم <b>فشلت بوابة الاستدامة</b> لكن سعرها <b>تحت التعادل الحقيقي</b>.
+        القاعدة المطلقة (م.11) تمنع البيع بخسارة محققة، فالخروج يُؤجَّل بأمر مفتوح عند سعر
+        <b>يُحدَّد عند القيمة لا عند التعادل</b> — «وضعه عند التعادل بالضبط هروب لا قرار»
+        (م.45). تُراجَع هذه القائمة <b>ربعياً</b> (م.60) و<b>سعرها كل دورة</b>.</div>
+      </div>
+      ${p.deferredExit.map(o => line(o, 'deferredExit')).join('')}` : ''}
     ${block('② تخفيف — ممّ تموّل', p.trims, 'trim')}
     ${block('③ تجميع — أين تضع المال', p.adds, 'add')}
     ${block('④ مؤجَّل — الفجوة قائمة والتنفيذ ممنوع الآن', p.deferred, 'defer')}
@@ -1464,6 +1642,64 @@ function renderTargetPlan() {
         escapeHtmlSafe(o.ticker) + (o.noPrice ? ' (بلا سعر)' : ' (بلا هدف مسجّل)')).join('، ')}
       — لا وجهة تُقاس إليها، فلا يُخترع لها هدف (§8). حدّد أهدافها في صفحة «أهداف الأسهم والقطاعات».</p>` : ''}
     ${renderSectorPlan()}`;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// عرض السجلّين — م.43 و72
+// ══════════════════════════════════════════════════════════════════════
+function renderLedgers() {
+  const rEl = document.getElementById('de-readings');
+  const aEl = document.getElementById('de-audit');
+  const bEl = document.getElementById('de-ledger-badge');
+
+  if (rEl) {
+    const rows = [];
+    Object.entries(readingsLog || {}).forEach(([tk, sigs]) => {
+      Object.entries(sigs || {}).forEach(([key, reads]) => {
+        const c = confirmationOf(key, reads);
+        if (!c.known) return;
+        rows.push({ tk, key, c, periods: (reads || []).map(x => x.period).filter(Boolean) });
+      });
+    });
+    // الأقرب لاكتمال التأكيد أولاً — هو ما يحتاج انتباهاً
+    rows.sort((a, b) => (b.c.have / (b.c.need || 1)) - (a.c.have / (a.c.need || 1)));
+    rEl.innerHTML = rows.length
+      ? `<div class="table-wrapper"><table><thead><tr>
+           <th>الرمز</th><th>الإشارة</th><th>الصنف</th><th>القراءات</th><th>الفترات</th><th>الحكم</th>
+         </tr></thead><tbody>${rows.map(r => `<tr>
+           <td><b>${escapeHtmlSafe(r.tk)}</b></td>
+           <td>${escapeHtmlSafe(r.c.label)}</td>
+           <td class="small">${({ decisive:'قاطعة', strong:'قوية', medium:'متوسطة', weak:'ضعيفة' })[r.c.cls]}</td>
+           <td class="num"><b>${r.c.have}</b> من ${r.c.need || '—'}</td>
+           <td class="small text-muted">${r.periods.map(escapeHtmlSafe).join(' · ') || '—'}</td>
+           <td class="small" style="color:var(--st-${r.c.confirmed ? 'bad' : 'warn'})">${escapeHtmlSafe(r.c.why)}</td>
+         </tr>`).join('')}</tbody></table></div>`
+      : noteHtml('📭', 'لا قراءات مسجَّلة بعد. تُسجَّل قراءة واحدة لكل إشارة في كل ربع عند تشغيل المحرّك — '
+                     + 'تكرار التشغيل في الربع نفسه لا يزيد العدّاد (م.43).', '');
+    if (bEl) {
+      const pending = rows.filter(r => !r.c.confirmed && r.c.need > 0).length;
+      bEl.textContent = `${rows.length} إشارة مرصودة${pending ? ` · ${pending} تنتظر تأكيداً` : ''}`;
+    }
+  }
+
+  if (aEl) {
+    const last = (auditLog || []).slice(-40).reverse();
+    aEl.innerHTML = last.length
+      ? `<div class="table-wrapper"><table><thead><tr>
+           <th>التاريخ</th><th>الرمز</th><th>المادة</th><th>القرار</th><th>نُفِّذ؟</th><th>مدخلات ضعيفة</th>
+         </tr></thead><tbody>${last.map(e => `<tr>
+           <td class="small num">${escapeHtmlSafe((e.ts || '').slice(0, 10))}</td>
+           <td><b>${escapeHtmlSafe(e.ticker || '—')}</b></td>
+           <td class="small">${escapeHtmlSafe(e.article || '—')}</td>
+           <td class="small">${escapeHtmlSafe(e.decision || '—')}</td>
+           <td class="small">${e.executed ? '✅' : '⏳'}</td>
+           <td class="small" style="color:${e.weakInputs.length ? 'var(--st-warn)' : 'var(--text-muted)'}">${
+             e.weakInputs.length ? '⚠️ ' + e.weakInputs.map(escapeHtmlSafe).join('، ') : '—'}</td>
+         </tr>`).join('')}</tbody></table></div>
+         <p class="small text-muted" style="margin:6px 0 0">آخر ${last.length} قيداً من ${auditLog.length}. `
+         + `عمود «مدخلات ضعيفة» يرصد ما لا يجوز أن يقود قرار وزن (م.66/2) — الرقم الخارجي ⚠️ يُعلَن ولا يُبنى عليه.</p>`
+      : noteHtml('📭', 'لا قيود بعد. يُسجَّل قيد لكل قرار يصدره المحرّك، مرة واحدة في اليوم للقرار نفسه (م.72).', '');
+  }
 }
 
 // ── المستوى القطاعي: انحراف كل قطاع عن هدفك ──────────────────────────
@@ -2347,7 +2583,11 @@ function openStockCard(ticker) {
   setNum('de-card-streak', cfg.streakYears);
   setNum('de-card-cov',    cfg.coverage);
   setSelect('de-card-fund', cfg.isManagedFund === true ? 'yes' : '');
+  setNum('de-card-histyears', cfg.divHistoryYears);
+  setSelect('de-card-erosion', cfg.equityEroding === true ? 'yes' : '');
+  buildCardMarks(cfg.cyclicalMarks || {});
   renderCardCategory();
+  renderCardFilter0(ticker);
   setSelect('de-card-covered', cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered]  || '');
   setSelect('de-card-healthy', cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy] || '');
   setSelect('de-card-cut',     cfg.divSignal    || ({ no: 'stable', yes: 'temp' })[cfg.divCut]       || '');
@@ -2407,6 +2647,43 @@ function closeStockCard() { document.getElementById('de-card-modal').style.displ
 // يُعاد الحساب مع كل تعديل حقل، فيرى المالك أثر الرقم على السقف قبل الحفظ.
 // وحين ينقص مدخل، يُعرَض ما ينقص بالضبط — لا فئة مُخمَّنة (م.20 و21).
 // ══════════════════════════════════════════════════════════════════════
+// م.41 — علامات «دوري لا بنيوي»، تُبنى من CYCLICAL_MARKS فلا تتفرّق عن المصدر
+function buildCardMarks(saved) {
+  const box = document.getElementById('de-card-marks');
+  if (!box) return;
+  box.innerHTML = CYCLICAL_MARKS.map(m => `
+    <label style="display:flex;gap:6px;align-items:flex-start;font-size:.78rem;font-weight:400;cursor:pointer">
+      <input type="checkbox" id="mark-${m.key}" ${saved[m.key] === true ? 'checked' : ''} style="margin-top:3px">
+      <span>${escapeHtmlSafe(m.label)}</span>
+    </label>`).join('');
+  box.querySelectorAll('input').forEach(el => el.addEventListener('change', renderCardCyclical));
+  renderCardCyclical();
+}
+
+function renderCardCyclical() {
+  const el = document.getElementById('de-card-cyclical');
+  if (!el) return;
+  const marks = {};
+  CYCLICAL_MARKS.forEach(m => {
+    const x = document.getElementById('mark-' + m.key);
+    if (x && x.checked) marks[m.key] = true;
+  });
+  const r = cyclicalScore(marks);
+  const col = r.key === 'cyclical' ? 'good' : r.key === 'mixed' ? 'warn' : 'bad';
+  el.innerHTML = `<b style="color:var(--st-${col})">${r.score} من ${r.max} — ${escapeHtmlSafe(r.label)}</b>`
+    + `<div class="text-muted" style="font-size:.74rem;margin-top:2px">${escapeHtmlSafe(r.why)}</div>`;
+}
+
+// م.41 — حالة بوابة العمق للسهم المعروض، من سجل توزيعاتك + الإدخال اليدوي
+function renderCardFilter0(ticker) {
+  const el = document.getElementById('de-card-depth');
+  if (!el) return;
+  const manual = document.getElementById('de-card-histyears');
+  const g = depthGate(divByTicker[ticker] || [], manual ? manual.value : null);
+  el.innerHTML = `<b style="color:var(--st-${g.pass ? 'good' : 'warn'})">${g.pass ? '✅ الحكم جائز' : '⏸️ الحكم ممنوع'}</b>`
+    + `<div class="text-muted" style="font-size:.74rem;margin-top:2px">${escapeHtmlSafe(g.why)}</div>`;
+}
+
 function renderCardCategory() {
   const el = document.getElementById('de-card-catresult');
   if (!el || typeof classifyStock !== 'function') return;
@@ -2426,7 +2703,9 @@ function renderCardCategory() {
 }
 // إعادة الحساب فور الكتابة — بلا حفظ
 document.addEventListener('input', e => {
-  if (e.target && /^de-card-(mcap|sov|streak|cov|fund)$/.test(e.target.id)) renderCardCategory();
+  if (!e.target) return;
+  if (/^de-card-(mcap|sov|streak|cov|fund)$/.test(e.target.id)) renderCardCategory();
+  if (e.target.id === 'de-card-histyears') renderCardFilter0(_cardTicker);
 });
 document.addEventListener('change', e => {
   if (e.target && e.target.id === 'de-card-fund') renderCardCategory();
@@ -2450,6 +2729,15 @@ async function saveStockCard(e) {
   cfg.streakYears  = numOf('de-card-streak');
   cfg.coverage     = numOf('de-card-cov');
   cfg.isManagedFund = v('de-card-fund') === 'yes' ? true : undefined;
+  // م.41 — عمق التاريخ وعلامات الدوري، وم.46 تآكل حقوق الملكية
+  cfg.divHistoryYears = numOf('de-card-histyears');
+  cfg.equityEroding   = v('de-card-erosion') === 'yes' ? true : undefined;
+  const marks = {};
+  CYCLICAL_MARKS.forEach(m => {
+    const el = document.getElementById('mark-' + m.key);
+    if (el && el.checked) marks[m.key] = true;
+  });
+  cfg.cyclicalMarks = Object.keys(marks).length ? marks : undefined;
   cfg.divCoverage  = v('de-card-covered') || undefined;
   cfg.fundamentals = v('de-card-healthy') || undefined;
   cfg.divSignal    = v('de-card-cut') || undefined;
