@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823b">
+  <link rel="stylesheet" href="css/style.css?v=20260823c">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -639,10 +639,10 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260823b"></script>
-  <script src="js/auth.js?v=20260823b"></script>
-  <script src="js/utils.js?v=20260823b"></script>
-  <script src="js/declutter.js?v=20260823b"></script>
+  <script src="js/supabase.js?v=20260823c"></script>
+  <script src="js/auth.js?v=20260823c"></script>
+  <script src="js/utils.js?v=20260823c"></script>
+  <script src="js/declutter.js?v=20260823c"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -972,9 +972,19 @@
         const cf = fcf * Math.pow(1 + growth_5yr, n);
         pv_sum += cf / Math.pow(1 + discount_rate, n);
       }
+      // AUDIT 2026-08-23 — كان النمو يقفز من نمو الخمس سنوات إلى النمو الدائم
+      // **دفعة واحدة** في السنة السادسة: شركة تنمو 15% تصير 3% بين ليلة وضحاها.
+      // هذا أثر نموذجي لا اقتصادي، ويكسر منحنى التدفقات عند نقطة تعسّفية.
+      // الممارسة المعيارية: **تلاشٍ خطّي** (fade) من نمو المرحلة الأولى إلى
+      // النمو الدائم عبر سنوات الانتقال، فيبلغ النمو الدائم في السنة العاشرة
+      // بالضبط — وهي السنة التي تُبنى عليها القيمة النهائية، فيبقى النموذج متسقاً.
+      // تنبيه صادق: هذا **يرفع** القيمة مقابل الصيغة السابقة حين يكون نمو
+      // المرحلة الأولى أعلى من الدائم — لأن الصيغة السابقة كانت تبتر النمو مبكراً.
       let cf_prev = cf5;
       for (let n = 6; n <= 10; n++) {
-        cf_prev = cf_prev * (1 + growth_perp);
+        const t = (n - 5) / 5;                                   // 0.2 … 1.0
+        const g = growth_5yr + (growth_perp - growth_5yr) * t;    // يصل للدائم عند n=10
+        cf_prev = cf_prev * (1 + g);
         pv_sum += cf_prev / Math.pow(1 + discount_rate, n);
       }
       const tv_cf            = cf_prev * (1 + growth_perp);
@@ -999,7 +1009,11 @@
       const v = (nums || []).filter(x => x != null && isFinite(x) && x > 0);
       if (v.length < 2) return { n: v.length, avg: v.length ? v[0] : null, sd: 0, cv: 0, min: v[0] ?? null, max: v[0] ?? null };
       const avg = v.reduce((a, b) => a + b, 0) / v.length;
-      const sd  = Math.sqrt(v.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / v.length); // σ المجتمع
+      // AUDIT 2026-08-23 — كان σ المجتمع (÷n). النماذج هنا **عيّنة** من طرق
+      // تقييم ممكنة لا مجتمعاً كاملاً، وقسمة (n−1) هي المقدّر غير المتحيّز.
+      // والفرق ليس أكاديمياً: عند ثلاثة نماذج يرفع σ بنحو 22%، فينبّه على
+      // تشتّت كان يمرّ تحت عتبة 30% — والاتجاه **لصالح التحفّظ**.
+      const sd  = Math.sqrt(v.reduce((a, b) => a + Math.pow(b - avg, 2), 0) / (v.length - 1)); // σ العيّنة
       return { n: v.length, avg, sd, cv: avg > 0 ? sd / avg * 100 : 0, min: Math.min(...v), max: Math.max(...v) };
     }
     const CV_ALERT = 30; // % — فوقها لا يُعرض رقم واحد كقيمة عادلة
@@ -1110,6 +1124,40 @@
 
     // هامش الأمان مزدوج: على الطرف الأدنى (متحفّظ) وعلى المتوسط/المرساة —
     // الفارق بينهما هو حجم الرهان على أن النموذج المتفائل هو الصحيح.
+    // ══════════════════════════════════════════════════════════════════
+    // سعر الشراء المنضبط — هامش أمان **مطلوب** لا وصفي
+    // ------------------------------------------------------------------
+    // الحاسبة كانت تُجيب: «كم أنت تحت القيمة العادلة؟» — وهو وصف للحاضر.
+    // والسؤال الذي يقود القرار: «تحت أي سعر يكون الشراء منضبطاً؟»
+    // هذا جوهر منهج جراهام: القيمة العادلة تقدير له خطأ، وهامش الأمان هو
+    // الوسادة التي تحتمل هذا الخطأ. وحجمها يجب أن **يتبع حجم عدم اليقين**
+    // لا أن يكون رقماً واحداً لكل الحالات:
+    //
+    //   الأساس 15% — الحدّ الأدنى المعقول لأي تقدير.
+    //   + تشتّت النماذج: كلما اختلفت النماذج زاد المطلوب (نصف معامل الاختلاف).
+    //   + 10% إن هيمنت القيمة النهائية على DCF (فوق 75%) — النموذج حينها
+    //     قسمةٌ على رقم صغير لا تدفّقات مرصودة.
+    //   + 10% للدوري (إسمنت/بتروكيماويات) — الأرباح تتحرّك مع الدورة.
+    //   والسقف 50%: فوقها لا يكون الرقم تقديراً أصلاً بل تخميناً، والأصدق
+    //   ألّا يُقيَّم لا أن يُطلب خصم خيالي.
+    //
+    // المخرَج: «اشترِ دون X» — رقم قابل للتنفيذ يُنقَل مباشرةً إلى منطقة
+    // الشراء في محرّك القرار، بدل أن يُقدّر المالك الخصم في رأسه.
+    // ══════════════════════════════════════════════════════════════════
+    function requiredMoS(comp, companyType, tvShare) {
+      let mos = 0.15;
+      const why = ['أساس 15%'];
+      const cv = comp && isFinite(comp.cv) ? comp.cv : 0;
+      if (cv > 0) {
+        const add = Math.min(0.20, cv / 100 / 2);      // نصف معامل الاختلاف، بسقف 20%
+        if (add >= 0.01) { mos += add; why.push(`+${(add*100).toFixed(0)}% لتشتّت النماذج (CV ${cv.toFixed(0)}%)`); }
+      }
+      if (tvShare != null && tvShare > 0.75) { mos += 0.10; why.push('+10% لهيمنة القيمة النهائية على DCF'); }
+      if (companyType === 'cyclical')        { mos += 0.10; why.push('+10% لطبيعة الأرباح الدورية'); }
+      if (mos > 0.50) { mos = 0.50; why.push('مسقوف عند 50%'); }
+      return { mos, why };
+    }
+
     function marginPair(price, comp) {
       if (!(price > 0) || !comp) return { text: '', dual: '' };
       const pc = comp.min > 0 ? (comp.min - price) / comp.min * 100 : null;
@@ -1150,6 +1198,8 @@
 
         document.getElementById('loadingOverlay').classList.remove('hidden');
         _lastFairAvg = null; _lastSustain = null; _lastComp = null;
+        // حصّة القيمة النهائية من DCF — تُستعمل في احتساب هامش الأمان المطلوب
+        let _lastDcfTvShare = null;
         const companyType = document.getElementById('companyType').value;
         const fcfBasis    = document.getElementById('fcfBasis').value;
         let growth_perp   = (parseFloat(document.getElementById('growthPerp').value)    || 0) / 100;
@@ -1158,7 +1208,20 @@
         // WACC التلقائي لا ينطبق على البنك إطلاقاً (ودائع = مادة تشغيل لا تمويل)
         if (companyType !== 'bank' && document.getElementById('useWacc').checked) {
           const rf = (parseFloat(document.getElementById('riskFree').value)    || 0) / 100;
-          const b  =  parseFloat(document.getElementById('betaMain').value)     || 1;
+          // AUDIT 2026-08-23 — كان `|| 1`: بيتا فارغة أو صفر تصير 1 **بصمت**.
+          // والأثر ليس تجميلياً: Ke = rf + β(Rm−rf)، فبيتا مفترَضة تُغيّر معدّل
+          // الخصم كلّه ومعه القيمة العادلة. والدستور §2 يَعدّ بيتا المصادر
+          // الشائعة **غير صالحة سعودياً** (GuruFocus ترجع 0.0، وياهو تقيس
+          // مقابل مؤشر أمريكي) — فافتراضها 1 يبني التقييم على رقم مرفوض أصلاً.
+          // الآن: بلا بيتا صالحة لا يُحتسب WACC، ويُطلب Ke يدوياً (§8).
+          const _bRaw = (document.getElementById('betaMain').value || '').trim();
+          const b  = parseFloat(_bRaw);
+          if (_bRaw === '' || !isFinite(b) || b <= 0) {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            showToast('❌ بيتا غير متوفرة أو غير صالحة — لا يُحتسب WACC ببيتا مفترَضة (§8). أدخل بيتا موجبة، أو ألغِ «WACC تلقائي» وأدخل معدّل الخصم أو Ke يدوياً.', 'error');
+            document.getElementById('betaMain').focus();
+            return;
+          }
           const rm = (parseFloat(document.getElementById('marketReturn').value) || 0) / 100;
           const rd = (parseFloat(document.getElementById('debtCost').value)     || 0) / 100;
           const tx = (parseFloat(document.getElementById('taxRate').value)      || 0) / 100;
@@ -1370,6 +1433,7 @@
           // معدل خصم DCF يتبع أساس التدفق: FCFF←WACC · FCFE←Ke (بلا طرح للدين)
           const dcfRate     = fcfBasis === 'fcfe' ? keInfo.ke : discount_rate;
           const dcf_result  = calculate_dcf(fcf, growth_5yr_adj, growth_perp_final, dcfRate, net_debt, fcfBasis);
+          _lastDcfTvShare   = dcf_result ? dcf_result.tvShare : null;
           const dcf_value   = dcf_result ? dcf_result.equityValue : null;
           enterprise_value  = dcf_result ? dcf_result.enterpriseValue : 0;
           const graham_value = calculateGraham(eps, growth_5yr_adj * 100, bond_yield);
@@ -1421,7 +1485,20 @@
         const priceNow = parseFloat(document.getElementById('currentPrice').value) || 0;
         const mp = marginPair(priceNow, comp);
         const dualEl = document.getElementById('marginDualLine');
-        if (mp.dual) { dualEl.style.display = ''; dualEl.innerHTML = '🎯 هامش الأمان — ' + mp.dual; }
+        // سعر الشراء المنضبط — يُضاف تحت هامش الأمان الوصفي
+        let mosHtml = '';
+        if (comp && comp.headline > 0) {
+          const rq = requiredMoS(comp, companyType, _lastDcfTvShare);
+          const buyBelow = comp.headline * (1 - rq.mos);
+          const okNow = priceNow > 0 && priceNow <= buyBelow;
+          mosHtml = `<div style="margin-top:6px">🛡️ <b>سعر الشراء المنضبط:</b>
+            اشترِ دون <b>${formatCurrency(buyBelow)}</b>
+            <span class="text-muted">(هامش أمان مطلوب ${(rq.mos*100).toFixed(0)}% — ${rq.why.join(' · ')})</span>
+            ${priceNow > 0 ? (okNow
+              ? ` — <b style="color:var(--st-good)">السعر اليوم ${formatCurrency(priceNow)} داخل النطاق ✅</b>`
+              : ` — <b style="color:var(--st-warn)">السعر اليوم ${formatCurrency(priceNow)} فوقه، انتظر</b>`) : ''}</div>`;
+        }
+        if (mp.dual || mosHtml) { dualEl.style.display = ''; dualEl.innerHTML = (mp.dual ? '🎯 هامش الأمان — ' + mp.dual : '') + mosHtml; }
         else dualEl.style.display = 'none';
         document.getElementById('dashboardMargin').textContent = mp.text || '—';
 
