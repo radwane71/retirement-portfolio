@@ -3084,7 +3084,10 @@ function showPriceZoneAlert({ ticker, label, price, zone, name }) {
 
 // سكة المناطق لسهم واحد — نفس منطق priceRulerHtml في decision-engine.js:
 // نطاق lo/hi يضم كل النقاط + السعر، بهامش 15% من المدى، وتسميات بصفّين متبادلين.
-function _zoneRailHtml(pts, price) {
+// compact=true ⇒ سكّة **رأسية** ضيّقة تُوضع بجانب الأرقام داخل البطاقة.
+// الرأسي هو الشكل الصحيح هنا: المحور سعر، والأعلى أغلى — فيقرأ الترتيب
+// بلا تسميات ممتدّة، ويأخذ عرضاً ثابتاً صغيراً بدل الشاشة كلها.
+function _zoneRailHtml(pts, price, compact) {
   if (!pts.length || !(price > 0)) return '';
   const vals = pts.map(p => p.v).concat([price]);
   let lo = Math.min(...vals), hi = Math.max(...vals);
@@ -3098,6 +3101,16 @@ function _zoneRailHtml(pts, price) {
       <span class="zrail-tick" data-k="${p.k}" style="left:${pos(p.v).toFixed(1)}%"></span>
       <span class="zrail-lbl" data-row="${i % 2}" style="left:${pos(p.v).toFixed(1)}%">${p.lbl}<b>${formatNum(p.v)}</b></span>`).join('');
 
+  if (compact) {
+    // رأسي: 0% أسفل (الأرخص) و100% أعلى (الأغلى)
+    const vmarks = sorted.map(p =>
+      `<span class="zvr-tick" data-k="${p.k}" style="bottom:${pos(p.v).toFixed(1)}%"
+             title="${p.lbl} ${formatNum(p.v)}"></span>`).join('');
+    return `<div class="zvrail" title="محور السعر — الأعلى أغلى">
+        <div class="zvr-track">${vmarks}
+          <span class="zvr-now" style="bottom:${pos(price).toFixed(1)}%"></span>
+        </div></div>`;
+  }
   return `<div class="zrail"><div class="zrail-track">${marks}
       <span class="zrail-now" style="left:${pos(price).toFixed(1)}%"><b>${formatNum(price)}</b><i>السعر الآن</i></span>
     </div></div>`;
@@ -3155,15 +3168,46 @@ function renderPriceZonesCard() {
   // فرز عرضي فقط: الأسهم داخل منطقة فعّالة أولاً (الأشد أولاً)، ثم الباقي
   rows.sort((a, b) => b.urgency - a.urgency);
 
-  el.innerHTML = `<div class="stack-4">${rows.map(r => `
-    <div>
-      ${cardHead(
-        `<strong class="text-accent num">${esc(r.ticker)}</strong>`,
-        esc(r.name || ''),
-        r.tags
-      )}
-      ${_zoneRailHtml(r.pts, r.price)}
-    </div>`).join('')}</div>`;
+  // ══════════════════════════════════════════════════════════════════
+  // عرض مدمج — طلب المالك 2026-08-23: «السكة بعرض الشاشة مخلّية الصفحة
+  // ضايعة… اضغطها على اليسار وحطّ البيانات على اليمين، كرت بسيط».
+  //
+  // كانت كل سهم صفّاً كامل العرض: سكّة تمتدّ من الحافة للحافة لعرض ثلاث
+  // نقاط سعرية فقط. المساحة تكبر والمعلومة لا تكبر معها — والعين تقطع
+  // الشاشة كلها لتقرأ رقمين.
+  //
+  // الآن: شبكة بطاقات (بحدّ أدنى 320px لكل بطاقة) تملأ العرض جنباً إلى
+  // جنب. داخل كل بطاقة: الرمز والحالة أعلى، ثم **السكّة على اليمين**
+  // (اتجاه الصفحة RTL) و**الأرقام مصفوفة بجانبها**. فتُقرأ البطاقة في
+  // نظرة واحدة، وتُعرض ثلاث أو أربع بطاقات في مساحة صفّ واحد سابقاً.
+  // لا تغيير في أي حساب — العرض وحده.
+  // ══════════════════════════════════════════════════════════════════
+  const zoneNum = (lbl, v, k) =>
+    `<div class="zc-num" data-k="${k}"><span>${lbl}</span><b class="num">${formatNum(v)}</b></div>`;
+
+  el.innerHTML = `<div class="zone-cards">${rows.map(r => {
+    const byK = {};
+    r.pts.forEach(p => { byK[p.k] = p.v; });
+    const nums = [
+      byK.buy  != null ? zoneNum('تجميع', byK.buy,  'buy')  : '',
+      byK.trim != null ? zoneNum('تخفيف', byK.trim, 'trim') : '',
+      byK.exit != null ? zoneNum('تصفية', byK.exit, 'exit') : '',
+    ].join('');
+    return `<div class="zone-card">
+      <div class="zc-head">
+        <strong class="text-accent num">${esc(r.ticker)}</strong>
+        <span class="zc-name">${esc(r.name || '')}</span>
+      </div>
+      <div class="zc-tags">${r.tags}</div>
+      <div class="zc-body">
+        ${_zoneRailHtml(r.pts, r.price, true)}
+        <div class="zc-nums">
+          <div class="zc-num zc-now"><span>السعر الآن</span><b class="num">${formatNum(r.price)}</b></div>
+          ${nums}
+        </div>
+      </div>
+    </div>`;
+  }).join('')}</div>`;
 }
 
 // ── Break-Even Card ───────────────────────────────────────────
