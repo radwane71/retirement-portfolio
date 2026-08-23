@@ -462,5 +462,108 @@ t('رمز غير معروف يرجع null', T.tdValuationInputs('9999') === null
   }
 }
 
+// ── 8) بطاقة السهم: ما مُلئ وما تعارض — تشغيل فعليّ ─────────────────
+{
+  const els = {};
+  const mkEl = () => ({ _html: '', value: '', style: {}, dataset: {},
+    classList: { add() {}, remove() {}, contains: () => false },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); },
+    textContent: '', setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { return c; }, addEventListener() {}, focus() {}, remove() {},
+    querySelector: () => null, querySelectorAll: () => [] });
+  const byId = (id) => (els[id] = els[id] || mkEl());
+
+  const ctx = {
+    console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map, WeakMap,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+    requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', body: mkEl(), documentElement: mkEl(),
+      getElementById: byId, querySelector: () => null, querySelectorAll: () => [],
+      createElement: mkEl, addEventListener() {}, createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { href: 'http://x/', pathname: '/', search: '', hash: '' },
+    navigator: { userAgent: 'node' }, matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    alert() {}, confirm: () => true, getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null,
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; },
+  };
+  ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
+  vm.createContext(ctx);
+
+  let loadErr = null;
+  try {
+    ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js',
+     'js/tadawul-data.js', 'js/decision-engine.js']
+      .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f }));
+  } catch (e) { loadErr = e.constructor.name + ': ' + e.message; }
+  t('المحرّك يُحمَّل بلا خطأ', loadErr === null, loadErr);
+  t('بطاقة تداول معرَّفة', typeof ctx.renderCardTadawul === 'function');
+
+  if (typeof ctx.renderCardTadawul === 'function') {
+    const run = (tk, price) => { let e = null;
+      try { ctx.renderCardTadawul(tk, price); } catch (x) { e = x.constructor.name + ': ' + x.message; }
+      return e; };
+
+    // (أ) بلا إدخال منك: كل شيء يُملأ من تداول
+    // `let engineCfg` في نطاق الوحدة لا يُكتب من خارج vm — يُسنَد داخله.
+    const setCfg = (o) => vm.runInContext('engineCfg = ' + JSON.stringify(o), ctx);
+    setCfg({});
+    t('الرسم بلا إعدادات لا يرمي', run('4002', 78) === null);
+    let h = byId('de-card-tadawul')._html;
+    t('يُعلن ما مُلئ', /مُلئ من تداول/.test(h), h.slice(0, 120));
+    t('يذكر اسم الشركة وعدد الإيداعات', /المواساة/.test(h) && /إيداعاً/.test(h));
+    t('يذكر مصدر كل رقم', /تداول ✅/.test(h));
+    t('يُعلن أنه لا يُحفَظ تلقائياً', /لا تُحفَظ حتى تكتبها/.test(h));
+    t('بلا NaN', !/NaN|undefined/.test(h), (h.match(/NaN|undefined/g) || []).join(' '));
+
+    // (ب) إدخالك يخالف تداول ⇒ تعارض مُعلَن، وإدخالك يبقى العامل
+    const tdStreak = T.tdDividendStreak('4002');
+    setCfg({ '4002': { streakYears: tdStreak + 3 } });
+    t('الرسم مع تعارض لا يرمي', run('4002', 78) === null);
+    h = byId('de-card-tadawul')._html;
+    t('التعارض مُعلَن', /تعارض مع تداول/.test(h), h.slice(0, 160));
+    t('التعارض يعرض الرقمين',
+      new RegExp('إدخالك <b>' + (tdStreak + 3) + '</b>').test(h)
+      && new RegExp('تداول <b>' + tdStreak + '</b>').test(h),
+      `لك=${tdStreak + 3} تداول=${tdStreak}`);
+    t('يُصرَّح أن إدخالك هو العامل', /إدخالك هو العامل/.test(h));
+
+    // والدمج فعلاً يُبقي رقمك، لا رقم تداول
+    const ti = ctx.tadawulInputsFor('4002', 78);
+    t('الدمج يُبقي إدخالك لا رقم تداول',
+      ti.merged.streakYears === tdStreak + 3 && ti.conflicts.length === 1,
+      JSON.stringify({ merged: ti.merged.streakYears, conflicts: ti.conflicts.length }));
+
+    // (ج) إدخالك يطابق تداول ⇒ لا ملء ولا تعارض
+    setCfg({ '4002': { streakYears: tdStreak, coverage: T.tdLatestCoverage('4002').value } });
+    run('4002', 78);
+    h = byId('de-card-tadawul')._html;
+    t('المطابقة: لا ملء ولا تعارض للحقلين',
+      !/تعارض مع تداول/.test(h), h.slice(0, 160));
+
+    // (د) سهم خارج تداول: لا لوحة، ولا بقايا من السهم السابق
+    setCfg({});
+    t('سهم خارج تداول لا يرمي', run('9999', 10) === null);
+    t('سهم خارج تداول: اللوحة تُمسح', byId('de-card-tadawul')._html === '',
+      byId('de-card-tadawul')._html);
+  }
+
+  // التاريخ والشاشة يصنّفان من المصدر نفسه — وإلا فئتان لسهم واحد
+  {
+    const src = fs.readFileSync(ROOT + 'js/decision-engine.js', 'utf8');
+    t('التاريخ يصنّف بعد دمج تداول',
+      /classifyStock\(tadawulInputsFor\(r\.ticker/.test(src));
+    t('لا بقايا تصنيفٍ من engineCfg عارياً',
+      !/classifyStock\(engineCfg\[r\.ticker\] \|\| \{\}\)/.test(src));
+    t('البطاقة مُستدعاة عند الفتح', /renderCardTadawul\(ticker/.test(src));
+  }
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

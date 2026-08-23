@@ -237,7 +237,10 @@ async function updateCategoryHistory(rows) {
   let changed = false;
   const next = { ...categoryHistory };
   (rows || []).forEach(r => {
-    const raw = classifyStock(engineCfg[r.ticker] || {});
+    // ⚠️ لا `engineCfg` عارياً: `categoryOf` تصنّف **بعد** دمج تداول، فلو
+    // صنّف التاريخ قبله لاختلف التصنيفان للسهم نفسه في اليوم نفسه —
+    // ولثبّت التاريخ فئةً لا تراها الشاشة. المصدر واحد أو لا يكون.
+    const raw = classifyStock(tadawulInputsFor(r.ticker, +r.current_price || 0).merged);
     if (!raw.known) return;
     const h = next[r.ticker] || { settled: raw.cat, pending: null, streak: 0, lastCycle: cycle };
     if (h.lastCycle === cycle && next[r.ticker]) return;   // دورة واحدة = قراءة واحدة
@@ -3005,6 +3008,7 @@ function openStockCard(ticker) {
   setNum('de-card-exit-book',    (dx.bases || {}).bookValue);
   setNum('de-card-exit-mult',    (dx.bases || {}).justMultiple);
   renderCardCategory();
+  renderCardTadawul(ticker, +h.current_price || 0);
   renderCardFilter0(ticker);
   renderCardExitCheck(ticker);
   setSelect('de-card-covered', cfg.divCoverage  || ({ yes: 'covered', no: 'weak' })[cfg.divCovered]  || '');
@@ -3131,6 +3135,62 @@ function renderCardFilter0(ticker) {
   const g = depthGate(divByTicker[ticker] || [], manual ? manual.value : null);
   el.innerHTML = `<b style="color:var(--st-${g.pass ? 'good' : 'warn'})">${g.pass ? '✅ الحكم جائز' : '⏸️ الحكم ممنوع'}</b>`
     + `<div class="text-muted" style="font-size:.74rem;margin-top:2px">${escapeHtmlSafe(g.why)}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// م.15 و24 — ما ملأته تداول، وما تعارض مع إدخالك
+// ----------------------------------------------------------------------
+// `tadawulInputsFor` تحسب `filled` و`conflicts` منذ ربطها، ولم يكن يراهما
+// أحد. وتعارضٌ يُحسب ولا يُعرَض كأنه لم يُحسب: م.24 تفرض إعلانه، وقيمتُه
+// كلها في أن تراه فتحسم. هنا يُعرَض.
+//
+// **إدخالك يبقى العامل.** المحرّك لا ينقض ما كتبتَه — يضع رقم تداول
+// بجواره ويترك القرار لك (م.23).
+// ═══════════════════════════════════════════════════════════════════
+const TD_SRC_KEY = { marketCapB: 'marketCap', streakYears: 'streak', coverage: 'coverage' };
+const TD_FIELD_LBL = { streakYears: 'سنوات التوزيع المتصل', coverage: 'تغطية التدفق الحر',
+                       marketCapB: 'القيمة السوقية (مليار)' };
+
+function renderCardTadawul(ticker, price) {
+  const el = document.getElementById('de-card-tadawul');
+  if (!el) return;
+  if (typeof TADAWUL_DATA === 'undefined' || !TADAWUL_DATA[ticker]) { el.innerHTML = ''; return; }
+  const ti = tadawulInputsFor(ticker, price);
+  const r  = TADAWUL_DATA[ticker];
+  const fmtV = (k, v) => k === 'marketCapB' ? (+v).toFixed(2)
+                       : k === 'coverage'   ? (+v).toFixed(2) + '×' : String(v);
+  const srcOf = k => ti.src[TD_SRC_KEY[k]] || '';
+
+  let html = '';
+  if (ti.filled.length) {
+    html += noteHtml('📗',
+        `<strong>مُلئ من تداول</strong> <span class="text-muted" style="font-size:.72rem">`
+      + `(${escapeHtmlSafe(r.name)} · ${r.sourceFiles || '—'} إيداعاً)</span>`
+      + ti.filled.map(k => `<div style="font-size:.76rem">• ${TD_FIELD_LBL[k] || k}: `
+          + `<b>${fmtV(k, ti.merged[k])}</b>`
+          + (srcOf(k) ? ` <span class="text-muted">${escapeHtmlSafe(String(srcOf(k)))}</span>` : '')
+          + `</div>`).join('')
+      + `<div class="text-muted" style="font-size:.72rem;margin-top:3px">`
+      + `الخانة فارغة عندك فمُلئت من الإيداع، ولا تُحفَظ حتى تكتبها بنفسك.</div>`,
+      'info');
+  }
+  if (ti.conflicts.length) {
+    html += noteHtml('⚠️',
+        `<strong>تعارض مع تداول (م.24)</strong>`
+      + ti.conflicts.map(c => `<div style="font-size:.76rem">• ${TD_FIELD_LBL[c.field] || c.field}: `
+          + `إدخالك <b>${fmtV(c.field, c.mine)}</b> · تداول <b>${fmtV(c.field, c.tadawul)}</b></div>`).join('')
+      + `<div class="text-muted" style="font-size:.72rem;margin-top:3px">`
+      + `م.24/1 تضع ملف تداول في القمة، والمحرّك لا ينقض إدخالك — `
+      + `<strong>إدخالك هو العامل</strong> حتى تغيّره. راجِع الإيداع واحسم.</div>`,
+      'warn');
+  }
+  if (!html) {
+    const n = Object.keys(r.years).length;
+    html = `<div class="text-muted" style="font-size:.72rem">`
+         + `📗 تداول تحمل ${n} سنة لهذا السهم — وإدخالك يطابقها، `
+         + `فلا شيء يُملأ ولا شيء يتعارض.</div>`;
+  }
+  el.innerHTML = html;
 }
 
 function renderCardCategory() {
