@@ -1119,3 +1119,23 @@ function computeDiversification(positions) {
     stockGauge, sectorFactor, gaugePos, zoneLabel, zoneColor,
   };
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// 📋 لبنات العرض المشتركة — noteHtml و kvsHtml
+// ----------------------------------------------------------------------
+// كانتا مكرَّرتين حرفياً في 11 ملفاً وغائبتين عن هذا الملف وعن
+// js/decision-engine.js. النتيجة: استعمالهما في المحرّك أسقط `runEngine`
+// كاملاً بـReferenceError، فماتت الصفحة — لا قسمٌ منها.
+//
+// تعريفهما هنا يجعلهما متاحتين لكل صفحة تحمّل utils.js. النُّسخ المحلية
+// في الملفات الأخرى تدهس هذه بنفس السلوك بلا ضرر، وتُنظَّف تباعاً.
+// ⚠️ js/settings.js يعرّف `noteHtml(state, html)` بترتيب معكوس — نسخته
+// المحلية تحكم هناك، ولا تُوحَّد بلا مراجعة كل مواضعها.
+// ══════════════════════════════════════════════════════════════════════
+function noteHtml(icon, html, state = '') {
+  return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
+}
+function kvsHtml(items) {
+  return `<div class="kvs">${(items || []).filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;
+}
