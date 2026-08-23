@@ -1884,29 +1884,69 @@ function _dailyPortfolioSeries() {
     if (t.type === 'buy')       addEv(t.date, -(+t.total || 0));
     else if (t.type === 'sell') addEv(t.date,  (+t.total || 0));
   });
+  // ══════════════════════════════════════════════════════════════
+  // تاريخ التوزيعة: `dividendFlowDate` لا `d.date` الخام
+  // --------------------------------------------------------------
+  // شرطُ `d.date` وحده كان **يُسقط** كل توزيعة سُجِّلت بسنة وشهر بلا حقل
+  // تاريخ. وأثرُه في اتجاه واحد: التوزيعة عائد، فإسقاطها يبخس عائدك.
+  // وقياسٌ فعلي بمحفظة سعرها ثابت ووزّعت 200 ر.س على مئة سهم: TWR عرض
+  // **10%** والصحيح 20% — بينما XIRR عرض 13.4% لأنه يستعمل التعريف
+  // الموحّد أصلاً. رقمان لسؤال واحد في صفحة واحدة.
+  //
+  // `dividendFlowDate` (utils.js) هي التعريف الواحد: قراءة محلية، واحتياطي
+  // أول الشهر من سنة/شهر، وإسقاط المُعلَن بتاريخ صرفٍ قادم لم يُستلَم.
+  // ══════════════════════════════════════════════════════════════
+  const _nowD = new Date();
+  const _isoOf = dt => `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}`
+                     + `-${String(dt.getDate()).padStart(2, '0')}`;
+  const _divIso = d => {
+    const dt = (typeof dividendFlowDate === 'function')
+      ? dividendFlowDate(d, _nowD)
+      : (d.date ? new Date(d.date) : null);
+    return (dt && !isNaN(dt)) ? _isoOf(dt) : null;
+  };
+  let divDropped = 0;
   (_divs || []).forEach(d => {
-    const dt = d.date || null;
-    if (!dt || !coveredSet.has(d.ticker)) return;
-    addEv(dt, +d.amount || 0);
+    if (!coveredSet.has(d.ticker)) return;
+    const iso = _divIso(d);
+    if (!iso) { divDropped++; return; }      // شهر مجهول أو صرفٌ لم يقع بعد
+    addEv(iso, +d.amount || 0);
   });
 
   // التوزيعات التراكمية وحدها — تُستعمل لبناء أساس «الأسهم فقط بالعائد الإجمالي»
   const divByDate = {};
   (_divs || []).forEach(d => {
-    if (!d.date || !coveredSet.has(d.ticker)) return;
-    divByDate[d.date] = (divByDate[d.date] || 0) + (+d.amount || 0);
+    if (!coveredSet.has(d.ticker)) return;
+    const iso = _divIso(d);
+    if (!iso) return;
+    divByDate[iso] = (divByDate[iso] || 0) + (+d.amount || 0);
   });
 
   const out = [];
   out.covered = coveredSet;
   let cash = 0, impliedDeposits = 0, divCum = 0;
-  Object.keys(divByDate).filter(d => d < dates[0]).forEach(d => { divCum += divByDate[d]; });
-  // أحداث سابقة لأول تاريخ في المحور تُطوى في الرصيد الابتدائي
-  Object.keys(evByDate).filter(d => d < dates[0]).sort()
-    .forEach(d => { cash += evByDate[d]; });
+
+  // ══════════════════════════════════════════════════════════════
+  // الأحداث تُلحَق بالتقدّم لا بمطابقة تامّة
+  // --------------------------------------------------------------
+  // كان `evByDate[d]` و`divByDate[d]` يبحثان عن **مطابقة تامّة** مع محور
+  // التواريخ، والمحور أيام تداولٍ فقط. فتوزيعةٌ صُرِفت يوم جمعة أو عطلة
+  // رسمية، أو إيداعٌ حُوِّل في إجازة، لا يجد يومه في المحور فيسقط إلى
+  // الأبد — لا يُرحَّل إلى اليوم التالي ولا يُعلَن.
+  //
+  // العلاج: مؤشّران يتقدّمان مع المحور ويبتلعان كل ما تاريخه ≤ اليوم
+  // الحالي. فيقع الحدث في أول يوم تداول بعده — وهو الصحيح: قيمة المحفظة
+  // لا تُقاس إلا في يوم تداول.
+  // ══════════════════════════════════════════════════════════════
+  const evList  = Object.keys(evByDate).sort().map(d => ({ d, v: evByDate[d] }));
+  const divList = Object.keys(divByDate).sort().map(d => ({ d, v: divByDate[d] }));
+  let ei = 0, di = 0;
+  // ما سبق أول يوم في المحور يُطوى في الرصيد الابتدائي
+  while (ei < evList.length  && evList[ei].d  < dates[0]) { cash   += evList[ei].v;  ei++; }
+  while (di < divList.length && divList[di].d < dates[0]) { divCum += divList[di].v; di++; }
 
   for (const d of dates) {
-    cash += (evByDate[d] || 0);
+    while (ei < evList.length && evList[ei].d <= d) { cash += evList[ei].v; ei++; }
     // رصيد سالب = إيداعات لم تُسجَّل في صفحة التدفقات (المشتريات تفوق الممول).
     // نرفعه إلى الصفر ونعدّ الفارق إيداعاً ضمنياً — ونُعلنه بدل تشويه العائد.
     if (cash < -0.005) { impliedDeposits += -cash; addEv(d, -cash); cash = 0; }
@@ -1919,11 +1959,13 @@ function _dailyPortfolioSeries() {
       const sh = _sharesAtISO(t, d);
       if (sh > 0) stocks += sh * last[t];
     }
-    divCum += (divByDate[d] || 0);
+    while (di < divList.length && divList[di].d <= d) { divCum += divList[di].v; di++; }
     const total = stocks + cash;
     if (total > 0) out.push({ date: d, total_value: total, notes: 'auto', stocks, cash, divCum });
   }
   out.impliedDeposits = impliedDeposits;
+  // توزيعات لا يمكن تأريخها (لا تاريخ ولا سنة/شهر) — تُعلَن ولا تُبتلع (م.20)
+  out.divDropped = divDropped;
   return out.length >= 2 ? out : null;
 }
 
@@ -2246,7 +2288,7 @@ function renderReturns() {
       <div class="stat-card">
         <div class="label">العائد منذ البداية <span class="eng-label">TWR</span></div>
         <div class="value num" style="color:${col(d.total)}">${pctS(d.total)}</div>
-        <div class="sub">${esc(d.first.date)} ← ${esc(d.last.date)} · ${d.years.toFixed(1)} سنة</div>
+        <div class="sub">شامل التوزيعات · ${esc(d.first.date)} ← ${esc(d.last.date)}</div>
       </div>
       <div class="stat-card">
         <div class="label">مُسنوى <span class="eng-label">Annualized</span></div>
@@ -2326,7 +2368,12 @@ function renderReturns() {
   // ── ④ ما يجب أن يُقال قبل أن يُقرأ الرقم ──
   const missing = (d.coverage && d.coverage.missing) || [];
   const notes = noteHtml('📐',
-      `<strong>الرقمان مختلفان عمداً.</strong> <b>TWR</b> يعزل توقيت إيداعاتك ويقيس `
+      `<strong>ما يدخل في الرقم:</strong> ارتفاع الأسعار <em>و</em>التوزيعات النقدية `
+    + `<em>و</em>الأرباح المحقَّقة من البيع <em>و</em>أسهم المنحة — عائدٌ إجمالي كامل. `
+    + `التوزيعة تُضاف إلى القيمة ولا تُعدّ سحباً، فيومَ الاستحقاق ينزل السعر ويدخل النقد `
+    + `والقيمة لا تتغيّر. ولو عُدَّت تدفّقاً خارجاً لظهر الهبوط بلا ما يقابله — `
+    + `<strong>انحياز ضدّك</strong>.`
+    + `<br><strong>الرقمان مختلفان عمداً.</strong> <b>TWR</b> يعزل توقيت إيداعاتك ويقيس `
     + `<em>أداء المحفظة</em> — وهو الوحيد الذي يصلح لمقارنة سنة بسنة. و<b>XIRR</b> `
     + `يُدخل التوقيت ويقيس <em>ما كسبتَه أنت</em>. مع ضخٍّ يعادل 42% من المحفظة سنوياً `
     + `(م.8) يتباعد الرقمان، وهذا طبيعي لا خلل.`

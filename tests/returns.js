@@ -54,14 +54,27 @@ const ctx = {
 ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
 vm.createContext(ctx);
 
+const FILES = ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js',
+               'js/tadawul-data.js', 'js/performance.js'];
 let loadErr = null;
 try {
-  ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js',
-   'js/tadawul-data.js', 'js/performance.js']
-    .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f }));
+  FILES.forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f }));
 } catch (e) { loadErr = e.constructor.name + ': ' + e.message; }
 ctx.showToast = (m, ty) => toasts.push([m, ty]);
 ctx.openInfoModal = (ti, b) => modals.push([ti, b]);
+
+// ملفات المشروع تعرّف `let` على المستوى الأعلى، فإعادة تحميلها في السياق
+// نفسه ترمي «already declared». الفحص الذي يحتاج الدوال **الأصلية** بعد أن
+// زرعها فحصٌ سابق يطلب سياقاً نظيفاً بدل أن يلوّث القائم.
+function freshCtx() {
+  const e2 = {}, id2 = (id) => (e2[id] = e2[id] || mkEl());
+  const c = { ...ctx, document: { ...ctx.document, getElementById: id2 },
+              showToast() {}, openInfoModal() {} };
+  c.window = c; c.globalThis = c; c.self = c;
+  vm.createContext(c);
+  FILES.forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), c, { filename: f }));
+  return c;
+}
 
 t('صفحة الأداء تُحمَّل بلا خطأ', loadErr === null, loadErr);
 t('حاسبة العائد معرَّفة', typeof ctx._returnsData === 'function');
@@ -187,6 +200,10 @@ if (d && d.ok) {
   t('يوسم الجزئية', /جزئية/.test(h));
   t('يُعلن الرمز خارج القياس', /BBB/.test(h) && /خارج القياس/.test(h));
   t('يشرح الفرق بين TWR وXIRR', /TWR/.test(h) && /XIRR/.test(h) && /توقيت/.test(h));
+  // السؤال «هل التوزيعات محسوبة؟» يجب ألّا يُسأل مرّة ثانية — الجواب في الشاشة
+  t('يُعلن صراحةً أن التوزيعات داخل الرقم',
+    /شامل التوزيعات/.test(h) && /التوزيعات النقدية/.test(h));
+  t('يُعلن أن أرباح البيع والمنح داخله', /المحقَّقة من البيع/.test(h) && /المنحة/.test(h));
   t('يُعلن أن الأساس أسهمك وحدها', /لا نقد راكد/.test(h));
 
   // المدى المخصّص يتحدّث عند تغيير الاختيار
@@ -244,6 +261,73 @@ if (typeof ctx.showReturnsInfo === 'function') {
     'الاسم القديم باقٍ — رقمان لسؤال واحد');
   t('XIRR يستعمل التعريف الموحّد لتاريخ التوزيعة',
     /dividendFlowDate\(d, _now\)/.test(src));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// التوزيعات **داخل** العائد — والسعر ثابت فلا مصدر آخر له
+// ----------------------------------------------------------------------
+// السؤال «هل التوزيعات محسوبة؟» لا يُجاب بقراءة الكود. هنا محفظةٌ سعرها
+// ثابت عند 10 ر.س طوال السنة: أي عائد يظهر مصدرُه التوزيعات وحدها، وأي
+// صفرٍ يعني أنها سقطت. المسار الكامل يُشغَّل — من `_priceHist` إلى الرقم.
+// ══════════════════════════════════════════════════════════════════════
+{
+  const ctx = freshCtx();   // نسخة نظيفة: الدوال الأصلية لا المزروعة في الجزء السابق
+  const seedFlat = (divs) => vm.runInContext(`
+    _priceHist = { bySymbol: { AAA: { p: [["2025-01-02",10],["2025-06-16",10],["2025-12-31",10]] } } };
+    _tx   = [{ ticker:"AAA", type:"buy", date:"2025-01-02", total:1000, shares:100 }];
+    _divs = ${JSON.stringify(divs)};
+    _cf   = [{ date:"2025-01-02", type:"deposit", amount:1000 }];
+    _holdings = [{ ticker:"AAA", shares:100, current_price:10, avg_price:10 }];
+    _positionCache = { open:[{ ticker:"AAA", marketValue:1000 }], closed:[] };`, ctx);
+
+  const twrOfFlat = () => { const d = ctx._returnsData(); return d.ok ? d.total : null; };
+
+  seedFlat([]);
+  t('سعر ثابت بلا توزيعات ⇒ صفر', near(twrOfFlat(), 0, 1e-9), 'القيمة = ' + twrOfFlat());
+
+  seedFlat([{ ticker: 'AAA', date: '2025-06-16', amount: 100 }]);
+  t('التوزيعة تُحتسب عائداً (سعر ثابت ⇒ +10%)',
+    near(twrOfFlat(), 0.10, 1e-9), 'القيمة = ' + twrOfFlat());
+
+  // ⚠️ الخلل المُصلَح: توزيعة بسنة/شهر بلا حقل تاريخ كانت **تسقط** من TWR
+  // بينما XIRR يلتقطها — رقمان لسؤال واحد، والإسقاط يبخس عائدك دائماً.
+  seedFlat([{ ticker: 'AAA', date: '2025-06-16', amount: 100 },
+            { ticker: 'AAA', year: 2025, month: 9,  amount: 100 }]);
+  t('توزيعة بسنة/شهر بلا تاريخ تُحتسب (⇒ +20%)',
+    near(twrOfFlat(), 0.20, 1e-9), 'القيمة = ' + twrOfFlat() + ' — لو 0.10 فقد سقطت');
+
+  // ⚠️ الخلل الثاني: المطابقة التامّة على محور أيام التداول. توزيعةٌ يوم
+  // عطلة لا يجد يومُها مكاناً في المحور فتسقط إلى الأبد.
+  seedFlat([{ ticker: 'AAA', date: '2025-06-14', amount: 100 }]);   // ليس يوم تداول
+  t('توزيعة في يوم غير تداوليّ تُرحَّل ولا تسقط',
+    near(twrOfFlat(), 0.10, 1e-9), 'القيمة = ' + twrOfFlat() + ' — لو 0 فقد سقطت');
+
+  // المُعلَن بتاريخ صرفٍ قادم ليس عائداً محقَّقاً بعد
+  const nextYear = new Date().getFullYear() + 1;
+  seedFlat([{ ticker: 'AAA', date: `${nextYear}-06-16`, amount: 100 }]);
+  t('توزيعة مُعلَنة لم تُصرَف بعد لا تُحتسب',
+    near(twrOfFlat(), 0, 1e-9), 'القيمة = ' + twrOfFlat());
+
+  // ارتفاع سعري + توزيعة ⇒ الاثنان معاً، لا أحدهما
+  vm.runInContext(`
+    _priceHist = { bySymbol: { AAA: { p: [["2025-01-02",10],["2025-12-31",12]] } } };
+    _tx   = [{ ticker:"AAA", type:"buy", date:"2025-01-02", total:1000, shares:100 }];
+    _divs = [{ ticker:"AAA", date:"2025-06-16", amount:100 }];
+    _cf   = [{ date:"2025-01-02", type:"deposit", amount:1000 }];
+    _holdings = [{ ticker:"AAA", shares:100, current_price:12, avg_price:10 }];
+    _positionCache = { open:[{ ticker:"AAA", marketValue:1200 }], closed:[] };`, ctx);
+  // القيمة النهائية = 100×12 + 100 توزيعات = 1300 على 1000 ⇒ +30%
+  t('الارتفاع السعري والتوزيعة يجتمعان (+20% سعر +10% توزيع ⇒ +30%)',
+    near(ctx._returnsData().total, 0.30, 1e-9), 'القيمة = ' + ctx._returnsData().total);
+
+  // والتعريف الموحّد مستعمل في الموضعين
+  const src2 = fs.readFileSync(ROOT + 'js/performance.js', 'utf8');
+  t('نموذج النقد يستعمل التعريف الموحّد للتاريخ', /_divIso = d =>/.test(src2)
+    && /dividendFlowDate\(d, _nowD\)/.test(src2));
+  t('لا مطابقة تامّة على المحور بعد الآن',
+    !/divCum \+= \(divByDate\[d\] \|\| 0\)/.test(src2)
+    && !/cash \+= \(evByDate\[d\] \|\| 0\)/.test(src2),
+    'عاد البحث بالمطابقة التامّة — العطل تُسقط الأحداث');
 }
 
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
