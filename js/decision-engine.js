@@ -189,8 +189,35 @@ function isBlueChip(h) {
 // ══════════════════════════════════════════════════════════════════════
 let categoryHistory = {};   // { ticker: { settled, pending, streak, lastCycle } }
 
+// ══════════════════════════════════════════════════════════════════════
+// م.15 و24 — أرقام تداول تُكمِل ما لم تُدخِله، والتعارض يُعلَن
+// ----------------------------------------------------------------------
+// م.15 تضع ملفات تداول الرسمية في **قمة** سلّم المصادر، وم.24/1: «ملف
+// تداول يعلو على كل شيء». فما هو متاح منها يملأ الفراغ بلا أن تكتبه
+// لثمانية عشر سهماً بيدك.
+//
+// لكن ما أدخلتَه **لا يُدهس بصمت**: إن اختلف عن تداول يُعلَن التعارض
+// ويبقى إدخالك هو العامل. المحرّك لا ينقض قرارك — يعرضه ويترك الحسم لك.
+// ══════════════════════════════════════════════════════════════════════
+function tadawulInputsFor(ticker, price) {
+  const cfg = engineCfg[ticker] || {};
+  if (typeof tdCategoryInputs !== 'function') return { merged: cfg, conflicts: [], filled: [], src: {} };
+  const td = tdCategoryInputs(ticker, price) || {};
+  const merged = { ...cfg }, conflicts = [], filled = [];
+  ['streakYears', 'coverage', 'marketCapB'].forEach(k => {
+    if (td[k] == null) return;
+    if (cfg[k] == null || cfg[k] === '') { merged[k] = td[k]; filled.push(k); return; }
+    const tol = Math.max(0.01, Math.abs(+td[k]) * 0.02);
+    if (Math.abs(+cfg[k] - +td[k]) > tol) {
+      conflicts.push({ field: k, mine: +cfg[k], tadawul: +td[k] });
+    }
+  });
+  return { merged, conflicts, filled, src: td._src || {} };
+}
+
 function categoryOf(h) {
-  const raw = classifyStock(engineCfg[h.ticker] || {});
+  const ti  = tadawulInputsFor(h.ticker, +h.current_price || 0);
+  const raw = { ...classifyStock(ti.merged), tadawul: ti };
   if (!raw.known) return raw;                       // غير مصنَّف — لا تعليق له
   const hist = categoryHistory[h.ticker];
   if (!hist || !hist.settled) return { ...raw, settled: true };
