@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823c">
+  <link rel="stylesheet" href="css/style.css?v=20260823d">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -639,10 +639,10 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260823c"></script>
-  <script src="js/auth.js?v=20260823c"></script>
-  <script src="js/utils.js?v=20260823c"></script>
-  <script src="js/declutter.js?v=20260823c"></script>
+  <script src="js/supabase.js?v=20260823d"></script>
+  <script src="js/auth.js?v=20260823d"></script>
+  <script src="js/utils.js?v=20260823d"></script>
+  <script src="js/declutter.js?v=20260823d"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -1482,6 +1482,11 @@
         renderDispersionBox(comp, avgNames, values);
 
         // ── هامش الأمان: على الطرف الأدنى وعلى المتوسط/المرساة معاً ──
+        // AUDIT 2026-08-23: سياق الموثوقية وجدول النماذج يُبنيان **قبل** سطر
+        // سعر الشراء، لأن السطر صار يعتمد النموذج «الأصدق» — وبناؤه بعده كان
+        // يجعل النموذج المتوَّج غير متاح فيسقط السطر على المتوسط صامتاً.
+        _lastCtx = relCtxFromInputs(captureInputs());
+        buildModelsTable(values, avgNames);
         const priceNow = parseFloat(document.getElementById('currentPrice').value) || 0;
         const mp = marginPair(priceNow, comp);
         const dualEl = document.getElementById('marginDualLine');
@@ -1489,11 +1494,20 @@
         let mosHtml = '';
         if (comp && comp.headline > 0) {
           const rq = requiredMoS(comp, companyType, _lastDcfTvShare);
-          const buyBelow = comp.headline * (1 - rq.mos);
+          // AUDIT 2026-08-23 — «الأصدق» كان وسماً بلا أثر عملي: يُتوَّج نموذج
+          // ثم يُحسب سعر الشراء على **المتوسط** الذي يخلطه بغيره. الآن يقود
+          // النموذج المتوَّج الرقم القابل للتنفيذ، لأن تتويجه يعني أنه أجدر
+          // بقياس هذا الأصل — فلا معنى لتتويجه ثم تجاهله في القرار.
+          const _topRow = (_lastModelRows || []).length
+            ? (window.__lastItems || []).find(x => x.isTop) : null;
+          const anchorVal = (_topRow && _topRow.valueNum > 0) ? _topRow.valueNum : comp.headline;
+          const anchorSrc = (_topRow && _topRow.valueNum > 0)
+            ? `النموذج الأصدق «${_topRow.name}»` : 'متوسط النماذج';
+          const buyBelow = anchorVal * (1 - rq.mos);
           const okNow = priceNow > 0 && priceNow <= buyBelow;
           mosHtml = `<div style="margin-top:6px">🛡️ <b>سعر الشراء المنضبط:</b>
             اشترِ دون <b>${formatCurrency(buyBelow)}</b>
-            <span class="text-muted">(هامش أمان مطلوب ${(rq.mos*100).toFixed(0)}% — ${rq.why.join(' · ')})</span>
+            <span class="text-muted">(على ${anchorSrc} ${formatCurrency(anchorVal)} · هامش أمان مطلوب ${(rq.mos*100).toFixed(0)}% — ${rq.why.join(' · ')})</span>
             ${priceNow > 0 ? (okNow
               ? ` — <b style="color:var(--st-good)">السعر اليوم ${formatCurrency(priceNow)} داخل النطاق ✅</b>`
               : ` — <b style="color:var(--st-warn)">السعر اليوم ${formatCurrency(priceNow)} فوقه، انتظر</b>`) : ''}</div>`;
@@ -1537,9 +1551,7 @@
           '⚠️ هذه القيمة قبل خصم الديون الصافية';
         document.getElementById('fairValueRange').textContent   = fair_value_range;
         document.getElementById('fairValueDetails').textContent = fair_value_detail;
-        // سياق الموثوقية للحساب الحيّ — نفس دالة السجل، مصدر واحد بلا تكرار
-        _lastCtx = relCtxFromInputs(captureInputs());
-        buildModelsTable(values, avgNames);
+        // (سياق الموثوقية وجدول النماذج بُنيا أعلاه قبل سطر سعر الشراء)
         // Cap Rate والأرضية الدفترية خارج الرسم: عمود مساوٍ للبقية رغم استبعادهما
         // من المتوسط يوحي بأنهما نموذجان مكافئان — وهما ليسا كذلك.
         const chart_values = Object.fromEntries(Object.entries(values)
@@ -1794,35 +1806,105 @@
       }
     }
 
-    // ===== درجة موثوقية رقمية 0–100 لكل نموذج + ترتيب + وسم «الأصدق» =====
-    // تدمج قاعدة النموذج الاستثمارية (مرتفعة/متوسطة/منخفضة) مع مدى توافقه مع
-    // بقية النماذج: النموذج البعيد عن وسيط النماذج تنخفض ثقته حتى لو قاعدته مرتفعة.
-    // هكذا يتمايز 4 نماذج «مرتفعة» بأرقام مختلفة، ويظهر أيّها الأصدق لهذا السهم تحديداً.
+    // ══════════════════════════════════════════════════════════════════
+    // «الأصدق لهذا السهم» — أُعيد بناؤه 2026-08-23 بعد مراجعة عميقة
+    // ------------------------------------------------------------------
+    // الصيغة السابقة: درجة = قاعدة النموذج − عقوبة الابتعاد عن **وسيط
+    // النماذج**. وفيها خلل منهجي جوهري:
+    //
+    //   ① **مصادرة على المطلوب (دوران):** وسيط النماذج ليس حقيقةً يُقاس
+    //      عليها — هو متوسط طرق بعضها غير مناسب للأصل أصلاً. فالنموذج
+    //      الصحيح الوحيد يُعاقَب لأنه «بعيد عن الإجماع»، والأغلبية المنحازة
+    //      تُكافأ لأنها متفقة. مثال قاطع من الكود نفسه: جراهام يسقف مضاعفه
+    //      عند 25 فيبخس شركات النمو **بنيوياً** — فإذا اتفق جراهام و P/E
+    //      على بخس، عوقب DCF وحده وهو الوحيد الذي احترم النمو.
+    //   ② **تجاهل تكليف الدستور §3:** لكل نوع أصل نموذج **مفروض** لا
+    //      مفضَّل: ريت ⇒ FFO/NAV/DDM · بنك ⇒ P/B و DDM · دوري ⇒ تغطية FCF ·
+    //      وغيرها ⇒ EPS/FCF. الترتيب كان يتجاهل هذا التكليف تماماً.
+    //   ③ **تاج بلا جدارة:** أعلى درجة تُتوَّج «الأصدق» ولو كانت 40/100.
+    //   ④ **نموذج وحيد** يُتوَّج بلا أي تحقّق مقابل غيره.
+    //
+    // البناء الجديد — الترتيب بالتكليف أولاً ثم جودة التطبيق، والتوافق
+    // **إشارة مساعدة لا حكم**:
+    //   الأساس (قاعدة النموذج) + مكافأة التكليف الدستوري − عقوبة عدم
+    //   المناسَبة − عقوبة الافتراضات المعتمَدة − عقوبة توافق **مخفَّضة**.
+    // ══════════════════════════════════════════════════════════════════
     let _lastModelRows = [];
     const _REL_BASE = { 'rel-high': 86, 'rel-mid': 66, 'rel-low': 44 };
+
+    // تكليف الدستور §3: ما يُقاس به هذا النوع من الأصول، وما لا يصلح له.
+    const MODEL_MANDATE = {
+      reit:     { fit: ['NAV للوحدة', 'مضاعف P/FFO', 'DDM'],       unfit: ['جراهام', 'P/E القطاع', 'DCF'] },
+      bank:     { fit: ['P/B العادل', 'DDM', 'P/E العادل'],        unfit: ['DCF'] },
+      cyclical: { fit: ['DCF', 'جراهام'],                          unfit: [] },
+      normal:   { fit: ['DCF', 'جراهام'],                          unfit: [] },
+    };
+
+    function mandateOf(companyType, name) {
+      const m = MODEL_MANDATE[companyType] || MODEL_MANDATE.normal;
+      if ((m.fit   || []).some(x => name.indexOf(x) === 0 || x.indexOf(name) === 0)) return 'fit';
+      if ((m.unfit || []).some(x => name.indexOf(x) === 0 || x.indexOf(name) === 0)) return 'unfit';
+      return 'neutral';
+    }
+
+    const TOP_MIN_SCORE = 60;   // دون هذا لا يُتوَّج نموذج «أصدق»
+
     function scoreModels(items, ctx) {
-      items.forEach(it => { it.rel = modelReliability(it.name, ctx); it.isTop = false; it.consensusNote = ''; });
-      // النماذج المُطبَّقة فقط (تستبعد «لا ينطبق» والمرجعية) تدخل في التوافق
+      ctx = ctx || {};
+      const cType = ctx.companyType || 'normal';
+      const assumedN = Array.isArray(ctx.assumedDefaults) ? ctx.assumedDefaults.length : 0;
+      items.forEach(it => { it.rel = modelReliability(it.name, ctx); it.isTop = false; it.consensusNote = ''; it.whyTop = []; });
+
       const applic = items.filter(it => it.rel.cls !== 'rel-na' && it.valueNum != null && it.valueNum > 0);
-      const nums = applic.map(it => it.valueNum).slice().sort((a, b) => a - b);
+
+      // التوافق يُقاس على **النماذج المكلَّفة** لا على الجميع: إدخال نموذج
+      // غير مناسب للأصل في الوسيط يجرّ المرجع كلّه نحو رقم لا يخصّ هذا السهم.
+      const fitOnly = applic.filter(it => mandateOf(cType, it.name) !== 'unfit');
+      const pool = fitOnly.length >= 2 ? fitOnly : applic;
+      const nums = pool.map(it => it.valueNum).slice().sort((a, b) => a - b);
       let median = null;
       if (nums.length) median = nums.length % 2 ? nums[(nums.length - 1) / 2] : (nums[nums.length / 2 - 1] + nums[nums.length / 2]) / 2;
+
       items.forEach(it => {
         if (it.rel.cls === 'rel-na' || it.valueNum == null || it.valueNum <= 0) { it.score = null; return; }
         let s = _REL_BASE[it.rel.cls] != null ? _REL_BASE[it.rel.cls] : 50;
-        if (median && median > 0 && applic.length >= 2) {
-          const dev = Math.abs(it.valueNum - median) / median;      // انحراف عن وسيط النماذج
-          // خصم متدرّج من أول انحراف (تمييز دقيق بين المتقاربة) ثم أشدّ بعد 10%
-          const pen = dev <= 0.10 ? dev * 40 : 4 + (dev - 0.10) * 70;
-          s -= Math.min(34, pen);
+
+        // ① تكليف الدستور §3 — الوزن الأثقل، لأنه يحسم «هل هذا النموذج يقيس
+        //    هذا الأصل أصلاً؟» قبل أي سؤال عن دقّته.
+        const mand = mandateOf(cType, it.name);
+        if (mand === 'fit')   { s += 12; it.whyTop.push('النموذج الذي يفرضه نوع الأصل (§3)'); }
+        if (mand === 'unfit') { s -= 30; it.whyTop.push('لا يقيس هذا النوع من الأصول (§3) — عرضي لا حاكم'); }
+
+        // ② جودة المدخلات: كل افتراض اعتُمد لغياب رقم يُضعف كل النماذج قليلاً
+        if (assumedN > 0) s -= Math.min(10, assumedN * 3);
+
+        // ③ التوافق — **إشارة مخفَّضة** (سقف 15 بدل 34) ولا تُسقط نموذجاً
+        //    مكلَّفاً دون غير المكلَّف. النموذج الصحيح قد يكون وحيداً.
+        if (median && median > 0 && pool.length >= 2) {
+          const dev = Math.abs(it.valueNum - median) / median;
+          const pen = Math.min(15, dev <= 0.10 ? dev * 20 : 2 + (dev - 0.10) * 30);
+          s -= pen;
           it.consensusNote = dev <= 0.10
-            ? ` · قريب من توافق النماذج (انحراف ${(dev * 100).toFixed(0)}%) ✓`
-            : ` · يبتعد ${(dev * 100).toFixed(0)}% عن وسيط النماذج (يخفض الثقة)`;
+            ? ` · قريب من توافق النماذج المكلَّفة (انحراف ${(dev * 100).toFixed(0)}%) ✓`
+            : ` · يبتعد ${(dev * 100).toFixed(0)}% عن وسيط النماذج المكلَّفة (إشارة لا حكم)`;
+        } else if (applic.length === 1) {
+          s -= 8;
+          it.consensusNote = ' · نموذج وحيد — لا مرجع للتحقّق منه';
+          it.whyTop.push('لا نموذج آخر يقابله');
         }
+
         it.score = Math.max(5, Math.min(99, Math.round(s)));
       });
+
       const ranked = applic.filter(it => it.score != null).sort((a, b) => b.score - a.score);
-      if (ranked.length) ranked[0].isTop = true;
+      // ④ التاج بجدارة: لا «أصدق» دون العتبة، ولا عند تعادل فعلي بلا فاصل.
+      if (ranked.length && ranked[0].score >= TOP_MIN_SCORE) {
+        const tie = ranked.length > 1 && (ranked[0].score - ranked[1].score) < 3;
+        if (!tie) ranked[0].isTop = true;
+        else { ranked[0].tieNote = `يتعادل مع «${ranked[1].name}» (فارق ${ranked[0].score - ranked[1].score} نقطة) — النطاق أصدق من نموذج واحد`; }
+      } else if (ranked.length) {
+        ranked[0].weakTop = `أعلى النماذج ${ranked[0].score}/100 — دون عتبة الجدارة ${TOP_MIN_SCORE}. لا نموذج يستحق أن يُبنى عليه وحده؛ اعتمد النطاق.`;
+      }
       return items;
     }
 
@@ -1840,7 +1922,12 @@
         + (it.isTop ? `<span class="rel-top">⭐ الأصدق لهذا السهم</span>` : '')
         + `</div>`
         + `<div class="rel-bar"><span style="width:${pct}%;background:${col}"></span></div>`
-        + (rel.reason ? `<div class="rel-reason">${rel.reason}${it.consensusNote || ''}</div>` : '');
+        + (rel.reason ? `<div class="rel-reason">${rel.reason}${it.consensusNote || ''}</div>` : '')
+        // إشارات البناء الجديد: لماذا تُوِّج · تعادل · دون عتبة الجدارة
+        + ((it.whyTop && it.whyTop.length)
+            ? `<div class="rel-reason" style="opacity:.9">${it.whyTop.map(x => '• ' + x).join('<br>')}</div>` : '')
+        + (it.tieNote  ? `<div class="rel-reason" style="color:var(--st-warn)">⚖️ ${it.tieNote}</div>` : '')
+        + (it.weakTop  ? `<div class="rel-reason" style="color:var(--st-warn)">⚠️ ${it.weakTop}</div>` : '');
     }
 
     // تحويل قيمة معروضة (أرقام عربية + رمز عملة) إلى رقم — لتقييم عمليات السجل القديمة
@@ -1859,6 +1946,7 @@
       tbody.innerHTML = '';
       const items = Object.entries(values).map(([name, val]) => ({ name, valueNum: (val != null && val > 0 && isFinite(val)) ? val : null, inAvg: inAvg.has(name) }));
       scoreModels(items, _lastCtx);
+      window.__lastItems = items;   // يقرؤها سطر «سعر الشراء المنضبط» ليعتمد النموذج الأصدق
       // نخزّن الصفوف بالقيمة الخام لحفظها في السجل (تمييز موثوقية دقيق لاحقاً بلا إعادة تحليل نص)
       _lastModelRows = items.map(it => ({ name: it.name, value: it.valueNum != null ? formatCurrency(it.valueNum) : 'لا ينطبق', raw: it.valueNum, inAvg: it.inAvg }));
       items.forEach(it => {
