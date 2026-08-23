@@ -1064,7 +1064,7 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }, fwdPrecom
       </tr></tfoot>
     </table></div>
   <div class="small text-muted mt-2" style="padding:6px 4px;border-top:1px solid var(--border);margin-top:8px">
-    ⚠️ <strong>YOC الفعلي منخفض؟</strong> — طبيعي إذا نمت محفظتك مؤخراً: الأرباح المقاسة جُمعت حين كانت أصغر، بينما المقام (تكلفة الحيازات) يعكس حجمها الحالي الأكبر.
+    💡 <strong>YOC الفعلي منخفض؟</strong> — طبيعي إذا نمت محفظتك مؤخراً: الأرباح المقاسة جُمعت حين كانت أصغر، بينما المقام (تكلفة الحيازات) يعكس حجمها الحالي الأكبر.
     <strong>▶ Forward</strong> هو الأدق — يحسب ما تتوقع استلامه بناءً على محفظتك الحالية وآخر دفعة لكل سهم (نفس طريقة ياهو فاينانس).
   </div>`;
 }

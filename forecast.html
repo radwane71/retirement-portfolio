@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823m">
+  <link rel="stylesheet" href="css/style.css?v=20260823n">
   <style>
     /* ── Scenario Cards ── */
     .scenario-grid {
@@ -520,7 +520,7 @@
       </div>
       <div id="scenario-prob-note" style="margin-top:10px"><!-- نسبة «أسوأ من المتحفظ» تُملأ ديناميكياً --></div>
       <p class="small" style="margin-top:10px;color:var(--text-2);line-height:1.7;border-right:3px solid var(--accent);background:var(--accent-dim);padding:8px 12px;border-radius:0 6px 6px 0">
-        ⚠️ <strong>كيف تقرأ الأرقام؟</strong> الرقم على كل كرت = <strong>كم نافذة تاريخية من تاسي</strong> نمت بمعدّل مقارب لهذا السيناريو — عدد خام، لا «احتمال» ولا نسبة «من 10». حسبناه من <strong>فترات طويلة متداخلة</strong> (10 و15 و20 سنة) مو من سنة وحدة، لأنك تخطّط للتقاعد. عوائد تاسي في السنة الوحدة «مجنونة» (تطلع +104% أو تنزل −57%)، فما تنفع تقيس عليها نتيجة عشرين سنة.
+        🧭 <strong>كيف تقرأ الأرقام؟</strong> الرقم على كل كرت = <strong>كم نافذة تاريخية من تاسي</strong> نمت بمعدّل مقارب لهذا السيناريو — عدد خام، لا «احتمال» ولا نسبة «من 10». حسبناه من <strong>فترات طويلة متداخلة</strong> (10 و15 و20 سنة) مو من سنة وحدة، لأنك تخطّط للتقاعد. عوائد تاسي في السنة الوحدة «مجنونة» (تطلع +104% أو تنزل −57%)، فما تنفع تقيس عليها نتيجة عشرين سنة.
         <br><br>
         📐 <strong>«المئين» على كل كرت</strong> يقول لك أين يقع معدّل السيناريو بين كل نوافذ تاسي — «المئين 60» يعني أن 60% من النوافذ نمت أبطأ منه. المئين يتحرك بسلاسة مع تغيّر محفظتك، بخلاف التصنيف بالنطاقات الذي يقفز من رقم لرقم بحركة سوقية صغيرة. وسقف سيناريو «المتفائل» مُعاير على <strong>أعلى نافذة حدثت فعلاً</strong> في تاريخ تاسي (تُحسب من البيانات، لا رقم مكتوب يدوياً).
         <br><br>
@@ -688,12 +688,9 @@
         <span class="section-title">🎲 اختبار الحظّ — محاكاة مونتي كارلو <span class="eng-label">Monte Carlo</span></span>
         <button class="info-btn" type="button" onclick="showCardInfo('montecarlo')" style="position:static;opacity:.7">ⓘ</button>
       </div>
-      <p class="small text-muted" style="margin:6px 0 12px;line-height:1.75">
-        السيناريوهات فوق تفترض إن السوق يعطيك <b>نفس العائد كل سنة</b> — وهذا ما يصير أبداً.
-        هنا نجرّب مستقبلك <b>10,000 مرة</b>، كل مرة بعوائد سوق مختلفة من تاريخ تاسي الحقيقي (فيه سنوات ممتازة
-        وسنوات انهيار)، ونطلّع لك <b>نطاق كل الاحتمالات</b> — من أسوأ حظ إلى أحسنه — بدل رقم واحد وهمي.
-        المحاكاة <b>مبذورة</b>: نفس المدخلات تعطي نفس الأرقام في كل تشغيل.
-      </p>
+      <!-- المقدّمة حُذفت 2026-08-23: _renderMonteCarlo() يطبع المعنى نفسه
+           فوق النتيجة مباشرة، ومبنيّاً على r.N الفعلي لا على «10,000» مكتوبة
+           يدوياً هنا — رقمٌ يصمت إن تغيّر عدد المسارات. -->
 
       <!-- ── مرحلة السحب: المقياس التقاعدي الحقيقي ── -->
       <div class="note" data-state="warn" style="margin-bottom:10px">
@@ -835,11 +832,11 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260823m"></script>
-  <script src="js/auth.js?v=20260823m"></script>
-  <script src="js/utils.js?v=20260823m"></script>
-  <script src="js/declutter.js?v=20260823m"></script>
-  <script src="js/navtoggle.js?v=20260823m"></script>
-  <script src="js/forecast.js?v=20260823m"></script>
+  <script src="js/supabase.js?v=20260823n"></script>
+  <script src="js/auth.js?v=20260823n"></script>
+  <script src="js/utils.js?v=20260823n"></script>
+  <script src="js/declutter.js?v=20260823n"></script>
+  <script src="js/navtoggle.js?v=20260823n"></script>
+  <script src="js/forecast.js?v=20260823n"></script>
 </body>
 </html>

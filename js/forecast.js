@@ -1253,7 +1253,7 @@ function _renderMonteCarlo(r) {
 
   // ── مقدمة تشرح الفكرة ببساطة ──
   const intro = `
-    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;line-height:1.85" class="small">
+    <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:14px;line-height:1.85" class="small text-muted">
       🎲 <strong>وش سوّينا هنا؟</strong> شغّلنا "مستقبل محفظتك" <b>${r.N.toLocaleString('ar-SA')} مرة</b>، كل مرة بعوائد سوق مختلفة
       سحبناها من تاريخ تاسي الحقيقي (2004–2024) — فيه سنوات ممتازة وسنوات انهيار. ليش؟ لأن السوق
       <b>ما يعطي نفس العائد كل سنة</b>؛ أحياناً يطلع وأحياناً ينزل، والترتيب نفسه يفرق. فالنتيجة مو رقم
@@ -2673,18 +2673,12 @@ function renderScenarioCards() {
     const sum = occ.counts.reduce((s, x) => s + x, 0);
     // ── كشف حجم العيّنة + الشريحة الرابعة «أسوأ من المتحفظ» التي كانت تُحسب ولا تُعرض ──
     note.innerHTML = `
-      <div class="note" data-state="warn" style="margin-bottom:10px">
+      <div class="note" style="margin-bottom:10px">
         <span class="ic">📏</span>
         <div><b>حجم العيّنة — اقرأ هذا قبل الأرقام.</b> الأعداد أعلاه من <b>${occ.windows} نافذة متداخلة</b> (10 و15 و20 سنة)
         مبنية على <b>21 ملاحظة سنوية فقط</b> (2004–2024). النوافذ تتقاطع فيما بينها، فعدد الملاحظات المستقلة فعلياً
         <b>قريب من واحدة</b>. دقّة النسبة الواحدة ≈ <b>±${occ.precision} نقطة مئوية</b> — لذلك نعرض <b>عدداً خاماً</b>
         لا نسبة «من 10» توهم بدقة أعلى. هذه <b>تكرارات لما حدث</b>، وليست احتمالات لما سيحدث.</div>
-      </div>
-      <div class="kvs" style="margin-bottom:10px">
-        <div class="kv"><span>🛡️ متحفظ</span><b>${occ.counts[0]} / ${occ.windows} نافذة</b></div>
-        <div class="kv"><span>📊 معتدل</span><b>${occ.counts[1]} / ${occ.windows} نافذة</b></div>
-        <div class="kv"><span>🚀 متفائل</span><b>${occ.counts[2]} / ${occ.windows} نافذة</b></div>
-        <div class="kv"><span>📉 أسوأ من المتحفظ (لا يغطّيه أي كرت)</span><b>${occ.belowCount} / ${occ.windows} نافذة</b></div>
       </div>
       <div class="note" data-state="${occ.belowCount > 0 ? 'bad' : 'good'}" style="margin-bottom:10px">
         <span class="ic">📉</span>
