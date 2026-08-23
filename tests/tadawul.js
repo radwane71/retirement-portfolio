@@ -565,5 +565,171 @@ t('رمز غير معروف يرجع null', T.tdValuationInputs('9999') === null
   }
 }
 
+// ── 9) بحث الرمز في صفحة التقييم — تشغيل فعليّ ──────────────────────
+{
+  const html = fs.readFileSync(ROOT + 'stock-valuation.html', 'utf8');
+  const inline = [...html.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(m => m[1]).join('\n');
+
+  const els = {};
+  const mkEl = () => ({ _html: '', value: '', style: {}, dataset: {}, tagName: 'DIV',
+    classList: { add() {}, remove() {}, contains: () => false },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); },
+    textContent: '', setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { return c; }, addEventListener() {}, focus() {}, remove() {},
+    scrollIntoView() {}, querySelector: () => null, querySelectorAll: () => [],
+    // `renderHistory` ترسم مخطط الخط الزمني — canvas بلا getContext يُسقطها
+    getContext: () => ({ canvas: {}, createLinearGradient: () => ({ addColorStop() {} }) }) });
+  const byId = (id) => (els[id] = els[id] || mkEl());
+
+  const toasts = [];
+  const ctx = {
+    console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map, WeakMap,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: (f) => { if (typeof f === 'function') f(); return 0; },
+    clearTimeout() {}, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', body: mkEl(), documentElement: mkEl(),
+      getElementById: byId, querySelector: () => null, querySelectorAll: () => [],
+      createElement: mkEl, addEventListener() {}, createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    location: { href: 'http://x/', pathname: '/', search: '', hash: '' },
+    navigator: { userAgent: 'node' }, matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    alert() {}, confirm: () => true, getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null,
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; },
+  };
+  ctx.window = ctx; ctx.globalThis = ctx; ctx.self = ctx;
+  vm.createContext(ctx);
+
+  let loadErr = null;
+  try {
+    ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js', 'js/tadawul-data.js']
+      .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), ctx, { filename: f }));
+    ctx.showToast = (m, ty) => toasts.push([m, ty]);
+    vm.runInContext(inline, ctx, { filename: 'stock-valuation.html' });
+  } catch (e) { loadErr = e.constructor.name + ': ' + e.message; }
+  t('صفحة التقييم تُحمَّل بلا خطأ (بعد البحث)', loadErr === null, loadErr);
+  t('البحث معرَّف', typeof ctx.renderSvSearch === 'function');
+
+  if (typeof ctx.renderSvSearch === 'function') {
+    // سجلّ وحيازات مُصطنعة داخل السياق (المتغيّرات `let` لا تُكتب من خارجه)
+    const seed = `
+      _history = [
+        { id: 11, date: '2026-08-01', inputs: { ticker: '4002', stockName: 'المواساة',
+          currentPrice: '70', decision: 'accumulate', companyType: 'normal' },
+          results: { fairValueAvg: 95, marginText: 'هامش أمان 26%' } },
+        { id: 12, date: '2026-02-01', inputs: { ticker: '4002', stockName: 'المواساة',
+          currentPrice: '80', companyType: 'normal' }, results: { fairValueAvg: 90 } },
+        { id: 13, date: '2026-07-01', inputs: { ticker: '1010', stockName: 'بنك الرياض',
+          currentPrice: '30', companyType: 'bank' }, results: { fairValueAvg: 28 } }
+      ];
+      _svStocks = { '4002': { name: 'المواساة', shares: 120, avgPrice: 62, price: 70 },
+                    '9999': { name: 'سهم ليس في تداول' } };
+      _histSearch = ''; _histPage = 0;`;
+    vm.runInContext(seed, ctx);
+
+    const search = (q) => { byId('sv-search').value = q;
+      let e = null; try { ctx.renderSvSearch(); } catch (x) { e = x.constructor.name + ': ' + x.message; }
+      return e; };
+
+    t('بحث فارغ لا يرمي ولا يعرض', search('') === null && byId('sv-search-result')._html === '');
+
+    // ── بحث برمز مغطّى بالمصادر الثلاثة ──
+    t('البحث بالرمز لا يرمي', search('4002') === null);
+    let h = byId('sv-search-result')._html;
+    t('يعرض بطاقة السهم', /المواساة/.test(h) && h.length > 600, 'الطول = ' + h.length);
+    t('يعرض المصادر الثلاثة',
+      /سجلّ تقييماتك/.test(h) && /إيداعات تداول/.test(h) && /حيازتك/.test(h));
+    t('يعدّ تقييمَي 4002 لا واحداً', /عدد التقييمات<\/span><b>2<\/b>/.test(h)
+      || /2<\/b>/.test(h), h.match(/عدد التقييمات[\s\S]{0,40}/));
+    t('يعرض آخر تقييم لا أقدمه', /2026-08-01/.test(h) && !/2026-02-01/.test(h));
+    t('زر فتح آخر تقييم يشير للأحدث', /editHistoryItem\(11\)/.test(h),
+      (h.match(/editHistoryItem\(\d+\)/) || [])[0]);
+    t('يعرض أرقام تداول', /الربح للسهم/.test(h) && /مُطبَّع/.test(h));
+    t('يعرض الحيازة', /120/.test(h) && /الفرق عن التكلفة/.test(h));
+    t('بلا NaN ولا undefined', !/NaN|undefined/.test(h),
+      (h.match(/NaN|undefined/g) || []).join(' '));
+
+    // ── البحث بالاسم العربي يعمل كالبحث بالرمز ──
+    t('البحث بالاسم لا يرمي', search('المواساة') === null);
+    t('البحث بالاسم يجد الرمز', /4002/.test(byId('sv-search-result')._html));
+
+    // ── سهم في تداول ولم يُقيَّم بعد ──
+    search('4190');
+    h = byId('sv-search-result')._html;
+    t('غير المُقيَّم يُعلَن ويُعرض له زر بدء',
+      /لم تُقيّم هذا السهم بعد/.test(h) && /svStartNew\('4190'\)/.test(h));
+    t('غير المملوك يُعلَن', /ليس في حيازتك/.test(h));
+
+    // ── سهم خارج تداول: يُعلَن النقص ولا يُخترع رقم ──
+    search('9999');
+    h = byId('sv-search-result')._html;
+    t('غياب الإيداعات يُعلَن (م.20)', /لا إيداعات مستخرَجة/.test(h), h.slice(0, 200));
+
+    // ── لا نتيجة: رسالة صريحة لا صفحة فارغة ──
+    search('zzzzz');
+    t('لا نتيجة ⇒ رسالة صريحة',
+      /لا رمز يطابق/.test(byId('sv-search-result')._html));
+
+    // ── الجوهر: البحث لا يخضع لفلاتر السجل ──
+    byId('hist-f-type').value = 'bank';       // فلتر على البنوك
+    byId('hist-f-verdict').value = 'exit';
+    search('4002');                            // سهم تجزئة — لو خضع للفلتر لاختفى
+    h = byId('sv-search-result')._html;
+    t('البحث يتجاوز فلاتر السجل الأربعة',
+      /عدد التقييمات/.test(h) && /المواساة/.test(h), 'اختفى تحت الفلتر — وهو عين الخلل');
+
+    // وللمقارنة: البحث القديم داخل السجل **يخضع** لها فعلاً
+    if (typeof ctx.histFiltered === 'function') {
+      vm.runInContext("_histSearch = '4002';", ctx);
+      t('البحث القديم يخضع للفلاتر (توثيق السبب)',
+        ctx.histFiltered().length === 0, 'العدد = ' + ctx.histFiltered().length);
+      vm.runInContext("_histSearch = '';", ctx);
+    }
+
+    // ── «اعرض تقييماته كلها» يصفّر الفلاتر قبل النزول ──
+    if (typeof ctx.svShowInHistory === 'function') {
+      byId('hist-f-type').value = 'bank';
+      byId('hist-f-margin').value = 'gt30';
+      let e = null;
+      try { ctx.svShowInHistory('4002'); } catch (x) { e = x.constructor.name + ': ' + x.message; }
+      t('عرض الكل لا يرمي', e === null, e);
+      t('الفلاتر صُفِّرت فعلاً',
+        byId('hist-f-type').value === '' && byId('hist-f-margin').value === '',
+        `type=${byId('hist-f-type').value} margin=${byId('hist-f-margin').value}`);
+      t('خانة بحث السجل مُلئت بالرمز', byId('hist-search').value === '4002');
+      t('التصفير مُعلَن في إشعار',
+        toasts.some(x => /صُفِّرت الفلاتر/.test(x[0])), JSON.stringify(toasts.slice(-1)));
+      t('السجل صار يُظهر تقييمَي 4002',
+        typeof ctx.histFiltered === 'function' && ctx.histFiltered().length === 2,
+        typeof ctx.histFiltered === 'function' ? String(ctx.histFiltered().length) : '—');
+    }
+
+    // ── قائمة الاقتراحات تجمع المصادر الثلاثة ──
+    if (typeof ctx.buildSvTickerList === 'function') {
+      let e = null;
+      try { ctx.buildSvTickerList(); } catch (x) { e = x.constructor.name + ': ' + x.message; }
+      t('بناء الاقتراحات لا يرمي', e === null, e);
+      const dl = byId('sv-tickers')._html;
+      t('الاقتراحات فيها رمز من السجل', /"1010"/.test(dl));
+      t('وفيها رمز من تداول لم يُقيَّم', /"4190"/.test(dl));
+      t('وفيها رمز من أسهمك خارج تداول', /"9999"/.test(dl));
+    }
+
+    // ── المسح يُفرِغ الخانة والنتيجة معاً ──
+    if (typeof ctx.clearSvSearch === 'function') {
+      search('4002');
+      ctx.clearSvSearch();
+      t('المسح يُفرغ الخانة والنتيجة',
+        byId('sv-search').value === '' && byId('sv-search-result')._html === '');
+    }
+  }
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

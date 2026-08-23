@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824l">
+  <link rel="stylesheet" href="css/style.css?v=20260824m">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -283,6 +283,27 @@
     </div>
 
     <div class="warning-bar"><span>⚠️</span><div><strong>إقرار قانوني:</strong> هذه الحاسبة أداة تعليمية رياضية فقط. النتائج بناءً على مدخلاتك ولا تعكس سعراً سوقياً أو توصية استثمارية. الاستخدام تحت مسؤوليتك الكاملة.</div></div>
+
+    <!-- ══ بحث الرمز — يجمع كل ما تعرفه المنصة عن السهم ══
+         الصندوق فوق الصفحة عمداً: البحث القديم يعيش داخل بطاقة السجل،
+         والبطاقة مخفيّة حتى يوجد سجل — فبحثٌ لا تراه لا يُستعمل. -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-hdr" style="margin-top:0">🔎 ابحث برمز السهم</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <input type="search" id="sv-search" list="sv-tickers" placeholder="مثال: 4002 أو المواساة"
+               oninput="onSvSearch()" autocomplete="off"
+               style="flex:1;min-width:200px;padding:9px 12px;background:var(--bg-2);
+                      border:1px solid var(--border);border-radius:var(--radius);
+                      color:var(--text);font-family:inherit;font-size:0.9rem">
+        <datalist id="sv-tickers"></datalist>
+        <button class="btn btn-secondary btn-sm" type="button" onclick="clearSvSearch()">مسح</button>
+      </div>
+      <p class="hint" style="margin-top:6px">
+        يجمع الرمز من مصادره الثلاثة معاً — سجلّ تقييماتك · إيداعات تداول · حيازتك —
+        و<strong>يتجاوز فلاتر السجل الأربعة</strong>، فلا يختفي تقييمٌ لأن فلتراً مضبوطٌ على غيره.
+      </p>
+      <div id="sv-search-result" style="margin-top:10px"></div>
+    </div>
 
     <div class="calc-grid">
       <!-- بطاقة البيانات الأساسية -->
@@ -646,14 +667,14 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260824l"></script>
-  <script src="js/auth.js?v=20260824l"></script>
-  <script src="js/utils.js?v=20260824l"></script>
-  <script src="js/constitution.js?v=20260824l"></script>
-  <script src="js/constitution-data.js?v=20260824l"></script>
-  <script src="js/tadawul-data.js?v=20260824l"></script>
-  <script src="js/declutter.js?v=20260824l"></script>
-  <script src="js/navtoggle.js?v=20260824l"></script>
+  <script src="js/supabase.js?v=20260824m"></script>
+  <script src="js/auth.js?v=20260824m"></script>
+  <script src="js/utils.js?v=20260824m"></script>
+  <script src="js/constitution.js?v=20260824m"></script>
+  <script src="js/constitution-data.js?v=20260824m"></script>
+  <script src="js/tadawul-data.js?v=20260824m"></script>
+  <script src="js/declutter.js?v=20260824m"></script>
+  <script src="js/navtoggle.js?v=20260824m"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -2472,6 +2493,223 @@
         : 'لا يوجد ما يُملأ لهذا النوع', done.length ? 'success' : 'info');
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // 🔎 بحث الرمز — مصادر ثلاثة في مكان واحد
+    // ------------------------------------------------------------------
+    // البحث القديم يعيش داخل بطاقة السجل ويُطبَّق **داخل** `histFiltered`،
+    // أي أنه يتقاطع مع الفلاتر الأربعة فوقه: فلترٌ مضبوط على «بنك» يجعل
+    // البحث عن سهم تجزئة يعود فارغاً وكأن لا تقييم له. وهذا يقرأه المرء
+    // «لا يوجد» لا «مُخفى بفلتر».
+    //
+    // هذا الصندوق يقرأ `_history` **خاماً** — لا فلاتر ولا صفحات — ويضمّ
+    // إليه إيداعات تداول وحيازتك. ولا يغيّر شيئاً: عرضٌ وروابط فقط.
+    // ══════════════════════════════════════════════════════════════════
+    let _svStocks = {};        // ticker → { name, shares, avgPrice, price }
+    let _svSearchTimer = null;
+
+    async function loadSvStocks() {
+      try {
+        const [h, us] = await Promise.all([
+          supabaseClient.from('holdings').select('ticker,name,shares,avg_price,current_price'),
+          supabaseClient.from('user_stocks').select('ticker,name'),
+        ]);
+        (us.data || []).forEach(r => {
+          const tk = String(r.ticker || '').trim();
+          if (tk) _svStocks[tk] = { ...(_svStocks[tk] || {}), name: r.name || '' };
+        });
+        (h.data || []).forEach(r => {
+          const tk = String(r.ticker || '').trim();
+          if (!tk) return;
+          _svStocks[tk] = { ...(_svStocks[tk] || {}), name: r.name || (_svStocks[tk] || {}).name || '',
+            shares: +r.shares || 0, avgPrice: +r.avg_price || 0, price: +r.current_price || 0 };
+        });
+      } catch (_) { /* الشبكة ليست شرطاً للبحث — السجل وتداول محليان */ }
+    }
+
+    // قائمة الاقتراحات: اتحاد المصادر الثلاثة، فلا يُخفى رمزٌ لأن مصدره غير الآخر
+    function buildSvTickerList() {
+      const dl = document.getElementById('sv-tickers');
+      if (!dl) return;
+      const map = {};
+      _history.forEach(e => { const tk = ((e.inputs || {}).ticker || '').trim();
+        if (tk) map[tk] = map[tk] || (e.inputs.stockName || ''); });
+      Object.entries(_svStocks).forEach(([tk, v]) => { map[tk] = map[tk] || v.name || ''; });
+      if (typeof TADAWUL_DATA !== 'undefined')
+        Object.entries(TADAWUL_DATA).forEach(([tk, v]) => { map[tk] = map[tk] || v.name || ''; });
+      dl.innerHTML = Object.keys(map).sort().map(tk =>
+        `<option value="${escHist(tk)}">${escHist(map[tk] || '')}</option>`).join('');
+    }
+
+    function clearSvSearch() {
+      const el = document.getElementById('sv-search');
+      if (el) el.value = '';
+      const out = document.getElementById('sv-search-result');
+      if (out) out.innerHTML = '';
+    }
+
+    function onSvSearch() {
+      clearTimeout(_svSearchTimer);
+      _svSearchTimer = setTimeout(renderSvSearch, 180);
+    }
+
+    function renderSvSearch() {
+      const out = document.getElementById('sv-search-result');
+      if (!out) return;
+      const q = (document.getElementById('sv-search').value || '').trim().toLowerCase();
+      if (!q) { out.innerHTML = ''; return; }
+
+      // مطابقة على الرمز أو الاسم، من المصادر الثلاثة
+      const hit = {};
+      const add = (tk, name) => { tk = String(tk || '').trim(); if (!tk) return;
+        if (tk.toLowerCase().includes(q) || (name || '').toLowerCase().includes(q))
+          hit[tk] = hit[tk] || name || ''; };
+      _history.forEach(e => add((e.inputs || {}).ticker, (e.inputs || {}).stockName));
+      Object.entries(_svStocks).forEach(([tk, v]) => add(tk, v.name));
+      if (typeof TADAWUL_DATA !== 'undefined')
+        Object.entries(TADAWUL_DATA).forEach(([tk, v]) => add(tk, v.name));
+
+      const tickers = Object.keys(hit).sort();
+      if (!tickers.length) {
+        out.innerHTML = noteHtml('🔍',
+          `لا رمز يطابق «<strong>${escHist(q)}</strong>» في سجلّ تقييماتك ولا في إيداعات تداول `
+        + `ولا في قائمة أسهمك. تأكّد من الرمز، أو ابدأ تقييماً جديداً بكتابته في خانة الرمز أعلى الحاسبة.`,
+          'warn');
+        return;
+      }
+      out.innerHTML = tickers.slice(0, 8).map(tk => svCardFor(tk, hit[tk])).join('')
+        + (tickers.length > 8
+            ? `<div class="text-muted" style="font-size:.78rem;margin-top:6px">`
+              + `و${tickers.length - 8} رمزاً آخر يطابق — ضيّق البحث.</div>` : '');
+    }
+
+    function svCardFor(tk, fallbackName) {
+      const td   = (typeof TADAWUL_DATA !== 'undefined') ? TADAWUL_DATA[tk] : null;
+      const own  = _svStocks[tk] || null;
+      // ⚠️ `_history` خاماً — لا `histFiltered()`: الفلاتر لا تحكم هذا البحث
+      const mine = _history.filter(e => ((e.inputs || {}).ticker || '').trim().toUpperCase() === tk.toUpperCase());
+      const name = (own && own.name) || (td && td.name) || fallbackName || '';
+
+      // (1) سجلّ التقييمات
+      let evalBlock;
+      if (mine.length) {
+        const last = mine[0];                       // السجل مرتَّب بالأحدث أولاً
+        const m    = marginPctOf(last);
+        const dec  = (last.inputs || {}).decision || '';
+        const decMap = { hold:'🤝 احتفاظ', accumulate:'➕ تجميع', trim:'✂️ تخفيف',
+                         exit:'🚪 خروج', watch:'👁️ مراقبة' };
+        const days = last.date ? Math.floor((Date.now() - new Date(last.date)) / 86400000) : null;
+        evalBlock = kvsHtml([
+          ['عدد التقييمات', String(mine.length)],
+          ['آخر تقييم', escHist(String(last.date || '—').slice(0, 10))
+            + (days != null ? ` <span class="text-muted" style="font-weight:400">(${days} يوماً)</span>` : '')],
+          [(last.results || {}).fairValueAvg ? 'القيمة العادلة' : 'النتيجة',
+            (last.results || {}).fairValueAvg
+              ? (+last.results.fairValueAvg).toFixed(2) + ' ر.س' : '—'],
+          m != null ? ['الهامش', `<span style="color:${m >= 0 ? 'var(--success)' : 'var(--danger)'}">`
+            + `${m >= 0 ? '+' : ''}${m.toFixed(1)}%</span>`] : null,
+          dec ? ['قرارك المسجَّل', decMap[dec] || escHist(dec)] : null,
+        ])
+        + `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">`
+        + `<button class="btn btn-primary btn-sm" onclick="editHistoryItem(${last.id})">`
+        + `↩️ افتح آخر تقييم في الحاسبة</button>`
+        + `<button class="btn btn-secondary btn-sm" onclick="svShowInHistory('${escHist(tk)}')">`
+        + `📋 اعرض تقييماته كلها</button></div>`;
+      } else {
+        evalBlock = `<div class="text-muted" style="font-size:.8rem">`
+          + `لم تُقيّم هذا السهم بعد.</div>`
+          + `<div style="margin-top:8px"><button class="btn btn-secondary btn-sm" `
+          + `onclick="svStartNew('${escHist(tk)}')">✏️ ابدأ تقييماً جديداً</button></div>`;
+      }
+
+      // (2) تداول
+      let tdBlock;
+      if (td && typeof tdValuationInputs === 'function') {
+        const v = tdValuationInputs(tk), g = tdDpsGrowth(tk);
+        const f = v.fields;
+        tdBlock = kvsHtml([
+          ['سنوات متاحة', `${Object.keys(td.years).length} <span class="text-muted" style="font-weight:400">`
+            + `من ${td.sourceFiles || '—'} إيداعاً</span>`],
+          f.eps     ? ['الربح للسهم', `${f.eps.value.toFixed(2)} <span class="text-muted" style="font-weight:400">${f.eps.year}</span>`] : null,
+          f.normEps ? ['مُطبَّع (م.35)', f.normEps.value.toFixed(2)] : null,
+          f.bvps    ? ['الدفترية', f.bvps.value.toFixed(2)] : null,
+          f.dps     ? ['التوزيع', f.dps.value.toFixed(2)] : null,
+          g.value != null
+            ? ['نمو التوزيع', `${g.value >= 0 ? '+' : ''}${(g.value * 100).toFixed(1)}%`
+                + (g.volatile ? ' 🔴' : g.caution ? ' 🟡' : '')]
+            : null,
+        ])
+        + `<div style="margin-top:8px"><button class="btn btn-secondary btn-sm" `
+        + `onclick="svPrefill('${escHist(tk)}')">📗 املأ الحاسبة من تداول</button></div>`;
+      } else {
+        tdBlock = `<div class="text-muted" style="font-size:.8rem">`
+          + `لا إيداعات مستخرَجة لهذا الرمز (م.20).</div>`;
+      }
+
+      // (3) حيازتك
+      let ownBlock;
+      if (own && own.shares > 0) {
+        const val = own.shares * (own.price || 0);
+        const pl  = (own.price && own.avgPrice) ? (own.price / own.avgPrice - 1) * 100 : null;
+        ownBlock = kvsHtml([
+          ['عدد الأسهم', String(own.shares)],
+          ['متوسط التكلفة', own.avgPrice ? own.avgPrice.toFixed(2) : '—'],
+          ['السعر الحالي', own.price ? own.price.toFixed(2) : '—'],
+          ['القيمة السوقية', val ? val.toFixed(0) + ' ر.س' : '—'],
+          pl != null ? ['الفرق عن التكلفة',
+            `<span style="color:${pl >= 0 ? 'var(--success)' : 'var(--danger)'}">`
+            + `${pl >= 0 ? '+' : ''}${pl.toFixed(1)}%</span>`] : null,
+        ]);
+      } else {
+        ownBlock = `<div class="text-muted" style="font-size:.8rem">`
+          + `ليس في حيازتك${own ? ' — لكنه في قائمة أسهمك' : ''}.</div>`;
+      }
+
+      const col = (title, html) =>
+        `<div style="flex:1;min-width:210px;background:var(--bg-2);border:1px solid var(--border);
+                     border-radius:var(--radius);padding:10px 12px">
+           <div style="font-weight:700;font-size:.84rem;margin-bottom:6px">${title}</div>${html}</div>`;
+
+      return `<div style="border:1px solid var(--border);border-radius:var(--radius);
+                          padding:12px;margin-bottom:10px">
+          <div style="font-weight:700;margin-bottom:8px">
+            <span class="text-accent">${escHist(tk)}</span> ${escHist(name)}
+            ${td ? `<span class="text-muted" style="font-size:.74rem;font-weight:400">
+                    · ${escHist(td.sector || '')}</span>` : ''}
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            ${col('📋 سجلّ تقييماتك', evalBlock)}
+            ${col('📗 إيداعات تداول', tdBlock)}
+            ${col('💼 حيازتك', ownBlock)}
+          </div>
+        </div>`;
+    }
+
+    // «اعرض تقييماته كلها» — يصفّر الفلاتر الأربعة قبل النزول، وإلا نزل
+    // المستخدم إلى قائمة فارغة وهي تحوي تقييماته فعلاً.
+    function svShowInHistory(tk) {
+      ['hist-f-type', 'hist-f-verdict', 'hist-f-margin', 'hist-f-decision']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      const box = document.getElementById('hist-search');
+      if (box) box.value = tk;
+      _histSearch = tk.toLowerCase();
+      _histPage = 0;
+      renderHistory();
+      const sec = document.getElementById('historySection');
+      if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      showToast(`📋 عُرضت تقييمات ${tk} — وصُفِّرت الفلاتر الأربعة`, 'info');
+    }
+
+    function svStartNew(tk) {
+      const t = document.getElementById('stockTicker');
+      if (t) { t.value = tk; lookupStockName(); t.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+    }
+
+    function svPrefill(tk) {
+      svStartNew(tk);
+      renderTadawulPanel(tk);
+      applyTadawulPrefill();
+    }
+
     function captureInputs() {
       const companyType = document.getElementById('companyType').value;
       const base = {
@@ -3555,6 +3793,8 @@
       await loadHistoryFromDB();
       invalidateHistIndex();
       renderHistory();
+      await loadSvStocks();
+      buildSvTickerList();
       toggleCompanyType();
       runFieldChecks();
     }
