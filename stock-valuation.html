@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823q">
+  <link rel="stylesheet" href="css/style.css?v=20260823r">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -484,12 +484,15 @@
 
     <!-- النتائج -->
     <div class="results-section" id="resultsSection">
-      <div class="result-card" id="enterpriseValueCard">
-        <h2 id="enterpriseValueTitle">🏢 قيمة المنشأة (Enterprise Value)</h2>
+      <!-- مطويّة 2026-08-23: قيمة المنشأة رقم **وسيط** في المعادلة — قرار
+           الشراء يُتّخذ على القيمة العادلة للسهم وهامش الأمان، لا عليها.
+           كانت بحجم بطاقة النتيجة الرئيسية فتزاحم الرقم البطل بصرياً. -->
+      <details class="result-card" id="enterpriseValueCard">
+        <summary style="cursor:pointer;list-style:none"><h2 id="enterpriseValueTitle" style="display:inline">🏢 قيمة المنشأة (Enterprise Value)</h2> <span class="text-muted" style="font-size:.8rem">▾</span></summary>
         <div class="result-amount" id="enterpriseValueRange">-</div>
         <div class="result-period"  id="enterpriseValueDetails">-</div>
         <div class="disclaimer-note" id="enterpriseValueNote">⚠️ هذه القيمة إجمالي قيمة الشركة قبل خصم الديون الصافية</div>
-      </div>
+      </details>
       <div id="sustainGateBanner" class="note" data-state="bad" style="display:none;margin-bottom:16px;">
         <span class="ic">⛔</span><div id="sustainGateText"></div>
       </div>
@@ -607,9 +610,10 @@
       <div id="hist-pager" style="display:none;justify-content:center;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;"></div>
     </div>
 
-    <!-- المنهجية -->
-    <div class="card">
-      <div class="section-hdr">📚 كيف تعمل الحاسبة؟</div>
+    <!-- المنهجية — مطويّة 2026-08-23: أطول كتلة ثابتة في الصفحة (9 بطاقات
+         معادلات + 8 بنود حدود استخدام). تشرح كيف يُحسب الرقم، لا تعطي رقماً. -->
+    <details class="card">
+      <summary class="section-hdr" style="cursor:pointer;list-style:none">📚 كيف تعمل الحاسبة؟ <span class="text-muted" style="font-size:.8rem">▾</span></summary>
       <p style="color:var(--text-muted);font-size:0.85rem;margin-bottom:14px;">لتعزيز الشفافية، نوضح جميع المعادلات والنماذج المالية المستخدمة:</p>
       <div class="method-grid">
         <div class="method-card"><h3>📊 DCF — التدفق النقدي المخصوم</h3><div class="formula">القيمة = Σ FCFt/(1+r)^t + TV/(1+r)^10<br>TV = FCF10 × (1+g) / (r − g)<br>FCFF: قيمة السهم = EV − الدين الصافي للسهم<br>FCFE: قيمة السهم = EV (بلا طرح)</div><div class="formula-detail"><p>السنوات 1-5: FCF ينمو بـ growth_5yr | السنوات 6-10: بـ growth_perp</p><p>✅ معدل الخصم يتبع الأساس: FCFF ← WACC · FCFE ← Ke — ومنه يُحدَّد آلياً هل يُطرح الدين، منعاً للخصم المزدوج</p></div></div>
@@ -635,17 +639,17 @@
           <li>البيانات الناقصة تُعلن «غير متوفرة» ولا تُقدَّر بصمت (§8) — Ke بلا بيتا، Cap Rate بلا NOI</li>
         </ul>
       </div>
-    </div>
+    </details>
   </main>
 
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260823q"></script>
-  <script src="js/auth.js?v=20260823q"></script>
-  <script src="js/utils.js?v=20260823q"></script>
-  <script src="js/declutter.js?v=20260823q"></script>
-  <script src="js/navtoggle.js?v=20260823q"></script>
+  <script src="js/supabase.js?v=20260823r"></script>
+  <script src="js/auth.js?v=20260823r"></script>
+  <script src="js/utils.js?v=20260823r"></script>
+  <script src="js/declutter.js?v=20260823r"></script>
+  <script src="js/navtoggle.js?v=20260823r"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)

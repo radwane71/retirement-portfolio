@@ -654,9 +654,14 @@ function fillTickerFromChip(btn) {
   const t = btn?.dataset?.ticker || '';
   const input = document.getElementById('rl-ticker');
   if (!input) return;
+  // النموذج مطويّ افتراضياً — نقر الشريحة نيّةُ تسجيلِ مراجعة، ففتحه جزء
+  // من الإجراء لا خطوة إضافية على المالك (نفضة 2026-08-23).
+  const card = document.getElementById('rl-add-card');
+  if (card && !card.open) card.open = true;
   input.value = t;
   onTickerInput();
   input.focus();
+  card?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ── Filters ────────────────────────────────────────────────────────────────

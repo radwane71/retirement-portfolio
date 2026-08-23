@@ -2358,12 +2358,14 @@ function renderHistSummary() {
         : `تقديري: لا يمكن حساب الدخل المتوقَّع (لا توزيعات مسجّلة كافية) — الرقم = توزيعات آخر 12 شهراً ÷ قيمة اليوم، وهو يبخس العائد في محفظة نامية.`}">
       ${fwdOk ? '✓ forward من حيازاتك' : '⚠️ تاريخي (تقديري)'}</span>`;
 
+  // `core` = يدخل الإسقاط فعلاً ⇒ يبقى ظاهراً. البقية سياق تاريخي يُطوى
+  // (نفضة 2026-08-23): عشرة أرقام في صفّ واحد تُخفي الأربعة التي تقود الرقم.
   const items = [
-    { val: fmt(h.currentValue),           lbl: 'القيمة السوقية الحالية' },
+    { val: fmt(h.currentValue),           lbl: 'القيمة السوقية الحالية', core: true },
     { val: fmt(h.costBasis),              lbl: 'التكلفة الأساسية' },
-    { val: xirrLabel,                     lbl: 'XIRR — العائد الداخلي الحقيقي', raw: true },
-    { val: growthLabel,                   lbl: 'نمو رأس المال (مُستخدَم في السيناريوهات)', raw: true },
-    { val: dyLabel,                       lbl: 'عائد التوزيعات السنوي (المُستخدَم)', raw: true },
+    { val: xirrLabel,                     lbl: 'XIRR — العائد الداخلي الحقيقي', raw: true, core: true },
+    { val: growthLabel,                   lbl: 'نمو رأس المال (مُستخدَم في السيناريوهات)', raw: true, core: true },
+    { val: dyLabel,                       lbl: 'عائد التوزيعات السنوي (المُستخدَم)', raw: true, core: true },
     { val: fwdOk ? fmt(h.fwdAnnualIncome) : '—', lbl: 'الدخل السنوي المتوقَّع (forward)' },
     { val: fmt(h.avgAnnualDiv),           lbl: 'توزيعات آخر 12 شهراً (فعلية)' },
     { val: fmt(h.totalDivAll),            lbl: 'إجمالي الأرباح المتراكمة' },
@@ -2372,11 +2374,16 @@ function renderHistSummary() {
   ];
 
   const el = document.getElementById('hist-summary');
-  if (el) el.innerHTML = items.map(i => `
+  const cell = i => `
     <div class="hist-item">
       <div class="h-val">${i.raw ? i.val : esc(i.val)}</div>
       <div class="h-lbl">${esc(i.lbl)}</div>
-    </div>`).join('');
+    </div>`;
+  if (el) {
+    el.innerHTML = items.filter(i => i.core).map(cell).join('');
+    const restEl = document.getElementById('hist-summary-rest');
+    if (restEl) restEl.innerHTML = items.filter(i => !i.core).map(cell).join('');
+  }
 
   // ══════════════════════════════════════════════════════════════════
   // أُزيل مربّع «الأساس: معيار تاسي · أداؤك حتى الآن» — قرار المالك 2026-08-22.

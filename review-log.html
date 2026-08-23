@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823q">
+  <link rel="stylesheet" href="css/style.css?v=20260823r">
   <style>
     /* ── Review Log Page Styles ── */
     .rl-form-grid {
@@ -239,11 +239,14 @@
     <!-- ── شارة «مستحق للمراجعة» — دورة الـ180 يوماً (الدستور §5) ── -->
     <div id="rl-due-banner" style="display:none"></div>
 
-    <!-- ── نموذج الإضافة ── -->
-    <div class="card" style="margin-bottom:18px">
-      <div class="section-header" style="margin-bottom:16px">
-        <span class="section-title">إضافة مراجعة جديدة</span>
-      </div>
+    <!-- ── نموذج الإضافة — مطويّ افتراضياً (نفضة 2026-08-23) ──
+         4 حقول + منطقة مرفقات + textarea كانت مفتوحة دائماً، فتدفع الجدول
+         ورقم «كم سهم مستحق» تحت الطيّ. في زيارة المتابعة المعتادة لا يُقرأ
+         النموذج أصلاً. يُفتح تلقائياً عند نقر شريحة سهم مستحق. -->
+    <details class="card" id="rl-add-card" style="margin-bottom:18px">
+      <summary class="section-header" style="margin-bottom:16px;cursor:pointer;list-style:none">
+        <span class="section-title">＋ إضافة مراجعة جديدة <span class="text-muted" style="font-size:.8rem">▾</span></span>
+      </summary>
 
       <div class="rl-form-grid">
         <div class="form-group">
@@ -292,7 +295,7 @@
         <button class="btn btn-secondary" onclick="resetForm()">مسح</button>
         <button class="btn btn-primary"   onclick="saveEntry()">💾 حفظ المراجعة</button>
       </div>
-    </div>
+    </details>
 
     <!-- ── شريط الأدوات ── -->
     <div class="rl-toolbar">
@@ -379,12 +382,12 @@
   <div id="toast-container" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:9999;display:flex;flex-direction:column;gap:8px;align-items:center"></div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
-  <script src="js/supabase.js?v=20260823q"></script>
-  <script src="js/auth.js?v=20260823q"></script>
-  <script src="js/utils.js?v=20260823q"></script>
-  <script src="js/declutter.js?v=20260823q"></script>
-  <script src="js/navtoggle.js?v=20260823q"></script>
-  <script src="js/tickerdb.js?v=20260823q"></script>
-  <script src="js/review-log.js?v=20260823q"></script>
+  <script src="js/supabase.js?v=20260823r"></script>
+  <script src="js/auth.js?v=20260823r"></script>
+  <script src="js/utils.js?v=20260823r"></script>
+  <script src="js/declutter.js?v=20260823r"></script>
+  <script src="js/navtoggle.js?v=20260823r"></script>
+  <script src="js/tickerdb.js?v=20260823r"></script>
+  <script src="js/review-log.js?v=20260823r"></script>
 </body>
 </html>

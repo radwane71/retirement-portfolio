@@ -2103,3 +2103,11 @@ details.card[open] > summary{margin-bottom:14px}
 
 /* جدول تفصيل المصاريف: مطويّ حتى يُطلب — الرسم الدائري فوقه يقول الشيء نفسه */
 #bd-toggle:not(:checked) ~ .calc-tbl{display:none}
+details.result-card > summary{cursor:pointer;list-style:none;user-select:none}
+details.result-card > summary::-webkit-details-marker{display:none}
+details.result-card > summary::marker{content:''}
+details.card > summary.section-hdr::-webkit-details-marker{display:none}
+details.card > summary.section-hdr::marker{content:''}
+details.card > summary.section-header{display:flex;align-items:center;justify-content:space-between}
+details.card > summary.section-header::-webkit-details-marker{display:none}
+details.card > summary.section-header::marker{content:''}
