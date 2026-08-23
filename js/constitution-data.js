@@ -310,6 +310,7 @@ const CD_KEYS = {
   deferred: 'deferred_exits_v1',    // م.45
   audit:    'audit_log_v1',         // م.72
   depth:    'dividend_depth_v1',    // م.41 — سنوات مُدخَلة يدوياً لكل سهم
+  categoryHistory: 'category_history_v1',   // م.26 — نطاق التعليق بين الفئات
 };
 const AUDIT_MAX = 1000;             // سقف السجل — الأقدم يُقصّ
 

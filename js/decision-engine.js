@@ -170,8 +170,55 @@ function isBlueChip(h) {
   return h.ticker === '2222'; // أرامكو — بحكم trigger المالك لا بحكم فئة
 }
 
-// م.25 — فئة السهم من أرقامه المحفوظة في بطاقته
-function categoryOf(h) { return classifyStock(engineCfg[h.ticker] || {}); }
+// ══════════════════════════════════════════════════════════════════════
+// م.25 و26 — الفئة من الأرقام، ونطاق التعليق يمنع التذبذب عند الحدود
+// ----------------------------------------------------------------------
+// م.26: «الترقية بتجاوز العتبة بـ+15% لدورتين متتاليتين، والتنزيل بالنزول
+// تحتها بـ−15% لدورتين. بين العتبتين يبقى في فئته الحالية.»
+//
+// بلا هذا النطاق يقفز سهمٌ قيمته السوقية 100.4 مليار بين (أ) و(ب) مع كل
+// تقلّب سوقي، فيتغيّر سقفه ويولّد أمر تخفيف ثم أمر تجميع في دورتين
+// متتاليتين — ذبذبةٌ تُنتج عمولتين بلا سبب اقتصادي.
+//
+// السجل يعيش في `category_history_v1`: لكل سهم فئته المستقرّة، والفئة
+// المحسوبة الأخيرة، وكم دورةً متتاليةً ظلّت مخالفة.
+// ══════════════════════════════════════════════════════════════════════
+let categoryHistory = {};   // { ticker: { settled, pending, streak, lastCycle } }
+
+function categoryOf(h) {
+  const raw = classifyStock(engineCfg[h.ticker] || {});
+  if (!raw.known) return raw;                       // غير مصنَّف — لا تعليق له
+  const hist = categoryHistory[h.ticker];
+  if (!hist || !hist.settled) return { ...raw, settled: true };
+
+  const hy = applyHysteresis(hist.settled, raw.cat, hist.streak || 0, false);
+  if (hy.cat === raw.cat) return { ...raw, settled: true };
+  // مُعلَّق: يبقى على فئته المستقرّة، ويُعلَن أن حسابه يشير لغيرها
+  const held = CAT[hy.cat];
+  return { ...held, cat: hy.cat, known: true, missing: [], settled: false,
+           pendingCat: raw.cat, pendingLabel: raw.label, streak: hist.streak || 0,
+           why: `${hy.why} — الحساب الحالي يشير إلى «${raw.label}»` };
+}
+
+// تُحدَّث مرة لكل دورة: تعدّ الدورات المتتالية التي خالف فيها الحساب المستقرّ
+async function updateCategoryHistory(rows) {
+  const cycle = Math.floor(Date.now() / (CYCLE_DAYS * 86400000));   // رقم الدورة
+  let changed = false;
+  const next = { ...categoryHistory };
+  (rows || []).forEach(r => {
+    const raw = classifyStock(engineCfg[r.ticker] || {});
+    if (!raw.known) return;
+    const h = next[r.ticker] || { settled: raw.cat, pending: null, streak: 0, lastCycle: cycle };
+    if (h.lastCycle === cycle && next[r.ticker]) return;   // دورة واحدة = قراءة واحدة
+    if (raw.cat === h.settled) { h.pending = null; h.streak = 0; }
+    else if (raw.cat === h.pending) { h.streak = (h.streak || 0) + 1; }
+    else { h.pending = raw.cat; h.streak = 1; }
+    if (h.streak >= 2) { h.settled = h.pending; h.pending = null; h.streak = 0; }
+    h.lastCycle = cycle;
+    next[r.ticker] = h; changed = true;
+  });
+  if (changed) { categoryHistory = next; await cdSave('categoryHistory', next); }
+}
 // السقف = سقف الفئة. غير المصنَّف يأخذ سقف أعلى فئة **مؤقتاً**: فرض سقف
 // أدنى بسبب نقص بيانات عند المحرّك معاقبةٌ للمالك، وم.21 تمنعها صراحةً.
 function capOf(h) { const c = categoryOf(h); return c.known ? c.cap : CAT.A.cap; }
@@ -793,7 +840,8 @@ async function loadAll() {
   catch (_) { _planOverrideDates = null; }
 
   // م.43 — سجل القراءات، وم.45 قائمة الخروج المؤجل، وم.72 سجل التدقيق
-  readingsLog   = (await cdLoad('readings', {})) || {};
+  readingsLog     = (await cdLoad('readings', {})) || {};
+  categoryHistory = (await cdLoad('categoryHistory', {})) || {};   // م.26
   deferredExits = (await cdLoad('deferred', {})) || {};
   auditLog      = (await cdLoad('audit', [])) || [];
 
@@ -936,6 +984,7 @@ function runEngine() {
   // م.43 — تُسجَّل قراءة واحدة لكل إشارة في كل ربع. تشغيل المحرّك مراراً
   // في الربع نفسه لا يزيد العدّاد (pushReading يرفض تكرار الفترة).
   recordReadings(_results);
+  updateCategoryHistory(_results);   // م.26 — دورة واحدة = قراءة واحدة
 
   renderSummaryStrip(totalValue);
   renderActionGroups();
@@ -1281,6 +1330,14 @@ function _planFairVerdict(r) {
   };
 }
 
+// وزن القطاع الآن — يُحسب من صفوف التقييم لا من استعلام جديد (م.28)
+function _sectorPctOf(sector, total) {
+  if (!(total > 0)) return 0;
+  const v = (_results || []).filter(x => (x.sector || '—') === (sector || '—'))
+                            .reduce((a, x) => a + (+x.value || 0), 0);
+  return v / total * 100;
+}
+
 function buildTargetPlan(valAware) {
   const rows = _results || [];
   const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
@@ -1360,6 +1417,41 @@ function buildTargetPlan(valAware) {
       return;   // action='hold' — المشغّل انطبق والوزن دون هدفه، لا إجراء
     }
     // ══════════════════════════════════════════════════════════════════
+    // م.27 — الحد الأدنى للمركز: أقلّ من 2% خروج، و2–3% مهلة دورتين
+    // ------------------------------------------------------------------
+    // «مركز 1% من محفظة 230 ألف = 2,300 ريال، دخله ~95 ريال سنوياً. لا
+    // يفرق في الدخل ولا في المخاطر، ويستهلك انتباه المراجعة.»
+    //
+    // ⚠️ يمرّ ببوابة م.45 كأي خروج: القاعدة المطلقة لا تسقط لأن المركز
+    // صغير. مركزٌ صغير وخاسر يُدرَج في قائمة الخروج المؤجل لا يُصفَّى.
+    // وترتيبه بعد الاستدامة في سلّم م.50 (البند 6 بعد 7؟ لا — م.50 تضع
+    // الحد الأدنى **قبل** فشل الاستدامة، فيُفحَص هنا قبلها).
+    // ══════════════════════════════════════════════════════════════════
+    {
+      const pos = positionSizeVerdict(r.weight);
+      if (pos.key === 'exit' && r.shares > 0 && r.value > 0) {
+        const divsMin = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+        const gMin = deferredVerdict(price, r.avgCost, divsMin, r.shares);
+        // 'unknown' = تعذّر حساب التعادل. الخروج حينها قد يكسر م.11 بلا أن
+        // نعلم، فيُعامَل معاملة المؤجَّل ويُعلَن سببه — لا يُنفَّذ على جهل.
+        if (gMin.action === 'defer' || gMin.action === 'unknown') {
+          out.deferredExit.push(mk({ sar: r.value, shares: r.shares, breakEven: gMin.breakEven,
+            why: `⏸️ وزنه ${formatNum(r.weight)}% دون الحدّ الأدنى ${POS_MIN_GRACE}% (م.27) — لكن ${gMin.why}`,
+            fix: 'حدِّد سعر خروج في بطاقة السهم (م.45).' }));
+        } else {
+          out.exits.push(mk({ sar: r.value, shares: r.shares, breakEven: gMin.breakEven,
+            why: `🔻 وزنه ${formatNum(r.weight)}% دون ${POS_MIN_GRACE}% — خروج كامل في الدورة الحالية (م.27). ${gMin.why}` }));
+          out.fundedBy += r.value;
+        }
+        return;
+      }
+      if (pos.key === 'grace') {
+        // لا أمر: المهلة دورتان للرفع **بالضخّ** لا بالبيع. يُعلَن ولا يُنفَّذ.
+        r.minPosNote = `وزنه ${formatNum(r.weight)}% — ${pos.label}`;
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // م.45 — الفلتر 1-ب: بوابة الخسارة المحققة
     // ------------------------------------------------------------------
     // «عند فشل الفلتر 1، الخروج **لا يُنفَّذ فوراً** بل يمر بهذه البوابة
@@ -1374,13 +1466,14 @@ function buildTargetPlan(valAware) {
     // ══════════════════════════════════════════════════════════════════
     if (r.sustain && r.sustain.status === 'fail' && r.action === 'exit') {
       const divs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+      // نفس الحذر في مسار فشل الاستدامة (انظر التعليق عند م.27 أعلاه)
       const gate = deferredVerdict(price, r.avgCost, divs, r.shares);
       const a46  = article46Applies(
         !!(r.sustain.trend && r.sustain.trend.signal === 'stopped'),
         true,
         (engineCfg[r.ticker] || {}).equityEroding === true);
 
-      if (gate.action === 'defer' && !a46.applies) {
+      if ((gate.action === 'defer' || gate.action === 'unknown') && !a46.applies) {
         const saved = deferredExits[r.ticker] || {};
         out.deferredExit.push(mk({
           sar: r.value, shares: r.shares, breakEven: gate.breakEven,
@@ -1443,6 +1536,17 @@ function buildTargetPlan(valAware) {
     // ③ تحت الهدف ⇒ تجميع، بشرط أن يسمح السعر وقرارك
     // م.57: حدّ الشراء 2,000 ر.س لا 500 — «تجزئة الضخّ تولّد عمولات وتُضعف الأثر»
     if (gapPct > 0 && sar >= MIN_BUY_SAR) {
+      // م.28 — قطاع بين 27.5% و30%: «وقف الإضافة للقطاع». التجميع هنا
+      // يزيد تركيزاً بلغ نطاق الوقف، فيُؤجَّل ويُعلَن سببه القطاعي.
+      const secPctNow = _sectorPctOf(r.sector, total);
+      const secBand = sectorBandOf(secPctNow);
+      if (secBand.action === 'stopAdd' || secBand.action === 'correct') {
+        out.deferredSar += sar;
+        out.deferred.push(mk({ sar, shares, gapPct,
+          why: `قطاع «${escapeHtmlSafe(r.sector || '—')}» عند ${formatNum(secPctNow)}% — ${secBand.label} (م.28). `
+             + 'الفجوة قائمة والتجميع موقوف حتى ينزل وزن القطاع.' }));
+        return;
+      }
       // BUGFIX 2026-08-23: كان `out.needed += sar` هنا — **قبل** فحوص التأجيل
       // والتعارض، فيدخل المبلغ المؤجَّل (سعر فوق العادلة · مراقبة · فشل
       // استدامة) والمتعارض في «تحتاج X ر.س» وأنت لن تنفّذها. النتيجة: احتياج
@@ -1719,6 +1823,22 @@ function renderLedgers() {
       const pending = rows.filter(r => !r.c.confirmed && r.c.need > 0).length;
       bEl.textContent = `${rows.length} إشارة مرصودة${pending ? ` · ${pending} تنتظر تأكيداً` : ''}`;
     }
+  }
+
+  // م.30 — تركيز العامل الواحد: يُحسب ويُفصح عنه في كل دورة
+  const gEl = document.getElementById('de-govexp');
+  if (gEl) {
+    const g = govExposure(_results || []);
+    gEl.innerHTML = g.pct == null
+      ? noteHtml('📭', 'لا حيازات لحساب التعرّض.', '')
+      : noteHtml('🏛️',
+          `<strong>تركيز العامل الواحد — الإنفاق الحكومي السعودي: `
+        + `<span class="num">${formatNum(g.pct, 1)}%</span> من محفظتك.</strong><br>`
+        + `${escapeHtmlSafe(g.why)}`
+        + (g.unknown.length
+            ? `<br>قطاعات بلا مُعامِل مُدرَج (استُعمل الافتراضي ${Math.round(GOV_DEFAULT * 100)}%): `
+              + g.unknown.map(escapeHtmlSafe).join('، ')
+            : ''), '');
   }
 
   if (aEl) {

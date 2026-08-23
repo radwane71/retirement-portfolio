@@ -106,6 +106,47 @@ const BANNED_TICKERS = { '4339': 'دراية ريت', '1111': 'تداول الق
 // م.55/5: ممنوع توجيه سيولة — بقرار المالك الصريح
 const NO_ACCUMULATE = { '2270': 'سدافكو — لا تجميع مهما كانت الإشارات (م.55)' };
 
+// ══════════════════════════════════════════════════════════════════════
+// م.30 — تركيز العامل الواحد: نسبة المحفظة المرتبطة بالإنفاق الحكومي
+// ----------------------------------------------------------------------
+// «الطاقة مباشرة، البنوك عبر الودائع وتمويل المشاريع، الأسمنت عبر
+// الإنشاءات، التجزئة والصحة عبر الدخل المحلي.»
+//
+// ⚠️ **مادة إفصاح فقط.** لا تولّد إشارة بيع ولا تُخصم من درجة التقييم —
+// احتراماً للمادة 9 (المحفظة 100% سعودية بقرار المالك، ولا تُنتقد عليه).
+// الرقم يُعرَض ليُعرَف، لا ليُعاقَب عليه.
+//
+// المعاملات تقديرية بنصّ الدستور («التقدير الحالي ~70%») — فتُعلَن كذلك،
+// ولا تُقدَّم على أنها قياس. م.20: ما ليس قياساً لا يُعرَض كقياس.
+// ══════════════════════════════════════════════════════════════════════
+const GOV_EXPOSURE = {
+  'الطاقة': 1.00, 'المرافق العامة': 1.00, 'البتروكيماويات': 0.85,
+  'البنوك': 0.70, 'الخدمات المالية': 0.60,
+  'الأسمنت': 0.75, 'السلع الرأسمالية': 0.70, 'إدارة وتطوير العقارات': 0.60,
+  'الاتصالات': 0.60, 'الرعاية الصحية': 0.55, 'التجزئة الكمالية': 0.45,
+  'تجزئة الأغذية': 0.45, 'إنتاج الأغذية': 0.40, 'النقل': 0.55,
+  'التأمين': 0.50, 'الإعلام والترفيه': 0.45, 'الاستثمار والتمويل': 0.55,
+};
+const GOV_DEFAULT = 0.45;   // قطاع غير مُدرَج — يُعلَن أنه افتراضي
+
+function govExposure(rows) {
+  const total = (rows || []).reduce((a, r) => a + (+r.value || 0), 0);
+  if (!(total > 0)) return { pct: null, total: 0, unknown: [], why: 'لا حيازات' };
+  const unknown = [];
+  let weighted = 0;
+  (rows || []).forEach(r => {
+    const sec = String(r.sector || '').trim();
+    const f = GOV_EXPOSURE[sec];
+    if (f == null && sec && !unknown.includes(sec)) unknown.push(sec);
+    weighted += (+r.value || 0) * (f == null ? GOV_DEFAULT : f);
+  });
+  return {
+    pct: weighted / total * 100, total, unknown,
+    why: 'إفصاح فقط (م.30): لا يولّد إشارة بيع ولا يُخصم من درجة التقييم (م.9). '
+       + 'المعاملات تقديرية بنصّ الدستور، لا قياس.',
+  };
+}
+
 // ── م.7: المعالم الرقمية ──
 const GOAL_MONTHLY_INCOME = 6000;      // ريال شهرياً بحلول 2045
 const GOAL_PORTFOLIO      = 1310000;   // عند عائد 5.5%
@@ -295,6 +336,7 @@ if (typeof module !== 'undefined' && module.exports) {
     HORIZON_YEAR, ACCUM_END_YEAR, TRANSITION_END_YEAR, WITHDRAW_START_YEAR,
     FRESH_DAYS, DATA_TAG, MIN_BUY_SAR, MAX_NAMES_PER_BATCH, CYCLE_DAYS, QUARTER_DAYS,
     OVERRIDE_VALID_DAYS, RATING_DIMS,
+    GOV_EXPOSURE, GOV_DEFAULT, govExposure,
     classifyStock, applyHysteresis, capOfCategory, sectorBandOf, valueBandOf,
     deviationBandOf, positionSizeVerdict, isBanned, isNoAccumulate,
     portfolioPhase, trueBreakEven, overrideStatus,
