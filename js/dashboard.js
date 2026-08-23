@@ -1061,10 +1061,18 @@ function renderStats() {
   if (pnlEl)    { pnlEl.textContent = formatSAR(pnl, true); pnlEl.className = 'value num ' + (pnl >= 0 ? 'text-success' : 'text-danger'); }
   if (pnlPctEl) { pnlPctEl.textContent = (pnl >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%'; pnlPctEl.className = 'sub ' + (pnl >= 0 ? 'text-success' : 'text-danger'); }
 
-  // ── إجمالي العائد منذ البداية ─────────────────────────────────
+  // ── إجمالي **الربح** منذ البداية ───────────────────────────────
   // الربح الكلي = (غير محقق) + (محقق من البيع) + (كل التوزيعات)
   //            = القيمة السوقية + إجمالي المبيعات + إجمالي التوزيعات − إجمالي المشتريات
-  // النسبة على إجمالي المشتريات (رأس المال المنشغل) — عائد تراكمي بسيط، غير مُسنوى.
+  //
+  // ⚠️ **ليست «عائداً»، وكانت تُسمّى كذلك.** النسبة هنا = الربح ÷ ما اشتريتَ
+  // به، وهي تقيس **حجم** الربح لا **أداء** المحفظة: ريالٌ أُودع الشهر الماضي
+  // لم تُتَح له فرصة الربح التي أُتيحت لريالٍ أُودع قبل ثلاث سنوات، وجمعهما في
+  // مقامٍ واحد يخلط الربح بالإيداع. ومع ضخٍّ يعادل 42% من المحفظة سنوياً (م.8)
+  // تنزل النسبة كلما ضخخت أكثر — ولو كان أداء المحفظة ممتازاً.
+  //
+  // قياس الأداء (TWR وXIRR وعائد كل سنة) في تبويب «📈 العائد بالنسبة» في
+  // الأداء التاريخي. البطاقة تشير إليه صراحةً، ولا تنافسه برقمٍ ثانٍ.
   const trEl    = g('stat-total-return');
   const trSubEl = g('stat-total-return-sub');
   if (trEl) {
@@ -1074,7 +1082,7 @@ function renderStats() {
       const totalRetPct = totalProfit / totalBuys * 100;
       trEl.textContent = formatSAR(totalProfit, true) + ` (${totalProfit >= 0 ? '+' : ''}${totalRetPct.toFixed(1)}%)`;
       trEl.className = 'value num ' + (totalProfit >= 0 ? 'text-success' : 'text-danger');
-      if (trSubEl) trSubEl.textContent = `القيمة الحالية + المبيعات + التوزيعات − المشتريات`;
+      if (trSubEl) trSubEl.textContent = `الربح ÷ ما اشتريتَ به — حجمُ ربح لا قياسُ أداء`;
     } else {
       trEl.textContent = '—';
       trEl.className = 'value num text-muted';
@@ -3287,7 +3295,7 @@ function renderBreakEvenCard() {
   // currentValue يشمل أسهم المنح (موجودة في holdings) — لا نضيف grantValueNow مرة ثانية
   // AUDIT-FIX (2026-07): حصيلة البيع مخصومة أصلاً من رأس المال المنشغل (مشتريات − مبيعات)،
   // فإضافتها مرة أخرى كـ«نقد عائد» كانت تحتسبها مرتين وتضخّم الربح الحقيقي بمقدار
-  // min(النقد، المبيعات). المعادلة الصحيحة — مطابقة لكرت «إجمالي العائد منذ البداية»:
+  // min(النقد، المبيعات). المعادلة الصحيحة — مطابقة لكرت «إجمالي الربح منذ البداية»:
   //   إجمالي العوائد = قيمة المحفظة + التوزيعات   مقابل   رأس المال = مشتريات − مبيعات
   const totalReturns = currentValue + totalDivAll;
 
@@ -4271,7 +4279,7 @@ function showCardInfo(key) {
         <p class="info-note">✅ هذه الطريقة الزمنية الدقيقة، ومطابقة لرقم «الربح المحقق» في صفحة سجل المعاملات.</p>`
     },
     'total-return': {
-      title: '🧮 إجمالي العائد منذ البداية',
+      title: '🧮 إجمالي الربح منذ البداية',
       body: (() => {
         const totalBuys = s.totalBuys || 0;
         const totalProfit = totalBuys > 0
@@ -4288,7 +4296,9 @@ function showCardInfo(key) {
           النسبة = إجمالي الربح ÷ إجمالي المشتريات = <strong class="${totalProfit>=0?'text-success':'text-danger'}">${totalProfit>=0?'+':''}${pct.toFixed(1)}%</strong><br>
           (الأسهم المجانية/المنح تظهر كربح صافٍ لأن تكلفتها صفر)
         </div>
-        <p class="info-note">📌 هذا عائد <strong>تراكمي بسيط</strong> منذ البداية وليس سنوياً — للعائد السنوي الحقيقي الذي يراعي التوقيت استخدم بطاقة <strong>XIRR</strong>. النسبة على إجمالي المشتريات، فإن أعدت تدوير رأس المال (بيع ثم شراء) يكون الرقم متحفظاً.</p>`;
+        <p class="info-note">📌 <strong>هذه نسبة ربح لا نسبة أداء.</strong> ريالٌ أُودع الشهر الماضي لم تُتَح له فرصة الربح التي أُتيحت لريالٍ أُودع قبل ثلاث سنوات، وجمعهما في مقامٍ واحد يخلط الربح بالإيداع. ومع ضخٍّ يعادل 42% من المحفظة سنوياً (م.8) <strong>تنزل هذه النسبة كلما ضخخت أكثر</strong> — ولو كان أداء المحفظة ممتازاً.</p>
+        <p class="info-note">📈 قياس الأداء الحقيقي — <strong>TWR</strong> (معزول عن توقيت إيداعاتك) و<strong>XIRR</strong> (موزون بها) و<strong>عائد كل سنة على حدة</strong> ومدى تختاره — في <a href="performance.html#returns" style="color:var(--accent)">الأداء التاريخي ← تبويب «العائد بالنسبة»</a>.</p>
+        <p class="info-note">والنسبة على إجمالي المشتريات، فإن أعدت تدوير رأس المال (بيع ثم شراء) يكون الرقم متحفظاً.</p>`;
       })()
     },
     'div-yield': {

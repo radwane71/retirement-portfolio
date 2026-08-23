@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824m">
+  <link rel="stylesheet" href="css/style.css?v=20260824n">
   <style>
     .perf-tabs { display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px; }
     .perf-tab  { padding:7px 16px; border-radius:var(--radius); border:1px solid var(--border);
@@ -250,8 +250,20 @@
            آلية الحساب تقوم على استيفاء سعر المؤشر وافتراض عائد توزيعات
            سوق ثابت مكتوب في الكود، فالناتج مُستنبَط لا مقيس.
            القاعدة: ما لسنا واثقين منه 100% لا يُعرض. ⚠️ لا تُعِد التبويب. -->
+      <button class="perf-tab"        onclick="showPerfTab('returns')"      id="ptab-returns">📈 العائد بالنسبة</button>
       <button class="perf-tab"        onclick="showPerfTab('div-metrics')"  id="ptab-div-metrics">💰 مؤشرات التوزيعات</button>
       <button class="perf-tab"        onclick="showPerfTab('behavioral')"   id="ptab-behavioral">🧠 تحليل السلوك</button>
+    </div>
+
+    <!-- ── TAB: العائد بالنسبة المئوية ── -->
+    <div id="pview-returns" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">📈 العائد بالنسبة المئوية <span class="eng-label">Total Return</span></span>
+        <button class="info-btn" type="button" onclick="showReturnsInfo()">ⓘ</button>
+      </div>
+      <div id="ret-body">
+        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ الحساب…</p></div>
+      </div>
     </div>
 
     <!-- ── TAB: Open positions ── -->
@@ -481,14 +493,14 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260824m"></script>
-  <script src="js/auth.js?v=20260824m"></script>
-  <script src="js/utils.js?v=20260824m"></script>
-  <script src="js/constitution.js?v=20260824m"></script>
-  <script src="js/constitution-data.js?v=20260824m"></script>
-  <script src="js/tadawul-data.js?v=20260824m"></script>
-  <script src="js/declutter.js?v=20260824m"></script>
-  <script src="js/navtoggle.js?v=20260824m"></script>
-  <script src="js/performance.js?v=20260824m"></script>
+  <script src="js/supabase.js?v=20260824n"></script>
+  <script src="js/auth.js?v=20260824n"></script>
+  <script src="js/utils.js?v=20260824n"></script>
+  <script src="js/constitution.js?v=20260824n"></script>
+  <script src="js/constitution-data.js?v=20260824n"></script>
+  <script src="js/tadawul-data.js?v=20260824n"></script>
+  <script src="js/declutter.js?v=20260824n"></script>
+  <script src="js/navtoggle.js?v=20260824n"></script>
+  <script src="js/performance.js?v=20260824n"></script>
 </body>
 </html>

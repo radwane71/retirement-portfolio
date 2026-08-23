@@ -231,17 +231,24 @@ async function init() {
   renderClosedPositions();
   renderMonthlyTimeline();
   renderMonthlyChart();
+
+  // رابط مباشر إلى تبويب: performance.html#returns
+  // بطاقة «إجمالي الربح» في لوحة التحكم تشير إلى هنا، ورابطٌ يفتح الصفحة
+  // على تبويب غير المقصود يُقرأ عطلاً.
+  const _hash = (location.hash || '').replace('#', '');
+  if (_hash && document.getElementById('pview-' + _hash)) showPerfTab(_hash);
 }
 
 // ── Tab switcher ──────────────────────────────────────────────────────
 function showPerfTab(tab) {
   _activeTab = tab;
-  ['open','closed','timeline','monthly-chart','div-metrics','behavioral'].forEach(t => {
+  ['open','closed','timeline','monthly-chart','returns','div-metrics','behavioral'].forEach(t => {
     const view = document.getElementById(`pview-${t}`);
     const btn  = document.getElementById(`ptab-${t}`);
     if (view) view.style.display = t === tab ? '' : 'none';
     if (btn)  btn.classList.toggle('active', t === tab);
   });
+  if (tab === 'returns')     renderReturns();
   if (tab === 'div-metrics') renderDividendMetrics();
   if (tab === 'behavioral')  renderBehavioralAudit();
 }
@@ -2118,6 +2125,253 @@ function _stockFlows(coveredSet) {
 // والخطأ **تراكمي**: يتكرر كل يوم فيه شراء، فمحفظة تضخّ بانتظام تظهر أسوأ من
 // حقيقتها مقابل مؤشر لا تدفّقات فيه. اختبار حياد التوقيت (twr-verify.js ②) يمسكه:
 // TWR يجب ألّا يتغيّر بتغيّر جدول شرائك، وكان يتغيّر 0.54 نقطة.
+// ══════════════════════════════════════════════════════════════════════
+// 📈 العائد بالنسبة المئوية — منذ البداية · لكل سنة · لمدى تختاره
+// ----------------------------------------------------------------------
+// **رقمان مختلفان، وكلاهما صحيح** — والخلط بينهما هو الخطأ الشائع:
+//
+//   • **TWR** يعزل توقيت إيداعاتك ويقيس *أداء المحفظة*. هو المعيار الذي
+//     تُقاس به الصناديق، وهو الوحيد الذي يصلح لمقارنة سنة بسنة.
+//   • **XIRR** يُدخل توقيتك في الحساب ويقيس *ما كسبتَه أنت*.
+//
+// والفرق ليس أكاديمياً هنا: الضخّ 96,000 ريالاً سنوياً يساوي 42% من قيمة
+// المحفظة (م.8). ريالٌ دخل في ديسمبر لم يعمل مثل ريالٍ دخل في يناير، فـXIRR
+// يزنه بمدّته وTWR لا يراه. تباعُدُ الرقمين طبيعي ومتوقَّع، لا خلل.
+//
+// **الأساس واحد**: نفس سلسلة `_dailyStocksTRSeries` ونفس `_stockFlows` التي
+// تقوم عليها مقاييس المخاطر. أساسٌ ثانٍ يعني رقمين لنفس السؤال في شاشة
+// واحدة — وهو عين ما بُني له `const-drift`.
+// ══════════════════════════════════════════════════════════════════════
+let _retState = { from: '', to: '' };
+
+function _returnsData() {
+  const series = _dailyStocksTRSeries();
+  if (!series || series.length < 2) return { ok: false, why: 'daily' };
+  const { twrMap, sortedSnaps } = _computeTWR(series, _stockFlows(series.covered || null), 'end');
+  const pts = sortedSnaps.map(s => ({ date: s.date, idx: twrMap[s.date] }))
+    .filter(p => p.idx != null && p.idx > 0);
+  if (pts.length < 2) return { ok: false, why: 'points' };
+
+  const first = pts[0], last = pts[pts.length - 1];
+  const spanDays = (new Date(last.date) - new Date(first.date)) / 86400000;
+  const years = spanDays / 365.25;
+  const total = last.idx / first.idx - 1;
+
+  // ── لكل سنة ميلادية ──────────────────────────────────────────────
+  // نقطة بداية السنة = **آخر نقطة في السنة السابقة** (القيمة المُرحَّلة)، لا
+  // أول نقطة في السنة نفسها: وإلا ضاع أداء الأيام بين 31 ديسمبر وأول تداول.
+  const years_ = [...new Set(pts.map(p => +p.date.slice(0, 4)))].sort();
+  const byYear = years_.map(y => {
+    const inY   = pts.filter(p => +p.date.slice(0, 4) === y);
+    const prior = pts.filter(p => p.date < `${y}-01-01`);
+    const start = prior.length ? prior[prior.length - 1] : inY[0];
+    const end   = inY[inY.length - 1];
+    if (!start || !end || start.idx <= 0 || start.date === end.date) return null;
+    const days = (new Date(end.date) - new Date(start.date)) / 86400000;
+    // صافي ما ضخَخْتَه في السنة — يُعرض ليُفهم لماذا نمت القيمة بلا عائد
+    const netFlow = (_stockFlows(series.covered || null) || [])
+      .filter(f => f.date > start.date && f.date <= end.date)
+      .reduce((a, f) => a + (f.type === 'deposit' ? f.amount : -f.amount), 0);
+    return { year: y, ret: end.idx / start.idx - 1, from: start.date, to: end.date,
+             days: Math.round(days), netFlow,
+             partial: !prior.length || end.date < `${y}-12-25` };
+  }).filter(Boolean);
+
+  // ── XIRR على كل معاملاتك (تغطيته أوسع: لا يحتاج أسعاراً تاريخية) ──
+  const flows = [];
+  (_tx || []).forEach(t => {
+    if (!t.date) return;
+    if (t.type === 'buy')       flows.push({ date: parseDateLocal(t.date), amount: -(+t.total || 0) });
+    else if (t.type === 'sell') flows.push({ date: parseDateLocal(t.date), amount:  (+t.total || 0) });
+  });
+  // `dividendFlowDate` هي التعريف الواحد لتاريخ التوزيعة داخل XIRR عبر المشروع
+  // (utils.js): قراءة محلية، واحتياطي أول الشهر من سنة/شهر، وإسقاط المُعلَن
+  // بتاريخ صرفٍ قادم لم يُستلَم. كتابةُ منطقٍ موازٍ هنا تعني رقمين لسؤال واحد.
+  const _now = new Date();
+  (_divs || []).forEach(d => {
+    const dt = dividendFlowDate(d, _now);
+    if (dt) flows.push({ date: dt, amount: +d.amount || 0 });
+  });
+  const mktValue = (getPositionData().open || [])
+    .reduce((a, p) => a + (+p.marketValue || 0), 0);
+  if (mktValue > 0) flows.push({ date: new Date(), amount: mktValue });
+  // ⚠️ `computeXIRR` ترجع **نسبة مئوية** (`r * 100`) لا كسراً — كما تستعملها
+  // جداول المراكز أعلاه (`p.xirr.toFixed(2) + '%'`). قسمتها هنا تُوحّد الوحدة
+  // مع TWR فيصحّ الضرب في 100 عند العرض. بلا هذا يظهر 12% رقماً هو **1202%**.
+  let xirr = null;
+  try {
+    const x = (flows.length >= 2) ? computeXIRR(flows) : null;
+    xirr = (typeof x === 'number' && isFinite(x)) ? x / 100 : null;
+  } catch (_) { xirr = null; }
+
+  const cov = (typeof _dailyCoverage === 'function') ? _dailyCoverage() : null;
+  return { ok: true, pts, first, last, years, total, byYear, xirr, spanDays,
+           coverage: cov, series };
+}
+
+// عائد مدى بين نقطتَي مؤشر — يُستعمل للمدى المخصّص
+function _retBetween(pts, fromISO, toISO) {
+  const before = pts.filter(p => p.date <= fromISO);
+  const start  = before.length ? before[before.length - 1] : pts[0];
+  const inR    = pts.filter(p => p.date <= toISO && p.date > start.date);
+  const end    = inR.length ? inR[inR.length - 1] : null;
+  if (!end || start.idx <= 0) return null;
+  const days = (new Date(end.date) - new Date(start.date)) / 86400000;
+  return { ret: end.idx / start.idx - 1, from: start.date, to: end.date, days: Math.round(days) };
+}
+
+function renderReturns() {
+  const el = document.getElementById('ret-body');
+  if (!el) return;
+  const d = _returnsData();
+
+  if (!d.ok) {
+    el.innerHTML = noteHtml('⚠️',
+        `<strong>لا يمكن قياس العائد بعد.</strong> الحساب يحتاج سلسلة أسعار يومية `
+      + `لإعادة بناء قيمة المحفظة يوماً بيوم، وهي غير متاحة الآن `
+      + `(${d.why === 'daily' ? 'لم تُجلب الأسعار التاريخية' : 'نقاط القياس أقل من اثنتين'}).`
+      + `<br>لا نعرض رقماً بديلاً: «القيمة اليوم ÷ التكلفة» ليست عائداً في محفظة `
+      + `يدخلها مالٌ جديد كل شهر — تخلط الربح بالإيداع (م.20).`, 'warn');
+    return;
+  }
+
+  const pctS = v => `${v >= 0 ? '+' : ''}${(v * 100).toFixed(2)}%`;
+  const col  = v => v >= 0 ? 'var(--success)' : 'var(--danger)';
+  const big  = v => `<span style="color:${col(v)}">${pctS(v)}</span>`;
+  const ann  = d.years >= 1 ? Math.pow(1 + d.total, 1 / d.years) - 1 : null;
+
+  // ── ① منذ البداية ──
+  const head = `
+    <div class="stats-grid" style="margin-bottom:14px">
+      <div class="stat-card">
+        <div class="label">العائد منذ البداية <span class="eng-label">TWR</span></div>
+        <div class="value num" style="color:${col(d.total)}">${pctS(d.total)}</div>
+        <div class="sub">${esc(d.first.date)} ← ${esc(d.last.date)} · ${d.years.toFixed(1)} سنة</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">مُسنوى <span class="eng-label">Annualized</span></div>
+        <div class="value num" style="color:${ann == null ? 'var(--text-muted)' : col(ann)}">
+          ${ann == null ? '—' : pctS(ann)}</div>
+        <div class="sub">${ann == null
+          ? 'المدة أقل من سنة — التسنية تضخّم ولا تُعرض'
+          : 'مركّب سنوياً — أداء المحفظة'}</div>
+      </div>
+      <div class="stat-card">
+        <div class="label">عائدك أنت <span class="eng-label">XIRR</span></div>
+        <div class="value num" style="color:${d.xirr == null ? 'var(--text-muted)' : col(d.xirr)}">
+          ${d.xirr == null ? '—' : pctS(d.xirr)}</div>
+        <div class="sub">${d.xirr == null ? 'يحتاج تدفّقين بإشارتين' : 'موزون بتوقيت إيداعاتك'}</div>
+      </div>
+    </div>`;
+
+  // ── ② لكل سنة ──
+  const rows = d.byYear.map(y => `
+    <tr>
+      <td><strong>${y.year}</strong>${y.partial
+        ? ` <span class="small text-muted" title="السنة غير مكتملة في القياس — لا تُقارن بسنة كاملة">جزئية</span>` : ''}</td>
+      <td class="num" style="color:${col(y.ret)};font-weight:700">${pctS(y.ret)}</td>
+      <td class="num small text-muted">${esc(y.from)} ← ${esc(y.to)}</td>
+      <td class="num small text-muted">${y.days} يوماً</td>
+      <td class="num small text-muted">${formatSAR(y.netFlow, true)}</td>
+    </tr>`).join('');
+
+  const yearsTbl = d.byYear.length ? `
+    <div class="section-header" style="margin-top:6px"><span class="section-title">العائد لكل سنة</span></div>
+    <div class="table-wrapper"><table>
+      <thead><tr>
+        <th>السنة</th><th>العائد <span class="small text-muted">TWR</span></th>
+        <th>نطاق القياس</th><th>أيام</th>
+        <th>صافي ما ضخخته <span class="small text-muted">شراء − بيع</span></th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table></div>` : '';
+
+  // ── ③ مدى مخصّص ──
+  const ys = d.byYear.map(y => y.year);
+  const from = _retState.from || String(ys[0] || '');
+  const to   = _retState.to   || String(ys[ys.length - 1] || '');
+  const opt  = (v, sel) => `<option value="${v}"${String(v) === String(sel) ? ' selected' : ''}>${v}</option>`;
+  let rangeOut = '';
+  if (ys.length) {
+    const r = _retBetween(d.pts, `${from}-01-01`, `${to}-12-31`);
+    if (+from > +to) {
+      rangeOut = noteHtml('↔️', 'سنة البداية بعد سنة النهاية — اقلبهما.', 'warn');
+    } else if (r) {
+      const ry = r.days / 365.25;
+      const ra = ry >= 1 ? Math.pow(1 + r.ret, 1 / ry) - 1 : null;
+      rangeOut = kvsHtml([
+        [`العائد من ${from} إلى ${to}`, big(r.ret)],
+        ['مُسنوى', ra == null ? '<span class="text-muted">— (أقل من سنة)</span>' : big(ra)],
+        ['نطاق القياس الفعلي', `${esc(r.from)} ← ${esc(r.to)} · ${r.days} يوماً`],
+      ]);
+    } else {
+      rangeOut = noteHtml('🔍', 'لا نقاط قياس في هذا المدى.', 'warn');
+    }
+  }
+
+  const range = ys.length ? `
+    <div class="section-header" style="margin-top:14px"><span class="section-title">مدى تختاره</span></div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+      <label class="small">من</label>
+      <select id="ret-from" onchange="onRetRange()" style="padding:6px 10px;background:var(--bg-2);
+        border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit">
+        ${ys.map(y => opt(y, from)).join('')}</select>
+      <label class="small">إلى</label>
+      <select id="ret-to" onchange="onRetRange()" style="padding:6px 10px;background:var(--bg-2);
+        border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit">
+        ${ys.map(y => opt(y, to)).join('')}</select>
+    </div>
+    <div id="ret-range-out">${rangeOut}</div>` : '';
+
+  // ── ④ ما يجب أن يُقال قبل أن يُقرأ الرقم ──
+  const missing = (d.coverage && d.coverage.missing) || [];
+  const notes = noteHtml('📐',
+      `<strong>الرقمان مختلفان عمداً.</strong> <b>TWR</b> يعزل توقيت إيداعاتك ويقيس `
+    + `<em>أداء المحفظة</em> — وهو الوحيد الذي يصلح لمقارنة سنة بسنة. و<b>XIRR</b> `
+    + `يُدخل التوقيت ويقيس <em>ما كسبتَه أنت</em>. مع ضخٍّ يعادل 42% من المحفظة سنوياً `
+    + `(م.8) يتباعد الرقمان، وهذا طبيعي لا خلل.`
+    + `<br><strong>العائد لكل سنة بـTWR وحده:</strong> XIRR على سنة واحدة تحكمه `
+    + `تواريخ الإيداع أكثر مما يحكمه الأداء، فيقفز بين السنوات بلا معنى.`
+    + `<br><strong>الأساس:</strong> أسهمك وتوزيعاتها (لا نقد راكد ولا عقار) — نفس أساس `
+    + `مقاييس المخاطر أعلى الصفحة، فلا رقمان لسؤال واحد.`
+    + (missing.length
+        ? `<br>⚠️ <strong>خارج القياس:</strong> ${esc(missing.join('، '))} — لا أسعار تاريخية `
+          + `لها، فلا تدخل TWR (تدخل XIRR لأنه لا يحتاج أسعاراً). م.20.`
+        : ''),
+    'info');
+
+  el.innerHTML = head + yearsTbl + range + notes;
+}
+
+function onRetRange() {
+  const f = document.getElementById('ret-from'), t2 = document.getElementById('ret-to');
+  _retState.from = f ? f.value : '';
+  _retState.to   = t2 ? t2.value : '';
+  renderReturns();
+}
+
+function showReturnsInfo() {
+  const p = h => `<p style="margin:0 0 8px">${h}</p>`;
+  openInfoModal('📈 العائد بالنسبة المئوية — المنهجية',
+      p(`<strong>لماذا لا نعرض «القيمة اليوم ÷ ما دفعتَه»؟</strong> لأنه ليس عائداً في `
+      + `محفظة يدخلها مالٌ جديد كل شهر. ريالٌ أُودع الشهر الماضي لم تُتَح له فرصة الربح `
+      + `التي أُتيحت لريالٍ أُودع قبل ثلاث سنوات، وجمعهما في مقامٍ واحد يخلط الربح بالإيداع.`)
+    + p(`<strong>TWR — العائد الموزون بالزمن.</strong> يقسّم المدة عند كل تدفّق ويضرب `
+      + `عوائد الفترات بعضها في بعض، فيخرج أداءُ المحفظة معزولاً عن توقيت إيداعاتك. `
+      + `هذا هو المعيار الذي تُقاس به الصناديق، وهو الوحيد الذي يصلح لمقارنة سنة بسنة.`)
+    + p(`<strong>XIRR — العائد الموزون بالمال.</strong> يزن كل ريال بمدّته، فيقيس ما `
+      + `كسبتَه أنت فعلاً بتوقيتك. إن كان أعلى من TWR فقد أحسنتَ التوقيت، وإن كان أدنى `
+      + `فقد دخل معظم مالك قبل فترة ضعيفة.`)
+    + p(`<strong>بداية كل سنة</strong> هي <em>آخر نقطة في السنة السابقة</em> لا أول نقطة `
+      + `في السنة نفسها — وإلا ضاع أداء الأيام بين إقفال ديسمبر وأول تداول في يناير.`)
+    + p(`<strong>«جزئية»</strong> بجوار سنة تعني أن القياس لا يغطّيها كاملة (السنة الأولى `
+      + `تبدأ من أول معاملة، والأخيرة تنتهي اليوم). لا تُقارَن بسنة كاملة.`)
+    + p(`<strong>الأساس:</strong> أسهمك وتوزيعاتها فقط — لا نقد راكد ولا عقار — وهو نفس `
+      + `أساس التذبذب وشارب وسورتينو أعلى الصفحة. رقمٌ واحد لسؤال واحد.`)
+    + p(`<strong>التوزيعات عائد لا تدفّق:</strong> يوم الاستحقاق ينزل السعر ويدخل النقد، `
+      + `فالقيمة لا تتغيّر — ولو عُدَّت تدفّقاً لظهر الهبوط بلا ما يقابله.`));
+}
+
 function _computeTWR(snapshots, cashflows, flowTiming) {
   // خطوة أولى: سلسلة متجانسة الأساس، ثم لقطة واحدة فقط لكل يوم لتجنب تشويه الحسابات
   const sorted = _deduplicateSnapsByDay(_selectConsistentSnapshots(snapshots));
