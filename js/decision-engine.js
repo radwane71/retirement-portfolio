@@ -1018,6 +1018,34 @@ function renderActionGroups() {
 // الحدّ الأدنى لأمر يستحق التنفيذ — ما دونه تكلفة الصفقة تأكله
 const PLAN_MIN_SAR = 500;
 
+// ══════════════════════════════════════════════════════════════════════
+// أثر التنفيذ على جيبك — طلب المالك 2026-08-23:
+// «قل لي: أنت خارج وأنت خسران كذا، أو خارج وأنت كسبان كذا — بعد ما تطرح
+//  التوزيعات والقيمة والمتوسط حقي والسعر اليوم».
+//
+// التفريق المقصود بين رقمين لا يصحّ خلطهما:
+//   • **رأسمالي**: (السعر اليوم − متوسط تكلفتك) × الأسهم التي ستبيعها.
+//     هذا وحده ما «تُحقّقه» بالبيع.
+//   • **المحصّلة مع التوزيعات**: تُضاف توزيعات هذا السهم — وهي مقبوضة فعلاً
+//     ولا يغيّرها البيع. تُعرض للخروج الكامل فقط، حيث يُقفل المركز فتصحّ
+//     محاسبته كلّه.
+//   في **التخفيف** لا تُنسب التوزيعات للجزء المباع: نسبتها بالتناسب اختراع
+//   (التوزيعة قُبضت على أسهم غير التي تبيعها اليوم). تُذكر كسياق للمركز كاملاً.
+// ══════════════════════════════════════════════════════════════════════
+function _planPnL(r, sharesSold, full) {
+  const h = holdings.find(x => x.ticker === r.ticker);
+  const avg = h ? +h.avg_price : 0;
+  const px  = +r.price || 0;
+  if (!(avg > 0) || !(px > 0) || !(sharesSold > 0)) return null;
+  const capital = (px - avg) * sharesSold;
+  const divs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+  return {
+    avg, px, sharesSold, capital, divs,
+    net: full ? capital + divs : null,          // المحصّلة تُحسب للخروج الكامل فقط
+    pctOnCost: avg > 0 ? (px - avg) / avg * 100 : null,
+  };
+}
+
 function _planEffectiveTarget(r) {
   // الهدف الفعّال = الأدنى بين هدفك المسجّل والسقف الدستوري. لا نرفع هدفك،
   // ولا نسمح لهدف فوق السقف أن يقود أمر شراء يكسر §1.
@@ -1048,10 +1076,18 @@ function buildTargetPlan(valAware) {
 
   rows.forEach(r => {
     const price = +r.price || 0;
-    const mk = (extra) => ({
-      ticker: r.ticker, name: r.name, price, weight: r.weight, value: r.value,
-      target: _planEffectiveTarget(r), taskType: r.taskType, sector: r.sector, ...extra,
-    });
+    const mk = (extra) => {
+      const row = {
+        ticker: r.ticker, name: r.name, price, weight: r.weight, value: r.value,
+        target: _planEffectiveTarget(r), taskType: r.taskType, sector: r.sector, ...extra,
+      };
+      // أثر التنفيذ على جيبك — يُرفَق بكل أمر بيع (خروج أو تخفيف)، لا بأوامر الشراء
+      if (row.shares > 0 && (row.sar > 0)) {
+        const full = row.shares >= r.shares - 1e-6;      // يبيع المركز كلّه؟
+        row.pnl = _planPnL(r, row.shares, full);
+      }
+      return row;
+    };
 
     // ① قرارك الصريح بالخروج — يسبق كل حساب (P0.1)
     if (zeroTargets.has(r.ticker) || r.taskType === 'liquidation') {
@@ -1070,10 +1106,35 @@ function buildTargetPlan(valAware) {
     //   • فشل بوابة الاستدامة (§4 الفلتر 1) — الخروج واجب بغضّ النظر عن السعر.
     // لولا هذا الدمج لاختفى أمر خروج حقيقي مع اختفاء المجموعات.
     if (r.trigger && r.trigger.fired) {
-      out.exits.push(mk({ sar: r.value, shares: r.shares,
-        why: `⚡ انطبق مشغّل ثابت عرّفته أنت — يتجاوز أي حساب آخر. ${r.reason || ''}` }));
-      out.fundedBy += r.value;
-      return;
+      // BUGFIX 2026-08-23 — بلاغ المالك: «مكتوب على أرامكو تصفية كاملة وهي ما هي
+      // تصفية، انطبق مشغّل ثابت… مستحيل أصفّي أرامكو».
+      // الخطأ كان في دمجي أنا (كوميت 75a8354): دفعتُ **كل** مشغّل منطبق كخروج
+      // كامل بمبلغ المركز كلّه، بينما المحرّك نفسه يفرّق بينهما منذ البداية:
+      //   kind='sell'   ⇒ action='exit'  → تصفية كاملة
+      //   kind='reduce' ⇒ action='trim'  → تخفيف إلى toWeight فقط (أو احتفاظ)
+      // العلاج: نتبع `r.action` الذي حسبه المحرّك ولا نفترض الخروج.
+      if (r.action === 'exit') {
+        out.exits.push(mk({ sar: r.value, shares: r.shares,
+          why: `⚡ انطبق مشغّل ثابت عرّفته أنت (بيع كامل) — يتجاوز أي حساب آخر. ${r.reason || ''}` }));
+        out.fundedBy += r.value;
+        return;
+      }
+      if (r.action === 'trim') {
+        // التخفيف إلى وزن المشغّل نفسه لا إلى هدفك — المشغّل يتقدّم (§4 الفلتر 5)
+        // بلا وزن مُحدَّد في المشغّل نهبط للهدف الفعّال، وإلا فالسقف الدستوري.
+        const toW  = (r.cutToWeight != null) ? +r.cutToWeight
+                   : (_planEffectiveTarget(r) != null ? _planEffectiveTarget(r) : r.cap);
+        const gapW = r.weight - toW;
+        const sarT = Math.max(0, gapW / 100 * total);
+        if (sarT >= PLAN_MIN_SAR) {
+          out.trims.push(mk({ sar: sarT, shares: price > 0 ? sarT / price : 0,
+            gapPct: -gapW, target: toW, forced: true,
+            why: `⚡ انطبق مشغّل ثابت عرّفته أنت — تخفيف إلى ${formatNum(toW)}% لا خروج كامل. ${r.reason || ''}` }));
+          out.fundedBy += sarT;
+        }
+        return;
+      }
+      return;   // action='hold' — المشغّل انطبق والوزن دون هدفه، لا إجراء
     }
     if (r.sustain && r.sustain.status === 'fail' && r.action === 'exit') {
       out.exits.push(mk({ sar: r.value, shares: r.shares,
@@ -1172,10 +1233,36 @@ function renderTargetPlan() {
       : '';
     const to = (kind === 'trim' || kind === 'add') && o.target != null
       ? ` — من <b>${formatNum(o.weight)}%</b> إلى <b>${formatNum(o.target)}%</b>` : '';
+
+    // ── أثر التنفيذ: تُعرض داخل نفس البطاقة بطلب المالك (لا في صفحة أخرى) ──
+    let pnlHtml = '';
+    if (o.pnl && (kind === 'exit' || kind === 'trim')) {
+      const p = o.pnl;
+      const sgn = v => (v >= 0 ? '+' : '−') + formatSAR(Math.abs(v));
+      const cls = v => v >= 0 ? 'text-success' : 'text-danger';
+      const verb = p.capital >= 0 ? 'كاسب' : 'خاسر';
+      const head = kind === 'exit'
+        ? `تخرج وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`
+        : `تبيع هذا الجزء وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`;
+      pnlHtml = `<div class="de-pnl" style="margin-top:6px;padding:6px 8px;border-radius:6px;
+                   background:var(--bg-2);font-size:.78rem;line-height:1.7">
+        ${head}: <b class="num ${cls(p.capital)}">${sgn(p.capital)}</b> ر.س
+        <span class="text-muted">(${formatNum(p.pctOnCost)}% على تكلفتك)</span><br>
+        <span class="text-muted">متوسط تكلفتك ${formatNum(p.avg)} · السعر اليوم ${formatNum(p.px)}
+        · ${formatNum(p.sharesSold, 0)} سهم</span>
+        ${p.net != null
+          ? `<br>وبعد إضافة توزيعات هذا السهم <b class="num">${formatSAR(p.divs)}</b> ر.س:
+             <b class="num ${cls(p.net)}">${sgn(p.net)}</b> ر.س <b>محصّلتك النهائية من المركز</b>.`
+          : (p.divs > 0
+              ? `<br><span class="text-muted">قبضت من هذا السهم ${formatSAR(p.divs)} ر.س توزيعات (على المركز كاملاً — لا تُنسب للجزء المباع).</span>`
+              : '')}
+      </div>`;
+    }
     return `<div class="de-alert-line" style="align-items:flex-start">
       <div>
         <b>${badge}: ${escapeHtmlSafe(o.ticker)}</b> ${escapeHtmlSafe(o.name || '')}${to}<br>
         <span class="small">${amt}</span>
+        ${pnlHtml}
         <div class="small text-muted" style="margin-top:3px;line-height:1.6">${o.why || ''}${
           o.fairNote ? `<br>${o.fairNote}` : ''}${
           o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
