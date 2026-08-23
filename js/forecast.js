@@ -732,9 +732,23 @@ async function loadHistoricalData() {
   const perfWeight = personalPerfWeight(cwYears);
   // السقف 11%: نمو سعري سنوي 11% مُركَّب 35 سنة هو الحدّ الأعلى المُدافَع عنه.
   // الأرضية 0: محفظة لم تُثبت نمواً تُسقَط مسطّحة لا صاعدة.
-  const blendedCapGrowth = Math.min(0.11, Math.max(0,
-    MARKET_CAP_BENCHMARK * (1 - perfWeight) + annCapGrowth * perfWeight
-  ));
+  // ══════════════════════════════════════════════════════════════════
+  // حارس NaN — أُضيف بعد كشف 2026-08-24
+  // ------------------------------------------------------------------
+  // صفُّ توزيع واحد بلا `year` يُنتج NaN في avgRecentDiv، فيسري إلى
+  // ttmDivYield ثم annCapGrowth ثم **معدّل النمو الذي يقود كل
+  // السيناريوهات**. الأثر: «—» في مكان، وإسقاطٌ فارغ أو مشوَّه في آخر —
+  // بلا رسالة واحدة تقول ما حدث.
+  //
+  // NaN أسوأ من الناقص المُعلَن ومن المُقدَّر: يمرّ صامتاً ويفسد ما بعده.
+  // فيُستبدَل بمعيار السوق ويُعلَن الاستبدال (م.20: يُعلَن ولا يُقدَّر بصمت).
+  // ══════════════════════════════════════════════════════════════════
+  const _growthBad = !isFinite(annCapGrowth);
+  const blendedCapGrowth = _growthBad
+    ? MARKET_CAP_BENCHMARK
+    : Math.min(0.11, Math.max(0,
+        MARKET_CAP_BENCHMARK * (1 - perfWeight) + annCapGrowth * perfWeight
+      ));
 
   // ── هدف FIRE — localStorage cache (يُحدَّث من Supabase عند تحميل الداشبورد) ──
   let fireGoal = { monthly: 0, swr: 4, target_year: 0 };
@@ -747,7 +761,8 @@ async function loadHistoricalData() {
 
   return {
     currentValue, costBasis, netCapital,
-    annCapGrowth,                          // تشخيص: أداؤك الشخصي الخام (ليس تنبؤاً)
+    annCapGrowth: _growthBad ? null : annCapGrowth,   // تشخيص لا تنبؤ
+    growthFallback: _growthBad,            // هل استُبدل بالمعيار؟ يُعلَن في الواجهة
     blendedCapGrowth,                      // المستخدم فعلياً في السيناريوهات
     perfWeight,                            // وزن أدائك في المزج (مُقدِّر انكماش)
     marketBenchmark: MARKET_CAP_BENCHMARK,  // الأساس
@@ -2337,21 +2352,51 @@ function renderConstitutionMilestones(h) {
   const fwd   = +h.fwdAnnualIncome || 0;
   const goalY = GOAL_MONTHLY_INCOME * 12;
   const pctOf = (a, b) => b > 0 ? Math.min(100, a / b * 100) : 0;
-  const row = (label, now, target, unit, art) => `
+  // ⚠️ fmt() تُلحق «ر.س» بنفسها — إضافتها هنا تُنتج «ر.س ر.س».
+  const row = (label, now, target, art) => `
     <div class="kv"><span>${label} <span class="text-muted" style="font-size:.7rem">${art}</span></span>
-      <b class="num">${fmt(now)}${unit} <span class="text-muted" style="font-weight:400">من ${fmt(target)}${unit}
+      <b class="num">${fmt(now)} <span class="text-muted" style="font-weight:400">من ${fmt(target)}
       (${pctOf(now, target).toFixed(0)}%)</span></b></div>`;
+
+  // ══════════════════════════════════════════════════════════════════
+  // رقمٌ واحد لهدفك، لا رقمان في صفحة واحدة
+  // ------------------------------------------------------------------
+  // بطاقة FIRE أعلى الصفحة تحسب من هدفك المحفوظ في لوحة التحكم
+  // (retirement_goal_v1)، وهذه البطاقة تعرض رقم الدستور (م.4 و7).
+  // إن اختلفا رأى المالك رقمين متعارضين في شاشة واحدة — وهو بالضبط ما
+  // يفسد الثقة بكل الأرقام. فالاختلاف **يُعلَن** ولا يُترك يُخمَّن.
+  //
+  // ولا يُعرض «هدف FIRE» هنا: بطاقة FIRE تحسبه من نسبة السحب التي
+  // اخترتَها، وتكراره برقم ثابت يُنتج رقمين لمفهوم واحد.
+  // ══════════════════════════════════════════════════════════════════
+  const fg = h.fireGoal || {};
+  const mismatch = fg.monthly > 0 && Math.abs(fg.monthly - GOAL_MONTHLY_INCOME) > 1;
+  // رقم FIRE المحفوظ مقابل رقم الدستور (م.7 = 1.8 مليون عند سحب 4%)
+  const savedFire = fg.monthly > 0 && fg.swr > 0 ? (fg.monthly * 12) / (fg.swr / 100) : null;
+  const fireGap   = savedFire != null && Math.abs(savedFire - GOAL_FIRE) > 1000;
+  const conflictNote = (mismatch || fireGap)
+    ? `<div style="margin-top:6px;color:var(--st-warn);font-size:.76rem">⚠️ <b>رقمان لهدفك:</b>`
+      + (mismatch
+          ? ` الدخل الشهري المحفوظ في لوحة التحكم <b class="num">${fmt(fg.monthly)}</b>،
+              والدستور (م.4) يقول <b class="num">${fmt(GOAL_MONTHLY_INCOME)}</b>.` : '')
+      + (fireGap
+          ? ` ورقم FIRE المحسوب من إعداداتك <b class="num">${fmt(savedFire)}</b>،
+              والدستور (م.7) يقول <b class="num">${fmt(GOAL_FIRE)}</b>.` : '')
+      + ` بطاقة «هدف التقاعد» أعلاه تحسب بالأول وهذه البطاقة بالثاني —
+          وحّدهما من لوحة التحكم كي لا تقرأ رقمين لشيء واحد.</div>`
+    : '';
+
   el.innerHTML = noteHtml('📜',
     `<strong>معالم الدستور — أين أنت منها اليوم</strong>
      <div class="kvs" style="margin-top:6px">
-       ${row('قيمة المحفظة', cur, GOAL_PORTFOLIO, ' ر.س', 'م.7')}
-       ${row('الدخل السنوي من التوزيعات', fwd, goalY, ' ر.س', 'م.4')}
-       ${row('هدف FIRE', cur, GOAL_FIRE, ' ر.س', 'م.7')}
+       ${row('قيمة المحفظة', cur, GOAL_PORTFOLIO, 'م.7')}
+       ${row('الدخل السنوي من التوزيعات', fwd, goalY, 'م.4')}
        <div class="kv"><span>الضخّ الشهري المقرَّر <span class="text-muted" style="font-size:.7rem">م.7</span></span>
-         <b class="num">${fmt(MONTHLY_INJECTION)} ر.س</b></div>
+         <b class="num">${fmt(MONTHLY_INJECTION)}</b></div>
        <div class="kv"><span>المرحلة الحالية <span class="text-muted" style="font-size:.7rem">م.1</span></span>
-         <b>${esc(phase.label)} — حتى ${phase.key === 'accumulation' ? ACCUM_END_YEAR : phase.key === 'transition' ? TRANSITION_END_YEAR : HORIZON_YEAR}</b></div>
-     </div>
+         <b>${esc(phase.label)} — حتى ${phase.key === 'accumulation' ? ACCUM_END_YEAR
+              : phase.key === 'transition' ? TRANSITION_END_YEAR : HORIZON_YEAR}</b></div>
+     </div>${conflictNote}
      <div class="text-muted" style="font-size:.74rem;margin-top:4px">عرضٌ لا حكم: لا يُخصم شيء ولا تُصدر إشارة (م.9).</div>`,
     '');
 }
@@ -2381,7 +2426,12 @@ function renderHistSummary() {
   const gap     = rawCap - bench;
   // أُزيل تفكيك «تاسي × كذا + أداؤك × كذا» من الوسم — قرار المالك 2026-08-22.
   // يبقى معدّل النمو المُستخدَم في السيناريوهات معروضاً كما هو، بلا حكم مقارَن.
-  const growthLabel = `${pct(blended)} <span style="font-size:0.63rem;color:var(--text-muted)"
+  // م.20 — إن تعذّر حساب أدائك واستُبدل بالمعيار، يُقال ذلك صراحةً
+  const growthLabel = h.growthFallback
+    ? `${pct(blended)} <span style="font-size:0.63rem;color:var(--st-warn)"
+        title="تعذّر حساب نموّك الشخصي (بيانات توزيعات ناقصة) — استُبدل بمعيار السوق ولم يُقدَّر بصمت (م.20)">
+        ⚠️ معيار السوق (نموّك غير محسوب)</span>`
+    : `${pct(blended)} <span style="font-size:0.63rem;color:var(--text-muted)"
         title="معدّل النمو السعري المُستخدَم في السيناريوهات — افتراض تخطيطي لا تنبؤ.">
         (افتراض تخطيطي)
       </span>`;
