@@ -680,7 +680,7 @@ async function loadAll() {
       .eq('status', 'active').order('updated_at', { ascending: false }),
     supabaseClient.from('dividends').select('ticker, amount, date').eq('is_archived', false),
     loadUserSetting(ENGINE_VAL_KEY),
-    supabaseClient.from('transactions').select('ticker, type, shares, date, total, price').eq('is_archived', false),
+    supabaseClient.from('transactions').select('ticker, type, shares, date, total, price, commission, vat').eq('is_archived', false),
     // دفتر المراجعة — لعرض آخر مراجعة لكل سهم داخل التقرير وحساب استحقاق الدورة (§5)
     supabaseClient.from('review_log').select('ticker, review_date, notes').order('review_date', { ascending: false }),
     loadUserSetting(ZERO_TARGETS_KEY),
@@ -725,7 +725,8 @@ async function loadAll() {
   (rTx.data || []).forEach(t => {
     const tk = (t.ticker || '').trim().toUpperCase();
     if (!tk || !t.date) return;
-    (txByTicker[tk] = txByTicker[tk] || []).push({ type: t.type, shares: +t.shares || 0, total: +t.total || 0, price: +t.price || 0, date: new Date(t.date) });
+    (txByTicker[tk] = txByTicker[tk] || []).push({ type: t.type, shares: +t.shares || 0, total: +t.total || 0, price: +t.price || 0,
+      fees: (+t.commission || 0) + (+t.vat || 0), date: new Date(t.date) });
   });
   Object.values(txByTicker).forEach(rows => rows.sort((a, b) => a.date - b.date));
 
@@ -1032,17 +1033,72 @@ const PLAN_MIN_SAR = 500;
 //   في **التخفيف** لا تُنسب التوزيعات للجزء المباع: نسبتها بالتناسب اختراع
 //   (التوزيعة قُبضت على أسهم غير التي تبيعها اليوم). تُذكر كسياق للمركز كاملاً.
 // ══════════════════════════════════════════════════════════════════════
+// معدّل تكلفة الصفقة عندك — من سجلّك أنت لا من افتراض.
+// يُحسب مرّة: مجموع (عمولة + ضريبة) ÷ مجموع مبالغ الصفقات.
+// بلا سجل ⇒ null، ولا تُقدَّر كلفة بيع (§8: لا تقدير صامت).
+let _feeRateCache;
+function planFeeRate() {
+  if (_feeRateCache !== undefined) return _feeRateCache;
+  let fees = 0, gross = 0;
+  Object.values(txByTicker || {}).forEach(rows => rows.forEach(t => {
+    if (t.type !== 'buy' && t.type !== 'sell') return;
+    fees  += +t.fees  || 0;
+    gross += Math.abs(+t.total || 0);
+  }));
+  _feeRateCache = gross > 0 && fees > 0 ? fees / gross : null;
+  return _feeRateCache;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// سعر التعادل الحقيقي — طلب المالك 2026-08-23: «طلّع لي البريك إيفن بطريقة
+// صحيحة وتأكد إنك أخذت كل شيء في الحسبان».
+//
+// التعادل ليس متوسط تكلفتك. متوسط التكلفة هو ما دفعتَه، والتعادل هو **السعر
+// الذي يعيد لك رأس مالك صافياً** — ويتحرّك بثلاثة عوامل:
+//   ① متوسط تكلفتك — ويشمل عمولة الشراء أصلاً لأن المتوسط مبنيّ على
+//      إجمالي الصفقة (total) لا على السعر المجرّد.
+//   ② التوزيعات المقبوضة — نقد استلمتَه من السهم، يخفض تكلفتك الفعلية.
+//   ③ عمولة البيع — تُدفع عند الخروج، فترفع السعر المطلوب للتعادل.
+//
+//   سعر التعادل = (متوسط التكلفة − التوزيعات لكل سهم) ÷ (1 − معدّل العمولة)
+//
+// التوزيعات لكل سهم = إجمالي توزيعات هذا السهم ÷ أسهمك **الحالية**، ويُصرَّح
+// بذلك: من باع جزءاً سابقاً قبض توزيعاته على عدد أكبر، فالقسمة على الحالي
+// تجعل التعادل **أكثر تحفّظاً لصالحه** لا العكس — وهذا الاتجاه الآمن.
+// ══════════════════════════════════════════════════════════════════════
+function planBreakEven(r) {
+  const h = holdings.find(x => x.ticker === r.ticker);
+  const avg = h ? +h.avg_price : 0;
+  const sh  = h ? +h.shares : 0;
+  if (!(avg > 0) || !(sh > 0)) return null;
+  const divs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+  const divPerShare = divs / sh;
+  const fee = planFeeRate();
+  const gross = avg - divPerShare;                      // التكلفة بعد التوزيعات
+  const be = fee != null ? gross / (1 - fee) : gross;    // ثم تغطية عمولة البيع
+  const px = +r.price || 0;
+  return {
+    avg, divs, divPerShare, feeRate: fee, be,
+    price: px,
+    above: px > 0 ? px - be : null,                      // موجب = فوق التعادل
+    abovePct: px > 0 && be > 0 ? (px - be) / be * 100 : null,
+  };
+}
+
 function _planPnL(r, sharesSold, full) {
   const h = holdings.find(x => x.ticker === r.ticker);
   const avg = h ? +h.avg_price : 0;
   const px  = +r.price || 0;
   if (!(avg > 0) || !(px > 0) || !(sharesSold > 0)) return null;
-  const capital = (px - avg) * sharesSold;
+  const gross = (px - avg) * sharesSold;
+  const fee   = planFeeRate();
+  const sellCost = fee != null ? px * sharesSold * fee : 0;   // عمولة الخروج
+  const capital = gross - sellCost;                            // الربح **الصافي**
   const divs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
   return {
-    avg, px, sharesSold, capital, divs,
+    avg, px, sharesSold, gross, sellCost, feeRate: fee, capital, divs,
     net: full ? capital + divs : null,          // المحصّلة تُحسب للخروج الكامل فقط
-    pctOnCost: avg > 0 ? (px - avg) / avg * 100 : null,
+    pctOnCost: avg > 0 ? capital / (avg * sharesSold) * 100 : null,
   };
 }
 
@@ -1071,7 +1127,8 @@ function buildTargetPlan(valAware) {
   const rows = _results || [];
   const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
   const out = { exits: [], trims: [], adds: [], deferred: [], conflicts: [],
-                noTarget: [], total, fundedBy: 0, needed: 0 };
+                noTarget: [], total, fundedBy: 0, needed: 0,
+                deferredSar: 0, conflictSar: 0 };
   if (!(total > 0)) return out;
 
   rows.forEach(r => {
@@ -1085,6 +1142,7 @@ function buildTargetPlan(valAware) {
       if (row.shares > 0 && (row.sar > 0)) {
         const full = row.shares >= r.shares - 1e-6;      // يبيع المركز كلّه؟
         row.pnl = _planPnL(r, row.shares, full);
+        row.be  = planBreakEven(r);
       }
       return row;
     };
@@ -1149,14 +1207,19 @@ function buildTargetPlan(valAware) {
     if (!(price > 0)) { out.noTarget.push(mk({ noPrice: true })); return; }
 
     const gapPct = tgt - r.weight;                 // + = تحت الهدف · − = فوقه
-    const sar    = Math.abs(gapPct) / 100 * total;
-    const shares = price > 0 ? sar / price : 0;
+    // BUGFIX 2026-08-23: كان المبلغ يُقسَم على السعر بلا تقريب، فيَخرج أمر
+    // بـ«133.4 سهم» — وهو غير قابل للتنفيذ. نُقرّب لأسفل ثم **نعيد اشتقاق
+    // المبلغ من عدد الأسهم**، فيتطابق ما تقرؤه مع ما ستنفّذه بالضبط.
+    const rawSar = Math.abs(gapPct) / 100 * total;
+    const shares = price > 0 ? Math.floor(rawSar / price) : 0;
+    const sar    = price > 0 ? shares * price : rawSar;
     const fair   = _planFairVerdict(r);
     const capped = tgt < r.targetWeight - 1e-9;    // هدفك قُصَّ عند السقف الدستوري
 
     // ② فوق الهدف ⇒ تخفيف
     if (gapPct < 0 && sar >= PLAN_MIN_SAR) {
       if (r.taskType === 'accumulation') {
+        out.conflictSar += sar;
         out.conflicts.push(mk({ sar, shares, gapPct,
           why: 'وزنه فوق هدفك بينما مهمتك المسجّلة «تجميع» — القراران متعاكسان',
           fix: 'إمّا ترفع هدفه في صفحة الأهداف، أو تغلق مهمة التجميع. المحرّك لا ينقض قرارك.' }));
@@ -1176,29 +1239,38 @@ function buildTargetPlan(valAware) {
 
     // ③ تحت الهدف ⇒ تجميع، بشرط أن يسمح السعر وقرارك
     if (gapPct > 0 && sar >= PLAN_MIN_SAR) {
-      out.needed += sar;
+      // BUGFIX 2026-08-23: كان `out.needed += sar` هنا — **قبل** فحوص التأجيل
+      // والتعارض، فيدخل المبلغ المؤجَّل (سعر فوق العادلة · مراقبة · فشل
+      // استدامة) والمتعارض في «تحتاج X ر.س» وأنت لن تنفّذها. النتيجة: احتياج
+      // مُضخَّم و«الخطة لا تموّل نفسها» زوراً. الآن يُحتسب المُنفَّذ فقط،
+      // ويُعرض المؤجَّل في بند مستقلّ.
       if (r.sustain && r.sustain.status === 'fail') {
+        out.deferredSar += sar;
         out.deferred.push(mk({ sar, shares, gapPct,
           why: 'فشل بوابة الاستدامة — ممنوع الشراء لمجرد نزول السعر (§8)' }));
         return;
       }
       if (r.taskType === 'liquidation') return;            // عولج أعلاه
       if (r.taskType === 'reduction') {
+        out.conflictSar += sar;
         out.conflicts.push(mk({ sar, shares, gapPct,
           why: 'وزنه تحت هدفك بينما مهمتك المسجّلة «تخفيف» — القراران متعاكسان',
           fix: 'إمّا تخفض هدفه في صفحة الأهداف، أو تغلق مهمة التخفيف.' }));
         return;
       }
       if (r.taskType === 'monitoring') {
+        out.deferredSar += sar;
         out.deferred.push(mk({ sar, shares, gapPct,
           why: 'قرارك «مراقبة» — لا مال جديد يدخل حتى ينتهي سبب المراقبة' }));
         return;
       }
       if (valAware && fair.usable && !fair.ok) {
+        out.deferredSar += sar;
         out.deferred.push(mk({ sar, shares, gapPct,
           why: `${fair.why} — الفجوة قائمة لكن الشراء عند النزول مشروط لا آلي (§4 الفلتر 3)` }));
         return;
       }
+      out.needed += sar;                                  // المُنفَّذ وحده
       out.adds.push(mk({ sar, shares, gapPct, capped,
         fairOk: fair.ok, fairUsable: fair.usable,
         why: fair.usable ? fair.why : `${fair.why} — التنفيذ على مسؤوليتك، لا مرجع سعري`,
@@ -1250,6 +1322,11 @@ function renderTargetPlan() {
         <span class="text-muted">(${formatNum(p.pctOnCost)}% على تكلفتك)</span><br>
         <span class="text-muted">متوسط تكلفتك ${formatNum(p.avg)} · السعر اليوم ${formatNum(p.px)}
         · ${formatNum(p.sharesSold, 0)} سهم</span>
+        ${o.be ? `<br><span class="text-muted">سعر التعادل بعد التوزيعات${o.be.feeRate != null ? ' وعمولة البيع' : ''}:
+            <b class="num">${formatNum(o.be.be)}</b> ر.س —
+            ${o.be.above >= 0
+              ? `أنت <b class="text-success">فوقه بـ${formatNum(o.be.abovePct)}%</b>`
+              : `أنت <b class="text-danger">تحته بـ${formatNum(-o.be.abovePct)}%</b>`}</span>` : ''}
         ${p.net != null
           ? `<br>وبعد إضافة توزيعات هذا السهم <b class="num">${formatSAR(p.divs)}</b> ر.س:
              <b class="num ${cls(p.net)}">${sgn(p.net)}</b> ر.س <b>محصّلتك النهائية من المركز</b>.`
@@ -1277,13 +1354,26 @@ function renderTargetPlan() {
   // ── الميزانية: كم يموّل تخفيفك من احتياجك؟ ──
   const gapFund = p.needed - p.fundedBy;
   const fundPct = p.needed > 0 ? Math.min(100, p.fundedBy / p.needed * 100) : 100;
+  const _fee = planFeeRate();
   const budget = `
     <div class="note" data-state="${gapFund > 0 ? 'warn' : 'good'}" style="flex-direction:column;gap:6px">
       <div><b>الميزانية الذاتية للخطة</b></div>
-      <div class="small">تحتاج <b class="num">${SAR(p.needed)}</b> ر.س لسدّ فجوات التجميع، ويوفّر التخفيف والتصفية <b class="num">${SAR(p.fundedBy)}</b> ر.س
+      <div class="small">تحتاج <b class="num">${SAR(p.needed)}</b> ر.س لسدّ فجوات التجميع <b>القابلة للتنفيذ الآن</b>،
+      ويوفّر التخفيف والتصفية <b class="num">${SAR(p.fundedBy)}</b> ر.س
       — أي <b>${formatNum(fundPct, 0)}%</b> ${gapFund > 0
         ? `منها. الفارق <b class="num">${SAR(gapFund)}</b> ر.س يحتاج ضخّاً جديداً.`
-        : 'منها — الخطة تموّل نفسها بالكامل، والفائض يذهب لأولوية التجميع الأعلى.'}</div>
+        : 'منها — الخطة تموّل نفسها بالكامل، والفائض يذهب لأولوية التجميع الأعلى.'}
+      ${p.deferredSar > 0 ? `<br>وخارج هذا الحساب <b class="num">${SAR(p.deferredSar)}</b> ر.س فجوات <b>مؤجَّلة</b> — لا تُحتسب لأنك لن تنفّذها الآن.` : ''}
+      ${p.conflictSar > 0 ? `<br>و<b class="num">${SAR(p.conflictSar)}</b> ر.س معلّقة على <b>تعارض</b> بين هدفك ومهمتك — تُحسم بيدك أولاً.` : ''}
+      </div>
+      <div class="small text-muted">
+        الأوزان والفجوات محسوبة على قيمة محفظتك <b>الآن</b> (${SAR(p.total)} ر.س).
+        تنفيذ خروج كامل لا يُعاد استثماره يُصغّر هذا المقام فترتفع أوزان الباقي تلقائياً —
+        راجع الخطة بعد كل تنفيذ كبير بدل الاعتماد على أرقام ما قبله.
+        ${_fee != null
+          ? `وكلفة الصفقة المستعملة في الأرقام أعلاه <b>${formatNum(_fee * 100, 3)}%</b> — محسوبة من متوسط عمولاتك وضرائبك في سجلّك أنت.`
+          : 'ولا سجل عمولات كافٍ، فكلفة البيع <b>غير محتسَبة</b> — الأرباح المعروضة قبلها.'}
+      </div>
     </div>`;
 
   const nothing = !p.exits.length && !p.trims.length && !p.adds.length;
