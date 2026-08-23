@@ -2062,12 +2062,3 @@ body.prose-off [data-prose="1"] { display: none !important; }
 .zs-now[data-zone="exit"]{background:var(--st-bad-dim);border-color:var(--st-bad);border-inline-start-color:var(--st-bad)}
 .zs-now[data-zone="exit"] .zs-lbl,.zs-now[data-zone="exit"] .zs-val{color:var(--st-bad)}
 
-/* بطاقة تحتاج انتباهاً فورياً (تصفية — سعرية أو بقرارك المسجّل).
-   التمييز بالحافة والخلفية الخفيفة لا بلون صارخ: يُلتقط بطرف العين في
-   التصفّح السريع، ولا يُرهق حين تكون عدة بطاقات في الحالة نفسها. */
-.zone-card.zc-alarm{border-color:var(--st-bad);background:var(--st-bad-dim);
-  box-shadow:inset 4px 0 0 var(--st-bad)}
-.zc-bell{font-size:.95rem;line-height:1}
-@keyframes zcPulse{0%,100%{opacity:1}50%{opacity:.45}}
-.zone-card.zc-alarm .zc-bell{animation:zcPulse 2.2s ease-in-out infinite}
-@media (prefers-reduced-motion: reduce){.zone-card.zc-alarm .zc-bell{animation:none}}

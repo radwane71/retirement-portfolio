@@ -3149,14 +3149,22 @@ function renderPriceZonesCard() {
       tags.push(tagHtml('🔴', `في منطقة تصفية — السعر ${formatNum(price)} ≥ ${formatNum(zone.exit_price)}`, 'bad'));
     }
     // قرارك المسجّل يتقدّم على الموقع السعري في الترتيب — هو قرار لا إشارة.
+    // فصل صريح بين مفهومين كانا مدمجين في متغيّر واحد فتلوّثا:
+    //   priceZone = أين يقع **السعر** (يقود اللون)
+    //   urgency   = ترتيب العرض (يقود الفرز وحده)
+    // دمجهما جعل رفع الأولوية للتصفية يمسح لون منطقة السعر ويجعله «محايداً».
+    const priceZone = urgency === 4 ? 'exit' : urgency === 3 ? 'trim' : urgency === 2 ? 'buy' : 'none';
     if (isLiq) {
+      // urgency 5 للفرز فقط (يتصدّر البطاقات) — لا أثر بصري له.
       urgency = 5;
-      tags.unshift(tagHtml('🚨', 'قرارك: تصفية — مسجَّل في التقييمات العادلة', 'bad'));
+      // بوكس صغير بنفس هيئة «الهدف مكتمل» — طلب المالك 2026-08-23 بعد رفض
+      // تلوين البطاقة كلها: «حطّ لي بوكس صغير جوّه أو إيموجي واحدة أفهمها».
+      tags.unshift(tagHtml('🚩', 'تصفية', 'bad'));
     }
     // بين التجميع والتخفيف: لا منطقة فعّالة ⇒ الرسالة صريحة بلا لبس
     if (!tags.length) tags.push(tagHtml('⚪', 'لا تتخذ أي إجراء', ''));
 
-    rows.push({ ticker: h.ticker, name: h.name, pts, price, tags: tags.join(''), urgency, isLiq });
+    rows.push({ ticker: h.ticker, name: h.name, pts, price, tags: tags.join(''), urgency, priceZone, isLiq });
   });
 
   if (!rows.length) {
@@ -3215,19 +3223,17 @@ function renderPriceZonesCard() {
     //   4 تصفية · 3 تخفيف · 2 تجميع · 0 خارج كل المنطقة
     // الألوان من رموز التصميم (‎--st-*-dim‎ خلفيةً و‎--st-*‎ حدّاً ونصّاً) لا
     // ألوان سطرية: هادئة بالتصميم، وتتبدّل مع الوضع الفاتح/الداكن تلقائياً.
-    const nowZone = r.urgency >= 4 ? 'exit' : r.urgency === 3 ? 'trim' : r.urgency === 2 ? 'buy' : 'none';
+    // اللون يتبع **موقع السعر** وحده: قرار التصفية يظهر ببوكسه الخاص أعلاه،
+    // فلا يُلوَّن سطر السعر أحمر وسعرُه في منطقة تجميع — رقمان مختلفان.
+    const nowZone = r.priceZone || 'none';
     const body = steps.map(st => `
       <div class="zs-row${st.now ? ' zs-now' : ''}" data-k="${st.k}"${st.now ? ` data-zone="${nowZone}"` : ''}>
         <span class="zs-lbl">${st.now ? '◀ ' : ''}${st.lbl}</span>
         <span class="zs-val num">${formatNum(st.v)}</span>
       </div>`).join('');
 
-    // بطاقة التصفية تُميَّز بحافة وخلفية خفيفة وعلامة تنبيه — ليلتقطها الطرف
-    // في تصفّح سريع بلا قراءة (طلب المالك: «خليني أنتبه له وأنا معدّي بسرعة»).
-    const alarm = r.urgency >= 4;
-    return `<div class="zone-card${alarm ? ' zc-alarm' : ''}">
+    return `<div class="zone-card">
       <div class="zc-head">
-        ${alarm ? '<span class="zc-bell" title="يحتاج انتباهك الآن">🚨</span>' : ''}
         <strong class="text-accent num">${esc(r.ticker)}</strong>
         <span class="zc-name">${esc(r.name || '')}</span>
       </div>
