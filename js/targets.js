@@ -147,6 +147,12 @@ function tgCapOf(ticker) {
   return c.known ? c.cap : TG_CAP_UNKNOWN;
 }
 
+// م.31 — هل تجاوزات الأهداف الفردية ما زالت داخل دورتها؟
+// المرجع تاريخ «حُدِّدت في» لأهداف الأسهم في هذه الصفحة. تحديثه = تجديد.
+function tgOverrideStatus() {
+  return overrideStatus(tgReviewDates && tgReviewDates.stocks && tgReviewDates.stocks.setAt);
+}
+
 // ── معرّف DOM موحّد لحقل هدف السهم (تناظر كتابة/قراءة) ─────────
 // تُستخدم في التوليد (render) والقراءة (save/validate) معاً — أي محرف خاص
 // في الرمز يتحول لنفس الشكل في الطرفين بدل esc() عند الكتابة والخام عند القراءة
@@ -1427,13 +1433,16 @@ function runRebalancing() {
       else if (+fv > 0)              { refPrice = +fv; refSrc = 'القيمة العادلة'; }
       const savedTarget = stockTargets[sk.ticker] || 0;
       const capPct      = tgCapOf(sk.ticker);
-      const targetPct   = savedTarget;                     // هدفك يحكم — انظر التعليق عند المملوك
+      const _ovrP       = tgOverrideStatus();              // م.31 — انظر التعليق عند المملوك
+      const _wantsP     = savedTarget > capPct + 1e-9;
+      const targetPct   = (_wantsP && !_ovrP.valid) ? capPct : savedTarget;
       return {
         ticker: sk.ticker, name: sk.name || sk.ticker, sector: sk.sector || '—',
         shares: 0, current_price: refPrice,
         planned: true, refSrc, hasRef: refPrice > 0,
         currentPct: 0, savedTarget, capPct, targetPct,
-        overCap: savedTarget > capPct + 1e-9,
+        overCap: _wantsP && _ovrP.valid,
+        overExpired: _wantsP && !_ovrP.valid,
         blueChip: tgIsBlueChip(sk.ticker),
         gap: targetPct,                       // الوزن 0 ⇒ الفجوة = الهدف كاملاً
         inZone: true,                         // لا سعر سوقي ⇒ لا فلتر منطقة شراء
@@ -1449,25 +1458,25 @@ function runRebalancing() {
     .map(h => {
       const currentPct  = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
       // ══════════════════════════════════════════════════════════════
-      // هدفك المحفوظ يحكم — نقض صريح من المالك 2026-08-23
+      // م.31 — أولوية الهدف الفردي على السقف، **بصلاحية دورة واحدة**
       // ------------------------------------------------------------
-      // كان: الهدف الفعّال = min(هدفك، السقف الدستوري 7% / 12%). المالك:
-      // «لما أكون معرّف حاجة فوق الهدف الدستوري يتجاوزها. أهم شيء يطابق
-      // التعرفة اللي أنا حاطها بالأهداف الفردية.»
+      // الدستور v3.0 حسم ما كان مفتوحاً في نقض 2026-08-23: الهدف الفردي
+      // يتقدّم على سقف الفئة فعلاً، لكن «التجاوز صالح لدورة واحدة (6
+      // أشهر). في الدورة التالية يُعرَض للتجديد الصريح؛ إن لم يجدَّد
+      // يُقصّ للسقف. السبب: **سقف يُتجاوز دائماً بلا مراجعة ليس سقفاً**.»
       //
-      // هذا يخالف §1 («قيود صلبة ممنوع تليينها») — وقد أُعلن للمالك، وهو
-      // كاتب الدستور فالنقض قراره. صفحة الأهداف تسمح بالحفظ فوق السقف
-      // أصلاً (قرار 2026-08-22)، وكان المحرّك يتجاهل ما سمحت بحفظه —
-      // بابٌ يفتح ومحرّكٌ يقفله.
-      //
-      // **ما لم يسقط:** الإعلان. تجاوز السقف يُعرَض في لافتة وفي كل صفّ
-      // (§8: لا شيء يمرّ بصمت) — لكنه إعلانٌ لا قصّ. لا تُعِد min().
+      // فالتجاوز الساري يُنفَّذ كما حدّده المالك ويُعلَن، والمنقضي يُقصّ
+      // ويُعلَن سبب قصّه. عمر التجاوز يُقاس بتاريخ تحديد أهداف الأسهم
+      // في هذه الصفحة نفسها — والتجديد تحديثُ ذلك التاريخ.
       // ══════════════════════════════════════════════════════════════
       const savedTarget = stockTargets[h.ticker] || 0;     // ما حفظه المالك
-      const capPct      = tgCapOf(h.ticker);               // 12 للقيادي · 7 لغيره — مرجع للإعلان
-      const targetPct   = savedTarget;                     // الهدف الفعّال = هدفك، بلا قصّ
-      const overCap     = savedTarget > capPct + 1e-9;     // فوق السقف → إفصاح إلزامي (§8)
-      const gap         = targetPct - currentPct;          // موجب = ناقص هدفك
+      const capPct      = tgCapOf(h.ticker);               // سقف فئته (م.25)
+      const _ovr        = tgOverrideStatus();
+      const _wants      = savedTarget > capPct + 1e-9;
+      const targetPct   = (_wants && !_ovr.valid) ? capPct : savedTarget;
+      const overCap     = _wants && _ovr.valid;            // تجاوز ساري → إعلان
+      const overExpired = _wants && !_ovr.valid;           // تجاوز منقضٍ → قُصّ
+      const gap         = targetPct - currentPct;          // موجب = ناقص الهدف الفعّال
       const zone        = stockZones[h.ticker] || {};
       const inZone      = !zone.entry_price || +h.current_price <= +zone.entry_price;
       const val         = valuationScore(h.ticker, +h.current_price);
@@ -1475,7 +1484,7 @@ function runRebalancing() {
       const effScore    = valAware ? val.score : 1;
       // الأولوية = الفجوة × جاذبية السعر → سهم قريب من المتضخم يهبط للأسفل ولو فجوته كبيرة
       const priority    = gap * effScore;
-      return { ...h, currentPct, savedTarget, capPct, targetPct, overCap,
+      return { ...h, currentPct, savedTarget, capPct, targetPct, overCap, overExpired,
                blueChip: tgIsBlueChip(h.ticker), gap, inZone, val, effScore, priority };
     });
 
@@ -1484,9 +1493,10 @@ function runRebalancing() {
     .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
     .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
 
-  // لم يعد هناك «مستبعَد بالسقف»: الهدف لا يُقصّ، فالسهم يبقى مرشّحاً حتى
-  // يبلغ هدفك أنت. يبقى الإعلان: من هدفه فوق السقف الدستوري.
-  const overCapList = candidatesAll.filter(c => c.overCap);
+  // م.31 — تجاوزان مختلفان حكماً: ساري يُنفَّذ ويُعلَن، ومنقضٍ قُصَّ ويُعلَن سببه.
+  const overCapList  = candidatesAll.filter(c => c.overCap);
+  const expiredList  = candidatesAll.filter(c => c.overExpired);
+  const _ovrNow      = tgOverrideStatus();
 
   // ── إفصاح نطاق المحرّك (عرض فقط) ────────────────────────────
   // قرار مؤكَّد من المالك: التوزيع على المملوك فقط. نُعلنه صراحةً مع عدّ
@@ -1514,13 +1524,21 @@ function runRebalancing() {
     + `.`, '');
 
   // ── لافتة تجاوز السقف: إعلان لا قصّ (§8: لا شيء بصمت) ──
-  const capNoteItems = overCapList.map(c =>
-    `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — هدفك ${c.savedTarget}% · السقف الدستوري ${c.capPct}%${c.blueChip ? ' (قيادي)' : ''} · فوقه بـ<b>${(c.savedTarget - c.capPct).toFixed(2)} نقطة</b></li>`);
+  const _li = c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — هدفك ${c.savedTarget}% · سقف الفئة `
+    + `${c.capPct}% · فوقه بـ<b>${(c.savedTarget - c.capPct).toFixed(2)} نقطة</b></li>`;
+  const capNoteItems = overCapList.map(_li);
   const capNote = capNoteItems.length ? noteHtml('⚠️',
-    `<strong>أهداف فوق السقف الدستوري — تُنفَّذ كما حدّدتها:</strong> المحرّك يوزّع نحو <b>هدفك المحفوظ</b>،
+    `<strong>أهداف فوق سقف الفئة — تُنفَّذ كما حدّدتها:</strong> المحرّك يوزّع نحو <b>هدفك المحفوظ</b>،
      لا نحو min(هدفك، سقف الفئة). سقوف م.25: أ ${CAT.A.cap}% · ب ${CAT.B.cap}% · ج ${CAT.C.cap}% · د ${CAT.D.cap}%.
-     وهذه الأسهم فوق سقف فئتها بقرارك الصريح. <b>م.31: التجاوز صالح دورة واحدة</b> ثم يُجدَّد صراحةً أو يُقصّ.
+     ${esc(_ovrNow.why)}
      <ul class="sum-ul">${capNoteItems.join('')}</ul>`, 'warn') : '';
+
+  // م.31 — «سقف يُتجاوز دائماً بلا مراجعة ليس سقفاً»: المنقضي يُقصّ صراحةً
+  const expiredNote = expiredList.length ? noteHtml('⛔',
+    `<strong>تجاوزات انقضت دورتها — قُصَّت للسقف (م.31):</strong> ${esc(_ovrNow.why)}
+     المحرّك يوزّع على <b>سقف الفئة</b> لهذه الأسهم حتى تُجدِّد التجاوز صراحةً
+     بتحديث تاريخ «حُدِّدت في» لأهداف الأسهم أعلى هذه الصفحة.
+     <ul class="sum-ul">${expiredList.map(_li).join('')}</ul>`, 'bad') : '';
 
   if (!candidates.length) {
     const msg = entryFilter
@@ -1544,6 +1562,7 @@ function runRebalancing() {
         <ul class="sum-ul">${list}</ul>
         <div class="small text-muted mt-2">💡 أوقف «مراعاة موقع السعر من التقييم» لتجاهل التقييم والتوزيع بالفجوة فقط، أو انتظر نزول الأسعار لمناطق التجميع.</div>`, 'warn')}
       ${capNote}
+    ${expiredNote}
       ${scopeNote}
     </div>`;
     return;
@@ -1706,7 +1725,8 @@ function runRebalancing() {
           ['إجمالي التكلفة', formatSAR(totalSpent)],
           ['المتبقي نقداً', formatSAR(leftover)],
           ['عدد الأسهم المختلفة', `${rows.length} سهم`],
-          ['أهداف فوق السقف الدستوري', capNoteItems.length ? `${capNoteItems.length} سهم` : 'لا شيء'],
+          ['أهداف فوق سقف الفئة', capNoteItems.length ? `${capNoteItems.length} سهم (ساري)` : 'لا شيء'],
+          ['تجاوزات قُصَّت (م.31)', expiredList.length ? `${expiredList.length} سهم` : 'لا شيء'],
           ['مقام «الوزن بعد»', `${formatSAR(actualTotal)} (القيمة + المُنفَق فعلاً)`],
         ])}
       </div>
@@ -1773,7 +1793,9 @@ function runRebalancing() {
                   title: `بعد الشراء ${r.newPct.toFixed(2)}% · هدفك ${r.targetPct}% · السقف الدستوري ${cap}%`,
                 })}
                 ${r.overCap
-                  ? `<div class="small num" style="color:var(--st-warn)">⚠️ هدفك ${r.savedTarget}% فوق السقف الدستوري ${r.capPct}% — يُنفَّذ كما حدّدتَه</div>`
+                  ? `<div class="small num" style="color:var(--st-warn)">⚠️ هدفك ${r.savedTarget}% فوق سقف الفئة ${r.capPct}% — يُنفَّذ كما حدّدتَه (م.31، ساري)</div>`
+                  : r.overExpired
+                  ? `<div class="small num" style="color:var(--st-bad)">⛔ هدفك ${r.savedTarget}% فوق سقف الفئة ${r.capPct}% وانقضت دورة التجاوز — قُصَّ للسقف (م.31)</div>`
                   : ''}
               </td>
               <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>

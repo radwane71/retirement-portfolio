@@ -1061,7 +1061,7 @@ function _blockBootstrap(pool, n, rnd, blockLen) {
 // ── قراءة مدخلات مرحلة السحب ───────────────────────────────────────
 function readWithdrawalConfig(retireCalYear) {
   const on = !!document.getElementById('inp-withdraw-enable')?.checked;
-  const endYear = parseInt(document.getElementById('inp-withdraw-end-year')?.value) || 2065;
+  const endYear = parseInt(document.getElementById('inp-withdraw-end-year')?.value) || HORIZON_YEAR;   // م.1 — الأفق 2055
   const mode    = document.getElementById('inp-withdraw-mode')?.value || 'rate';
   // AUDIT-FIX (2026-08-18): الحقل مثبّت على 4 في HTML ولا يُبذَر من هدفك المحفوظ،
   // بينما رقم FIRE ونسبة الإنجاز أعلى الصفحة يُحسبان بـ fireGoal.swr. فمن ضبط

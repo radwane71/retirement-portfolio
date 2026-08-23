@@ -4133,9 +4133,9 @@ async function exportMonthlyReviewMD() {
     h2('36. الامتثال لدستور المحفظة — فحص كل قاعدة');
     p('فحص آلي صريح لكل قاعدة صلبة في الدستور. كل بند له نتيجة قاطعة: ✅ ممتثل / 🔴 مخالف / ⚠️ غير قابل للفحص (بيانات ناقصة — تُعلَن ولا تُقدَّر، §8).');
     {
-      // 2026-08-23: سقف واحد 15% لكل سهم (CLAUDE.md §1) — CAP_BLUE مساوٍ عمداً
-      const CAP_SINGLE = 15, CAP_BLUE = 15, CAP_SECTOR = 25;
-      const TOL_STOCK = 0.75, TOL_SECTOR = 1.25;
+      // v3.0: السقف من فئة السهم (م.25). لا أرقام هنا — المصدر js/constitution.js
+      const CAP_SECTOR = SECTOR_CAP;
+      const TOL_STOCK = CAP_BUFFER, TOL_SECTOR = 2.5;
       const checks = [];
       const addCheck = (rule, ref, status, detail) => checks.push([rule, ref, status, detail]);
 
@@ -4144,41 +4144,106 @@ async function exportMonthlyReviewMD() {
       // AUDIT-FIX (2026-08-18): كان يفتقد fallback أرامكو الموجود حرفياً في
       // decision-engine.js:168 و targets.js:127 و watchlist.js:21 — فيقرأ سقفها 7%
       // بدل 12% ويُصدر أمر بيع لسهم ممتثل. العلم اليدوي يتقدّم على الافتراض.
-      const isBlue = tk => (deCfgC[tk] && (deCfgC[tk].blueChip === true || deCfgC[tk].isBlueChip === true))
-        ? true
-        : (deCfgC[tk] && deCfgC[tk].blueChip === false ? false : tk === '2222');
+      // v3.0: الفئة تُحسب من أرقام السهم المحفوظة في بطاقته (م.25)
+      const catOfC = tk => classifyStock(deCfgC[tk] || {});
 
-      // ① سقف السهم الواحد / القيادي
+      // ① سقف الفئة لكل سهم
       if (holdings.length && gm > 0) {
         const breaches = holdings.map(h => {
-          const w   = (+h.shares * +h.current_price) / gm * 100;
-          const cap = isBlue(h.ticker) ? CAP_BLUE : CAP_SINGLE;
-          return { tk: h.ticker, name: h.name, w, cap, blue: isBlue(h.ticker), over: w > cap + TOL_STOCK, inTol: w > cap && w <= cap + TOL_STOCK };
+          const w = (+h.shares * +h.current_price) / gm * 100;
+          const c = catOfC(h.ticker);
+          // غير المصنَّف بلا سقف مفروض — لا يُعدّ مخالفاً بنقص بيانات المحرّك (م.21)
+          const cap = c.known ? c.cap : null;
+          return { tk: h.ticker, name: h.name, w, cap, cat: c,
+                   over: cap != null && w > cap + TOL_STOCK,
+                   inTol: cap != null && w > cap && w <= cap + TOL_STOCK };
         });
         const hard = breaches.filter(b => b.over);
         const soft = breaches.filter(b => b.inTol);
-        addCheck('سقف السهم الواحد 15% + منطقة سماح 0.75%', '§1',
+        const unclassified = breaches.filter(b => !b.cat.known);
+        if (unclassified.length) {
+          addCheck('تصنيف الفئة لكل سهم (م.25)', 'م.25 و20',
+            '⚠️ غير قابل للفحص',
+            `${unclassified.length} سهماً غير مصنَّف: ${unclassified.map(b => `${b.tk} (ينقصه ${b.cat.missing.join('، ')})`).join('؛ ')}. `
+            + 'تُدخَل في بطاقة السهم بمحرّك القرار. لا يُفرَض عليها سقف ولا تُنزَّل فئتها (م.21).');
+        }
+        addCheck(`سقف الفئة لكل سهم (أ ${CAT.A.cap}% · ب ${CAT.B.cap}% · ج ${CAT.C.cap}% · د ${CAT.D.cap}%) + سماح ${TOL_STOCK}%`, 'م.25',
           hard.length ? '🔴 مخالف' : '✅ ممتثل',
           hard.length
-            ? `${hard.length} سهم كسر سقفه: ${hard.map(b => `${b.tk} ${PCT(b.w)} > ${b.cap}%${b.blue ? ' (قيادي)' : ''}`).join('؛ ')}`
+            ? `${hard.length} سهم كسر سقفه: ${hard.map(b => `${b.tk} ${PCT(b.w)} > ${b.cap}% (الفئة ${b.cat.short})`).join('؛ ')}`
             : `لا سهم يتجاوز سقفه.${soft.length ? ` (${soft.length} داخل منطقة السماح بلا تنبيه: ${soft.map(b => b.tk).join('، ')})` : ''}`);
 
         // ② سقف القطاع
         const secM = {};
         holdings.forEach(h => { const s = h.sector || 'غير مصنف'; secM[s] = (secM[s] || 0) + +h.shares * +h.current_price; });
         const secB = Object.entries(secM).map(([s, v]) => ({ s, w: v / gm * 100 })).filter(x => x.w > CAP_SECTOR + TOL_SECTOR);
-        addCheck('سقف القطاع الواحد 25% + منطقة سماح 1.25%', '§1',
+        addCheck(`سقف القطاع الواحد ${CAP_SECTOR}% — 25–27.5 تنبيه · 27.5–30 وقف الإضافة · >30 تصحيح`, 'م.28',
           secB.length ? '🔴 مخالف' : '✅ ممتثل',
           secB.length ? `${secB.length} قطاع فوق السقف: ${secB.map(x => `${x.s} ${PCT(x.w)}`).join('؛ ')}` : `أعلى قطاع ${PCT(Math.max(...Object.values(secM).map(v => v / gm * 100)))} — تحت السقف.`);
 
         // ③ حجم المحفظة
         const nH = holdings.length;
-        addCheck('حجم المحفظة المستهدف 15–20 سهماً', '§1',
-          nH >= 15 && nH <= 20 ? '✅ ممتثل' : '🔴 مخالف',
-          `العدد الحالي ${nH} سهم — ${nH < 18 ? `ينقص ${18 - nH} سهماً عن الحد الأدنى (تركيز زائد)` : nH > 25 ? `يزيد ${nH - 25} سهماً عن السقف (تشتّت وإدارة مرهقة)` : 'داخل النطاق'}.`);
+        addCheck(`حجم المحفظة المستهدف ${SIZE_MIN}–${SIZE_MAX} سهماً (سماح ${SIZE_GRACE_MAX} أثناء الخروج)`, 'م.29',
+          nH >= SIZE_MIN && nH <= SIZE_MAX ? '✅ ممتثل'
+            : nH > SIZE_MAX && nH <= SIZE_GRACE_MAX ? '🟡 داخل السماح المؤقّت' : '🔴 مخالف',
+          `العدد الحالي ${nH} سهم — ${nH < SIZE_MIN ? `ينقص ${SIZE_MIN - nH} سهماً عن الحد الأدنى (تركيز زائد)` : nH > 25 ? `يزيد ${nH - 25} سهماً عن السقف (تشتّت وإدارة مرهقة)` : 'داخل النطاق'}.`);
+
+        // ④-أ الاستبعادات الدائمة (م.12) — إشارة قاطعة، بلا تأكيد
+        {
+          const held = holdings.filter(h => isBanned(h.ticker));
+          addCheck('الاستبعادات الدائمة — 4339 دراية ريت · 1111 تداول القابضة', 'م.12 و44',
+            held.length ? '🔴 مخالف' : '✅ ممتثل',
+            held.length
+              ? `مملوك رغم الاستبعاد الدائم: ${held.map(h => `${h.ticker} ${h.name || ''}`).join('؛ ')}. إشارة قاطعة تُنفَّذ من قراءة واحدة (م.44).`
+              : 'لا سهم مستبعَد في المحفظة، ولا يُقترَح في أي مخرَج.');
+        }
+
+        // ④-ب الحد الأدنى للمركز (م.27)
+        {
+          const small = holdings.map(h => ({ tk: h.ticker, name: h.name,
+              w: (+h.shares * +h.current_price) / gm * 100 }))
+            .map(x => ({ ...x, v: positionSizeVerdict(x.w) }))
+            .filter(x => x.v.key !== 'ok');
+          const exits = small.filter(x => x.v.key === 'exit');
+          addCheck(`الحد الأدنى للمركز — ≥${POS_MIN_OK}% (${POS_MIN_GRACE}–${POS_MIN_OK}% مهلة دورتين · <${POS_MIN_GRACE}% خروج)`, 'م.27',
+            exits.length ? '🔴 مخالف' : small.length ? '🟡 قيد المهلة' : '✅ ممتثل',
+            small.length
+              ? small.map(x => `${x.tk} ${PCT(x.w)} — ${x.v.label}`).join('؛ ')
+              : `أصغر مركز ${PCT(Math.min(...holdings.map(h => (+h.shares * +h.current_price) / gm * 100)))} — كلها فوق الحد.`);
+        }
+
+        // ④-ج عدد القطاعات (م.29)
+        {
+          const nSec = new Set(holdings.map(h => h.sector || 'غير مصنف')).size;
+          addCheck(`عدد القطاعات المستهدف ${SECTORS_MIN} فأكثر`, 'م.29',
+            nSec >= SECTORS_MIN ? '✅ ممتثل' : '🔴 مخالف',
+            `القطاعات الحالية ${nSec}${nSec < SECTORS_MIN ? ` — ينقص ${SECTORS_MIN - nSec}` : ''}.`);
+        }
+
+        // ④-د صلاحية تجاوزات الهدف الفردي (م.31) — التجاوز يسقط بعد دورة
+        {
+          const tg  = await syncedGet('stock_targets', {}) || {};
+          // م.31 تقيس عمر التجاوز بالدورة. التاريخ المسجَّل هو تاريخ تحديد
+          // أهداف الأسهم في صفحة الأهداف (target_review_dates_v1.stocks.setAt) —
+          // على مستوى المجموعة لا السهم، فالتجديد يتمّ بتحديث ذلك التاريخ.
+          const _rvT = await syncedGet('target_review_dates_v1', null);
+          const st   = overrideStatus(_rvT && _rvT.stocks && _rvT.stocks.setAt);
+          const over = Object.entries(tg).map(([tk, v]) => {
+            const c = catOfC(tk);
+            if (!c.known || !(+v > c.cap + 1e-9)) return null;
+            return { tk, target: +v, cap: c.cap, cat: c.short, st };
+          }).filter(Boolean);
+          const expired = over.filter(o => o.st.expired || o.st.unknownDate);
+          addCheck('تجاوز الهدف الفردي للسقف — صالح دورة واحدة ثم يُجدَّد', 'م.31',
+            !over.length ? '✅ ممتثل (لا تجاوزات)'
+              : expired.length ? '🔴 مخالف — تجاوز لم يُجدَّد' : '🟡 ساري داخل الدورة',
+            !over.length
+              ? 'لا هدف فردي فوق سقف فئته.'
+              : over.map(o => `${o.tk} هدف ${PCT(o.target)} > سقف الفئة ${o.cat} ${o.cap}% — ${o.st.why}`).join('؛ '));
+        }
 
         // ④ السوق 100% سعودي
-        addCheck('المحفظة 100% سعودية بقرار المالك — لا تُنتقد لغياب التنويع الجغرافي', '§1',
+        addCheck('المحفظة 100% سعودية بقرار المالك — لا تُنتقد لغياب التنويع الجغرافي', 'م.9',
           '✅ ممتثل (قرار مالك)',
           `${nH} سهماً كلها في تاسي. هذا قيد مقصود ومُعلَن، لا يُطرح كخلل.`);
       } else {
@@ -4289,7 +4354,7 @@ async function exportMonthlyReviewMD() {
       {
         const goalMonthly = +retGoal.monthly || 0;
         const fwdMonthly  = (_fwd?.total || 0) / 12;
-        addCheck('هدف الدخل 5,000 ر.س شهرياً بحلول 2045', '§1',
+        addCheck(`هدف الدخل ${SAR(GOAL_MONTHLY_INCOME)} ر.س شهرياً بحلول 2045`, 'م.4 و7',
           !goalMonthly ? '⚠️ غير قابل للفحص' : (fwdMonthly >= goalMonthly ? '✅ الهدف مُحقَّق' : '🟡 قيد البناء'),
           !goalMonthly ? 'لم يُسجَّل هدف شهري في صفحة التقاعد.'
             : `الدخل التوزيعي المتوقع حالياً ${SAR(fwdMonthly)} ر.س/شهر مقابل هدف ${SAR(goalMonthly)} ر.س — نسبة التغطية ${PCT(goalMonthly > 0 ? fwdMonthly / goalMonthly * 100 : 0)}.`);

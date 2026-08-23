@@ -718,6 +718,10 @@ async function loadAll() {
     if (k) sectorTargets[k] = +r.target_pct || 0;
   });
   engineCfg = rEng || {};
+  // م.31 — تاريخ تحديد أهداف الأسهم: يقيس عمر تجاوزات السقف. نفس المفتاح
+  // الذي تقرؤه js/targets.js، فلا يفترق المحرّكان في الحكم على التجاوز.
+  try { _planOverrideDates = await loadUserSetting('target_review_dates_v1'); }
+  catch (_) { _planOverrideDates = null; }
 
   // سجل الأرباح الفعلي لكل رمز — مصدر كشف اتجاه التوزيع آلياً
   divByTicker = {};
@@ -749,8 +753,8 @@ async function loadAll() {
     });
   }
 
-  // هدف الدخل الشهري (§1) — من إعدادات المالك، وإلا هدف الدستور 5,000 ر.س
-  incomeGoalMonthly = 5000;
+  // هدف الدخل الشهري — من إعدادات المالك، وإلا هدف الدستور (م.7)
+  incomeGoalMonthly = GOAL_MONTHLY_INCOME;
   try {
     const raw = localStorage.getItem(userLsKey(RET_GOAL_LS_KEY)) || localStorage.getItem(RET_GOAL_LS_KEY);
     const g = raw ? JSON.parse(raw) : null;
@@ -943,7 +947,7 @@ function renderSummaryStrip(totalValue) {
     }
   }
 
-  // سطر دخل بسيط: أين أنت من هدف 5000 ر.س شهرياً بحلول 2045 (الدستور §1)
+  // سطر دخل بسيط: أين أنت من هدف الدخل الشهري بحلول 2045 (م.4 و7)
   const incomeEl = document.getElementById('de-income-line');
   if (incomeEl) {
     // نافذة مغلقة عند اليوم: التوزيع المُعلَن بتاريخ صرف قادم لم يُستلَم بعد
@@ -955,7 +959,7 @@ function renderSummaryStrip(totalValue) {
     const monthly = ttm / 12;
     // AUDIT-FIX (2026-08-18): كان 5000 مثبّتاً بينما بقيّة الصفحة نفسها تقرأ هدفك
     // المحفوظ (incomeGoalMonthly) — فيرى صاحب هدف 7000 رقمين متناقضين في شاشة واحدة.
-    const goal = incomeGoalMonthly > 0 ? incomeGoalMonthly : 5000;
+    const goal = incomeGoalMonthly > 0 ? incomeGoalMonthly : GOAL_MONTHLY_INCOME;
     const pct = goal > 0 ? Math.min(100, monthly / goal * 100) : 0;
     incomeEl.innerHTML = `💵 دخل توزيعاتك الشهري الحالي (آخر 12 شهراً): <strong>${formatNum(monthly)} ر.س</strong> من هدف <strong>${formatNum(goal)} ر.س</strong> بحلول 2045 (<strong>${formatNum(pct)}%</strong>)`;
   }
@@ -1109,27 +1113,41 @@ function _planPnL(r, sharesSold, full) {
   };
 }
 
-function _planEffectiveTarget(r) {
-  // ══════════════════════════════════════════════════════════════════
-  // الهدف الفعّال = هدفك المسجّل كما حدّدتَه — نقض المالك 2026-08-23.
-  // ------------------------------------------------------------------
-  // كان: min(هدفك، السقف الدستوري). المالك: «لما أكون معرّف حاجة فوق
-  // الهدف الدستوري يتجاوزها — أهم شيء يطابق التعرفة اللي أنا حاطها».
-  //
-  // ولزوم الاتّساق: محرّك إعادة التوازن (js/targets.js) تخلّى عن القصّ في
-  // القرار نفسه. لو بقي هذا الموضع يقصّ، لأعطى محرّكان في التطبيق الواحد
-  // رقمين مختلفين لنفس السهم في اليوم نفسه — وهو أسوأ من أيّهما وحده.
-  //
-  // السقف يبقى نافذاً حيث يقيس **الواقع** لا النيّة: رصد كسر الوزن الفعلي
-  // في الفلتر 4 يظلّ على السقف الدستوري ويأمر بالتخفيف. ⚠️ لا تُعِد min().
-  // ══════════════════════════════════════════════════════════════════
-  if (!r.hasTarget) return null;
-  return r.targetWeight;
+// م.31 — هل تجاوزات الأهداف الفردية ما زالت داخل دورتها؟
+// المرجع تاريخ «حُدِّدت في» لأهداف الأسهم في صفحة الأهداف. تحديثه = تجديد.
+// ⚠️ نفس المصدر الذي تقرؤه js/targets.js — محرّكان يقرآن رقماً واحداً.
+let _planOverrideDates = null;   // يُملأ عند تحميل الصفحة
+function _planOverrideStatus() {
+  return overrideStatus(_planOverrideDates && _planOverrideDates.stocks && _planOverrideDates.stocks.setAt);
 }
 
-// هل هدفك المسجّل فوق السقف الدستوري؟ — للإعلان لا للقصّ (§8)
+function _planEffectiveTarget(r) {
+  // ══════════════════════════════════════════════════════════════════
+  // م.31 — الهدف الفردي يتقدّم على سقف الفئة، **بصلاحية دورة واحدة**.
+  // ------------------------------------------------------------------
+  // «التجاوز صالح لدورة واحدة (6 أشهر)… إن لم يجدَّد يُقصّ للسقف. السبب:
+  // سقف يُتجاوز دائماً بلا مراجعة ليس سقفاً.»
+  //
+  // فالساري يُنفَّذ كما حدّده المالك، والمنقضي يُقصّ. والقاعدة نفسها
+  // حرفياً في js/targets.js — لو افترق الموضعان لأعطى محرّكان في التطبيق
+  // الواحد رقمين مختلفين لنفس السهم في اليوم نفسه.
+  // ══════════════════════════════════════════════════════════════════
+  if (!r.hasTarget) return null;
+  if (r.cap == null) return r.targetWeight;              // غير مصنَّف — لا سقف (م.21)
+  const wants = r.targetWeight > r.cap + 1e-9;
+  if (!wants) return r.targetWeight;
+  return _planOverrideStatus().valid ? r.targetWeight : r.cap;
+}
+
+// تجاوز **ساري** — يُعلَن ولا يُقصّ (م.31)
 function _planTargetOverCap(r) {
-  return !!(r.hasTarget && r.cap != null && r.targetWeight > r.cap + 1e-9);
+  return !!(r.hasTarget && r.cap != null && r.targetWeight > r.cap + 1e-9
+            && _planOverrideStatus().valid);
+}
+// تجاوز **منقضٍ** — قُصَّ للسقف، ويُعلَن سبب قصّه
+function _planTargetExpired(r) {
+  return !!(r.hasTarget && r.cap != null && r.targetWeight > r.cap + 1e-9
+            && !_planOverrideStatus().valid);
 }
 
 function _planFairVerdict(r) {
@@ -1245,7 +1263,8 @@ function buildTargetPlan(valAware) {
     // 2026-08-23: الهدف لم يعد يُقصّ. العَلَم نفسه بقي — لكن دلالته انقلبت من
     // «قُصَّ عند السقف» إلى «فوق السقف ويُنفَّذ كما حدّدتَه»، وهو المسار الذي
     // يطبع الإعلان في البطاقة أدناه. الإعلان بديل القصّ لا مرافقه (§8).
-    const capped = _planTargetOverCap(r);
+    const capped  = _planTargetOverCap(r);
+    const expired = _planTargetExpired(r);
 
     // ② فوق الهدف ⇒ تخفيف
     if (gapPct < 0 && sar >= PLAN_MIN_SAR) {
@@ -1256,7 +1275,7 @@ function buildTargetPlan(valAware) {
           fix: 'إمّا ترفع هدفه في صفحة الأهداف، أو تغلق مهمة التجميع. المحرّك لا ينقض قرارك.' }));
         return;
       }
-      out.trims.push(mk({ sar, shares, gapPct, capped,
+      out.trims.push(mk({ sar, shares, gapPct, capped, expired,
         forced: r.overCap,
         why: r.overCap
           ? `كسر السقف الدستوري ${r.cap}% — تخفيف واجب بغضّ النظر عن السعر (§4 الفلتر 5)`
@@ -1302,7 +1321,7 @@ function buildTargetPlan(valAware) {
         return;
       }
       out.needed += sar;                                  // المُنفَّذ وحده
-      out.adds.push(mk({ sar, shares, gapPct, capped,
+      out.adds.push(mk({ sar, shares, gapPct, capped, expired,
         fairOk: fair.ok, fairUsable: fair.usable,
         why: fair.usable ? fair.why : `${fair.why} — التنفيذ على مسؤوليتك، لا مرجع سعري`,
         priority: gapPct * (fair.usable && fair.ok ? 1 + Math.min(0.5, fair.margin / 100) : 1) }));
@@ -1374,7 +1393,8 @@ function renderTargetPlan() {
         <div class="small text-muted" style="margin-top:3px;line-height:1.6">${o.why || ''}${
           o.fairNote ? `<br>${o.fairNote}` : ''}${
           o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
-          o.capped ? `<br><span style="color:var(--st-warn)">⚠️ هدفك ${formatNum(o.target)}% فوق السقف الدستوري ${formatNum(o.cap)}% — الخطة تنفّذ هدفك كما حدّدتَه.</span>` : ''}</div>
+          o.capped ? `<br><span style="color:var(--st-warn)">⚠️ هدفك فوق سقف فئتك ${formatNum(o.cap)}% — الخطة تنفّذه كما حدّدتَه (م.31، ساري).</span>`
+          : o.expired ? `<br><span style="color:var(--st-bad)">⛔ هدفك فوق سقف فئتك ${formatNum(o.cap)}% وانقضت دورة التجاوز — الخطة تستعمل السقف. جدِّده بتحديث «حُدِّدت في» في صفحة الأهداف (م.31).</span>` : ''}</div>
       </div></div>`;
   };
 
