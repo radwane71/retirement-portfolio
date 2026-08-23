@@ -727,7 +727,7 @@ const VD_CFG_LABELS = {
   assetType:    ['نوع الأصل', {
     reit: 'REIT — صندوق عقاري', bank: 'بنك',
     cement_petro: 'إسمنت/بتروكيماويات', general: 'بقية القطاعات' }],
-  blueChip:     ['سهم قيادي', { true: 'نعم (سقف 12%)', false: 'لا (سقف 7%)' }],
+  blueChip:     ['سهم قيادي', { true: 'نعم (علم trigger)', false: 'لا' }],   // السقف 15% للجميع منذ 2026-08-23
   divCoverage:  ['تغطية التوزيع', { covered: '✅ مغطّى', weak: '🟡 ضعف ربع واحد', uncovered: '🔴 غير مغطّى مزمن' }],
   fundamentals: ['الأساسيات', { healthy: '✅ سليمة', soft: '🟡 ضعف ربع واحد', deteriorating: '🔴 تدهور مستمر' }],
   divSignal:    ['إشارة التوزيع', { stable: '✅ مستقر', temp: '🟡 تأجيل/تخفيف مؤقت', cut: '🔴 قطع مؤكّد' }],

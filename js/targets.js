@@ -110,13 +110,22 @@ function kvsHtml(items) {
 // القصّ، ويرصد محرّك القرار كسر السقف في الأوزان **الفعلية** ويأمر بالتخفيف.
 // منطقة السماح للتنبيه فقط — لا تدخل معادلة منع ولا معادلة شراء.
 // ══════════════════════════════════════════════════════════════════════
-const TG_CAP_SINGLE    = 7;     // سقف السهم الواحد
-const TG_CAP_BLUECHIP  = 12;    // سقف السهم القيادي
-const TG_CAP_BUFFER    = 0.75;  // منطقة سماح السهم/القيادي
+// ══════════════════════════════════════════════════════════════════════
+// تحديث الأسقف — قرار المالك 2026-08-23
+// ----------------------------------------------------------------------
+// السقف صار **15% لكل سهم بلا استثناء**، وتمييز «القيادي» بسقف أعلى أُلغي:
+// الثابتان متساويان عمداً. علم `blueChip` باقٍ لأن triggers المالك تشير
+// إليه (أرامكو)، لكنه لم يعد يرفع سقفاً. حجم المحفظة 15–20 سهماً،
+// وعدد القطاعات المستهدف 8 فأكثر. ⚠️ المصدر: CLAUDE.md §1.
+// ══════════════════════════════════════════════════════════════════════
+const TG_CAP_SINGLE    = 15;    // سقف السهم الواحد — لكل الأسهم
+const TG_CAP_BLUECHIP  = 15;    // مساوٍ عمداً: تمييز القيادي أُلغي
+const TG_CAP_BUFFER    = 0.75;  // منطقة سماح السهم
 const TG_CAP_SECTOR    = 25;    // سقف القطاع
 const TG_SECTOR_BUFFER = 1.25;  // منطقة سماح القطاع
-const TG_SIZE_MIN      = 18;    // أدنى حجم محفظة مستهدف
-const TG_SIZE_MAX      = 25;    // أقصى حجم محفظة مستهدف
+const TG_SIZE_MIN      = 15;    // أدنى حجم محفظة مستهدف
+const TG_SIZE_MAX      = 20;    // أقصى حجم محفظة مستهدف
+const TG_SECTORS_MIN   = 8;     // أدنى عدد قطاعات مستهدف
 
 let engineCfg = {};   // ticker → مدخلات محرّك القرار (منها علم «قيادي» blueChip)
 
@@ -694,7 +703,7 @@ function renderStockTargets() {
     const zoneCell = (mergedVal, taskVal) =>
       mergedVal ? `${fmtZone(mergedVal)} ${srcTag(!!taskVal)}` : fmtZone(mergedVal);
 
-    const capNote = tgIsBlueChip(s.ticker) ? 'قيادي — السقف 12%' : 'السقف 7%';
+    const capNote = `السقف ${TG_CAP_SINGLE}%`;   // سقف واحد للجميع منذ 2026-08-23
     const meterCell = s.planned
       ? '<div class="small text-muted">لم يُشترَ بعد — لا وزن</div>'
       : weightMeterHtml({
@@ -851,7 +860,7 @@ function renderSectorTargets() {
 // ══════════════════════════════════════════════════════════════════════
 // 🧭 بطاقة الانضباط — الرقم القائد للصفحة
 // عرض فقط: تقرأ نفس الأوزان والأهداف المحفوظة وتلخّص حالتها مقابل دستور
-// CLAUDE.md §1 (سقف السهم/القيادي/القطاع + حجم المحفظة 18–25).
+// CLAUDE.md §1 (سقف السهم 15% / القطاع 25% + حجم المحفظة 15–20 + 8 قطاعات فأكثر).
 // لا تحسب شيئاً جديداً ولا تؤثر على الحفظ أو محرك التوازن.
 // ══════════════════════════════════════════════════════════════════════
 function renderTargetsSummary() {
@@ -992,7 +1001,7 @@ function markCapViolations(list) {
   if (list[0]?.el?.scrollIntoView) list[0].el.scrollIntoView({ block: 'center' });
 }
 
-// مخالفات أهداف الأسهم: كل صف مرسوم يُقاس بسقفه هو (7% أو 12% للقيادي)
+// مخالفات أهداف الأسهم: كل صف مرسوم يُقاس بالسقف 15% (واحد للجميع للقيادي)
 function collectStockCapViolations() {
   const holdingTickers = new Set(holdings.map(h => h.ticker));
   const tickers = [
@@ -1053,7 +1062,7 @@ function sumTargetInputs(tbodyId) {
 // **مُعلَن**: الفارغ لا يقول شيئاً، والمخالف يقول «هنا نيّة تخالف سقفك».
 //
 // الدستور لم يُنقَض: السقوف تبقى نافذة **حيث تُصدر القرارات** —
-//   • محرّك التوازن يوزّع على الهدف الفعّال = min(المحفوظ، السقف) ويُعلن القصّ.
+//   • محرّك التوازن يوزّع على **هدفك المحفوظ** (نقض 2026-08-23) ويُعلن تجاوز السقف.
 //   • «خطة الوصول إلى أهدافك» في محرّك القرار تفعل الشيء نفسه.
 //   • محرّك القرار يرصد كسر السقف الفعلي في الأوزان ويأمر بالتخفيف.
 // أي: يُسجَّل ما تريد، ويبقى ما يُنفَّذ محكوماً بالسقف ومُعلَناً — لا منع صامت
@@ -1366,9 +1375,8 @@ function runRebalancing() {
   // ── بناء قائمة المرشحين ─────────────────────────────────────
   // فقط الأسهم الفعلية (ليس المخطط) ذات الهدف المحدد والسعر الموجود
   //
-  // ⚖️ السقف الدستوري قيد صلب لا هدف استرشادي (CLAUDE.md §1 + الفلتر 4):
-  // الهدف الفعّال = min(الهدف المحفوظ، السقف) — 7% للسهم و12% للقيادي.
-  // السقف الأساس بلا منطقة السماح: السماح يعني «لا تنبّه ضمنه» لا «اشترِ داخله عمداً».
+  // ⚖️ الهدف الفعّال = هدفك المحفوظ كما حدّدتَه (نقض المالك 2026-08-23).
+  // السقف الدستوري 15% يبقى مرجعاً يُعلَن تجاوزه، لا حدّاً يقصّ الهدف.
   // AUDIT-FIX (2026-08-21): كان يوصي بشراء سهم مهمّته الفعّالة «تصفية» —
   // بينما نفس الصفحة تعرض شارة «🔴 تصفية» فوقه، ومحرّك القرار يُصدر عليه
   // خروجاً كاملاً بأولوية P0.1. توصيتان متعاكستان في شاشة واحدة، والقابلة
@@ -1407,13 +1415,13 @@ function runRebalancing() {
       else if (+fv > 0)              { refPrice = +fv; refSrc = 'القيمة العادلة'; }
       const savedTarget = stockTargets[sk.ticker] || 0;
       const capPct      = tgCapOf(sk.ticker);
-      const targetPct   = Math.min(savedTarget, capPct);
+      const targetPct   = savedTarget;                     // هدفك يحكم — انظر التعليق عند المملوك
       return {
         ticker: sk.ticker, name: sk.name || sk.ticker, sector: sk.sector || '—',
         shares: 0, current_price: refPrice,
         planned: true, refSrc, hasRef: refPrice > 0,
         currentPct: 0, savedTarget, capPct, targetPct,
-        capBound: targetPct < savedTarget - 1e-9,
+        overCap: savedTarget > capPct + 1e-9,
         blueChip: tgIsBlueChip(sk.ticker),
         gap: targetPct,                       // الوزن 0 ⇒ الفجوة = الهدف كاملاً
         inZone: true,                         // لا سعر سوقي ⇒ لا فلتر منطقة شراء
@@ -1428,11 +1436,26 @@ function runRebalancing() {
                  && taskMap[h.ticker] !== 'liquidation')
     .map(h => {
       const currentPct  = totalValue > 0 ? (+h.shares * +h.current_price) / totalValue * 100 : 0;
+      // ══════════════════════════════════════════════════════════════
+      // هدفك المحفوظ يحكم — نقض صريح من المالك 2026-08-23
+      // ------------------------------------------------------------
+      // كان: الهدف الفعّال = min(هدفك، السقف الدستوري 7% / 12%). المالك:
+      // «لما أكون معرّف حاجة فوق الهدف الدستوري يتجاوزها. أهم شيء يطابق
+      // التعرفة اللي أنا حاطها بالأهداف الفردية.»
+      //
+      // هذا يخالف §1 («قيود صلبة ممنوع تليينها») — وقد أُعلن للمالك، وهو
+      // كاتب الدستور فالنقض قراره. صفحة الأهداف تسمح بالحفظ فوق السقف
+      // أصلاً (قرار 2026-08-22)، وكان المحرّك يتجاهل ما سمحت بحفظه —
+      // بابٌ يفتح ومحرّكٌ يقفله.
+      //
+      // **ما لم يسقط:** الإعلان. تجاوز السقف يُعرَض في لافتة وفي كل صفّ
+      // (§8: لا شيء يمرّ بصمت) — لكنه إعلانٌ لا قصّ. لا تُعِد min().
+      // ══════════════════════════════════════════════════════════════
       const savedTarget = stockTargets[h.ticker] || 0;     // ما حفظه المالك
-      const capPct      = tgCapOf(h.ticker);               // 12 للقيادي · 7 لغيره
-      const targetPct   = Math.min(savedTarget, capPct);   // الهدف الفعّال — يقود كل حساب بعده
-      const capBound    = targetPct < savedTarget - 1e-9;  // قُصَّ بالسقف → إفصاح إلزامي (§8)
-      const gap         = targetPct - currentPct;          // موجب = ناقص الهدف الفعّال
+      const capPct      = tgCapOf(h.ticker);               // 12 للقيادي · 7 لغيره — مرجع للإعلان
+      const targetPct   = savedTarget;                     // الهدف الفعّال = هدفك، بلا قصّ
+      const overCap     = savedTarget > capPct + 1e-9;     // فوق السقف → إفصاح إلزامي (§8)
+      const gap         = targetPct - currentPct;          // موجب = ناقص هدفك
       const zone        = stockZones[h.ticker] || {};
       const inZone      = !zone.entry_price || +h.current_price <= +zone.entry_price;
       const val         = valuationScore(h.ticker, +h.current_price);
@@ -1440,7 +1463,7 @@ function runRebalancing() {
       const effScore    = valAware ? val.score : 1;
       // الأولوية = الفجوة × جاذبية السعر → سهم قريب من المتضخم يهبط للأسفل ولو فجوته كبيرة
       const priority    = gap * effScore;
-      return { ...h, currentPct, savedTarget, capPct, targetPct, capBound,
+      return { ...h, currentPct, savedTarget, capPct, targetPct, overCap,
                blueChip: tgIsBlueChip(h.ticker), gap, inZone, val, effScore, priority };
     });
 
@@ -1449,10 +1472,9 @@ function runRebalancing() {
     .filter(c => !entryFilter || c.inZone)                 // فلتر منطقة الشراء اختياري
     .sort((a, b) => b.priority - a.priority);              // ترتيب تنازلي بالأولوية (فجوة × تقييم)
 
-  // مستبعَد لأن وزنه بلغ سقفه الدستوري وإن كان هدفه المحفوظ أعلى — لا قصّ صامت (§8)
-  const capBlocked = candidatesAll.filter(c => c.capBound && c.gap <= 0.05);
-  // مرشّح دخل التوزيع لكن بهدف مقصوص عند السقف
-  const capTrimmed = candidates.filter(c => c.capBound);
+  // لم يعد هناك «مستبعَد بالسقف»: الهدف لا يُقصّ، فالسهم يبقى مرشّحاً حتى
+  // يبلغ هدفك أنت. يبقى الإعلان: من هدفه فوق السقف الدستوري.
+  const overCapList = candidatesAll.filter(c => c.overCap);
 
   // ── إفصاح نطاق المحرّك (عرض فقط) ────────────────────────────
   // قرار مؤكَّد من المالك: التوزيع على المملوك فقط. نُعلنه صراحةً مع عدّ
@@ -1475,19 +1497,18 @@ function runRebalancing() {
       : `<strong>نطاق المحرّك: الأسهم المملوكة فقط.</strong> يوزّع على ما له وزن حالي قابل للقياس وهدف محدَّد وسعر حالي > 0.`
         + ` المستبعَد الآن: ${_exPlanned} سهماً مخطّطاً (في قاعدة بياناتك ولم يُشترَ بعد)`)
     + ` · ${_exNoTarget} سهماً بلا هدف محدَّد · ${_exNoPrice} سهماً بلا سعر حالي`
-    + (capBlocked.length ? ` · ${capBlocked.length} سهماً بلغ سقفه الدستوري` : '')
+    + (overCapList.length ? ` · <b>${overCapList.length} سهماً هدفه فوق السقف الدستوري</b> (يُنفَّذ كما حدّدتَه)` : '')
     + (_liq.length ? ` · <b>${_liq.length} سهماً مهمّته «تصفية»</b> (${_liq.map(esc).join('، ')}) — قرارك بالخروج منه يتقدّم على أي توصية شراء` : '')
     + `.`, '');
 
-  // ── لافتة القصّ الدستوري: تُعرض في كل مخرَج (§8: لا تقليص صامت) ──
-  const capNoteItems = [
-    ...capTrimmed.map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — الهدف المحفوظ ${c.savedTarget}% · الفعّال ${c.capPct}% (السقف الدستوري${c.blueChip ? ' — قيادي' : ''})</li>`),
-    ...capBlocked.map(c => `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — الهدف المحفوظ ${c.savedTarget}% · الفعّال ${c.capPct}% (السقف الدستوري${c.blueChip ? ' — قيادي' : ''}) · وزنه ${c.currentPct.toFixed(2)}% بلغ السقف فلا شراء</li>`),
-  ];
-  const capNote = capNoteItems.length ? noteHtml('⛔',
-    `<strong>قصّ دستوري للهدف (الفلتر 4):</strong> المحرّك يوزّع نحو الهدف الفعّال = min(هدفك المحفوظ، السقف)
-     — لا يشتري داخل منطقة السماح عمداً.
-     <ul class="sum-ul">${capNoteItems.join('')}</ul>`, 'bad') : '';
+  // ── لافتة تجاوز السقف: إعلان لا قصّ (§8: لا شيء بصمت) ──
+  const capNoteItems = overCapList.map(c =>
+    `<li><strong>${esc(c.ticker)}</strong> ${esc(c.name)} — هدفك ${c.savedTarget}% · السقف الدستوري ${c.capPct}%${c.blueChip ? ' (قيادي)' : ''} · فوقه بـ<b>${(c.savedTarget - c.capPct).toFixed(2)} نقطة</b></li>`);
+  const capNote = capNoteItems.length ? noteHtml('⚠️',
+    `<strong>أهداف فوق السقف الدستوري — تُنفَّذ كما حدّدتها:</strong> المحرّك يوزّع نحو <b>هدفك المحفوظ</b>،
+     لا نحو min(هدفك، السقف). الدستور §1 يضع السقف عند ${TG_CAP_SINGLE}% للسهم و${TG_CAP_BLUECHIP}% للقيادي،
+     وهذه الأسهم فوقه بقرارك الصريح (2026-08-23). تُعرَض هنا لتبقى تحت عينك، ولا تُقصّ.
+     <ul class="sum-ul">${capNoteItems.join('')}</ul>`, 'warn') : '';
 
   if (!candidates.length) {
     const msg = entryFilter
@@ -1644,8 +1665,15 @@ function runRebalancing() {
   const leftoverState = leftover > 0.005 ? 'warn' : 'good';
   const spentPct      = budget > 0 ? totalSpent / budget * 100 : 0;
 
-  // تنبيه دستوري عرضي: هل تدفع أي توصية وزن سهم فوق سقفه؟ (لا يغيّر التوزيع)
-  const capHits = rows.filter(r => r.newPct > tgCapOf(r.ticker) + TG_CAP_BUFFER);
+  // ══════════════════════════════════════════════════════════════════
+  // معيار «الخلل» تغيّر مع نقض 2026-08-23: تجاوز السقف الدستوري صار
+  // **متوقَّعاً** لمن هدفه فوقه — فقياس الخلل عليه يُطلق إنذاراً كاذباً في
+  // كل تشغيل. الخلل الحقيقي أن يتجاوز الشراء **هدفك أنت**: ذاك يعني أن
+  // التوزيع لم يستقرّ عند السعة التي حسبها المحرّك لنفسه.
+  const overShoot   = rows.filter(r => r.newPct > r.targetPct + TG_CAP_BUFFER);
+  // وتجاوز السقف بلا تجاوز هدفك: إعلانٌ صريح، لا إنذار.
+  const overCapRows = rows.filter(r => r.newPct > tgCapOf(r.ticker) + TG_CAP_BUFFER
+                                       && !(r.newPct > r.targetPct + TG_CAP_BUFFER));
 
   resultEl.innerHTML = `<div class="stack-4">
     <!-- الرقم القائد: ما ستنفقه فعلاً -->
@@ -1666,7 +1694,7 @@ function runRebalancing() {
           ['إجمالي التكلفة', formatSAR(totalSpent)],
           ['المتبقي نقداً', formatSAR(leftover)],
           ['عدد الأسهم المختلفة', `${rows.length} سهم`],
-          ['أهداف قُصَّت عند السقف', capNoteItems.length ? `${capNoteItems.length} سهم` : 'لا شيء'],
+          ['أهداف فوق السقف الدستوري', capNoteItems.length ? `${capNoteItems.length} سهم` : 'لا شيء'],
           ['مقام «الوزن بعد»', `${formatSAR(actualTotal)} (القيمة + المُنفَق فعلاً)`],
         ])}
       </div>
@@ -1674,9 +1702,13 @@ function runRebalancing() {
 
     ${capNote}
 
-    ${capHits.length ? noteHtml('⛔', `<strong>خلل يستوجب المراجعة (الفلتر 4):</strong>
-      ${capHits.map(r => `<strong>${esc(r.ticker)}</strong> سيصل وزنه ${r.newPct.toFixed(2)}% متجاوزاً سقفه ${tgCapOf(r.ticker)}% + سماح ${TG_CAP_BUFFER}%`).join(' · ')}.
-      المحرّك يقصّ الهدف عند السقف الدستوري، فظهور هذه اللافتة يعني عدم استقرار الحساب — لا تنفّذ قبل المراجعة.`, 'bad') : ''}
+    ${overShoot.length ? noteHtml('⛔', `<strong>خلل يستوجب المراجعة:</strong>
+      ${overShoot.map(r => `<strong>${esc(r.ticker)}</strong> سيصل وزنه ${r.newPct.toFixed(2)}% متجاوزاً <b>هدفك ${r.targetPct}%</b> + سماح ${TG_CAP_BUFFER}%`).join(' · ')}.
+      المحرّك لا يشتري فوق هدفك، فظهور هذه اللافتة يعني عدم استقرار الحساب — لا تنفّذ قبل المراجعة.`, 'bad') : ''}
+
+    ${overCapRows.length ? noteHtml('⚠️', `<strong>وزن فوق السقف الدستوري — بقرارك:</strong>
+      ${overCapRows.map(r => `<strong>${esc(r.ticker)}</strong> ${r.newPct.toFixed(2)}% مقابل سقف ${tgCapOf(r.ticker)}%`).join(' · ')}.
+      هذا ما يقتضيه هدفك المحفوظ، والشراء داخل هدفك لا فوقه.`, 'warn') : ''}
 
     <!-- جدول التوصيات -->
     <div class="table-wrapper">
@@ -1689,7 +1721,7 @@ function runRebalancing() {
             <th>أسهم تشتري</th>
             <th>التكلفة</th>
             <th>الوزن: قبل ← بعد (مقابل الهدف الفعّال والسقف)</th>
-            <th title="مقابل الهدف الفعّال = min(الهدف المحفوظ، السقف الدستوري)">الفجوة المتبقية</th>
+            <th title="مقابل هدفك المحفوظ كما حدّدتَه">الفجوة المتبقية</th>
             ${valAware ? '<th class="valcol">موقع السعر من التقييم</th>' : ''}
             <th>منطقة الشراء</th>
           </tr>
@@ -1723,11 +1755,13 @@ function runRebalancing() {
                   <span class="small text-success">↑${(r.newPct - r.currentPct).toFixed(2)}%</span></div>
                 ${weightMeterHtml({
                   current: r.newPct, target: r.targetPct, cap, scale: rScale,
-                  state: r.newPct > cap + TG_CAP_BUFFER ? 'bad' : 'good',
-                  title: `بعد الشراء ${r.newPct.toFixed(2)}% · الهدف الفعّال ${r.targetPct}% · السقف ${cap}%`,
+                  // الحالة تُقاس على هدفك لا على السقف (نقض 2026-08-23):
+                  // قياسها على السقف يصبغ كل صفٍّ هدفُه فوقه بالأحمر أبداً.
+                  state: r.newPct > r.targetPct + TG_CAP_BUFFER ? 'bad' : 'good',
+                  title: `بعد الشراء ${r.newPct.toFixed(2)}% · هدفك ${r.targetPct}% · السقف الدستوري ${cap}%`,
                 })}
-                ${r.capBound
-                  ? `<div class="small text-muted num">⛔ الهدف المحفوظ ${r.savedTarget}% · الفعّال ${r.capPct}% (السقف الدستوري${r.blueChip ? ' — قيادي' : ''})</div>`
+                ${r.overCap
+                  ? `<div class="small num" style="color:var(--st-warn)">⚠️ هدفك ${r.savedTarget}% فوق السقف الدستوري ${r.capPct}% — يُنفَّذ كما حدّدتَه</div>`
                   : ''}
               </td>
               <td class="num small ${gapAfterCls}">${r.gapAfter > 0 ? '+' : ''}${r.gapAfter.toFixed(2)}%</td>
@@ -1777,10 +1811,9 @@ function showRebInfo() {
     'يُشترَ بعد) لا وزن حالي له ولا سعر، فلا فجوة تُقاس له — مستبعَد عمداً.',
     'كذلك أي سهم بلا هدف محدَّد أو بلا سعر حالي.',
     '',
-    '⚖️ الأسقف الدستورية قيد صلب: المحرّك يوزّع نحو «الهدف الفعّال» =',
-    'min(هدفك المحفوظ، السقف) — 7% للسهم و12% للقيادي، بلا منطقة سماح',
-    '(السماح يعني «لا تنبيه ضمنه» لا إذناً بالشراء داخله). إن كان هدفك أعلى',
-    'من السقف يُقصّ صراحةً وتُعلن اللافتة الحمراء أي سهم قُصَّ ولماذا.',
+    '⚖️ المحرّك يوزّع نحو هدفك المحفوظ كما حدّدتَه — لا نحو min(هدفك، السقف).',
+    'السقف الدستوري 15% للسهم و25% للقطاع (§1) يبقى مرجعاً يُعلَن تجاوزه في',
+    'لافتة وفي كل صفّ، ولا يقصّ الهدف. نقض صريح من المالك 2026-08-23.',
     '',
     '📐 «الوزن بعد» يُقاس على الإنفاق الفعلي (قيمة المحفظة + ما أُنفق فعلاً)',
     'لا على الميزانية كاملة — القسمة على الميزانية كاملة كانت تُظهر المحفظة',

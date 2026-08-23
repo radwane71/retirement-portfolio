@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260823r">
+  <link rel="stylesheet" href="css/style.css?v=20260823s">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -144,7 +144,7 @@
           <div class="calc-input-group">
             <label>عدد الأسهم المنفردة</label>
             <input type="number" id="individualStocks" placeholder="مثال: 15" min="0" max="100">
-            <p class="field-hint">حجم المحفظة المستهدف حسب دستور المحفظة: 18–25 سهماً</p>
+            <p class="field-hint">حجم المحفظة المستهدف حسب دستور المحفظة: 15–20 سهماً</p>
           </div>
           <div class="calc-input-group">
             <label>عدد صناديق المؤشرات (ETFs)</label>
@@ -164,7 +164,7 @@
           <div class="calc-input-group">
             <label>نسبة أكبر سهم / صندوق فردي (%)</label>
             <input type="number" id="largestStockPercentage" placeholder="مثال: 15" min="0" max="100" step="0.1">
-            <p class="field-hint">دستور المحفظة: السقف 7% للسهم الواحد (12% للسهم القيادي)</p>
+            <p class="field-hint">دستور المحفظة: السقف 15% لكل سهم بلا استثناء</p>
           </div>
           <div class="calc-input-group">
             <label>نسبة أكبر قطاع (%)</label>
@@ -186,6 +186,7 @@
             <option value="5-7-sectors">5–7 قطاعات</option>
             <option value="8-plus-sectors">8 قطاعات فأكثر</option>
           </select>
+          <p class="field-hint">دستور المحفظة: العدد المستهدف 8 قطاعات فأكثر، ولا قطاع يتجاوز 25%</p>
         </div>
         <div class="conflict-warning" id="sectorConflict">⚠️ تناقض: اخترت تنويعاً قطاعياً عالياً لكن نسبة القطاع الأكبر مرتفعة جداً. سيُطبَّق خصم إضافي.</div>
       </div>
@@ -297,11 +298,11 @@
   <!-- AUDIT-FIX (2026-08): تثبيت إصدار Chart.js بدل التعويم على @4 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260823r"></script>
-  <script src="js/auth.js?v=20260823r"></script>
-  <script src="js/utils.js?v=20260823r"></script>
-  <script src="js/declutter.js?v=20260823r"></script>
-  <script src="js/navtoggle.js?v=20260823r"></script>
+  <script src="js/supabase.js?v=20260823s"></script>
+  <script src="js/auth.js?v=20260823s"></script>
+  <script src="js/utils.js?v=20260823s"></script>
+  <script src="js/declutter.js?v=20260823s"></script>
+  <script src="js/navtoggle.js?v=20260823s"></script>
   <script>
     let breakdownChartInst = null;
 
@@ -385,10 +386,10 @@
     // ══════════════════════════════════════════════════════════════
     // نظام التقييم — مُواءَم مع دستور المحفظة (CLAUDE.md)
     // AUDIT-FIX (2026-08):
-    //   • تركيز السهم: الدرجة الكاملة ≤ 7% (سقف الدستور؛ 12% للقيادي — لا يمكن
-    //     تمييز القيادي في هذا النموذج فاعتُمد 7%)، خصم تدريجي فوقها وقوي فوق 12%.
+    //   • تركيز السهم: الدرجة الكاملة ≤ 15% (سقف الدستور — واحد للجميع منذ
+    //     2026-08-23)، خصم تدريجي فوقها وقوي فوق 20%.
     //   • تركيز القطاع: الدرجة الكاملة ≤ 25%، خصم فوقها وقوي فوق 30%.
-    //   • حجم المحفظة: 18–25 سهماً = الدرجة الكاملة (لا اشتراط ≥ 60 «وحدة»).
+    //   • حجم المحفظة: 15–20 سهماً = الدرجة الكاملة (لا اشتراط ≥ 60 «وحدة»).
     //   • التوزيع الجغرافي: بُعد محايد — CLAUDE.md §1 يمنع انتقاد القرار الجغرافي؛
     //     وزنه (1.0) أعيد توزيعه: +0.5 للتنويع الفعلي، +0.25 لكل من تركيزي السهم والقطاع.
     //   • الحقل الفارغ لا يأخذ أسوأ درجة — البُعد غير المعبأ يُستثنى من الحساب
@@ -431,14 +432,14 @@
         else breakdown.push({ label, value: null, max, unanswered: true });
       };
 
-      // 1. التنويع الفعلي / حجم المحفظة (0–3.0) — الدستور: 18–25 سهماً = الدرجة الكاملة
+      // 1. التنويع الفعلي / حجم المحفظة (0–3.0) — الدستور: 15–20 سهماً = الدرجة الكاملة
       const effectiveUnits = is + (ec * 30) + (rc * 5) + (bc * 3);
-      const ds = effectiveUnits >= 18 ? 3.0
-               : effectiveUnits >= 12 ? 2.4
-               : effectiveUnits >= 8  ? 1.8
+      const ds = effectiveUnits >= 15 ? 3.0
+               : effectiveUnits >= 11 ? 2.4
+               : effectiveUnits >= 7  ? 1.8
                : effectiveUnits >= 4  ? 1.0
                : effectiveUnits > 0   ? 0.5 : 0;
-      addDim(`التنويع الفعلي (${effectiveUnits} وحدة — الهدف 18–25)`, ds, 3.0, compAnswered);
+      addDim(`التنويع الفعلي (${effectiveUnits} وحدة — الهدف 15–20)`, ds, 3.0, compAnswered);
 
       // 2. التنوع القطاعي (0–1.5)
       const secMap = { 'single-sector': 0, '2-4-sectors': 0.6, '5-7-sectors': 1.1, '8-plus-sectors': 1.5 };
@@ -448,11 +449,11 @@
       const horMap = { long: 1.0, medium: 0.65, short: 0.3 };
       addDim('أفق الاستثمار', horMap[hor] || 0, 1.0, hor !== '');
 
-      // 4. تركيز السهم الأكبر (0–1.25) — الدرجة الكاملة ≤ 7% (سقف الدستور)
-      const stockConc = lsp <= 7  ? 1.25
-                      : lsp <= 12 ? 0.85
-                      : lsp <= 20 ? 0.4 : 0;
-      addDim('تركيز السهم الأكبر (السقف 7%)', stockConc, 1.25, lspAnswered);
+      // 4. تركيز السهم الأكبر (0–1.25) — الدرجة الكاملة ≤ 15% (سقف الدستور)
+      const stockConc = lsp <= 15 ? 1.25
+                      : lsp <= 20 ? 0.85
+                      : lsp <= 30 ? 0.4 : 0;
+      addDim('تركيز السهم الأكبر (السقف 15%)', stockConc, 1.25, lspAnswered);
 
       // 5. تركيز القطاع الأكبر (0–1.25) — الدرجة الكاملة ≤ 25% (سقف الدستور)
       const sconc = lsecp <= 25 ? 1.25
@@ -483,7 +484,7 @@
         if      (lsp > 40) { const p=2.5;  score=Math.max(0,score-p); breakdown.push({ label:'⛔ خصم: سهم واحد > 40%', value:-p, isPenalty:true }); }
         else if (lsp > 30) { const p=1.2;  score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 30–40%',  value:-p, isPenalty:true }); }
         else if (lsp > 20) { const p=0.6;  score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم واحد 20–30%',  value:-p, isPenalty:true }); }
-        else if (lsp > 12) { const p=0.35; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم فوق سقف القيادي (12%)', value:-p, isPenalty:true }); }
+        else if (lsp > 15) { const p=0.35; score=Math.max(0,score-p); breakdown.push({ label:'خصم: سهم فوق السقف الدستوري (15%)', value:-p, isPenalty:true }); }
       }
 
       if (lsecpAnswered) {
@@ -527,8 +528,8 @@
       if (lev === 'yes')           fb.push('• ⛔ <strong>خطر حاد:</strong> الرافعة تُضاعف الخسائر — قلّصها أو أزلها');
       if (lsecp > 50)              fb.push('• ⛔ تركيز قطاعي خطير — سقف الدستور 25% للقطاع الواحد');
       else if (lsecp > 30)         fb.push('• ⚠️ القطاع الأكبر فوق 30% — خفّفه نحو سقف الدستور 25%');
-      if (lsp > 30)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — أعده نحو سقف الدستور 7% (12% للقيادي)');
-      else if (lsp > 12)           fb.push('• ⚠️ السهم الأكبر فوق سقف القيادي 12% — مرشّح للتخفيف حسب الدستور');
+      if (lsp > 30)                fb.push('• ⚠️ سهم واحد يُهيمن على المحفظة — أعده نحو سقف الدستور 15%');
+      else if (lsp > 15)           fb.push('• ⚠️ السهم الأكبر فوق السقف الدستوري 15% — مرشّح للتخفيف حسب الدستور');
       if (cash === 'no')           fb.push('• احتفظ بـ 5-10% كاش — يوفر هامش الأمان وفرص الشراء');
       if (sec === 'single-sector') fb.push('• ⚠️ قطاع واحد = مخاطرة مركّزة — حاول التوسع لقطاعين على الأقل');
       if (hor === 'short')         fb.push('• أفق قصير: ارفع نسبة الكاش، قلّل الأسهم عالية التذبذب');

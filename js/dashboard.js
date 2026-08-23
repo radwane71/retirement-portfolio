@@ -1180,20 +1180,20 @@ function renderStats() {
     if (s.largestHolding && s.largestPosPct > 0) {
       concEl.textContent = s.largestPosPct.toFixed(1) + '%';
       // AUDIT-FIX (2026-08-21): كانت العتبات عامة (خطر ≥25%، مرتفع ≥15%) فتصف
-      // بـ«تركيز صحي» وزناً يسمّيه دستورك كسراً للسقف. الدستور §1: سقف السهم 7%
-      // (12% للقيادي) + منطقة سماح 0.75%. النظام القائم على قواعد يفقد قيمته إن
-      // خالفت واجهته قاعدته. العتبات الآن دستورية: فوق 12.75% كسر مؤكّد لأي سهم،
-      // وفوق 7.75% كسر لغير القيادي.
-      const _capHard = 12 + 0.75, _capSingle = 7 + 0.75;
+      // بـ«تركيز صحي» وزناً يسمّيه دستورك كسراً للسقف. النظام القائم على قواعد
+      // يفقد قيمته إن خالفت واجهته قاعدته، فالعتبات دستورية.
+      // 2026-08-23: السقف صار 15% لكل سهم وتمييز القيادي أُلغي — فدرجتان بدل
+      // ثلاث: اقتراب من السقف، ثم كسر فوق السقف + منطقة السماح.
+      const _capHard = 15 + 0.75, _capNear = 13;
       concEl.className = 'value num ' + (s.largestPosPct > _capHard ? 'text-danger'
-        : s.largestPosPct > _capSingle ? 'text-accent' : 'text-success');
+        : s.largestPosPct > _capNear ? 'text-accent' : 'text-success');
       const nm = s.largestHolding.name ? `${s.largestHolding.ticker} — ${s.largestHolding.name}` : s.largestHolding.ticker;
       setText('stat-concentration-name', 'أكبر مركز: ' + nm);
       setText('stat-concentration-sub', `أكبر 5 مراكز: ${s.top5Pct.toFixed(1)}% من قيمة الأسهم`);
       setHtml('stat-concentration-tag', s.largestPosPct > _capHard
-        ? tagHtml('🔴', `فوق السقف الدستوري 12%`, 'bad')
-        : s.largestPosPct > _capSingle
-          ? tagHtml('⚠️', 'فوق سقف السهم 7% — قيادي فقط يُسمح له بـ12%', 'warn')
+        ? tagHtml('🔴', 'فوق السقف الدستوري 15%', 'bad')
+        : s.largestPosPct > _capNear
+          ? tagHtml('⚠️', 'يقترب من السقف 15%', 'warn')
           : tagHtml('✅', 'ضمن السقف الدستوري', 'good'));
     } else {
       concEl.textContent = '—';
@@ -1492,25 +1492,27 @@ function renderPortfolioHealthCard() {
 
   // T1: عدد الأسهم
   if (stockCount < 5)
-    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. حجم المحفظة المستهدف في دستورك: 18–25 سهماً` });
-  else if (stockCount < 18)
-    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — دون الحد الأدنى في دستورك (18–25 سهماً). استمر بالإضافة بأوزان متوازنة` });
-  else if (stockCount > 25)
+    tips.push({ lvl:'red',    txt: `${stockCount} أسهم فقط — الخسارة في سهم واحد تؤثر بشكل كبير. حجم المحفظة المستهدف في دستورك: 15–20 سهماً` });
+  else if (stockCount < 15)
+    tips.push({ lvl:'yellow', txt: `${stockCount} أسهم — دون الحد الأدنى في دستورك (15–20 سهماً). استمر بالإضافة بأوزان متوازنة` });
+  else if (stockCount > 20)
     tips.push({ lvl:'yellow', txt: `${stockCount} سهماً — راجع كل سهم: هل تعرفه وتتابعه؟ الأسهم التي لا تعرفها جيداً تزيد المخاطر لا تقللها` });
 
   // T2: عدد القطاعات
   if (sectorCount === 1)
     tips.push({ lvl:'red',    txt: `قطاع واحد فقط (${_largSecE}) — أزمة في هذا القطاع ستضرب 100% من محفظتك. أضف قطاعات مختلفة` });
-  else if (sectorCount === 2)
-    tips.push({ lvl:'red',    txt: `قطاعان فقط — غير كافٍ للحماية من الصدمات القطاعية. الهدف: 4–5 قطاعات` });
-  else if (sectorCount === 3)
-    tips.push({ lvl:'yellow', txt: `3 قطاعات — إضافة قطاع رابع يزيد الحماية بشكل ملحوظ ضد أزمات القطاع الواحد` });
+  else if (sectorCount <= 3)
+    tips.push({ lvl:'red',    txt: `${sectorCount} قطاعات — غير كافٍ للحماية من الصدمات القطاعية. هدف دستورك: 8 قطاعات فأكثر` });
+  else if (sectorCount < 8)
+    tips.push({ lvl:'yellow', txt: `${sectorCount} قطاعات — دون هدف دستورك (8 فأكثر). ${8 - sectorCount} قطاع${8 - sectorCount === 1 ? '' : 'ات'} إضافي يرفع الحماية ضد أزمة القطاع الواحد` });
 
   // T3: تركيز أكبر سهم
-  if (top1Pct > 30)
-    tips.push({ lvl:'red',    txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — تراجع حاد في هذا السهم وحده يُضعف المحفظة بشكل كبير. الهدف: لا سهم > 20%` });
-  else if (top1Pct > 20)
-    tips.push({ lvl:'yellow', txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — تركيز مرتفع. خفّضه تدريجياً لأقل من 20% عند أي فرصة إعادة توازن` });
+  // 2026-08-23: العتبات كانت 30%/20% وهي أعلى من السقف الدستوري نفسه —
+  // فكان السهم عند 18% «سليماً» هنا و«كاسراً للسقف» في البطاقة المجاورة.
+  if (top1Pct > 15 + 0.75)
+    tips.push({ lvl:'red',    txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — فوق السقف الدستوري 15%. خفّضه لإرجاع الوزن إلى السقف` });
+  else if (top1Pct > 13)
+    tips.push({ lvl:'yellow', txt: `${_top1NameE} يشكل ${top1Pct.toFixed(1)}% — يقترب من السقف الدستوري 15%. راقبه عند أي إضافة` });
 
   // T4: تركيز قطاعي
   // AUDIT-FIX (2026-08-21): كانت العتبات 50%/38% وتنصح بـ«دون 35%» بينما الدستور
@@ -1963,9 +1965,9 @@ function showDiversificationAnalysis() {
   // ── معايير "تنوع ممتاز" ──────────────────────────────────────
   // HHI < 5% → N_eff > 20، وعامل القطاعات يجب أن يكون عالياً
   const TARGET_HHI     = 0.067;  // N_eff ≥ 15 — Evans & Archer (1968): 15 سهم تُزيل 90% من المخاطر القابلة للتنويع
-  const TARGET_TOP1    = 12;     // % - أكبر مركز (سقف القيادي الدستوري §1؛ وغير القيادي 7%)
+  const TARGET_TOP1    = 15;     // % - أكبر مركز (السقف الدستوري §1 — واحد للجميع منذ 2026-08-23)
   const TARGET_TOP3    = 45;     // % - أكبر 3
-  const TARGET_SECTORS = 4;      // قطاعات كحد أدنى
+  const TARGET_SECTORS = 8;      // قطاعات كحد أدنى (§1 — رُفع من 4 بقرار المالك 2026-08-23)
   const TARGET_TOPSEC  = 25;     // % - أكبر قطاع (السقف الدستوري §1)
   const TARGET_SECFACT = 0.85;   // معامل القطاعات المطلوب
 

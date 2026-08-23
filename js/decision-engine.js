@@ -161,7 +161,8 @@ function assetTypeOf(h) {
   return cfg.assetType || classifyAsset(h.sector);
 }
 
-// هل السهم قيادي؟ (سقف 12% بدل 7%) — علم يدوي، وأرامكو افتراضياً قيادية
+// هل السهم قيادي؟ 2026-08-23: لم يعد يرفع سقفاً (السقف 15% للجميع)،
+// ويبقى العلم لأن trigger المالك على أرامكو يشير إليه. علم يدوي، وأرامكو افتراضياً قيادية
 function isBlueChip(h) {
   const cfg = engineCfg[h.ticker] || {};
   if (cfg.blueChip === true)  return true;
@@ -421,7 +422,7 @@ function evaluateHolding(h, ctx) {
   const tgt    = stockTargets[h.ticker] || {};
   // فصل صارم بين مفهومين (إصلاح: لا نُلفّق هدفاً من السقف):
   //   • الهدف المسجّل: نسبة السهم من صفحة «أهداف الأسهم» — قد لا تكون موجودة.
-  //   • السقف الدستوري: 7% عادي / 12% قيادي (الدستور §1) — حدّ صلب دائماً.
+  //   • السقف الدستوري: 15% لكل سهم (الدستور §1، مُحدَّث 2026-08-23) — حدّ صلب دائماً.
   // إذا لم يُسجَّل هدف (أو 0%) → لا نعرض هدفاً مفبركاً؛ نعرض «بلا هدف» ونراقب
   // السقف فقط. الانحراف يُحسب عن الهدف المسجّل حصراً.
   // هدف صفر مقصود = هدف صريح (وقيمته 0)، لا «بلا هدف». التمييز من قائمة
@@ -1103,10 +1104,26 @@ function _planPnL(r, sharesSold, full) {
 }
 
 function _planEffectiveTarget(r) {
-  // الهدف الفعّال = الأدنى بين هدفك المسجّل والسقف الدستوري. لا نرفع هدفك،
-  // ولا نسمح لهدف فوق السقف أن يقود أمر شراء يكسر §1.
+  // ══════════════════════════════════════════════════════════════════
+  // الهدف الفعّال = هدفك المسجّل كما حدّدتَه — نقض المالك 2026-08-23.
+  // ------------------------------------------------------------------
+  // كان: min(هدفك، السقف الدستوري). المالك: «لما أكون معرّف حاجة فوق
+  // الهدف الدستوري يتجاوزها — أهم شيء يطابق التعرفة اللي أنا حاطها».
+  //
+  // ولزوم الاتّساق: محرّك إعادة التوازن (js/targets.js) تخلّى عن القصّ في
+  // القرار نفسه. لو بقي هذا الموضع يقصّ، لأعطى محرّكان في التطبيق الواحد
+  // رقمين مختلفين لنفس السهم في اليوم نفسه — وهو أسوأ من أيّهما وحده.
+  //
+  // السقف يبقى نافذاً حيث يقيس **الواقع** لا النيّة: رصد كسر الوزن الفعلي
+  // في الفلتر 4 يظلّ على السقف الدستوري ويأمر بالتخفيف. ⚠️ لا تُعِد min().
+  // ══════════════════════════════════════════════════════════════════
   if (!r.hasTarget) return null;
-  return Math.min(r.targetWeight, r.cap);
+  return r.targetWeight;
+}
+
+// هل هدفك المسجّل فوق السقف الدستوري؟ — للإعلان لا للقصّ (§8)
+function _planTargetOverCap(r) {
+  return !!(r.hasTarget && r.cap != null && r.targetWeight > r.cap + 1e-9);
 }
 
 function _planFairVerdict(r) {
@@ -1136,7 +1153,12 @@ function buildTargetPlan(valAware) {
     const mk = (extra) => {
       const row = {
         ticker: r.ticker, name: r.name, price, weight: r.weight, value: r.value,
-        target: _planEffectiveTarget(r), taskType: r.taskType, sector: r.sector, ...extra,
+        // ⚠️ لا تُسمِّ هذا `overCap`: الاسم مأخوذ في هذا الملف لمعنى آخر —
+        // `r.overCap` = الوزن **الفعلي** كسر السقف (سطر 452). خلطهما يجعل
+        // «هدفك فوق السقف» و«وزنك كسر السقف» شيئاً واحداً، وهما نقيضان:
+        // الأول نيّة معلَنة، والثاني واقع يستوجب تخفيفاً.
+        target: _planEffectiveTarget(r), cap: r.cap,
+        taskType: r.taskType, sector: r.sector, ...extra,
       };
       // أثر التنفيذ على جيبك — يُرفَق بكل أمر بيع (خروج أو تخفيف)، لا بأوامر الشراء
       if (row.shares > 0 && (row.sar > 0)) {
@@ -1179,7 +1201,7 @@ function buildTargetPlan(valAware) {
       }
       if (r.action === 'trim') {
         // التخفيف إلى وزن المشغّل نفسه لا إلى هدفك — المشغّل يتقدّم (§4 الفلتر 5)
-        // بلا وزن مُحدَّد في المشغّل نهبط للهدف الفعّال، وإلا فالسقف الدستوري.
+        // بلا وزن مُحدَّد في المشغّل نهبط لهدفك، وإلا فالسقف الدستوري.
         const toW  = (r.cutToWeight != null) ? +r.cutToWeight
                    : (_planEffectiveTarget(r) != null ? _planEffectiveTarget(r) : r.cap);
         const gapW = r.weight - toW;
@@ -1214,7 +1236,10 @@ function buildTargetPlan(valAware) {
     const shares = price > 0 ? Math.floor(rawSar / price) : 0;
     const sar    = price > 0 ? shares * price : rawSar;
     const fair   = _planFairVerdict(r);
-    const capped = tgt < r.targetWeight - 1e-9;    // هدفك قُصَّ عند السقف الدستوري
+    // 2026-08-23: الهدف لم يعد يُقصّ. العَلَم نفسه بقي — لكن دلالته انقلبت من
+    // «قُصَّ عند السقف» إلى «فوق السقف ويُنفَّذ كما حدّدتَه»، وهو المسار الذي
+    // يطبع الإعلان في البطاقة أدناه. الإعلان بديل القصّ لا مرافقه (§8).
+    const capped = _planTargetOverCap(r);
 
     // ② فوق الهدف ⇒ تخفيف
     if (gapPct < 0 && sar >= PLAN_MIN_SAR) {
@@ -1343,7 +1368,7 @@ function renderTargetPlan() {
         <div class="small text-muted" style="margin-top:3px;line-height:1.6">${o.why || ''}${
           o.fairNote ? `<br>${o.fairNote}` : ''}${
           o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
-          o.capped ? '<br>ℹ️ هدفك المسجّل أعلى من السقف الدستوري — الخطة تستعمل السقف.' : ''}</div>
+          o.capped ? `<br><span style="color:var(--st-warn)">⚠️ هدفك ${formatNum(o.target)}% فوق السقف الدستوري ${formatNum(o.cap)}% — الخطة تنفّذ هدفك كما حدّدتَه.</span>` : ''}</div>
       </div></div>`;
   };
 
@@ -1510,7 +1535,7 @@ function toggleAllCards() {
 // ── بطاقة سهم واحدة (مشتركة بين المجموعات الرئيسية وقائمة «كل الأسهم») ──
 function cardHtml(r) {
   const noteTag = r.specialNote ? ` <span title="${escapeHtmlSafe(r.specialNote)}" style="cursor:help">📌</span>` : '';
-  const star    = r.blueChip ? ' <span title="سهم قيادي — سقف 12%">⭐</span>' : '';
+  const star    = r.blueChip ? ' <span title="سهم قيادي (علم trigger — لا يرفع السقف)">⭐</span>' : '';
   // AUDIT-FIX (2026-08): تقييم بلا طابع زمني قابل للتحليل → «عمر التقييم غير معروف» (§8)
   const ageUnknown = r.fairValue != null && r.valAgeDays == null
     ? ' <span style="color:#f59e0b;cursor:help" title="عمر التقييم غير معروف — لا طابع زمني صالح في السجل">❔</span>' : '';
@@ -1945,7 +1970,7 @@ function manualCfgHtml(ticker) {
     fundamentals: ['الأساسيات',     { healthy: '✅ سليمة', soft: '🟡 ضعف ربع واحد', deteriorating: '🔴 تدهور مستمر' }],
     divSignal:    ['إشارة التوزيع', { stable: '✅ مستقر', temp: '🟡 تأجيل/تخفيف مؤقت', cut: '🔴 قطع مؤكّد' }],
     assetType:    ['نوع الأصل',     ASSET_LABEL],
-    blueChip:     ['سهم قيادي',     { true: 'نعم (سقف 12%)', false: 'لا (سقف 7%)' }],
+    blueChip:     ['سهم قيادي',     { true: 'نعم (علم trigger)', false: 'لا' }],
   };
   const rows = Object.keys(LBL).filter(k => cfg[k] != null && cfg[k] !== '').map(k => {
     const [label, map] = LBL[k];
