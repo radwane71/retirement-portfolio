@@ -353,6 +353,10 @@ function computeXIRR(flows) {
 }
 
 // ── UI helpers ────────────────────────────────────────────────
+// مدّة بقاء الإشعار — بطلب المالك 2026-08-24: «يظهر وبعد 15 ثانية يختفي».
+// ⚠️ مرتبط بـ`animation: toast-shrink 15s` في css/style.css — يُغيَّران معاً.
+const TOAST_MS = 15000;
+
 function showToast(msg, type = 'info') {
   // أنشئ الحاوية إن لم تكن موجودة
   let stack = document.getElementById('toast-stack');
@@ -381,24 +385,20 @@ function showToast(msg, type = 'info') {
     item._timer = setTimeout(() => dismissToast(item), delay);
   }
 
-  // ── ديسكتوب: pause عند hover، resume عند leave فقط لو غير مفتوح يدوياً ──
+  // ── المرور بالفأرة يوقف العدّاد، والمغادرة تستأنفه من جديد ──
+  // (الاستئناف بالمدّة الكاملة مقصود: من عاد بعينه إلى الإشعار يريد قراءته.)
   item.addEventListener('mouseenter', () => { clearTimeout(item._timer); });
   item.addEventListener('mouseleave', () => {
-    if (!item.classList.contains('expanded')) startTimer(5000);
+    if (!item.classList.contains('expanded')) startTimer(TOAST_MS);
   });
 
-  // ── موبايل / نقر: toggle expanded ──
+  // ── النقر يُثبّت الإشعار (يوقف العدّاد) ونقرة ثانية تستأنفه ──
+  // المهمّ على الجوّال حيث لا وجود لمرور الفأرة: رسالةٌ طويلة تحتاج وقتاً
+  // أطول من 15 ثانية تُثبَّت بلمسة بدل أن تختفي وسط القراءة.
   item.addEventListener('click', (e) => {
-    if (!e.target.classList.contains('toast-close')) {
-      const isExpanded = item.classList.toggle('expanded');
-      if (isExpanded) {
-        // مفتوح يدوياً → أوقف العداد
-        clearTimeout(item._timer);
-      } else {
-        // أُغلق يدوياً → ابدأ عداد قصير
-        startTimer(5000);
-      }
-    }
+    if (e.target.classList.contains('toast-close')) return;
+    if (item.classList.toggle('expanded')) clearTimeout(item._timer);
+    else startTimer(TOAST_MS);
   });
 
   // زر الإغلاق
@@ -409,13 +409,18 @@ function showToast(msg, type = 'info') {
 
   stack.appendChild(item);
 
-  // ظهور
-  requestAnimationFrame(() => {
-    requestAnimationFrame(() => item.classList.add('visible'));
-  });
+  // ── الظهور: rAF للحركة السلسة، و setTimeout حارساً ──
+  // rAF لا تُنفَّذ في مستند مخفيّ (تبويب في الخلفية)، فكان الإشعار يبقى
+  // شفافاً ثم يُحذف بعد 15 ثانية بلا أن يراه أحد. setTimeout تُنفَّذ في
+  // المخفيّ (مُقيَّدة لا مُعطَّلة)، فتضمن الظهور ولو بلا حركة.
+  const show = () => item.classList.add('visible');
+  requestAnimationFrame(() => requestAnimationFrame(show));
+  setTimeout(show, 60);
 
-  // اختفاء تلقائي بعد 20 ثانية (إذا لم يُفتح)
-  startTimer(20000);
+  // اختفاء تلقائي بعد TOAST_MS — نفس المدّة التي يعدّها شريط CSS بالضبط.
+  // ⚠️ الرقمان مرتبطان: تغييرُ أحدهما بلا الآخر يجعل الشريط يفرغ والإشعار
+  // باقياً، أو الإشعار يختفي والشريط في منتصفه.
+  startTimer(TOAST_MS);
 }
 
 function dismissToast(item) {
