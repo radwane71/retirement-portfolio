@@ -2062,3 +2062,31 @@ body.prose-off [data-prose="1"] { display: none !important; }
 .zs-now[data-zone="exit"]{background:var(--st-bad-dim);border-color:var(--st-bad);border-inline-start-color:var(--st-bad)}
 .zs-now[data-zone="exit"] .zs-lbl,.zs-now[data-zone="exit"] .zs-val{color:var(--st-bad)}
 
+
+/* ── طيّ شريط التنقّل (js/navtoggle.js) — سطح المكتب فقط ──
+   الشريط ينزلق خارج الشاشة يميناً والمحتوى يتمدّد مكانه. الزرّ يلازم حافة
+   الشريط الداخلية فيبقى في متناول اليد في الحالتين. */
+#nav-toggle{
+  position:fixed; top:14px; right:calc(var(--sidebar) + 10px); z-index:150;
+  width:26px; height:34px; padding:0; cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  background:var(--bg-2); color:var(--text-2);
+  border:1px solid var(--border); border-radius:8px;
+  font-size:.8rem; line-height:1;
+  transition:right .26s cubic-bezier(.25,.46,.45,.94), color .15s, background .15s;
+}
+#nav-toggle:hover{color:var(--text); background:var(--bg-3, var(--bg-1))}
+.sidebar{transition:transform .26s cubic-bezier(.25,.46,.45,.94)}
+.main{transition:margin-right .26s cubic-bezier(.25,.46,.45,.94)}
+body.nav-collapsed .sidebar{transform:translateX(100%)}
+body.nav-collapsed .main{margin-right:0}
+body.nav-collapsed #nav-toggle{right:10px}
+/* الجوّال: الدرج الجانبي وزر الهمبرغر يتكفّلان — لا طيّ ثانٍ فوقهما */
+@media (max-width: 768px){
+  #nav-toggle{display:none !important}
+  body.nav-collapsed .sidebar{transform:none}
+  body.nav-collapsed .main{margin-right:0}
+}
+@media (prefers-reduced-motion: reduce){
+  .sidebar,.main,#nav-toggle{transition:none}
+}
