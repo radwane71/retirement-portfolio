@@ -595,7 +595,7 @@
           <button class="btn btn-secondary btn-sm" onclick="downloadHistCSV('all')">⬇️ تنزيل الكل CSV</button>
           <button class="btn btn-secondary btn-sm" onclick="verifyHistorySaved()" title="يقرأ السجل من الخادم مباشرةً ويقارنه بما تراه">🛡️ تحقّق من الحفظ</button>
           <button class="btn btn-secondary btn-sm" onclick="exportHistoryMD()">⬇️ تصدير Markdown</button>
-          <button class="btn btn-secondary btn-sm" onclick="previewValCorrections()" title="يطابق السجل بملف التصحيحات المعتمد ويعرض الفروق قبل الكتابة">🔧 تطبيق التصحيحات</button>
+          <button class="btn btn-secondary btn-sm" onclick="previewValCorrections()" title="يطابق السجل بملفات المالك: يصحّح القائم ويضيف السجل التاريخي، ويعرض كل شيء قبل الكتابة">📥 استيراد وتصحيح السجل</button>
           <button class="btn btn-secondary btn-sm" onclick="recomputeAllHistory()" title="يعيد حساب نتائج كل العمليات المحفوظة بالمعادلة المحدّثة من مدخلاتها الأصلية">🔄 إعادة حساب السجل</button>
           <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
         </div>
@@ -707,7 +707,7 @@
   <script src="js/tadawul-data.js?v=20260824y"></script>
   <script src="js/declutter.js?v=20260824y"></script>
   <script src="js/navtoggle.js?v=20260824y"></script>
-  <script src="js/valuation-corrections.js?v=20260824y"></script>
+  <script src="js/valuation-import.js?v=20260824z"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -1104,6 +1104,16 @@
     // الدستور §4: «فشل → الإجراء = خروج، بغض النظر عن السعر». عرض «هامش أمان»
     // بجوار فشل الاستدامة يدعو للشراء عند النزول — وهو ما يحرّمه §8 نصّاً.
     // القاعدة هنا صارمة ومحصورة في الكسور القاطعة فقط — لا اجتهاد ولا استنتاج.
+    // م.21: البيان الغائب لا يُحاكَم. num() تُصفّر الغائب، والصفر في البوابة
+    // يعني «الشركة خاسرة» أو «لا تدفق يغطّي التوزيع» — فتنقلب ثغرةُ بيانات
+    // عند المحرّك إشارةَ خروج على السهم. هذه تُرجع null للغائب فيُتخطّى.
+    function gateNum(v) {
+      const s = (v == null) ? '' : String(v).trim();
+      if (s === '') return null;
+      const n = parseFloat(s);
+      return isFinite(n) ? n : null;
+    }
+
     function sustainabilityGate(type, g) {
       const reasons = [], watch = [];
       const n = v => { const x = parseFloat(v); return isFinite(x) ? x : null; };
@@ -1428,7 +1438,7 @@
           _lastFairAvg      = comp.headline != null ? comp.headline : comp.avg;
           fair_value_range  = comp.rangeText;
           fair_value_detail = comp.detailText;
-          _lastSustain = sustainabilityGate('reit', { ffo, dividends: dividendsR });
+          _lastSustain = sustainabilityGate('reit', { ffo: gateNum(document.getElementById('ffo').value), dividends: gateNum(document.getElementById('dividends').value) });
         } else if (companyType === 'bank') {
           // ── وضع البنك: فرع مستقل — لا يمر على فرع الشركة العادية ولا يقرأ حقولها المخفية ──
           const bvps         = parseFloat(document.getElementById('bvps').value)         || 0;
@@ -1477,7 +1487,7 @@
           evTitle = '🏢 قيمة المنشأة (Enterprise Value)';
           evNote  = '⚠️ لا تنطبق على البنوك — لا يُفصل الدين عن التشغيل في الميزانية المصرفية.';
 
-          _lastSustain = sustainabilityGate('bank', { bankPayout, cet1: cet1Val, provCoverage: provCov });
+          _lastSustain = sustainabilityGate('bank', { bankPayout: gateNum(document.getElementById('bankPayout').value), cet1: gateNum(document.getElementById('cet1').value), provCoverage: gateNum(document.getElementById('provCoverage').value) });
 
           // فلاتر الأمان — عنصر مستقل عن تنبيه القيم الشاذة (كانا يتنازعان عنصراً واحداً)
           const safetyFlags = [];
@@ -1685,7 +1695,7 @@
             : '⚠️ رقم <strong>للسهم الواحد</strong> (ر.س/سهم) قبل خصم الدين الصافي — ليس قيمة الشركة الإجمالية.';
           createSensitivityTable(fcf, growth_5yr_adj, growth_perp_final, dcfRate, net_debt, fcfBasis);
           _lastSustain = sustainabilityGate(companyType,
-            { eps: epsSpot, fcf: fcfSpot, dividends, normEps: nEpsRaw === '' ? null : nEps, normFcf: nFcfRaw === '' ? null : nFcf });
+            { eps: gateNum(document.getElementById('eps').value), fcf: gateNum(document.getElementById('fcf').value), dividends: gateNum(document.getElementById('dividends').value), normEps: nEpsRaw === '' ? null : nEps, normFcf: nFcfRaw === '' ? null : nFcf });
         }
 
         // ── فحص التشتّت في كل الأنواع (كان محصوراً في الشركة العادية) ──
@@ -2386,7 +2396,7 @@
         const extras = [`عائد FFO الحالي = ${ffo_yield.toFixed(2)}%`];
         if (noiRaw == null) extras.push('Cap Rate: غير متوفر — لم يُدخَل NOI (لا يُقدَّر من FFO §8)');
         if (tdMissing) extras.push('⚠️ إجمالي الديون غير مُسجَّل في هذه العملية — حُسب صفراً، والقيمة قد تكون مضخّمة');
-        const gate = sustainabilityGate('reit', { ffo, dividends: num(inp.dividends) });
+        const gate = sustainabilityGate('reit', { ffo: gateNum(inp.ffo), dividends: gateNum(inp.dividends) });
         // حارس مفقود كان في الفرعين الآخرين فقط: بلا نموذج صالح لا نكتب «0.00 ر.س» في السجل
         return mk(values, ['NAV للوحدة', 'مضاعف P/FFO', 'DDM'], extras, gate);
       }
@@ -2406,7 +2416,7 @@
         const extras = [];
         if (ke != null) extras.push(`DDM مخصوم بـ Ke = ${(ke*100).toFixed(2)}%`);
         else if (dpsBank > 0) extras.push('⚠️ DDM غير محتسب: تكلفة حقوق الملكية Ke غير متوفرة في هذه العملية (لا بيتا ولا Ke يدوي) — أُعلن ولم يُقدَّر (§8)');
-        const gate = sustainabilityGate('bank', { bankPayout: inp.bankPayout, cet1: inp.cet1, provCoverage: inp.provCoverage });
+        const gate = sustainabilityGate('bank', { bankPayout: gateNum(inp.bankPayout), cet1: gateNum(inp.cet1), provCoverage: gateNum(inp.provCoverage) });
         return mk(values, Object.keys(values), extras, gate);
       }
 
@@ -2445,7 +2455,7 @@
       }
       if (ndMissing) extras.push('⚠️ الدين الصافي غير مُسجَّل في هذه العملية — حُسب صفراً، والقيمة قد تكون مضخّمة');
       const gate = sustainabilityGate(cyc ? 'cyclical' : 'normal',
-        { eps: epsSpot, fcf: fcfSpot, dividends, normEps: nEpsRaw, normFcf: nFcfRaw });
+        { eps: gateNum(inp.eps), fcf: gateNum(inp.fcf), dividends: gateNum(inp.dividends), normEps: nEpsRaw, normFcf: nFcfRaw });
       // القيمة الدفترية أرضية تصفوية — خارج المتوسط (تبقى في جدول النماذج للعرض)
       const out = mk(values, ['DCF', 'جراهام', 'مكرر الربحية P/E', 'جوردون'], extras, gate);
       if (out && values['القيمة الدفترية'] > 0) out.bookFloor = values['القيمة الدفترية'];
@@ -2472,13 +2482,15 @@
 
 
     // ═══════════════════════════════════════════════════════════════════
-    // تطبيق ملف التصحيحات المعتمد — 2026-08-24  (م.15 · م.19 · م.24)
+    // استيراد سجل التقييمات — تصحيحٌ للقائم وإضافةٌ للتاريخي (م.15 · م.19 · م.24)
     // ═══════════════════════════════════════════════════════════════════
-    // الملف مصدره أرقام تداول الرسمية، فيعلو على ما في السجل (م.15).
-    // المطابقة بالمعرّف أولاً، ثم بالرمز+التاريخ إن تغيّر المعرّف.
-    // **التاريخ لا يُمسّ** — العملية تحتفظ بختمها الأصلي بطلب المالك.
-    // النتائج تُعاد حسابها من المدخلات بمعادلة المنصة نفسها لا تُنسخ من
-    // الملف، وأي فرق بين الاثنين يُعرَض ولا يُبتلع (م.24).
+    // js/valuation-import.js مولَّد من ملفات المالك في data/valuation-sources.
+    // المطابقة بالمعرّف: الموجود يُعدَّل، والغائب يُضاف — فيصير للسهم الواحد
+    // سلسلةُ تقييماتٍ سنوية لا لقطتان. والتاريخ يُنقل كما هو، لا يُعاد ختمه.
+    //
+    // النتائج تُعاد حسابها من المدخلات بمعادلة المنصّة ولا تُنسخ من الملف:
+    // ملف التصحيحات صحّح المدخلات ولم يُعِد تشغيل النماذج، فنسخُ نتائجه كان
+    // سيُبقي الخطأ الذي جاء ليصلحه.
     const CORR_BACKUP_KEY = 'valuation_history_backup_2026-08-24';
 
     const CORR_LBL = {
@@ -2521,10 +2533,8 @@
     //    الملف يعلن عن نفسه «تصحيح أخطاء وأرقام فقط»، ومسح نثرك خارج نطاقه
     //  • ما عدا ذلك، الخليّة الفارغة تفريغٌ مقصود (م.20: يُعلَن ناقصاً لا يُقدَّر صفراً)
     function corrMergeInputs(oldInp, newInp) {
-      const cols = (typeof VAL_CORRECTIONS_FIELDS !== 'undefined')
-        ? new Set(VAL_CORRECTIONS_FIELDS) : null;
-      const keep = new Set((typeof VAL_CORRECTIONS_KEEP_IF_EMPTY !== 'undefined')
-        ? VAL_CORRECTIONS_KEEP_IF_EMPTY : []);
+      const cols = (typeof VAL_IMPORT_FIELDS !== 'undefined') ? new Set(VAL_IMPORT_FIELDS) : null;
+      const keep = new Set((typeof VAL_IMPORT_KEEP_IF_EMPTY !== 'undefined') ? VAL_IMPORT_KEEP_IF_EMPTY : []);
       const out = JSON.parse(JSON.stringify(newInp || {}));
       Object.keys(oldInp || {}).forEach(k => {
         if (out[k] !== undefined) return;
@@ -2547,11 +2557,12 @@
       return out;
     }
 
+    // ثلاثة دلاء: يُعدَّل · يُضاف · يبقى. لا رابع، ولا شيء يسقط صامتاً.
     function corrMatch() {
-      const list = (typeof VAL_CORRECTIONS !== 'undefined') ? VAL_CORRECTIONS : [];
+      const list = (typeof VAL_IMPORT !== 'undefined') ? VAL_IMPORT : [];
       const byId = new Map(_history.map(e => [String(e.id), e]));
       const used = new Set();
-      const matched = [], missing = [];
+      const matched = [], toAdd = [];
       list.forEach(c => {
         let e = byId.get(String(c.id));
         let how = 'المعرّف';
@@ -2563,40 +2574,55 @@
           how = 'الرمز + التاريخ';
         }
         if (e) { used.add(String(e.id)); matched.push({ entry: e, corr: c, how, diff: corrDiff(e.inputs, corrMergeInputs(e.inputs, c.inputs)) }); }
-        else missing.push(c);
+        else toAdd.push(c);
       });
       const untouched = _history.filter(h => !used.has(String(h.id)));
-      return { matched, missing, untouched };
+      return { matched, toAdd, untouched };
     }
 
-    async function corrApply(matched) {
+    async function corrApply(toEdit, toAdd) {
       // نسخة احتياطية قبل أي كتابة — العودة ممكنة بمفتاح واحد
       let backedUp = false;
       try { backedUp = !!await saveUserSetting(CORR_BACKUP_KEY, _history); } catch (_) {}
       const drift = [], failed = [];
-      let changed = 0;
-      matched.forEach(m => {
-        if (!m.diff.length) return;                       // مطابق أصلاً — لا نكتب
-        m.entry.inputs = corrMergeInputs(m.entry.inputs, m.corr.inputs);
-        const res = recomputeResults(m.entry.inputs);     // م.24: المعادلة واحدة
+      let edited = 0, added = 0;
+
+      const recompute = (entry, corr, isNew) => {
+        const res = recomputeResults(entry.inputs);        // م.24: المعادلة واحدة
         if (res) {
-          const fileFv = m.corr.results ? parseFloat(m.corr.results.fairValueAvg) : NaN;
-          m.entry.results = res;
+          const fileFv = corr.results ? parseFloat(corr.results.fairValueAvg) : NaN;
+          entry.results = res;
           if (isFinite(fileFv) && res.fairValueAvg != null
               && Math.abs(fileFv - res.fairValueAvg) > 0.01) {
-            drift.push({ tk: m.entry.inputs.ticker, date: m.entry.date, file: fileFv, calc: res.fairValueAvg });
+            drift.push({ tk: entry.inputs.ticker, date: entry.date, file: fileFv, calc: res.fairValueAvg });
           }
         } else {
           // تعذّرت إعادة الحساب — نُبقي نتيجة الملف ونعلنها لا نبتلعها
-          if (m.corr.results) m.entry.results = m.corr.results;
-          failed.push({ tk: m.entry.inputs.ticker, date: m.entry.date });
+          if (corr.results) entry.results = corr.results;
+          failed.push({ tk: entry.inputs.ticker, date: entry.date, نوع: isNew ? 'إضافة' : 'تعديل' });
         }
-        changed++;
+      };
+
+      (toEdit || []).forEach(m => {
+        if (!m.diff.length) return;                        // مطابق أصلاً — لا نكتب
+        m.entry.inputs = corrMergeInputs(m.entry.inputs, m.corr.inputs);
+        recompute(m.entry, m.corr, false);                 // التاريخ والمعرّف لا يُمسّان
+        edited++;
       });
+
+      (toAdd || []).forEach(c => {
+        const entry = { id: c.id, date: c.date, inputs: JSON.parse(JSON.stringify(c.inputs)), results: {} };
+        recompute(entry, c, true);
+        _history.push(entry);
+        added++;
+      });
+
+      // الترتيب بالمعرّف هو ترتيب السجل في كل شاشاته — والتاريخي معرّفه أقدم
+      _history.sort((a, b) => (a.id || 0) - (b.id || 0));
       const ok = await persistHistory();
       invalidateHistIndex(); _histBuilt.clear();
       renderHistory();
-      return { ok, changed, drift, failed, backedUp };
+      return { ok, edited, added, drift, failed, backedUp };
     }
 
     function corrCell(v) {
@@ -2606,67 +2632,94 @@
     }
 
     function previewValCorrections() {
-      if (typeof VAL_CORRECTIONS === 'undefined') {
-        showToast('ملف التصحيحات غير محمَّل', 'error'); return;
+      if (typeof VAL_IMPORT === 'undefined') {
+        showToast('ملف الاستيراد غير محمَّل', 'error'); return;
       }
-      if (!_history.length) { showToast('السجل فارغ — حمّل الصفحة أولاً', 'info'); return; }
-      const { matched, missing, untouched } = corrMatch();
+      const { matched, toAdd, untouched } = corrMatch();
       const toEdit = matched.filter(m => m.diff.length);
       const same   = matched.filter(m => !m.diff.length);
 
-      const grp = {};
-      toEdit.forEach(m => {
-        const t = (m.corr.inputs.ticker || '—') + ' — ' + (m.corr.inputs.stockName || '');
-        (grp[t] = grp[t] || []).push(m);
+      // ── ما سيُضاف: ملخَّص بالسهم لا صفّاً صفّاً، فالعدد بالمئات ──
+      const addBy = {};
+      toAdd.forEach(c => {
+        const k = (c.inputs.ticker || '—') + ' — ' + (c.inputs.stockName || '');
+        (addBy[k] = addBy[k] || []).push(c);
       });
+      let addBody = '';
+      if (toAdd.length) {
+        addBody += '<table style="width:100%;border-collapse:collapse;font-size:.82rem">'
+                + '<tr style="color:var(--text-muted)"><th style="text-align:right;padding:4px">السهم</th>'
+                + '<th style="text-align:right;padding:4px">عدد</th>'
+                + '<th style="text-align:right;padding:4px">التواريخ</th></tr>';
+        Object.keys(addBy).sort().forEach(k => {
+          const g = addBy[k];
+          addBody += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px">' + escHist(k) + '</td>'
+                   + '<td style="padding:4px"><strong>' + g.length + '</strong></td>'
+                   + '<td style="padding:4px" class="text-muted">'
+                   + escHist(g.map(c => String(c.date).replace(/،.*$/, '')).join(' · ')) + '</td></tr>';
+        });
+        addBody += '</table>';
+      }
 
-      let body = '';
-      Object.keys(grp).sort().forEach(t => {
-        body += '<div style="margin:14px 0 6px;font-weight:700;color:var(--text-1)">' + escHist(t) + '</div>';
-        grp[t].forEach(m => {
-          body += '<div class="small text-muted" style="margin:4px 0">' + escHist(m.entry.date || '')
-                + ' · <span dir="ltr">#' + m.entry.id + '</span> · مطابقة بـ' + escHist(m.how)
-                + ' · <strong>' + m.diff.length + '</strong> حقلاً</div>';
-          body += '<table style="width:100%;border-collapse:collapse;font-size:.82rem;margin-bottom:8px">';
-          body += '<tr style="color:var(--text-muted)"><th style="text-align:right;padding:3px">الحقل</th>'
-                + '<th style="text-align:right;padding:3px">كان</th><th style="text-align:right;padding:3px">صار</th></tr>';
+      // ── ما سيُعدَّل: حقلاً حقلاً، فالعدد محدود ويستحق التدقيق ──
+      const editBy = {};
+      toEdit.forEach(m => {
+        const k = (m.corr.inputs.ticker || '—') + ' — ' + (m.corr.inputs.stockName || '');
+        (editBy[k] = editBy[k] || []).push(m);
+      });
+      let editBody = '';
+      Object.keys(editBy).sort().forEach(t => {
+        editBody += '<div style="margin:14px 0 6px;font-weight:700;color:var(--text-1)">' + escHist(t) + '</div>';
+        editBy[t].forEach(m => {
+          editBody += '<div class="small text-muted" style="margin:4px 0">' + escHist(m.entry.date || '')
+                    + ' · <span dir="ltr">#' + m.entry.id + '</span> · مطابقة بـ' + escHist(m.how)
+                    + ' · <strong>' + m.diff.length + '</strong> حقلاً</div>';
+          editBody += '<table style="width:100%;border-collapse:collapse;font-size:.82rem;margin-bottom:8px">'
+                    + '<tr style="color:var(--text-muted)"><th style="text-align:right;padding:3px">الحقل</th>'
+                    + '<th style="text-align:right;padding:3px">كان</th><th style="text-align:right;padding:3px">صار</th></tr>';
           m.diff.forEach(d => {
-            body += '<tr style="border-top:1px solid var(--border)"><td style="padding:3px">' + escHist(corrLbl(d.k)) + '</td>'
-                  + '<td style="padding:3px;color:var(--danger,#f85149)">' + corrCell(d.from) + '</td>'
-                  + '<td style="padding:3px;color:var(--success,#3fb950)">' + corrCell(d.to) + '</td></tr>';
+            editBody += '<tr style="border-top:1px solid var(--border)"><td style="padding:3px">' + escHist(corrLbl(d.k)) + '</td>'
+                      + '<td style="padding:3px;color:var(--danger,#f85149)">' + corrCell(d.from) + '</td>'
+                      + '<td style="padding:3px;color:var(--success,#3fb950)">' + corrCell(d.to) + '</td></tr>';
           });
-          body += '</table>';
+          editBody += '</table>';
         });
       });
 
+      const secn = (title, html) => html
+        ? '<div style="margin-top:14px"><div style="font-weight:700;color:var(--text-1);margin-bottom:6px">'
+          + title + '</div>' + html + '</div>' : '';
+
       let notes = '';
+      ((typeof VAL_IMPORT_NOTES !== 'undefined') ? VAL_IMPORT_NOTES : []).forEach(n => {
+        notes += '<div style="margin-bottom:6px">⚠️ ' + escHist(n) + '</div>';
+      });
       if (same.length)      notes += '<div>✅ ' + same.length + ' عملية مطابقة أصلاً — لن تُكتب.</div>';
-      if (missing.length)   notes += '<div>⚠️ ' + missing.length + ' عملية في الملف بلا نظير في السجل: '
-        + escHist(missing.map(c => c.inputs.ticker + ' (' + c.date + ')').join(' · '))
-        + ' — <strong>لن تُضاف</strong>.</div>';
-      if (untouched.length) notes += '<div>ℹ️ ' + untouched.length + ' عملية في السجل خارج الملف — تبقى كما هي: '
+      if (untouched.length) notes += '<div>ℹ️ ' + untouched.length + ' عملية في سجلّك خارج الملف — تبقى كما هي: '
         + escHist(untouched.map(e => ((e.inputs || {}).ticker || '؟') + ' (' + (e.date || '') + ')').join(' · ')) + '</div>';
 
+      const total = toEdit.length + toAdd.length;
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
       overlay.innerHTML =
-        '<div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:760px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.5)">'
+        '<div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:820px;width:100%;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.5)">'
       + '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'
-      + '<div style="font-weight:700;color:var(--text-1)">🔧 تصحيحات ' + escHist(VAL_CORRECTIONS_AT) + ' — معاينة قبل الكتابة</div>'
-      + '<div class="small text-muted" style="margin-top:4px">' + toEdit.length
-      + ' عملية ستُعدَّل · التواريخ والمعرّفات لا تتغيّر · نسخة احتياطية تُحفَظ أولاً</div>'
+      + '<div style="font-weight:700;color:var(--text-1)">📥 استيراد سجل التقييمات ' + escHist(VAL_IMPORT_AT) + ' — معاينة قبل الكتابة</div>'
+      + '<div class="small text-muted" style="margin-top:4px"><strong>' + toEdit.length + '</strong> ستُعدَّل · <strong>'
+      + toAdd.length + '</strong> ستُضاف · السجل بعدها <strong>' + (_history.length + toAdd.length) + '</strong> عملية'
+      + ' · التواريخ والمعرّفات لا تتغيّر · نسخة احتياطية تُحفَظ أولاً</div>'
       + '<div class="small" style="margin-top:8px;line-height:1.7;color:var(--text-muted)">'
-      + 'الملف صحّح <strong>المدخلات</strong> ولم يُعِد تشغيل النماذج، فقيمه العادلة المحفوظة فيه '
-      + 'ما تزال محسوبة بالأرقام القديمة. لذلك تُعاد هنا حسابُ كل قيمة عادلة من المدخلات المصحَّحة '
-      + 'بمعادلة المنصّة — معادلةٌ واحدة لا اثنتان (م.24). فرقٌ عن رقم الملف متوقَّع، وهو التصحيح يعمل.'
+      + 'كل قيمة عادلة تُعاد حسابها من المدخلات بمعادلة المنصّة — معادلةٌ واحدة لا اثنتان (م.24). '
+      + 'فرقٌ عن الرقم المحفوظ في الملف متوقَّع، وهو التصحيح يعمل.'
       + '</div></div>'
       + '<div style="padding:12px 20px;overflow:auto;flex:1">'
-      + (body || '<div class="text-muted">لا فروق — السجل مطابق للملف.</div>')
-      + '<div class="small" style="margin-top:12px;line-height:1.9">' + notes + '</div></div>'
+      + (total ? (secn('➕ عمليات جديدة', addBody) + secn('✏️ عمليات تُعدَّل', editBody))
+               : '<div class="text-muted">لا جديد — السجل مطابق للملف بالكامل.</div>')
+      + '<div class="small" style="margin-top:14px;line-height:1.9">' + notes + '</div></div>'
       + '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px">'
       + '<button id="corr-cancel" class="btn btn-secondary">إلغاء</button>'
-      + '<button id="corr-ok" class="btn btn-primary"' + (toEdit.length ? '' : ' disabled') + '>تطبيق '
-      + toEdit.length + ' تعديلاً وحفظ</button></div></div>';
+      + '<button id="corr-ok" class="btn btn-primary"' + (total ? '' : ' disabled') + '>تطبيق '
+      + total + ' عملية وحفظ</button></div></div>';
       document.body.appendChild(overlay);
       const close = () => overlay.remove();
       overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
@@ -2674,14 +2727,13 @@
       overlay.querySelector('#corr-ok').onclick = async () => {
         const btn = overlay.querySelector('#corr-ok');
         btn.disabled = true; btn.textContent = 'جارٍ الحفظ…';
-        const r = await corrApply(toEdit);
+        const r = await corrApply(toEdit, toAdd);
         close();
-        if (!r.ok) { showToast('تعذّر الحفظ — التصحيحات في الذاكرة فقط، أعد المحاولة', 'error'); return; }
-        let msg = '✅ حُفظت ' + r.changed + ' عملية مصحَّحة';
-        if (r.backedUp)     msg += ' · نسخة احتياطية محفوظة';
-        if (r.drift.length) msg += ' · ⚠️ ' + r.drift.length + ' فرق بين قيمة الملف وإعادة الحساب';
+        if (!r.ok) { showToast('تعذّر الحفظ — التغييرات في الذاكرة فقط، أعد المحاولة', 'error'); return; }
+        let msg = '✅ حُفظ السجل — ' + r.added + ' مضافة · ' + r.edited + ' معدَّلة · الإجمالي ' + _history.length;
+        if (r.backedUp)      msg += ' · نسخة احتياطية محفوظة';
         if (r.failed.length) msg += ' · ' + r.failed.length + ' تعذّرت إعادة حسابها';
-        showToast(msg, (r.drift.length || r.failed.length) ? 'info' : 'success');
+        showToast(msg, r.failed.length ? 'info' : 'success');
         if (r.drift.length)  console.table(r.drift);
         if (r.failed.length) console.table(r.failed);
       };
