@@ -154,15 +154,23 @@ function filterYear() {
 // ملخص واحد يقوده رقم واحد: صافي التدفق. المجاميع على كل السنوات ولا
 // تتأثر بفلتر الجدول — مصرَّح به نصاً في رأس البطاقة.
 function renderSummary() {
-  const totalDep  = cfEntries.filter(e => e.type === 'deposit').reduce((s,e) => s + +e.amount, 0);
-  const totalWith = cfEntries.filter(e => e.type === 'withdrawal').reduce((s,e) => s + +e.amount, 0);
-  const totalDiv  = divEntries.reduce((s,e) => s + +e.amount, 0);
+  // ⚠️ `+e.amount` بلا حارس: قيمة غير رقمية (من استيراد أو استعادة
+  // نسخة) تُنتج NaN يسمّم المجموع كلّه — ثم `formatSAR` تحوّله إلى
+  // **0.00 ر.س**، فلا يظهر الخلل ويُعرَض صفراً. والبطاقة تناقض نفسها:
+  // البطل يعرض 0.00 والتصنيف حسب السنة يعرض 1,000. م.20: ما لا يُقرأ
+  // يُعلَن ولا يُبتلع.
+  const _num = v => { const n = +v; return isFinite(n) ? n : null; };
+  const _badAmt = [...cfEntries, ...divEntries].filter(e => _num(e.amount) === null).length;
+  const _sum = (arr) => arr.reduce((s, e) => s + (_num(e.amount) || 0), 0);
+  const totalDep  = _sum(cfEntries.filter(e => e.type === 'deposit'));
+  const totalWith = _sum(cfEntries.filter(e => e.type === 'withdrawal'));
+  const totalDiv  = _sum(divEntries);
   const net       = totalDep - totalWith;
 
   const curYear   = new Date().getFullYear();
-  const yearDep   = cfEntries.filter(e => e.type === 'deposit'    && _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
-  const yearWith  = cfEntries.filter(e => e.type === 'withdrawal' && _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
-  const yearDiv   = divEntries.filter(e => _cfYear(e.date) === curYear).reduce((s,e) => s + +e.amount, 0);
+  const yearDep   = _sum(cfEntries.filter(e => e.type === 'deposit'    && _cfYear(e.date) === curYear));
+  const yearWith  = _sum(cfEntries.filter(e => e.type === 'withdrawal' && _cfYear(e.date) === curYear));
+  const yearDiv   = _sum(divEntries.filter(e => _cfYear(e.date) === curYear));
   const yearNet   = yearDep - yearWith;
 
   const el = document.getElementById('cf-summary');

@@ -524,11 +524,19 @@ async function loadAllData() {
   {
     // AUDIT-FIX 2026-08: السجلات بلا تاريخ توضع في نهاية الترتيب صراحة
     // (كانت المقارنة NaN فتترك موضعها غير محدد)
+    // ⚠️ التاريخ وحده لا يكفي: معاملتان في اليوم نفسه ترتيبهما غير محدَّد،
+    // وإن سبق البيعُ شراءَه صار متوسط التكلفة صفراً و**كامل عائد البيع
+    // ربحاً محقَّقاً**. القاعدة المحاسبية: الاقتناء قبل التصرّف — لا يُباع
+    // ما لم يُملَك بعد. (نفس ترتيب `txSortForWAC` في js/transactions.js.)
+    const _txRank = { buy: 0, grant: 0, sell: 1 };
     const sortedTx = txRows.slice().sort((a, b) => {
       if (!a.date && !b.date) return 0;
       if (!a.date) return 1;
       if (!b.date) return -1;
-      return new Date(a.date) - new Date(b.date);
+      return (new Date(a.date) - new Date(b.date))
+          || ((_txRank[a.type] ?? 0) - (_txRank[b.type] ?? 0))
+          || String(a.created_at || '').localeCompare(String(b.created_at || ''))
+          || String(a.id || '').localeCompare(String(b.id || ''));
     });
     const costMap  = {}; // ticker → { shares, totalCost (شاملة عمولة + ضريبة) }
     sortedTx.forEach(t => {
@@ -540,12 +548,17 @@ async function loadAllData() {
       } else if (t.type === 'grant') {
         m.shares    += +t.shares;            // منحة: تكلفة صفر
       } else if (t.type === 'sell') {
+        // ⚠️ البيع يُقَصّ على المملوك — كماً **وعائداً معاً**. كان العدد بلا
+        // قصّ، فبيعُ 150 من 100 مملوكة يسجّل ربح خمسين سهماً لا تملكها.
+        // (`syncHoldingsFromTx` في هذا الملف نفسه تقصّ — كان الملف يناقض نفسه.)
+        const sellShares      = Math.min(+t.shares, m.shares);
+        const sellRatio       = (+t.shares > 0) ? sellShares / +t.shares : 0;
         const avgCostPerShare = m.shares > 0 ? m.totalCost / m.shares : 0;
-        const costOfSold      = avgCostPerShare * +t.shares;
-        realizedPnL += (+t.total) - costOfSold;
+        const costOfSold      = avgCostPerShare * sellShares;
+        realizedPnL += (+t.total) * sellRatio - costOfSold;
         // خصم التكلفة بعدد الأسهم (لا بالنسبة) — مطابق recomputeHoldingFromTx
         m.totalCost = Math.max(0, m.totalCost - costOfSold);
-        m.shares    = Math.max(0, m.shares - +t.shares);
+        m.shares    = Math.max(0, m.shares - sellShares);
       }
     });
   }
@@ -575,15 +588,52 @@ async function loadAllData() {
   const bottomSector = sectorList[sectorList.length - 1] || null;
   const sectorCount  = sectorList.length;
 
-  // ── العوائد التوزيعية ──────────────────────────────────
-  const totalDivAll = divRows.reduce((s, d) => s + +d.amount, 0);
-  const yearDiv     = divRows.filter(d => d.year === yr).reduce((s, d) => s + +d.amount, 0);
+  // ══════════════════════════════════════════════════════════════════
+  // العوائد التوزيعية — تاريخٌ واحد لكل توزيعة، ومُستلَمٌ لا مُعلَن
+  // ------------------------------------------------------------------
+  // كان هذا الملف يحمل **ثلاثة** تعريفات لتاريخ التوزيعة في آن:
+  //   • `totalDivAll` و`yearDiv`: بلا فحص تاريخ إطلاقاً، و`yearDiv` تقرأ
+  //     حقل `year` المستقل — فتوزيعة تاريخها هذا الشهر وحقل سنتها الماضية
+  //     تُحسب في TTM وتغيب عن «أرباح السنة» فيظهر العائد المُسنوى 0.00%.
+  //   • `ttmDiv` عبر `parseDateLocal` مع احتياطي سنة/شهر.
+  //   • XIRR عبر `dividendFlowDate`.
+  //
+  // والأخطر: التوزيعة **المُعلَنة بتاريخ صرفٍ قادم** كانت تدخل «إجمالي
+  // الأرباح» و«أرباح السنة» و«إجمالي الربح منذ البداية» وكرت التعادل —
+  // بينما TTM وForward وXIRR تُسقطها كلها. نقدٌ لم يدخل جيبك بعدُ ليس دخلاً
+  // محقَّقاً، وهو نصّ `dividendFlowDate` نفسها في utils.js.
+  //
+  // المصدر الآن واحد: `_divPaid` — كل توزيعة أمكن تأريخها ووقع صرفها.
+  // ══════════════════════════════════════════════════════════════════
+  const _nowRef = new Date();
+  const _divPaid = divRows
+    .map(d => ({ d, dt: dividendFlowDate(d, _nowRef) }))
+    .filter(x => x.dt);
+  const _divDeclaredPending = divRows.length - _divPaid.length;
+
+  const totalDivAll = _divPaid.reduce((s, x) => s + +x.d.amount, 0);
+  const yearDiv     = _divPaid.filter(x => x.dt.getFullYear() === yr)
+                              .reduce((s, x) => s + +x.d.amount, 0);
   // أرباح آخر 12 شهراً (TTM) — للعائد الحقيقي على التكلفة والدخل المتوقع
   const _today = new Date();
   const _yearAgo = new Date(_today.getFullYear() - 1, _today.getMonth(), _today.getDate());
   // AUDIT-FIX (2026-07): سجل بلا تاريخ يُحتسب بتاريخ مُركَّب من شهر/سنة (أول الشهر)
   // بدل إسقاطه — موحَّد مع _ttmDividends في صفحة الأرباح.
-  const ttmDiv = divRows.reduce((s, d) => {
+  // ══════════════════════════════════════════════════════════════════
+  // ⚠️ بسطُ العائد ومقامُه من مجالٍ واحد — الأسهم التي **تملكها اليوم**
+  // ------------------------------------------------------------------
+  // `ttmDiv` كان يجمع توزيعات آخر 12 شهراً من **كل** السجلات، بما فيها سهمٌ
+  // بِعتَه بالكامل — بينما `costBasis` و`totalValue` من الحيازات القائمة
+  // وحدها. توزيعةُ مركزٍ خرجتَ منه تخصّ رأس مال لم يعد في المقام، وهي
+  // محسوبة أصلاً في الربح المحقَّق.
+  //
+  // قياس فعلي: سهم تكلفته 1,000 وتوزيعه 50، وآخر تكلفته 9,000 وتوزيعه 450
+  // ثم بِعتَه ⇒ العائد على التكلفة يُعرض **50%** والصحيح **5%**. وتبويب
+  // Forward وحده كان صحيحاً لأنه يمشي على الحيازات.
+  // ══════════════════════════════════════════════════════════════════
+  const _heldTickers = new Set(holdings.map(h => String(h.ticker || '').trim().toUpperCase()));
+  const _divHeld = divRows.filter(d => _heldTickers.has(String(d.ticker || '').trim().toUpperCase()));
+  const ttmDiv = _divHeld.reduce((s, d) => {
     // AUDIT-FIX 2026-08-21 (#51): كان `new Date('YYYY-MM-DD')` يُفسَّر UTC بينما
     // احتياطي year/month في السطر التالي — و tsOf في الدخل المتوقَّع أسفل الملف —
     // يُفسَّر بالتوقيت المحلي. فرق الإزاحة كان ينقل توزيعة أول/آخر يوم في النافذة
@@ -606,9 +656,39 @@ async function loadAllData() {
   // year for lumpy / semi-annual Saudi payers — a single H1 dividend by June would scale ×2.2.
   // Only extrapolate once ≥180 days (a full semi-annual cycle) have elapsed; before that fall
   // back to the trailing-12-month figure, which is a true annual run-rate with no extrapolation.
-  const annualizedYearDiv = (daysElapsed >= 180)
+  // ══════════════════════════════════════════════════════════════════
+  // ⚠️ حارس 180 يوماً وحده يفترض أن **كل** موزّع نصف سنوي على الأقل
+  // ------------------------------------------------------------------
+  // السوق السعودي مليء بموزّع سنوي واحد في مارس/أبريل. قياس فعلي: موزّع
+  // سنوي دفع 600 ر.س في مارس على تكلفة 10,000، في اليوم 236 من السنة ⇒
+  // الاستقراء يعطي **9.28%** والحقيقة **6.00%** — تضخيم 55% على الرقم
+  // الذي يقيس هدف م.7 نفسه. وتبويبا YOC وForward يعرضان 6.00% بجواره.
+  //
+  // القاعدة الصحيحة: لا يُستقرأ إلا ما اكتملت دورته. سهم ربعي مضى عليه
+  // ثلاثة أرباع يجوز استقراؤه؛ وسنويٌّ لم يُكمل سنته لا يجوز — ومجموع
+  // آخر 12 شهراً (TTM) معدّلٌ سنويٌّ **حقيقي** بلا استقراء أصلاً.
+  // ══════════════════════════════════════════════════════════════════
+  // نفس `inferDividendFrequency` التي تحكم الدخل المتوقَّع — لا استنتاج موازٍ
+  const _annFreqs = (() => {
+    const byTk = {};
+    _divHeld.forEach(d => {
+      const tk = String(d.ticker || '').trim().toUpperCase();
+      if (!tk) return;
+      const iso = d.date || (d.year ? `${d.year}-${String(d.month || 1).padStart(2, '0')}-01` : null);
+      if (iso) (byTk[tk] = byTk[tk] || []).push(iso);
+    });
+    return Object.values(byTk)
+      .map(list => (typeof inferDividendFrequency === 'function') ? inferDividendFrequency(list) : 0)
+      .filter(f => f > 0);
+  })();
+  const _minFreq  = _annFreqs.length ? Math.min(..._annFreqs) : 0;
+  // الدورة الواحدة لأبطأ موزّع لديك، بالأيام. بلا بيانات دورية: لا استقراء.
+  const _cycleDays = _minFreq > 0 ? daysInYear / _minFreq : Infinity;
+  const _canExtrapolate = daysElapsed >= 180 && daysElapsed >= _cycleDays * 1.5;
+  const annualizedYearDiv = _canExtrapolate
     ? yearDiv * (daysInYear / daysElapsed)
     : ttmDiv;
+  const _annBasis = _canExtrapolate ? 'extrapolated' : 'ttm';
   // المقام للعائد المُسنوى: costBasis (WAC × الأسهم الحالية) هو الأدق لأنه يعكس رأس المال الفعلي المُنشغل
   // صافي التدفقات النقدية (شراء − بيع) قد يكون منخفضاً إذا ضُخّ معظم المال في نفس السنة
   // AUDIT-FIX 2026-08: عند costBasis=0 كان المقام يُجبر على 1 فيظهر رقم بلا معنى —
@@ -874,6 +954,7 @@ async function loadAllData() {
     divYieldAnn, divYieldYOC, divYieldMarket, divYieldFwd,
     fwdProjected, fwdByTicker, fwdStale: _fwdStale, ttmDiv, xirr,
     annualizedYearDiv, daysElapsed, daysInYear, denomAnn,
+    annBasis: _annBasis, divDeclaredPending: _divDeclaredPending,
     grantMap, totalGrantShares, totalGrantTickers,
     latestNW:        _nwPick ? +_nwPick.total_value : null,
     latestNWDate:    _nwPick ? _nwPick.date : null,
@@ -955,9 +1036,11 @@ function switchYieldTab(tab) {
     setText('stat-div-yield',  s.divYieldAnn != null ? s.divYieldAnn.toFixed(2) + '%' : '—');
     // AUDIT-FIX (2026-07): قبل يوم 180 الحساب فعلياً TTM (لا استقراء خطي) —
     // السطر التوضيحي يطابق المعادلة المستخدمة في الحالتين.
-    const note = (s.daysElapsed || 0) >= 180
+    // الشرط هو الأساس المُستخدَم فعلاً لا اليوم وحده — كان السطر يقول
+    // «استقراء» بينما الحساب TTM لأن دورية أبطأ موزّع لم تكتمل بعد.
+    const note = s.annBasis === 'extrapolated'
       ? `أرباح ${formatSAR(s.yearDiv||0)} × (${s.daysInYear}÷${s.daysElapsed}) ÷ تكلفة المحفظة (WAC)`
-      : `مبكراً في السنة (يوم ${s.daysElapsed||0}) — TTM ${formatSAR(s.ttmDiv||0)} ÷ التكلفة (بلا استقراء)`;
+      : `لا استقراء (يوم ${s.daysElapsed||0}، ودورة أبطأ موزّع لم تكتمل) — TTM ${formatSAR(s.ttmDiv||0)} ÷ التكلفة`;
     setText('stat-div-yield-sub', note);
   } else if (tab === 'yoc') {
     setText('yield-tab-label', 'العائد على التكلفة (YOC)');
@@ -4307,7 +4390,7 @@ function showCardInfo(key) {
         <p>ثلاث طرق لحساب العائد، كل منها تعبّر عن زاوية مختلفة:</p>
 
         <p style="margin:12px 0 4px"><strong>① مُسنوى (السنة الجارية)</strong> — الأدق للسنة غير المكتملة</p>
-        ${(s.daysElapsed||0) >= 180 ? `
+        ${s.annBasis === 'extrapolated' ? `
         <div class="info-formula">أرباح ${s.yr||new Date().getFullYear()} × (${s.daysInYear||365}÷${s.daysElapsed||1}) ÷ التكلفة</div>
         <div class="info-math">
           ${formatSAR(s.yearDiv||0)} × ${((s.daysInYear||365)/(s.daysElapsed||1)).toFixed(2)} = أرباح مُسنواة ${formatSAR(s.annualizedYearDiv||0)}<br>
@@ -4316,7 +4399,8 @@ function showCardInfo(key) {
         </div>` : `
         <div class="info-formula">أرباح آخر 12 شهراً ÷ التكلفة</div>
         <div class="info-math">
-          مبكراً في السنة (${s.daysElapsed||0} يوماً) نتجنّب التضخيم بالاستقراء الخطي ونستخدم آخر 12 شهراً:<br>
+          لا استقراء هنا: إمّا السنة مبكّرة (${s.daysElapsed||0} يوماً) أو دورة أبطأ موزّع لديك لم تكتمل بعد.<br>
+          الاستقراء الخطي يضخّم الموزّع السنوي (دفعة مارس × 365÷236 = ‎+55%‎)، فنستخدم آخر 12 شهراً:<br>
           ${formatSAR(s.ttmDiv||0)} ÷ ${formatSAR(s.denomAnn||0)}<br>
           = <strong class="text-success">${(s.divYieldAnn||0).toFixed(2)}%</strong>
         </div>`}

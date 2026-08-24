@@ -15,8 +15,10 @@ window.CARD_INFO = {
         • <strong>الربح/الخسارة:</strong> = القيمة الحالية − تكلفة الشراء (ربح ورقي حتى تبيع).<br>
         • <strong>الدخل الإيجاري الشهري:</strong> من العقارات المؤجّرة فقط.
       </div>
-      <div class="info-formula">العائد الإيجاري السنوي ≈ (الإيجار الشهري × 12) ÷ القيمة الحالية × 100</div>
-      <p class="info-note">💡 العائد الإيجاري يقيس كفاءة العقار كمصدر دخل — عقار بقيمة مليون يدرّ 40 ألف سنوياً = 4%. قارنه بعوائد الأسهم/الصكوك لتقرّر أين تضع مالك. (العقارات المباعة تُستبعد من الإجماليات وتظهر في صافي الثروة.)</p>`
+      <div class="info-formula">العائد الإيجاري <strong>الإجمالي</strong> ≈ (الإيجار الشهري × 12) ÷ القيمة الحالية × 100</div>
+      <p class="info-note">💡 هذا عائد <strong>إجمالي (gross)</strong> — قبل مصاريف التشغيل والصيانة والشغور ورسوم الإدارة. والعرف السعودي أن تستهلك هذه 20–35% من الإيجار.</p>
+      <p class="info-note">⚠️ <strong>لا تقارنه مباشرةً بعائد توزيعات سهم أو قسيمة صك</strong> — تلك صافية وهذا ليس كذلك. المقارنة الصحيحة بصافي العائد = NOI ÷ القيمة، حيث NOI = الإيجار − مصاريف التشغيل المباشرة (م.2). عملياً: عقار عائده الإجمالي 4.8% صافيه ≈ 3.6% عند مصاريف 25%.</p>
+      <p class="info-note">العقارات المباعة تُستبعد من هذه الإجماليات <strong>ومن صافي الثروة كذلك</strong> — سجّل حصيلة البيع أصلاً نقدياً حتى لا تختفي من ثروتك.</p>`
   },
 };
 
@@ -50,9 +52,13 @@ async function loadProperties() {
 
 function renderStats() {
   const active       = properties.filter(p => p.status !== 'sold');
-  const totalPurch   = active.reduce((s, p) => s + +p.purchase_value, 0);
-  const totalCurrent = active.reduce((s, p) => s + +p.current_value, 0);
-  const totalRental  = properties.filter(p => p.status === 'rented').reduce((s, p) => s + +p.monthly_rental, 0);
+  // حارس `|| 0`: قيمة غير رقمية تُنتج NaN، و`formatSAR` تعرضه **0.00 ر.س**
+  // بلون أحمر (لأن `NaN >= 0` خطأ) — خطأ معروض صفراً لا خطأً.
+  const _v = x => { const n = +x; return isFinite(n) ? n : 0; };
+  const totalPurch   = active.reduce((s, p) => s + _v(p.purchase_value), 0);
+  const totalCurrent = active.reduce((s, p) => s + _v(p.current_value), 0);
+  const totalRental  = properties.filter(p => p.status === 'rented')
+                                 .reduce((s, p) => s + _v(p.monthly_rental), 0);
   const pnl          = totalCurrent - totalPurch;
 
   const el = id => document.getElementById(id);

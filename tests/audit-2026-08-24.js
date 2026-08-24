@@ -180,5 +180,189 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
     !/if \(!tk \|\| !d\.date\) return;/.test(de));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⑧ دورية التوزيع — من المعدّل لا من وسيط الفجوات
+// ----------------------------------------------------------------------
+// الوسيط يلتقط الفجوة القصيرة في النمط المتناوب (مرحليٌّ ثم ختاميٌّ، وهو
+// الغالب سعودياً)، فتخرج دورية أعلى من الحقيقة ⇒ كل نافذة أطول من سنة ⇒
+// nFull = 0 ⇒ **درجة جودة صفر** لسهم منتظم تماماً.
+// ══════════════════════════════════════════════════════════════════════
+{
+  const el = () => ({ style: {}, classList: { add() {}, remove() {}, contains: () => false },
+    setAttribute() {}, addEventListener() {}, innerHTML: '', textContent: '' });
+  const c = { console: { log() {}, warn() {}, error() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    setTimeout: () => 0, clearTimeout() {},
+    document: { addEventListener() {}, getElementById: () => el(), querySelectorAll: () => [],
+      querySelector: () => null, documentElement: el(), body: el(), createElement: el },
+    localStorage: { getItem: () => null, setItem() {} }, location: { href: 'http://x/' },
+    navigator: { userAgent: 'n' }, matchMedia: () => ({ matches: false, addEventListener() {} }),
+    supabase: { createClient: () => ({}) },
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; } };
+  c.window = c; c.globalThis = c; vm.createContext(c);
+  vm.runInContext(fs.readFileSync(ROOT + 'js/utils.js', 'utf8'), c);
+  const F = c.inferDividendFrequency, S = c.dividendStaleDays;
+
+  const P = {
+    'نصف سنوي متناوب (أبريل+أغسطس)': [['2023-04-10', '2023-08-10', '2024-04-10',
+      '2024-08-10', '2025-04-10', '2025-08-10'], 2],
+    'نصف سنوي متباعد (مارس+سبتمبر)': [['2023-03-10', '2023-09-10', '2024-03-10',
+      '2024-09-10', '2025-03-10', '2025-09-10'], 2],
+    'ربعي متناوب': [['2024-03-01', '2024-05-01', '2024-09-01', '2024-11-01',
+      '2025-03-01', '2025-05-01', '2025-09-01', '2025-11-01'], 4],
+    'ربعي منتظم': [['2024-03-01', '2024-06-01', '2024-09-01', '2024-12-01',
+      '2025-03-01', '2025-06-01', '2025-09-01', '2025-12-01'], 4],
+    'سنوي': [['2023-04-01', '2024-04-01', '2025-04-01'], 1],
+  };
+  Object.entries(P).forEach(([k, pair]) => {
+    const got = F(pair[0]);
+    t('دورية ' + k + ' = ' + pair[1], got === pair[1], 'خرجت ' + got);
+  });
+
+  // الحلقة المُصلَحة: الدورية لا تُنزَّل بسبب التوقّف، فيُكشَف الانقطاع في وقته
+  const q = ['2023-03-01', '2023-06-01', '2023-09-01', '2023-12-01',
+             '2024-03-01', '2024-06-01', '2024-09-01', '2024-12-01'];
+  t('السهم المتوقّف يحتفظ بدوريته البنيوية', F(q) === 4, 'خرجت ' + F(q));
+  t('عتبة الانقطاع 160 يوماً لا 639', Math.round(S(F(q))) === 160, S(F(q)));
+
+  // تاريخ قصير لا يُضخّم الدورية
+  const shortHist = ['2025-01-01', '2025-04-01'];
+  t('دفعتان في ثلاثة أشهر لا تُثبتان دورية ربعية', F(shortHist) === 1, 'خرجت ' + F(shortHist));
+
+  // ⚠️ التعليقات تُجرَّد: هذا الملف يشرح الحلقة القديمة بنصّها، وبحثٌ خام
+  // كان سيلتقط الشرح ويظنّه الكود — نفس العلّة المُصلَحة في dead-exports.
+  const noComments = (src) => src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/(^|[^:'"`\\])\/\/[^\n]*/g, '$1 ');
+  const utils = noComments(fs.readFileSync(ROOT + 'js/utils.js', 'utf8'));
+  t('لا حلقة تنزيل بعدد دفعات آخر سنة',
+    !/ttmCount < MIN_PAYS/.test(utils),
+    'عادت الحلقة: التوقّف يُنزّل الدورية فيُمنَح السهم تسامحاً أطول');
+
+  const div = fs.readFileSync(ROOT + 'js/dividends.js', 'utf8');
+  t('جدول الجودة يستعمل التعريف الموحّد',
+    /inferDividendFrequency\(series\.map/.test(div),
+    'عاد الاستنتاج الموازي — أنماط سليمة تنال صفراً');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ⑨ لوحة التحكم — بسطٌ ومقامٌ من مجالٍ واحد، ومُستلَمٌ لا مُعلَن
+// ══════════════════════════════════════════════════════════════════════
+{
+  const d = fs.readFileSync(ROOT + 'js/dashboard.js', 'utf8');
+  t('TTM مقصور على ما تملكه اليوم', /const _divHeld = divRows\.filter/.test(d),
+    'كان يجمع توزيعات مراكز بِعتَها على مقام الحيازات القائمة');
+  t('إجمالي الأرباح يستبعد غير المصروف', /const _divPaid = divRows/.test(d)
+    && /dividendFlowDate\(d, _nowRef\)/.test(d));
+  t('أرباح السنة من التاريخ لا من حقل year',
+    /_divPaid\.filter\(x => x\.dt\.getFullYear\(\) === yr\)/.test(d),
+    'حقل year المستقل كان يخالف التاريخ فيصفّر العائد المُسنوى');
+  t('لا جمع خام للتوزيعات', !/divRows\.reduce\(\(s, d\) => s \+ \+d\.amount, 0\)/.test(d));
+  t('الاستقراء مشروط باكتمال الدورة', /_canExtrapolate = daysElapsed >= 180 && daysElapsed >= _cycleDays/.test(d),
+    'موزّع سنوي كان يُقرأ +55% أعلى من الحقيقة');
+  t('الأساس المُستخدَم مُعلَن في الشرح', /s\.annBasis === 'extrapolated'/.test(d));
+  t('الربح المحقق يُقَصّ على المملوك',
+    /const sellShares      = Math\.min\(\+t\.shares, m\.shares\)/.test(d)
+    && /realizedPnL \+= \(\+t\.total\) \* sellRatio - costOfSold/.test(d));
+  t('ترتيب اليوم الواحد: الاقتناء قبل التصرّف', /_txRank = \{ buy: 0, grant: 0, sell: 1 \}/.test(d));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ⑩ حاسبة القيمة العادلة — جوردون بـ Ke، والخاسرة بالدفترية وحدها
+// ══════════════════════════════════════════════════════════════════════
+{
+  const src = fs.readFileSync(ROOT + 'stock-valuation.html', 'utf8');
+
+  // نماذج التوزيعات تُخصم بتكلفة حقوق الملكية — لا بـ WACC الذي يمزج الدين
+  t('perpRate يأخذ Ke دائماً',
+    /const perpRate     = \(keInfo && keInfo\.ke != null\) \? keInfo\.ke/.test(src),
+    'كان WACC للشركة العادية — والخطأ يتضخّم مع الرافعة (D/E=1 ⇒ +50%)');
+  t('الريت يخصم DDM بـ perpRate',
+    /calculate_gordon\(dividendsR, growth_perp_final, perpRate\)/.test(src),
+    'كان يمرّر discount_rate مباشرةً بلا شرط');
+  t('غياب Ke يُعلَن ولا يسقط على WACC', /const perpBlocked  = perpRate == null/.test(src));
+
+  // م.32 و36 — الشركة الخاسرة
+  t('مسار الشركة الخاسرة موجود', /const isLossMaking = eps <= 0;/.test(src));
+  t('نموذجها الوحيد دفتري',
+    /avgNames = \['القيمة الدفترية × مكرر متحفّظ \(م\.36\)'\]/.test(src),
+    'كان DCF يقود القيمة العادلة لشركة ربحيتها سالبة');
+  t('المكرر مقيَّد بين 0.6 و0.8',
+    /Math\.min\(0\.8, Math\.max\(0\.6, fair_pb \|\| 0\.7\)\)/.test(src));
+  t('القصّ يُعلَن للمالك', /قُصّ من \$\{fair_pb\}/.test(src));
+
+  // تشغيل النموذجين على أرقام معلومة الجواب
+  const el = () => ({ style: {}, value: '', innerHTML: '', textContent: '',
+    classList: { add() {}, remove() {}, contains: () => false },
+    setAttribute() {}, addEventListener() {}, getContext: () => ({}) });
+  const c = { console: { log() {}, warn() {}, error() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', getElementById: el, querySelector: () => null,
+      querySelectorAll: () => [], createElement: el, addEventListener() {},
+      documentElement: el(), body: el(), createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {} },
+    location: { href: 'http://x/', hash: '' }, navigator: { userAgent: 'n' },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null, showToast() {},
+    requireAuth: () => Promise.resolve(null),
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; } };
+  c.window = c; c.globalThis = c; c.self = c; vm.createContext(c);
+  ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js', 'js/tadawul-data.js']
+    .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), c, { filename: f }));
+  const inline = [...src.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(m => m[1]).join('\n');
+  try { vm.runInContext(inline, c, { filename: 'sv' }); } catch (_) { /* init يحتاج مصادقة */ }
+
+  if (typeof c.calculate_gordon === 'function') {
+    // D₀=1 · g=2% · Ke=8% ⇒ 1.02/0.06 = 17.00 بالضبط
+    t('جوردون يشتقّ D₁ من D₀', near(c.calculate_gordon(1, 0.02, 0.08), 17, 0.005),
+      c.calculate_gordon(1, 0.02, 0.08));
+    // ونفس التوزيعة بـWACC مخفَّض بالرافعة تعطي 25.50 — الفارق الذي كان يُعرض
+    t('الخصم بـWACC كان يعطي 25.50 (التوثيق)',
+      near(c.calculate_gordon(1, 0.02, 0.06), 25.5, 0.005));
+  }
+  if (typeof c.calculate_book_value === 'function') {
+    t('الدفترية 20 × 0.7 = 14 (داخل نطاق م.36)',
+      near(c.calculate_book_value(20, 0.7), 14, 1e-9), c.calculate_book_value(20, 0.7));
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ⑪ الصكوك والراتب والعقار وصافي الثروة والتدفقات
+// ══════════════════════════════════════════════════════════════════════
+{
+  const sk = fs.readFileSync(ROOT + 'js/sukuk.js', 'utf8');
+  t('العائد السنوي مرجَّح بريال-سنة', /const capitalYears = active\.reduce/.test(sk)
+    && /totalNetProfit \/ capitalYears \* 100/.test(sk),
+    'كان مرجَّحاً بالمبلغ وحده فيتجاهل المدة: 12.80% بدل 10.40%');
+  t('«العائد الكلي» صار «الإجمالي عند الاستحقاق»',
+    /الإجمالي المتوقع عند الاستحقاق/.test(sk) && !/العائد الكلي المتوقع/.test(sk));
+  t('الدفعة الختامية مُفسَّرة في التحذير', /يردّ أصله دفعةً ختامية/.test(sk));
+
+  const sal = fs.readFileSync(ROOT + 'js/salary.js', 'utf8');
+  t('معدّل ادخار فوق 100% لا يُوسَم صحّياً', /const over  = r != null && r > 100;/.test(sal)
+    && /يتجاوز 100% — مموَّل من خارج دخل الفترة/.test(sal));
+
+  const re = fs.readFileSync(ROOT + 'js/realestate.js', 'utf8');
+  t('العائد الإيجاري موسوم «إجمالي»', /العائد الإيجاري <strong>الإجمالي<\/strong>/.test(re));
+  t('يُحذّر من مقارنته بعائد سهم أو صك', /لا تقارنه مباشرةً بعائد توزيعات سهم/.test(re));
+  t('ادّعاء «تظهر في صافي الثروة» أُزيل',
+    !/تُستبعد من الإجماليات وتظهر في صافي الثروة/.test(re));
+  t('حارس القيم غير الرقمية في العقار', /const _v = x => \{ const n = \+x;/.test(re));
+
+  const nw = fs.readFileSync(ROOT + 'js/networth.js', 'utf8');
+  t('صافي الثروة يُسمّي ما يشمله', /أسهم \+ عقار \+ أصولك اليدوية − الالتزامات/.test(nw));
+  t('والفجوة مُسمّاة صراحةً', /رصيد الوساطة والصكوك خارج هذا الرقم/.test(nw));
+
+  const cf = fs.readFileSync(ROOT + 'js/cashflows.js', 'utf8');
+  t('حارس القيم غير الرقمية في التدفقات', /const _num = v => \{ const n = \+v;/.test(cf)
+    && /const _badAmt =/.test(cf));
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);
