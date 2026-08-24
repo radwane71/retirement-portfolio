@@ -185,10 +185,34 @@ function filterByType(type) {
   applyFilters();
 }
 
+// نصّ البحث الحالي، مُطبَّعاً — الرمز والاسم كلاهما مقبول
+function _tkQuery() {
+  return String(document.getElementById('tk-search')?.value || '').trim().toLowerCase();
+}
+function _matchesQuery(t, q) {
+  if (!q) return true;
+  const tk = String(t.ticker || '').toLowerCase();
+  const nm = String(t.name || t.stock_name || '').toLowerCase();
+  const h  = _holdings.find(x => String(x.ticker).trim().toUpperCase() === String(t.ticker).trim().toUpperCase());
+  const hn = String((h && h.name) || '').toLowerCase();
+  return tk.includes(q) || nm.includes(q) || hn.includes(q);
+}
+
 function applyFilters() {
   const statusF = document.getElementById('status-filter')?.value || 'active';
+  const q = _tkQuery();
+
+  // ══════════════════════════════════════════════════════════════════
+  // «أسهم بلا تقييم» — مسارٌ مستقل لأنه لا يقرأ اللوحة بل يسأل عن الغائب
+  // ------------------------------------------------------------------
+  // كل فلتر آخر يبدأ من `_tasks`، وسهمٌ لم يُقيَّم قط ليس فيها إطلاقاً.
+  // فلا يكفي فلترةٌ إضافية — يلزم مصدرٌ آخر: حيازاتك.
+  // ══════════════════════════════════════════════════════════════════
+  if (statusF === '__untracked') { renderUntracked(q); return; }
+
   const base = _tasks.filter(t => !t.auto_generated);
-  const typed = _filterType !== 'all' ? base.filter(t => t.type === _filterType) : base;
+  const typed0 = _filterType !== 'all' ? base.filter(t => t.type === _filterType) : base;
+  const typed  = typed0.filter(t => _matchesQuery(t, q));
 
   let filtered = typed;
   if (statusF !== 'all') filtered = filtered.filter(t => t.status === statusF);
@@ -199,10 +223,134 @@ function applyFilters() {
   const archived = typed.filter(t => t.status !== 'active');
 
   const countEl = document.getElementById('tasks-count-label');
-  if (countEl) countEl.textContent = `${active.length} تقييم نشط`;
+  if (countEl) countEl.textContent = `${active.length} تقييم نشط`
+    + (q ? ` · بحث «${q}»` : '');
+
+  // ⚠️ نتيجةٌ فارغة لها سببان مختلفان: لا تقييم لهذا السهم، أو تقييمُه
+  // موجود لكن فلترَ النوع/الحالة يُخفيه. الخلط بينهما يُضلّل — فيُحسَب
+  // كم يطابق **البحث وحده** ويُعلَن الفرق.
+  const noteEl = document.getElementById('tk-search-note');
+  if (noteEl) {
+    if (!q) { noteEl.innerHTML = ''; }
+    else {
+      const bySearchOnly = base.filter(t => _matchesQuery(t, q));
+      noteEl.innerHTML = (active.length === 0 && bySearchOnly.length > 0)
+        ? `<span style="color:var(--st-warn)">⚠️ ${bySearchOnly.length} تقييماً يطابق البحث `
+          + `لكن الفلاتر تُخفيه — <button class="btn btn-secondary btn-sm" `
+          + `style="padding:2px 8px" onclick="clearTkFilters()">🧹 امسحها</button></span>`
+        : (bySearchOnly.length === 0
+            ? `<span style="color:var(--text-2)">لا تقييم يطابق «${esc(q)}» — `
+              + `<button class="btn btn-secondary btn-sm" style="padding:2px 8px" `
+              + `onclick="showUntracked()">🆕 اعرض الأسهم بلا تقييم</button></span>`
+            : '');
+    }
+  }
 
   renderValGrid('val-grid',     active);
   renderValGrid('archive-grid', archived);
+}
+
+// مسح فلترَي النوع والحالة وإبقاء البحث — يُستدعى حين يُخفي فلترٌ نتيجةَ بحثك
+function clearTkFilters() {
+  _filterType = 'all';
+  document.querySelectorAll('#type-pills .filter-pill').forEach(p =>
+    p.classList.toggle('active', p.getAttribute('onclick') === "filterByType('all')"));
+  const s = document.getElementById('status-filter');
+  if (s) s.value = 'all';
+  applyFilters();
+}
+// ⚠️ `openValModal(id)` تأخذ **معرّف تقييم** لا رمزاً — تمرير الرمز لها
+// يجعلها تبحث عن تقييم بذلك المعرّف فلا تجده وتخرج صامتة (`if (!t) return`).
+// فنفتحها جديدة ثم نملأ الرمز والاسم.
+function newCardFor(tk, name) {
+  openValModal(null);
+  const a = document.getElementById('task-ticker'), b = document.getElementById('task-name');
+  if (a) a.value = tk || '';
+  if (b) b.value = name || '';
+  if (a) a.focus();
+}
+
+function showUntracked() {
+  const s = document.getElementById('status-filter');
+  if (s) s.value = '__untracked';
+  applyFilters();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// الأسهم التي لا تقييم لها — من حيازاتك، لا من اللوحة
+// ----------------------------------------------------------------------
+// «بلا تقييم» تعني أمرين قد يفترقان، وكلاهما يهمّك:
+//   • لا **بطاقة قرار** هنا (لا خطة أسعار: متى تجمّع ومتى تخفّف).
+//   • ولا **قيمة عادلة محفوظة** من حاسبة التقييم (`_valLast`).
+// فنعرض الحالتين في عمودين منفصلين بدل دمجهما في «بلا تقييم» غامضة.
+// ══════════════════════════════════════════════════════════════════════
+function renderUntracked(q) {
+  const grid = document.getElementById('val-grid');
+  const arch = document.getElementById('archive-grid');
+  if (arch) arch.innerHTML = `<p class="small text-muted" style="padding:10px">—</p>`;
+  const noteEl = document.getElementById('tk-search-note');
+  if (noteEl) noteEl.innerHTML = '';
+  if (!grid) return;
+
+  const withCard = new Set(_tasks.filter(t => !t.auto_generated)
+    .map(t => String(t.ticker || '').trim().toUpperCase()));
+
+  const rows = _holdings
+    .map(h => {
+      const tk = String(h.ticker || '').trim().toUpperCase();
+      const val = _valLast[tk];
+      const value = (+h.shares || 0) * (+h.current_price || 0);
+      return { tk, name: h.name || '', value,
+               weight: _totalValue > 0 ? value / _totalValue * 100 : 0,
+               hasCard: withCard.has(tk), hasFair: !!(val && val.fair && val.fair.avg > 0),
+               fairAt: val ? (val.date || '') : null };
+    })
+    .filter(r => !r.hasCard || !r.hasFair)
+    .filter(r => !q || r.tk.toLowerCase().includes(q) || r.name.toLowerCase().includes(q))
+    .sort((a, b) => b.value - a.value);   // الأكبر وزناً أولاً — هو الأهمّ
+
+  const countEl = document.getElementById('tasks-count-label');
+  if (countEl) countEl.textContent = `${rows.length} سهماً`;
+
+  if (!rows.length) {
+    grid.innerHTML = `<div class="empty-state"><div class="icon">✅</div>
+      <p class="small text-muted">${q ? 'لا سهم يطابق البحث بلا تقييم.'
+        : 'كل أسهمك لها بطاقة قرار وقيمة عادلة محفوظة.'}</p></div>`;
+    return;
+  }
+
+  const nNoCard = rows.filter(r => !r.hasCard).length;
+  const nNoFair = rows.filter(r => !r.hasFair).length;
+
+  grid.innerHTML = `
+    <div style="grid-column:1/-1">
+      ${noteHtml('🆕',
+        `<strong>${rows.length} سهماً من حيازاتك ينقصه تقييم.</strong> `
+      + `منها <b>${nNoCard}</b> بلا بطاقة قرار (لا خطة أسعار: متى تجمّع ومتى تخفّف)، `
+      + `و<b>${nNoFair}</b> بلا قيمة عادلة محفوظة.<br>`
+      + `هذه لا تظهر في الفلاتر أعلاه لأنها ليست في اللوحة أصلاً — `
+      + `و<strong>محرّك القرار يقرأ القيمة العادلة من حاسبة التقييم</strong>، `
+      + `فما لا قيمة عادلة له لا حكم سعري له (الفلتر 3). مرتَّبة بالوزن، الأكبر أولاً.`, 'warn')}
+      <div class="table-wrapper" style="margin-top:12px"><table>
+        <thead><tr>
+          <th>الرمز</th><th>الاسم</th><th class="num">الوزن</th>
+          <th>بطاقة القرار</th><th>القيمة العادلة</th><th></th>
+        </tr></thead><tbody>
+        ${rows.map(r => `<tr>
+          <td><strong class="text-accent">${esc(r.tk)}</strong></td>
+          <td>${esc(r.name || '—')}</td>
+          <td class="num">${formatNum(r.weight, 1)}%</td>
+          <td>${r.hasCard ? '<span style="color:var(--success)">✅ موجودة</span>'
+                          : '<span style="color:var(--st-warn)">— ناقصة</span>'}</td>
+          <td>${r.hasFair ? `<span style="color:var(--success)">✅ محفوظة</span>`
+                          : '<span style="color:var(--st-warn)">— ناقصة</span>'}</td>
+          <td style="white-space:nowrap">
+            ${!r.hasCard ? `<button class="btn btn-primary btn-sm" onclick="newCardFor('${esc(r.tk)}','${esc(r.name)}')">+ بطاقة قرار</button>` : ''}
+            ${!r.hasFair ? `<a class="btn btn-secondary btn-sm" href="stock-valuation.html">💹 احسب العادلة</a>` : ''}
+          </td>
+        </tr>`).join('')}
+        </tbody></table></div>
+    </div>`;
 }
 
 // ── Render valuation cards ────────────────────────────────────────────
