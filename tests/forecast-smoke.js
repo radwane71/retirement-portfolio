@@ -188,10 +188,26 @@ const body = id => (els.get(id) || {})._html || '';
     const H2 = (await ctx.loadHistoricalData()) || {};
     TABLES.dividends = orig;
     t('بلا عمود السنة لا يُنتج NaN', finite(H2.blendedCapGrowth), String(H2.blendedCapGrowth));
-    t('ويُستبدَل بمعيار السوق',      H2.blendedCapGrowth === ctx.MARKET_CAP_BENCHMARK
-                                     || H2.growthFallback === true, String(H2.blendedCapGrowth));
-    t('ويُعلَن الاستبدال',           H2.growthFallback === true, String(H2.growthFallback));
-    t('والأداء الشخصي يُعلَن غير محسوب', H2.annCapGrowth === null, String(H2.annCapGrowth));
+
+    // ⚠️ **تغيَّر التوقُّع في أوديت 2026-08-24، ولمصلحة أقوى.**
+    // كان النمو السعري يُشتقّ `XIRR الكلّي − عائد التوزيعات`، فسجلٌّ بلا
+    // عمود سنة يفسد الطرف الثاني ويُنتج NaN ⇒ سقوطٌ على معيار السوق.
+    // صار يُشتقّ من XIRR على **الشراء والبيع وحدهما** (تعريف
+    // money-weighted price return)، فلا يمسّ التوزيعات إطلاقاً — وغياب
+    // عمود السنة لم يعد يقدر على إفساده أصلاً.
+    //
+    // الحارس الأقوى: **الرقم لا يتغيّر** بحذف العمود، لا أنه «يسقط على
+    // بديل معلَن». والسقوط نفسه ما زال قائماً لمسارٍ لا XIRR فيه.
+    const H1 = H;
+    t('حذف عمود السنة لا يحرّك النمو السعري إطلاقاً',
+      finite(H1.blendedCapGrowth) && Math.abs(H2.blendedCapGrowth - H1.blendedCapGrowth) < 1e-9,
+      `${H1.blendedCapGrowth} مقابل ${H2.blendedCapGrowth}`);
+    t('ولا يُعلَن استبدالٌ لم يقع', H2.growthFallback !== true, String(H2.growthFallback));
+    t('والأداء الشخصي يبقى محسوباً', finite(H2.annCapGrowth), String(H2.annCapGrowth));
+
+    // وحارس NaN نفسه ما زال في الكود لمسار الاحتياطي
+    const fsrc = fs.readFileSync(ROOT + 'js/forecast.js', 'utf8');
+    t('حارس NaN ما زال قائماً', /_growthBad/.test(fsrc) && /growthFallback/.test(fsrc));
   }
 
   // ══ رقم واحد لهدفك، لا رقمان ══

@@ -8,7 +8,8 @@ window.CARD_INFO = {
       <p>أداة متقدّمة تقارن معاملاتك المسجّلة في التطبيق بكشف الوسيط أو ملف DivTracker، وتكتشف التواريخ الخاطئة لتصحّحها دفعة واحدة بأمان.</p>
       <div class="info-math">
         ١. الصق ملف DivTracker و/أو كشف الوسيط (CSV).<br>
-        ٢. يطابق كل معاملة بالرمز والنوع وعدد الأسهم (±1%) والسعر (±2%).<br>
+        ٢. يطابق كل معاملة بالرمز والنوع وعدد الأسهم (±1% أو نصف سهم، أيّهما أكبر)
+        والسعر (±2% أو 0.02 ر.س).<br>
         ٣. يعرض ما تاريخه صحيح، وما يحتاج تصحيحاً، وما لم يُطابَق.<br>
         ٤. تختار ما تريد تصحيحه ثم «تطبيق».
       </div>
@@ -196,8 +197,12 @@ function findBestMatch(tx, refList) {
     !r.unknown &&
     r.ticker === tx.ticker &&
     r.type   === tx.type &&
-    Math.abs(r.shares - +tx.shares) < Math.max(1, +tx.shares * 0.01) &&
-    Math.abs(r.price  - +tx.price)  < Math.max(0.15, +tx.price * 0.02)
+    // ⚠️ الأرضيات المطلقة كانت تبتلع النسبة في المراكز الصغيرة والأسهم
+    // الرخيصة: 7 أسهم × 1.50 ر.س ⇒ تسامح فعلي **14.3%** في العدد و**10%**
+    // في السعر — والنصّ يعد بـ±1% و±2%. ومطابقة خاطئة تعني كتابة
+    // **تاريخ خاطئ** على معاملة صحيحة، والتاريخ يحكم WAC وXIRR وTTM.
+    Math.abs(r.shares - +tx.shares) < Math.max(0.5, +tx.shares * 0.01) &&
+    Math.abs(r.price  - +tx.price)  < Math.max(0.02, +tx.price * 0.02)
   );
   if (!candidates.length) return null;
   // Prefer DivTracker over Broker; within same source prefer closest price

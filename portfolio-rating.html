@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824t">
+  <link rel="stylesheet" href="css/style.css?v=20260824u">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -298,14 +298,14 @@
   <!-- AUDIT-FIX (2026-08): تثبيت إصدار Chart.js بدل التعويم على @4 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260824t"></script>
-  <script src="js/auth.js?v=20260824t"></script>
-  <script src="js/utils.js?v=20260824t"></script>
-  <script src="js/constitution.js?v=20260824t"></script>
-  <script src="js/constitution-data.js?v=20260824t"></script>
-  <script src="js/tadawul-data.js?v=20260824t"></script>
-  <script src="js/declutter.js?v=20260824t"></script>
-  <script src="js/navtoggle.js?v=20260824t"></script>
+  <script src="js/supabase.js?v=20260824u"></script>
+  <script src="js/auth.js?v=20260824u"></script>
+  <script src="js/utils.js?v=20260824u"></script>
+  <script src="js/constitution.js?v=20260824u"></script>
+  <script src="js/constitution-data.js?v=20260824u"></script>
+  <script src="js/tadawul-data.js?v=20260824u"></script>
+  <script src="js/declutter.js?v=20260824u"></script>
+  <script src="js/navtoggle.js?v=20260824u"></script>
   <script>
     let breakdownChartInst = null;
 
@@ -438,12 +438,30 @@
 
       // 1. التنويع الفعلي / حجم المحفظة (0–3.0) — م.29: 12–18 سهماً = الدرجة الكاملة
       const effectiveUnits = is + (ec * 30) + (rc * 5) + (bc * 3);
-      const ds = effectiveUnits >= 12 ? 3.0
+      // ══════════════════════════════════════════════════════════════
+      // م.29 **نطاق** (12–18) لا حدّ أدنى — والسلّم ينزل فوقه كما ينزل تحته
+      // --------------------------------------------------------------
+      // كان `>= 12 ⇒ 3.0` بلا سقف: أربعون سهماً (ضِعف سقف م.29) مع بقية
+      // الحقول مثالية تعطي **9.3/10** بلا أي خصم، والعنوان نفسه يقول
+      // «الهدف 12–18». والتشتّت المفرط يُضعف أثر كل مركز ويرفع كلفة
+      // المتابعة — ولهذا وضعت المادة سقفاً لا أرضية فقط.
+      //
+      // نطاق السماح 22 (`SIZE_GRACE_MAX`) يبقى بلا خصم لأنه منصوصٌ عليه
+      // «مؤقتاً أثناء تنفيذ الخروج».
+      // ══════════════════════════════════════════════════════════════
+      const _sMin = (typeof SIZE_MIN === 'number') ? SIZE_MIN : 12;
+      const _sMax = (typeof SIZE_GRACE_MAX === 'number') ? SIZE_GRACE_MAX : 22;
+      const ds = effectiveUnits > _sMax + 12 ? 1.5     // ضِعف السقف تقريباً
+               : effectiveUnits > _sMax + 4  ? 2.1
+               : effectiveUnits > _sMax      ? 2.6
+               : effectiveUnits >= _sMin     ? 3.0
                : effectiveUnits >= 9  ? 2.4
                : effectiveUnits >= 6  ? 1.8
                : effectiveUnits >= 3  ? 1.0
                : effectiveUnits > 0   ? 0.5 : 0;
-      addDim(`التنويع الفعلي (${effectiveUnits} وحدة — الهدف 12–18)`, ds, 3.0, compAnswered);
+      addDim(`التنويع الفعلي (${effectiveUnits} وحدة — الهدف ${_sMin}–18`
+             + (effectiveUnits > _sMax ? `، وأنت فوق نطاق السماح ${_sMax}` : '') + ')',
+             ds, 3.0, compAnswered);
 
       // 2. التنوع القطاعي (0–1.5)
       // م.29: الهدف 8 فأكثر — فالدرجة الكاملة له وحده، وما دونه يتدرّج

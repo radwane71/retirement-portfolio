@@ -571,5 +571,84 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
     'سبعة نصوص كانت تصف «آخر دفعة × الدورية» والكود يحسب مجموع TTM');
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⑮ الرؤية المستقبلية — النمو السعري والعائد الفعّال والضخّ الوهمي
+// ══════════════════════════════════════════════════════════════════════
+{
+  const f = fs.readFileSync(ROOT + 'js/forecast.js', 'utf8');
+
+  t('النمو السعري من XIRR الشراء/البيع وحدهما',
+    /const priceFlows = xirrFlows\.filter\(f => f\._kind !== 'div'\)/.test(f)
+    && /_priceXirr != null \? _priceXirr/.test(f),
+    'كان يطرح عائداً نقطيّاً من عائدٍ مرجَّح بالمال — مقياسان لا يُطرح أحدهما من الآخر');
+  t('وتدفّق التوزيعة موسوم', /_kind: 'div'/.test(f));
+
+  t('إجمالي العائد يُعرض فعّالاً لا جمعاً',
+    /function effectiveTotalRate\(capRate, divRate\)/.test(f)
+    && /\(1 \+ c\) \* Math\.pow\(1 \+ d \/ 12, 12\) - 1/.test(f),
+    'الجمع البسيط يبخس 13.2% في القيمة النهائية على 35 سنة');
+  t('ولا موضع يجمع capRate + divRate للعرض',
+    !/pct\(sc\.capRate \+ sc\.divRate\)/.test(f) && !/pct\(s\.capRate \+ s\.divRate\)/.test(f));
+
+  t('ترتيب السيناريوهات لا ينكسر عند عائد منخفض',
+    /divRate: Math\.min\(div, Math\.max\(0\.01, div \* 0\.80\)\)/.test(f),
+    'الأرضية 1% كانت ترفع المتحفّظ فوق المعتدل عند عائد دون 1.25%');
+
+  t('عائد التوزيع صفراً مدخلٌ صريح لا فراغ',
+    (f.match(/Number\.isFinite\(divYieldOverride\) && divYieldOverride >= 0/g) || []).length >= 2,
+    'كان يُتجاهَل بصمت ويُستبدل بأعلى عائد ممكن');
+
+  t('متوسط الإيداع يشترط ثلاثة إيداعات وسنة',
+    /const _depositEvidence  = depositRows\.length >= 3 && depositYears >= 1/.test(f),
+    'إيداع واحد كان يُقسَم على ستة أشهر فيزرع فترة DCA بملايين لم يقرّها المالك');
+  t('والعجز يُعلَن لا يُقدَّر', /avgDepositBasis === 'measured'/.test(f));
+
+  t('وسم إعادة الاستثمار يتبع الإعداد الفعلي',
+    /reinvestOn \? '📈 أرباح معاد استثمارها/.test(f)
+    && /توزيعات مستلمة نقداً \(خارج المحفظة\)/.test(f),
+    'كانت تُعرض «معاد استثمارها» وهي خرجت من المحفظة، والتفكيك لا يجمع');
+
+  t('أرقام تاسي تُشتقّ من المصفوفة',
+    /function _tasiLossShareTxt\(\)/.test(f) && !/30% من سنوات تاسي كانت خسارة/.test(f),
+    'النصّ كان يقول 30% و−57% والمصفوفة تقول 35% و−55.2%');
+
+  t('عائد التوزيع المقصوص يُعلَن',
+    /const divYieldClamped = annDivYield > 0\.15/.test(f) && /راجِعه/.test(f),
+    'كان يُقصّ عند 15% بصمت ويُعرض بشارة خضراء «✓ متحقَّق منه»');
+
+  t('نصّ السحب لا يجمع الوصفين المتناقضين',
+    /مبلغاً اسمياً ثابتاً عند \$\{r\.retireCalYear\}/.test(f),
+    '«بقوة شراء اليوم» و«بمبلغ اسمي ثابت» معاً — والفرق ×1.64 على 20 سنة');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ⑯ طفيفات مؤكَّدة — التواريخ والتسامح والتشتّت المفرط
+// ══════════════════════════════════════════════════════════════════════
+{
+  const ctx2 = { console, Math, Number, parseFloat, String, Object, Array, Date, JSON,
+    isFinite, isNaN, parseInt, Intl,
+    document: { addEventListener() {}, documentElement: { style: {} }, body: { style: {} } },
+    localStorage: { getItem: () => null, setItem() {} } };
+  ctx2.window = ctx2; ctx2.globalThis = ctx2; vm.createContext(ctx2);
+  try { vm.runInContext(fs.readFileSync(ROOT + 'js/utils.js', 'utf8'), ctx2); } catch (_) {}
+
+  t('30 فبراير يُرفض لا يُدحرَج', ctx2.parseDateLocal('2026-02-30') === null);
+  t('الشهر 13 يُرفض', ctx2.parseDateLocal('2026-13-01') === null);
+  t('والتواريخ الصحيحة تمرّ',
+    ctx2.parseDateLocal('2026-02-28') != null && ctx2.parseDateLocal('2024-02-29') != null,
+    '29 فبراير في سنة كبيسة يجب أن يمرّ');
+
+  const rec = fs.readFileSync(ROOT + 'js/reconcile.js', 'utf8');
+  t('تسامح التسوية يطابق نصّه',
+    /Math\.max\(0\.5, \+tx\.shares \* 0\.01\)/.test(rec)
+    && /Math\.max\(0\.02, \+tx\.price \* 0\.02\)/.test(rec),
+    '7 أسهم × 1.50 ر.س كان تسامحها الفعلي 14.3% والنصّ يعد بـ±1%');
+
+  const pr = fs.readFileSync(ROOT + 'portfolio-rating.html', 'utf8');
+  t('التشتّت المفرط يُخصم كما يُخصم النقص',
+    /effectiveUnits > _sMax \+ 12 \? 1\.5/.test(pr),
+    'أربعون سهماً كانت تنال درجة تنويع كاملة والعنوان يقول «الهدف 12–18»');
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

@@ -118,9 +118,16 @@ function todayISO() {
 // M-6: parse a YYYY-MM-DD string as local midnight — avoids UTC-shift date-off-by-one
 function parseDateLocal(s) {
   if (!s) return null;
-  const [y, m, d] = s.split('-').map(Number);
+  const [y, m, d] = String(s).split('-').map(Number);
   if (!y || !m || !d) return null;
-  return new Date(y, m - 1, d);
+  // ⚠️ الحارس كان يلتقط الصفر وحده لا التجاوز، و`new Date` تدحرج المستحيل
+  // صامتةً: '2026-02-30' ← 2026-03-02 · '2026-13-01' ← 2027-01-01. والتاريخ
+  // يحكم WAC وXIRR وTTM، فانزياحه بلا إنذار يسري إلى كل رقم مبنيٍ عليه.
+  // المسار الواقعي: بيانات مستوردة أو معدّلة مباشرة — لا حقل الإدخال.
+  if (m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(y, m - 1, d);
+  if (dt.getFullYear() !== y || dt.getMonth() !== m - 1 || dt.getDate() !== d) return null;
+  return dt;
 }
 
 // دورية التوزيع — التعريف الوحيد المعتمد في المشروع.

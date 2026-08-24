@@ -5,9 +5,26 @@
 'use strict';
 
 // ── شروحات الكروت (showCardInfo المشتركة في utils.js) ──
+// نسبة سنوات الخسارة وأسوأ سنتين — من المصفوفة نفسها لا من نصّ مكتوب
+function _tasiLossShareTxt() {
+  try {
+    const r = _tasiAnnualReturns();
+    if (!r || !r.length) return 'جزء من سنوات تاسي كانت خسارة';
+    const neg = r.filter(x => x < 0);
+    const worst = [...r].sort((a, b) => a - b).slice(0, 2)
+      .map(v => (v * 100).toFixed(1) + '%');
+    return `${(neg.length / r.length * 100).toFixed(0)}% من سنوات تاسي المرصودة `
+         + `(${neg.length} من ${r.length}) كانت خسارة، أسوأها ${worst.join(' و')}`;
+  } catch (_) { return 'جزء من سنوات تاسي كانت خسارة'; }
+}
+
 window.CARD_INFO = {
   'scenarios': {
     title: '🔮 السيناريوهات الثلاثة',
+    // ⚠️ الأرقام تُشتقّ من `_tasiAnnualReturns()` لا تُثبّت نصّاً. كان النصّ
+    // يقول «30% من سنوات تاسي خسارة» والفعلي من المصفوفة **35%**،
+    // و«−57% في 2008» والفعلي **−55.2%** (لأن المصفوفة تستعمل آخر إغلاق
+    // أسبوعي لا إغلاق نهاية السنة). رقمٌ مكتوب يجمد، والمصدر يتحرّك.
     body: `
       <p>بدل توقّع رقم واحد للمستقبل (وهمٌ مستحيل)، نعرض ثلاثة مسارات للنمو <strong>أساسها معيار تاسي</strong> (نمو سعري ~4.4% للفترة الحديثة 2010-2024، + توزيعاتك).</p>
       <div class="info-math">
@@ -16,7 +33,7 @@ window.CARD_INFO = {
         • <strong>متفائل:</strong> مسقوف بـ<strong>أعلى نافذة سعرية حدثت فعلاً</strong> في تاريخ تاسي على 10–20 سنة — محسوبة من البيانات لا مُرقّمة يدوياً.
       </div>
       <p><strong>لماذا وزن أدائك صغير؟</strong> أداؤك مشتقّ من XIRR على عيّنة قصيرة، وتذبذب تاسي السنوي ~32% يجعل الخطأ المعياري لعائد سنة واحدة ~32 نقطة مئوية — أي أن الرقم شبه كله ضجيج. نستخدم <strong>مُقدِّر انكماش</strong> (Bühlmann): وزنك = العمر ÷ (العمر + 41)، مسقوفاً عند 25%. أداؤك يبقى معروضاً كـ<strong>تشخيص</strong> (هل أنت أعلى أم أدنى من السوق) لا كتنبؤ.</p>
-      <p class="info-note">⚠️ الأعداد على الكروت (<strong>X من N نافذة</strong>) هي <strong>تكرارات لما حدث</strong>، لا احتمالات لما سيحدث: النوافذ متداخلة ومبنية على 21 ملاحظة سنوية فقط، فالعيّنة المستقلة ≈ واحدة ودقّة النسبة ±6 نقاط. والثلاثة كلها تفترض نمواً موجباً بينما <strong>30% من سنوات تاسي كانت خسارة</strong> (−57% في 2008، −52% في 2006) — انظر شريحة «أسوأ من المتحفظ» لمعرفة أين ذهبت بقيّة النوافذ.</p>`
+      <p class="info-note">⚠️ الأعداد على الكروت (<strong>X من N نافذة</strong>) هي <strong>تكرارات لما حدث</strong>، لا احتمالات لما سيحدث: النوافذ متداخلة ومبنية على 21 ملاحظة سنوية فقط، فالعيّنة المستقلة ≈ واحدة ودقّة النسبة ±6 نقاط. والثلاثة كلها تفترض نمواً موجباً بينما <strong>${_tasiLossShareTxt()}</strong> — انظر شريحة «أسوأ من المتحفظ» لمعرفة أين ذهبت بقيّة النوافذ.</p>`
   },
   'forecast-inputs': {
     title: '⚙️ معطيات الإسقاط',
@@ -246,9 +263,28 @@ const SCENARIO_META = [
 ];
 
 // وصف السيناريو مبنيّ على معدّله الفعلي المحسوب + موقعه بين نوافذ تاسي
+// ═════════════════════════════════════════════════════════════════════
+// إجمالي العائد الفعّال — كما يُركّبه المحرّك لا جمعاً بسيطاً
+// ----------------------------------------------------------------------
+// البطاقة والجدول وتفاصيل السيناريو كانت تعرض `capRate + divRate`،
+// والمحرّك يطبّق النمو والتوزيع **ضربياً وشهرياً**:
+//     value *= (1 + نمو/12)  ثم  div = value × توزيع/12  ثم إعادة استثمار
+//
+// مصدرا الفجوة: الحدّ التقاطعي (cap × div) + تركيب التوزيع شهرياً.
+// قياس: نمو 4.4% + توزيع 5.5% ⇒ المعروض **9.90%** والفعلي **10.29%**،
+// وعلى 35 سنة الفرق **13.2%** في القيمة النهائية (7,085,200 مقابل 6,261,049).
+// فالصفحة كانت تعرض معدّلاً ومساراً لا يتّفقان.
+//
+// ⚠️ **المحرّك لا يُمسّ** — هو الأدقّ. المعروض وحده صار يطابقه.
+// ═════════════════════════════════════════════════════════════════════
+function effectiveTotalRate(capRate, divRate) {
+  const c = +capRate || 0, d = +divRate || 0;
+  return (1 + c) * Math.pow(1 + d / 12, 12) - 1;
+}
+
 function _scenarioDesc(key, sc, occ, i) {
   if (!sc) return '';
-  const cap = pct(sc.capRate), div = pct(sc.divRate), tot = pct(sc.capRate + sc.divRate);
+  const cap = pct(sc.capRate), div = pct(sc.divRate), tot = pct(effectiveTotalRate(sc.capRate, sc.divRate));
   const perc = occ?.percentiles?.[i];
   const percTxt = perc != null ? ` — يقع في المئين ${perc} من نوافذ تاسي الطويلة` : '';
   if (key === 'conservative')
@@ -563,7 +599,9 @@ async function loadHistoricalData() {
     // AUDIT-FIX 2026-08-21 (#44): كان الافتراض «1 يونيو» يُقحم شهراً مخترعاً على
     // توزيعة معلومة الشهر. التعريف الموحَّد في utils.js/dividendFlowDate.
     const dDate = dividendFlowDate(d, today);
-    if (dDate) xirrFlows.push({ date: dDate, amount: +d.amount });
+    // `_kind` يميّز تدفّق التوزيع عن تدفّق الشراء/البيع، ليُشتقّ
+    // النمو السعري من الثاني وحده (انظر `_priceXirr` أدناه).
+    if (dDate) xirrFlows.push({ date: dDate, amount: +d.amount, _kind: 'div' });
   });
   if (currentValue > 0) xirrFlows.push({ date: new Date(), amount: currentValue });
 
@@ -619,7 +657,14 @@ async function loadHistoricalData() {
   const fwdOk        = fwdIncome.total > 0 && currentValue > 0;
   const divYieldSource = fwdOk ? 'forward' : 'historical';
   const annDivYield  = fwdOk ? (fwdIncome.total / currentValue) : ttmDivYield;
+  // ⚠️ القصّ يُعلَن: عائدٌ يتجاوز 15% يعني خطأ بيانات أو حيازة صغيرة
+  // بتوزيع كبير — وكان يُقصّ بلا أي وسم، ثم يُعرض بشارة خضراء
+  // «✓ forward من حيازاتك» كأنه رقم مُتحقَّق منه. وعائد 14.7% على محفظة
+  // توزيعات سعودية رقم يستوجب مراجعة لا تمريراً (م.20).
+  const DIV_YIELD_SANE = 0.09;    // عتبة المراجعة لا القصّ
   const safeDivYield = Math.min(0.15, Math.max(0, annDivYield));
+  const divYieldClamped = annDivYield > 0.15;
+  const divYieldSuspect = annDivYield > DIV_YIELD_SANE;
   // العائد المستخدم في تفكيك XIRR يبقى التاريخي عمداً: التوزيعات الداخلة في
   // XIRR هي المستلمة فعلاً، فطرح عائد forward منها يبخس نمو السعر بلا مبرر.
   const safeTtmDivYield = Math.min(0.15, Math.max(0, ttmDivYield));
@@ -633,9 +678,34 @@ async function loadHistoricalData() {
   const xirrRate = xirrResult != null ? xirrResult / 100 : null;
   // H-8: floor lowered from 2% → -5% so truly negative portfolios are not masked.
   // The cap of 40% prevents unrealistic runaway projections.
+  // ══════════════════════════════════════════════════════════════════════
+  // النمو السعري = XIRR على تدفّقات **الشراء والبيع وحدها**
+  // ----------------------------------------------------------------------
+  // كان `xirrRate − safeTtmDivYield`: طرحُ عائدٍ **نقطيّ** (توزيعات 12 شهراً
+  // ÷ قيمة **اليوم**) من عائدٍ **كلّي مرجَّح بالمال على عمر المحفظة كله**.
+  // مقياسان مختلفان لا يُطرح أحدهما من الآخر: في محفظة نامية يكون مقام
+  // العائد النقطي أكبر من رأس المال الذي جنى تلك التوزيعات، فيُطرَح أقلّ
+  // مما يجب ويبقى جزءٌ من عائد التوزيع داخل «النمو السعري».
+  //
+  // قياس على محفظة نموها السعري 5.000% بالضبط وتوزيعها ربعي 1%:
+  //   آخر ضخّ قبل شهر   ⇒ الطرح 5.850%   ·   الصحيح 4.996%   (+0.85 نقطة)
+  //   آخر ضخّ قبل 6 أشهر ⇒ الطرح 5.562%   ·   الصحيح 4.996%   (+0.56)
+  //
+  // أثره اليوم محدود لأن وزن أدائك في المزج 4.75%، لكنه يبلغ ~21 نقطة أساس
+  // عند السقف 25% ⇒ ~7.5% في القيمة النهائية على 35 سنة. والرقم يُصدَّر
+  // حرفياً في CSV وفي سياق كل خطة محفوظة.
+  //
+  // العلاج: XIRR ثانٍ على الشراء والبيع + القيمة الحالية، بلا توزيعات —
+  // وهو تعريف money-weighted price return. المدخلات كلها متاحة أصلاً.
+  // ══════════════════════════════════════════════════════════════════════
+  const priceFlows = xirrFlows.filter(f => f._kind !== 'div');
+  const _priceXirr = (() => {
+    try { const x = computeXIRR(priceFlows); return (typeof x === 'number' && isFinite(x)) ? x / 100 : null; }
+    catch (_) { return null; }
+  })();
   const annCapGrowth = Math.min(0.40, Math.max(-0.05,
-    xirrRate != null
-      ? xirrRate - safeTtmDivYield   // نمو السعر فقط = XIRR − العائد التاريخي المُحقَّق
+    _priceXirr != null ? _priceXirr
+      : xirrRate != null ? xirrRate - safeTtmDivYield   // احتياطي: أفضل المتاح
       : rawCapGrowth
   ));
 
@@ -644,10 +714,22 @@ async function loadHistoricalData() {
   const depositRows       = cfRows.filter(e => e.type==='deposit');
   const totalDeposited    = depositRows.reduce((s,e) => s + +e.amount, 0);
   const firstDepositStr   = depositRows.filter(e => e.date).map(e => e.date).sort()[0] || null;
+  // ⚠️ إيداعٌ واحد ليس **معدّل ضخّ**. أرضية `0.5` كانت تقسم إيداعاً
+  // مقطوعاً على ستة أشهر فيظهر نمطاً شهرياً: محفظة عمرها شهران
+  // وإيداع 230,000 ⇒ **38,333 ر.س/شهر**، ثم تُبذَر فترة DCA مدتها خمس
+  // سنوات = **2,300,000 ر.س ضخّ لم يقرّه المالك** — عشرة أضعاف المحفظة،
+  // تدخل الرسم والجدول والهدف ومونتي كارلو.
+  //
+  // م.20: لا يُستنتج معدّل دوري من ملاحظة واحدة — يُعلَن «غير متوفر».
+  // الشرط: ثلاثة إيداعات فأكثر **و** مدى إيداعات لا يقلّ عن سنة.
   const depositYears      = firstDepositStr
-    ? Math.max(0.5, (today - parseDateLocal(firstDepositStr)) / (365.25 * 86400000))
+    ? Math.max(1, (today - parseDateLocal(firstDepositStr)) / (365.25 * 86400000))
     : yearsActive;
-  const avgMonthlyDeposit = depositYears > 0 ? totalDeposited / (depositYears * 12) : 0;
+  const _depositEvidence  = depositRows.length >= 3 && depositYears >= 1;
+  const avgMonthlyDeposit = (_depositEvidence && depositYears > 0)
+    ? totalDeposited / (depositYears * 12) : 0;
+  const avgDepositBasis   = _depositEvidence ? 'measured'
+    : (depositRows.length ? 'insufficient' : 'none');
 
   // ══════════════════════════════════════════════════════════════════════
   // عمر رأس المال المرجَّح بالتدفقات (Capital-Weighted Age)
@@ -768,11 +850,12 @@ async function loadHistoricalData() {
     marketBenchmark: MARKET_CAP_BENCHMARK,  // الأساس
     safeDivYield, avgAnnualDiv,
     divYieldSource,                        // 'forward' | 'historical'
+    divYieldClamped, divYieldSuspect, divYieldRaw: annDivYield,
     fwdAnnualIncome: fwdIncome.total,
     fwdCovered:      fwdIncome.breakdown.filter(b => !b.isStale).length,
     fwdStale:        fwdIncome.stale.length,
     ttmDivYield:     safeTtmDivYield,
-    avgMonthlyDeposit, totalDivAll,
+    avgMonthlyDeposit, avgDepositBasis, depositCount: depositRows.length, totalDivAll,
     totalBuys, totalSells,
     yearsActive, firstDate,
     capitalWeightedMonths,
@@ -826,7 +909,8 @@ function buildScenarios(divOverride) {
   // المتحفّظ يُرسى على «الطرف المنخفض للسوق» (ارتداد للمتوسط) لا على أداء الفرد
   // المرتفع — فمحفظة حقّقت 11% لن تكرّرها 35 سنة؛ الافتراض الحذر هو عودتها للسوق.
   //   • متحفّظ   ≈ 2.4% سعري + توزيعات مخفّضة (≈5% إجمالي) — كامل-دورة تاسي
-  //   • متفائل  = عقد جيّد واقعي (≈11% إجمالي)
+  //   • متفائل  = مسقوف بـ`tasiWindowExtremes().max` — محسوب من البيانات لا
+  //     مُرقّماً هنا. (كان مكتوباً «≈11% إجمالي» والفعلي 6.25% سعري + التوزيع.)
   // (أُزيل «الاستثنائي»: نمو سعري 9.5%+ على 10-20 سنة لم يحدث في تاريخ تاسي)
   const MARKET_LOW = Math.max(0, MARKET_CAP_BENCHMARK - 0.02);   // ~2.4% — قاع تاسي طويل المدى الواقعي
   // سقف المتفائل = أعلى نافذة سعرية فعلية في تاريخ تاسي (10/15/20 سنة)،
@@ -840,7 +924,10 @@ function buildScenarios(divOverride) {
   _scenarios = [
     { key:'conservative',
       capRate: Math.max(0, Math.min(base * 0.8, MARKET_LOW)),
-      divRate: Math.max(0.01, div * 0.80) },
+      // الأرضية المطلقة 1% كانت ترفع توزيع «المتحفّظ» فوق «المعتدل»
+      // عند عائد دون 1.25%: بإدخال 0.5% تخرج cons 1.00% و base 0.50%.
+      // السقف يلغي الزيادة ولا يقلب الترتيب — نفس علاج السطر المتفائل.
+      divRate: Math.min(div, Math.max(0.01, div * 0.80)) },
     { key:'base',
       capRate: base,
       divRate: div },
@@ -958,7 +1045,7 @@ function runForecast() {
 
   // عائد الأرباح: يدوي إذا أدخله المستخدم، وإلا من البيانات الفعلية
   const divYieldOverride = parseFloat(document.getElementById('inp-div-yield').value);
-  const divYieldToUse    = (!isNaN(divYieldOverride) && divYieldOverride > 0)
+  const divYieldToUse    = (Number.isFinite(divYieldOverride) && divYieldOverride >= 0)
     ? divYieldOverride / 100
     : _hist.safeDivYield;
 
@@ -1168,7 +1255,7 @@ function runMonteCarlo() {
   const goalAmount   = parseFloat(document.getElementById('inp-goal-amount').value) || 0;
 
   const divYieldOverride = parseFloat(document.getElementById('inp-div-yield').value);
-  const divYield = (!isNaN(divYieldOverride) && divYieldOverride > 0)
+  const divYield = (Number.isFinite(divYieldOverride) && divYieldOverride >= 0)
     ? divYieldOverride / 100 : _hist.safeDivYield;
 
   // جدول DCA الشهري — يُطبَّق شهرياً (كان يُجمَّع سنوياً دفعة واحدة فينحاز
@@ -1308,10 +1395,16 @@ function _renderMonteCarlo(r) {
   if (r.wd?.enabled && r.survivalPct != null) {
     const st  = r.survivalPct >= 90 ? 'good' : r.survivalPct >= 75 ? 'warn' : 'bad';
     const col = `var(--st-${st})`;
+    // ⚠️ «بقوة شراء اليوم» صحيحة **فقط** عند تفعيل الرفع بالتضخم: حينها
+    // يُرفَع المبلغ بـ(1+i)^أفق فيحافظ على قوّته. ومع إطفائه يكون مبلغاً
+    // اسمياً ثابتاً عند التقاعد — فكان النصّ يقول الوصفين معاً وهما نقيضان.
+    // بأفق 20 سنة الفرق ×1.025²⁰ = **1.64 ضعف** في القوة الشرائية الفعلية.
     const wTxt = r.wd.mode === 'amount'
-      ? `سحب ${fmt(r.wd.monthly)}/شهر بقوة شراء اليوم`
+      ? (r.wd.inflate
+          ? `سحب ${fmt(r.wd.monthly)}/شهر بقوة شراء اليوم`
+          : `سحب ${fmt(r.wd.monthly)}/شهر مبلغاً اسمياً ثابتاً عند ${r.retireCalYear}`)
       : `سحب ${(r.wd.rate * 100).toFixed(1)}% سنوياً من قيمة المحفظة عند التقاعد`;
-    const inflTxt = r.wd.inflate ? ' مرفوعاً بالتضخم كل سنة' : ' بمبلغ اسمي ثابت';
+    const inflTxt = r.wd.inflate ? ' مرفوعاً بالتضخم كل سنة' : '';
     const depTxt = (r.depP10 === Infinity || r.depP10 == null)
       ? 'حتى في أسوأ 10% من المسارات لم تنفد المحفظة قبل النهاية.'
       : `في أسوأ 10% من المسارات ينفد المال بعد <b>${r.depP10} سنة</b> من التقاعد — أي حوالي عام <b>${r.retireCalYear + r.depP10}</b>.`;
@@ -1838,7 +1931,7 @@ function renderSavedPlanView(id) {
       <td>${esc(_scenLabel(s.key))}${chosen ? ' ✓' : ''}</td>
       <td class="num">${pct(s.capRate)}</td>
       <td class="num">${pct(s.divRate)}</td>
-      <td class="num">${pct(s.capRate + s.divRate)}</td>
+      <td class="num">${pct(effectiveTotalRate(s.capRate, s.divRate))}</td>
     </tr>`;
   }).join('');
 
@@ -2221,7 +2314,7 @@ function exportPlanToPDF(planId) {
     .map(s => `<tr${s.key === p.inp.scenarioKey ? ' class="pr-strong"' : ''}>
         <td>${esc(_scenLabel(s.key))}${s.key === p.inp.scenarioKey ? ' ✓ (المعتمد)' : ''}</td>
         <td class="pr-n">${pct(s.capRate)}</td><td class="pr-n">${pct(s.divRate)}</td>
-        <td class="pr-n">${pct(s.capRate + s.divRate)}</td>
+        <td class="pr-n">${pct(effectiveTotalRate(s.capRate, s.divRate))}</td>
       </tr>`).join('');
 
   const pathRows = _planReportRows(p);
@@ -2538,7 +2631,14 @@ function renderHistSummary() {
       title="${fwdOk
         ? `forward = الدخل السنوي المتوقَّع من حيازاتك (${fmt(h.fwdAnnualIncome)}) ÷ القيمة السوقية الحالية.&#10;بسط ومقام كلاهما «الآن» — التعريف القياسي.&#10;مغطّى: ${h.fwdCovered} رمز${h.fwdStale ? ` · مُستبعَد لانقطاع التوزيع: ${h.fwdStale}` : ''}`
         : `تقديري: لا يمكن حساب الدخل المتوقَّع (لا توزيعات مسجّلة كافية) — الرقم = توزيعات آخر 12 شهراً ÷ قيمة اليوم، وهو يبخس العائد في محفظة نامية.`}">
-      ${fwdOk ? '✓ forward من حيازاتك' : '⚠️ تاريخي (تقديري)'}</span>`;
+      ${fwdOk ? '✓ forward من حيازاتك' : '⚠️ تاريخي (تقديري)'}</span>`
+    + (h.divYieldSuspect
+        ? ` <span style="font-size:0.63rem;color:var(--st-warn)"
+            title="${h.divYieldClamped
+              ? `الرقم الخام ${pct(h.divYieldRaw)} قُصَّ إلى 15% — والقصّ يُعلَن ولا يُبتلع (م.20).`
+              : ''}عائد توزيعات فوق ${pct(0.09)} على محفظة سعودية رقمٌ يستوجب مراجعة: قد يكون توزيعاً استثنائياً أو خطأ إدخال أو حيازة صغيرة بتوزيع كبير. وهو يقود «الدخل الشهري في 2045» أي هدفك المعلن.">
+            ⚠️ راجِعه${h.divYieldClamped ? ' · مقصوص' : ''}</span>`
+        : '');
 
   // `core` = يدخل الإسقاط فعلاً ⇒ يبقى ظاهراً. البقية سياق تاريخي يُطوى
   // (نفضة 2026-08-23): عشرة أرقام في صفّ واحد تُخفي الأربعة التي تقود الرقم.
@@ -2551,7 +2651,9 @@ function renderHistSummary() {
     { val: fwdOk ? fmt(h.fwdAnnualIncome) : '—', lbl: 'الدخل السنوي المتوقَّع (forward)' },
     { val: fmt(h.avgAnnualDiv),           lbl: 'توزيعات آخر 12 شهراً (فعلية)' },
     { val: fmt(h.totalDivAll),            lbl: 'إجمالي الأرباح المتراكمة' },
-    { val: fmt(h.avgMonthlyDeposit),      lbl: 'متوسط الإضافة الشهرية' },
+    { val: h.avgDepositBasis === 'measured' ? fmt(h.avgMonthlyDeposit)
+           : `<span class="text-muted" title="يلزم ثلاثة إيداعات فأكثر على مدى سنة فأطول لاستنتاج معدّل شهري — والمسجّل ${h.depositCount || 0} (م.20)">—</span>`,
+      lbl: 'متوسط الإضافة الشهرية', raw: h.avgDepositBasis !== 'measured' },
     { val: String(h.holdingsCount),       lbl: 'عدد الأسهم' },
   ];
 
@@ -2852,7 +2954,7 @@ function renderScenarioCards() {
       <div class="sc-rates">
         <div class="sc-rate-row"><span class="label">نمو رأس المال/سنة</span><span class="val" style="color:${m.color}">${pct(sc.capRate)}</span></div>
         <div class="sc-rate-row"><span class="label">عائد الأرباح/سنة</span><span class="val" style="color:${m.color}">${pct(sc.divRate)}</span></div>
-        <div class="sc-rate-row"><span class="label">إجمالي العائد/سنة</span><span class="val" style="color:${m.color}">${pct(sc.capRate + sc.divRate)}</span></div>
+        <div class="sc-rate-row"><span class="label">إجمالي العائد/سنة</span><span class="val" style="color:${m.color}" title="العائد الفعّال كما يركّبه المحرّك: (1+نمو) × (1+توزيع/12)^12 − 1 — لا جمعاً بسيطاً">${pct(effectiveTotalRate(sc.capRate, sc.divRate))}</span></div>
       </div>
     </div>`;
   }).join('');
@@ -2948,7 +3050,7 @@ function renderCardsView(horizonYears) {
       }).join('');
       return `<div class="sc-value-card" style="border-color:${meta.color}40">
         <div class="cv-header" style="color:${meta.color}">${meta.emoji} ${meta.name}
-          <span style="font-weight:400;color:var(--text-2);font-size:0.72rem;margin-right:6px">${pct(p.scenario.capRate + p.scenario.divRate)} / سنة</span>
+          <span style="font-weight:400;color:var(--text-2);font-size:0.72rem;margin-right:6px">${pct(effectiveTotalRate(p.scenario.capRate, p.scenario.divRate))} / سنة</span>
         </div>
         ${rows}
       </div>`;
@@ -3337,6 +3439,7 @@ function renderScenarioDetail(horizonYears) {
   // ── تفكيك القيمة النهائية ────────────────────────────────────────
   const endYourCap    = end?.yourCapital  || 0;
   const endDivCum     = end?.cumDiv       || 0;
+  const reinvestOn    = document.getElementById('inp-reinvest')?.checked !== false;
   const endPriceGrow  = end?.priceGrowth  || 0;
   const endVal        = end?.value        || 0;
   const multiplier    = endYourCap > 0 ? endVal / endYourCap : 0;
@@ -3351,7 +3454,7 @@ function renderScenarioDetail(horizonYears) {
   const items = [
     { val: pct(sc.capRate),                      lbl: 'نمو رأس المال / سنة' },
     { val: pct(sc.divRate),                      lbl: 'عائد الأرباح / سنة' },
-    { val: pct(sc.capRate + sc.divRate),         lbl: 'إجمالي العائد / سنة' },
+    { val: pct(effectiveTotalRate(sc.capRate, sc.divRate)), lbl: 'إجمالي العائد / سنة (فعّال)' },
     { val: y5  ? fmt(y5.value)                  : '—', lbl: 'القيمة بعد 5 سنوات' },
     { val: y5  ? fmt(y5.monthlyIncome)          : '—', lbl: 'دخل شهري (5 سنوات)' },
     { val: y10 ? fmt(y10.value)                 : '—', lbl: 'القيمة بعد 10 سنوات' },
@@ -3375,8 +3478,15 @@ function renderScenarioDetail(horizonYears) {
     { val: end  ? fmt(end.cumDiv)              : '—', lbl: 'إجمالي الأرباح الموزعة التراكمية' },
     // ── التفكيك: فلوسك مقابل نمو السوق
     { val: end  ? fmt(endYourCap)              : '—', lbl: '💰 رأس مالك المُضاف (مدخراتك الفعلية)' },
-    { val: end && endDivCum > 0 ? fmt(endDivCum) : '—', lbl: '📈 أرباح معاد استثمارها (مجانية)' },
+    // ⚠️ الوسم يتبع **الإعداد الفعلي**: مع إطفاء إعادة الاستثمار كانت
+    // 1,835,089 ر.س تُعرض «معاد استثمارها» وهي خرجت من المحفظة، ومجموع
+    // التفكيك يتجاوز القيمة النهائية بـ1.84 مليون (5,419,206 مقابل 3,584,117).
+    { val: end && endDivCum > 0 ? fmt(endDivCum) : '—',
+      lbl: reinvestOn ? '📈 أرباح معاد استثمارها (مجانية)'
+                      : '💵 توزيعات مستلمة نقداً (خارج المحفظة)' },
     { val: end  ? fmt(endPriceGrow)            : '—', lbl: '🚀 نمو السعر الصافي (عمل السوق لك)' },
+    ...(!reinvestOn && end ? [{ val: fmt((+end.value || 0) + endDivCum),
+      lbl: 'القيمة + التوزيعات المستلمة (حتى يجمع التفكيك)' }] : []),
     { val: end && multiplier > 0 ? `×${multiplier.toFixed(1)}` : '—', lbl: 'مضاعف رأس مالك (كل ريال أصبح ×N)' },
   ];
 
@@ -3461,7 +3571,7 @@ function exportForecastCSV() {
   rows.push(['السيناريو', 'نمو رأس المال', 'عائد الأرباح', 'إجمالي العائد', 'عدد النوافذ', 'من أصل', 'المئين']);
   SCENARIO_META.forEach((m, i) => {
     const s = _scenarios[i];
-    rows.push([m.name, pctv(s.capRate), pctv(s.divRate), pctv(s.capRate + s.divRate),
+    rows.push([m.name, pctv(s.capRate), pctv(s.divRate), pctv(effectiveTotalRate(s.capRate, s.divRate)),
                occ.counts[i], occ.windows, occ.percentiles[i]]);
   });
   rows.push(['نوافذ أسوأ من «المتحفظ» (لا يغطّيها أي سيناريو)', occ.belowCount, occ.windows]);
