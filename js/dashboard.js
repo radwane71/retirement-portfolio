@@ -293,8 +293,15 @@ function startPriceAutoRefresh() {
 
 // ── إعادة رسم موحّدة لكل الكروت (AUDIT-FIX 2026-08: كانت كل نقطة تعديل
 // تعيد رسم قائمة جزئية مختلفة — القائمة الكاملة هنا واحدة للجميع) ──────
+// الخطة تُقرأ مرة واحدة عند الإقلاع، ثم يرسمها renderAllCards مع البقية
+async function initPlanGoalStrip() {
+  _dashPlan = await loadDashPlan();
+  renderPlanGoalStrip();
+}
+
 function renderAllCards() {
   renderStats();
+  renderPlanGoalStrip();
   renderPortfolioHealthCard();
   renderDiversificationCard();
   renderCharts();
@@ -313,6 +320,7 @@ async function init() {
   _loadPriceTimestamps();   // ← حمّل آخر تواريخ تحديث الأسعار
   await loadAllData();
   renderAllCards();
+  initPlanGoalStrip();          // لا نُوقِف اللوحة على قراءة الخطة — ترسم نفسها متى وصلت
   applyReliabilityBadges();
   startPriceAutoRefresh();
 
@@ -3350,6 +3358,94 @@ function setBreakevenMode(mode) {
     }
   });
   renderBreakEvenCard();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// شريط الخطة المحفوظة — «الهدف ده، بالتاريخ ده»
+// ----------------------------------------------------------------------
+// الخطة تُحفَظ في الرؤية المستقبلية ثم لا تُرى إلا هناك. وأول ما تفتحه كل
+// يوم هو هذه اللوحة، فيغيب عنها الرقم الذي تُبنى عليه بقية الأرقام.
+//
+// وقياس التقدّم هنا **مقابل مسار الخطة نفسها لا مقابل الهدف البعيد**:
+// نسبةُ اليوم من هدف 2045 تقول «أنت عند 18%» وهي بلا معنى — التركيب يفعل
+// معظم العمل في السنوات الأخيرة، فالرقم يبدو متأخراً دائماً وهو في موعده.
+// الخطة تحفظ مسارها السنوي، فنقارنك بما توقّعته هي **لهذه السنة**.
+const DASH_PLANS_KEY = 'forecast_plans_v1';
+let _dashPlan = null;
+
+async function loadDashPlan() {
+  try {
+    const rows = await loadUserSetting(DASH_PLANS_KEY);
+    if (!Array.isArray(rows) || !rows.length) return null;
+    // لا نثق بترتيبة التخزين — الأحدث بالتاريخ لا بالموضع
+    const sorted = rows.slice().sort((a, b) => {
+      const ta = Date.parse(b.createdISO || 0) || +b.id || 0;
+      const tb = Date.parse(a.createdISO || 0) || +a.id || 0;
+      return ta - tb;
+    });
+    return sorted[0] || null;
+  } catch (_) { return null; }
+}
+
+function renderPlanGoalStrip() {
+  const el = document.getElementById('plan-goal-strip');
+  if (!el) return;
+  const p = _dashPlan;
+  if (!p || !p.inp) { el.style.display = 'none'; return; }
+  el.style.display = '';
+
+  const inp = p.inp || {};
+  const isIncome = inp.goalType === 'monthly_income';
+  const goalAmt  = +inp.goalAmount || 0;
+  const years    = +inp.horizonYears || 0;
+  const baseYear = +p.baseYear || (new Date(p.createdISO || Date.now())).getFullYear();
+  const targetYear = baseYear + years;
+  const now = new Date();
+  const elapsed = Math.max(0, now.getFullYear() - baseYear);
+  const left = Math.max(0, targetYear - now.getFullYear());
+
+  // ما توقّعته الخطة لهذه السنة — من مسارها المحفوظ
+  const path = Array.isArray(p.path) ? p.path : [];
+  const due  = path.find(s => +s.year === elapsed) || null;
+  // نفس مصدر بطاقة «إجمالي قيمة المحفظة» أعلاه: أسهم + نقد — وإلا قارنّا رقمين مختلفين
+  const have = (Array.isArray(holdings) && holdings.length)
+    ? holdings.reduce((a, h) => a + (+h.shares) * (+h.current_price), 0) + (+portfolioCash || 0)
+    : null;
+
+  let track = '';
+  if (due && due.value > 0 && have != null) {
+    const r = have / due.value;
+    const off = Math.abs(r - 1) * 100;
+    const [ic, col, txt] = r >= 0.98 ? ['🟢', 'var(--st-good,#22c55e)', 'في موعدها']
+      : r >= 0.90 ? ['🟡', 'var(--st-warn,#f59e0b)', `متأخّرة ${off.toFixed(0)}%`]
+      : ['🔴', 'var(--st-bad,#ef4444)', `متأخّرة ${off.toFixed(0)}%`];
+    track = `<span style="color:${col}" title="الخطة توقّعت ${formatSAR(due.value)} لسنة ${baseYear + elapsed}؛ عندك ${formatSAR(have)}">`
+          + `${ic} ${txt}</span>`;
+  } else if (have != null && !due) {
+    track = `<span class="text-muted" title="مسار الخطة لا يغطّي هذه السنة">— لا مقارنة لهذه السنة</span>`;
+  }
+
+  const goalTxt = isIncome
+    ? `<strong>${formatSAR(goalAmt)}</strong> شهرياً`
+    : `<strong>${formatSAR(goalAmt)}</strong>`;
+  const pmtTxt = p.alreadyReached ? 'لا حاجة لضخ'
+    : (p.requiredPMT == null || p.impossible) ? '—'
+    : `${formatSAR(p.requiredPMT)} / شهر`;
+
+  el.innerHTML =
+      `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">`
+    + `<span style="font-size:1.05rem">🎯</span>`
+    + `<span><strong>خطتك المحفوظة</strong>${p.notes ? ` · ${esc(p.notes)}` : ''}</span>`
+    + `<span class="text-muted" style="font-size:.78rem">${esc(p.date || '')}</span>`
+    + `<span style="flex:1"></span>`
+    + `<a href="forecast.html#plans" style="font-size:.8rem;color:var(--accent);text-decoration:none">الرؤية المستقبلية ←</a>`
+    + `</div>`
+    + `<div style="margin-top:6px;display:flex;gap:18px;flex-wrap:wrap;font-size:.88rem;line-height:1.9">`
+    + `<span>الهدف: ${goalTxt} <span class="text-muted">بحلول</span> <strong>${targetYear}</strong>`
+    + `<span class="text-muted"> (${left} سنة)</span></span>`
+    + `<span><span class="text-muted">الضخ المطلوب:</span> <strong>${pmtTxt}</strong></span>`
+    + (track ? `<span>${track}</span>` : '')
+    + `</div>`;
 }
 
 function renderBreakEvenCard() {

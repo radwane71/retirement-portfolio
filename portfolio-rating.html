@@ -133,6 +133,19 @@
       </div>
     </div>
 
+    <!-- ══ درجة الملحق (ب) — محسوبة من البيانات لا مُدخَلة ══ -->
+    <div class="card" id="apxb-card" style="margin-bottom:18px">
+      <div class="section-header">
+        <span class="section-title">📐 درجة تقييم المحفظة — منهجية الملحق (ب)</span>
+        <button class="info-btn" type="button" onclick="showAppendixBInfo()">ⓘ</button>
+      </div>
+      <div id="apxb-body">
+        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ الحساب…</p></div>
+      </div>
+    </div>
+
+    <div class="dash-divider" style="margin-bottom:12px">أداةٌ أخرى — استبيان أمان المحفظة (مدخلاتٌ يدوية، لا علاقة له بدرجة الملحق ب)</div>
+
     <div class="rating-layout">
     <!-- عمود اليمين: النموذج -->
     <div class="rating-form-col">
@@ -304,6 +317,7 @@
   <script src="js/constitution.js?v=20260824y"></script>
   <script src="js/constitution-data.js?v=20260824y"></script>
   <script src="js/tadawul-data.js?v=20260824y"></script>
+  <script src="js/appendix-b.js?v=20260824z"></script>
   <script src="js/declutter.js?v=20260824y"></script>
   <script src="js/navtoggle.js?v=20260824y"></script>
   <script>
@@ -720,7 +734,160 @@
       el.addEventListener('change', () => updateResults(true));
     });
 
+
+    // ══════════════════════════════════════════════════════════════════
+    // درجة الملحق (ب) — تُحسب من البيانات، ولا تُدخَل يدوياً
+    // ══════════════════════════════════════════════════════════════════
+    const APX_VAL_KEY = 'valuation_history_v1';
+
+    async function renderAppendixB() {
+      const el = document.getElementById('apxb-body');
+      if (!el) return;
+      el.innerHTML = '<div class="empty-state"><div class="icon">⏳</div><p>جارٍ القراءة…</p></div>';
+
+      const [rH, rTx] = await Promise.all([
+        supabaseClient.from('holdings').select('*'),
+        supabaseClient.from('transactions').select('*').order('date'),
+      ]);
+      if (rH.error) { el.innerHTML = noteHtml('⚠️', 'تعذّر قراءة الحيازات.'); return; }
+
+      const holds = rH.data || [];
+      const rows = holds.map(h => {
+        const price  = +h.current_price || 0;
+        const shares = +h.shares || 0;
+        // العائد الجاري: التوزيع السنوي من ملفات تداول ÷ السعر (م.2)
+        const dps = (typeof tdLatest === 'function') ? tdLatest(String(h.ticker), 'dps') : null;
+        return {
+          ticker: String(h.ticker || '').trim(),
+          sector: h.sector || 'غير مصنّف',
+          value:  shares * price,
+          yieldPct: (dps > 0 && price > 0) ? (dps / price * 100) : null,
+        };
+      }).filter(r => r.ticker && r.value > 0);
+
+      // صفقات الدخول — بنفس حرّاس تبويب «التسعير عند الدخول»
+      const entryRows = await apxBuildEntryRows(rTx.error ? [] : (rTx.data || []));
+
+      const res = computeAppendixB(rows, entryRows);
+      const fmt1 = v => (v == null ? '—' : (+v).toFixed(1));
+
+      const bar = (v, max) => {
+        const pct = (max > 0 && v != null) ? Math.max(0, Math.min(100, v / max * 100)) : 0;
+        const col = pct >= 80 ? 'var(--st-good,#22c55e)' : pct >= 55 ? 'var(--st-warn,#f59e0b)' : 'var(--st-bad,#ef4444)';
+        return `<div style="background:var(--bg-3,#22272e);border-radius:4px;height:7px;overflow:hidden">`
+             + `<div style="width:${pct}%;height:100%;background:${col}"></div></div>`;
+      };
+
+      const rowsHtml = res.parts.map(p => `
+        <tr>
+          <td><strong>${esc(p.label)}</strong>
+              <div class="text-muted" style="font-size:.72rem">${esc(p.art)} · وزن ${(p.weight * 100).toFixed(0)}%</div></td>
+          <td style="min-width:130px">${esc(p.detail || '—')}
+              ${p.coveredPct != null && p.coveredPct < 99
+                ? `<div class="text-muted" style="font-size:.72rem">تغطية ${p.coveredPct.toFixed(0)}% من قيمة المحفظة</div>` : ''}
+              ${p.missing ? `<div class="text-muted" style="font-size:.72rem">مستبعَد: ${p.missing}${
+                  p.missingTickers && p.missingTickers.length ? ' (' + esc(p.missingTickers.slice(0, 6).join('، ')) + ')' : ''}</div>` : ''}</td>
+          <td style="width:120px">${p.assessed ? bar(p.points, p.maxPoints) : '<span class="text-muted">غير مُقيَّم</span>'}</td>
+          <td style="text-align:left;white-space:nowrap">
+            ${p.assessed ? `<strong>${fmt1(p.points)}</strong> <span class="text-muted">/ ${fmt1(p.maxPoints)}</span>` : '—'}
+          </td>
+          <td><button class="info-btn" type="button" title="${esc(p.why || '')}">ⓘ</button></td>
+        </tr>`).join('');
+
+      const diff = (res.score != null) ? res.score - res.recorded : null;
+
+      el.innerHTML =
+          `<div style="display:flex;gap:24px;align-items:baseline;flex-wrap:wrap;margin-bottom:10px">`
+        + `<div><div class="text-muted" style="font-size:.78rem">المحسوبة من بياناتك</div>`
+        + `<div style="font-size:2.1rem;font-weight:700">${fmt1(res.score)}<span class="text-muted" style="font-size:1rem"> / 10</span></div></div>`
+        + `<div><div class="text-muted" style="font-size:.78rem">المسجَّلة في الدستور</div>`
+        + `<div style="font-size:1.4rem;font-weight:600" class="text-muted">${res.recorded} / 10</div></div>`
+        + (diff != null
+            ? `<div><div class="text-muted" style="font-size:.78rem">الفارق</div>`
+              + `<div style="font-size:1.4rem;font-weight:600;color:${diff >= 0 ? 'var(--st-good,#22c55e)' : 'var(--st-bad,#ef4444)'}">`
+              + `${diff >= 0 ? '+' : ''}${fmt1(diff)}</div></div>`
+            : '')
+        + `</div>`
+        + noteHtml('📐',
+            `<strong>هذه الدرجة قياسٌ لا مكافأة (م.38).</strong> تُحسب من حيازاتك وملفات تداول `
+          + `وسجلّ التقييمات، ولا تُدخَل يدوياً ولا تُكتب في الدستور.`
+          + (res.unassessed.length
+              ? `<br>⚠️ غير مُقيَّم: <strong>${esc(res.unassessed.join('، '))}</strong> — `
+                + `خرجت من البسط والمقام معاً، والدرجة مقنَّنة على ${res.weighedPct.toFixed(0)}% من الأوزان. `
+                + `الغياب ليس صفراً (م.20).`
+              : '')
+          + (diff != null && Math.abs(diff) >= 0.1
+              ? `<br>الفارق عن الرقم المسجَّل يُعرض ولا يُبتلع. وتعديل الدستور قرارك وحدك (م.73).`
+              : ''))
+        + `<div class="table-wrapper" style="margin-top:10px"><table>`
+        + `<thead><tr><th>البُعد</th><th>القياس</th><th>الدرجة</th><th>النقاط</th><th></th></tr></thead>`
+        + `<tbody>${rowsHtml}</tbody></table></div>`;
+    }
+
+    // صفقات الدخول: نفس حرّاس تبويب «التسعير عند الدخول» — مرجع السنة
+    // السابقة (لا استشراف)، واستبعاد ما يعبر تجزئة (م.22)، وكل صفقة على حدة.
+    async function apxBuildEntryRows(tx) {
+      let hist = null;
+      try { hist = await loadUserSetting(APX_VAL_KEY); } catch (_) { hist = null; }
+      if (!Array.isArray(hist) || !hist.length || !Array.isArray(tx) || !tx.length) return [];
+
+      const byTk = {};
+      hist.forEach(e => {
+        const tk = String(e?.inputs?.ticker || '').trim().toUpperCase();
+        const ts = (typeof valEntryStamp === 'function') ? valEntryStamp(e) : null;
+        const fv = (e.results?.fairValueAvg != null && isFinite(+e.results.fairValueAvg) && +e.results.fairValueAvg > 0)
+          ? +e.results.fairValueAvg : null;
+        if (!tk || !ts || fv == null) return;
+        const y = new Date(ts).getFullYear();
+        const bvps = parseFloat(e.inputs?.bookValue ?? e.inputs?.bvps);
+        byTk[tk] = byTk[tk] || {};
+        if (!byTk[tk][y] || ts > byTk[tk][y].ts) {
+          byTk[tk][y] = { ts, fv, bvps: isFinite(bvps) ? bvps : null };
+        }
+      });
+
+      const splitYear = {};
+      Object.keys(byTk).forEach(tk => {
+        const ys = Object.keys(byTk[tk]).map(Number).sort((a, b) => a - b);
+        for (let i = 1; i < ys.length; i++) {
+          const a = byTk[tk][ys[i - 1]].bvps, b = byTk[tk][ys[i]].bvps;
+          if (a > 0 && b > 0 && a / b >= 4) { splitYear[tk] = ys[i]; break; }
+        }
+      });
+
+      const out = [];
+      tx.forEach(t => {
+        if (t.type !== 'buy') return;
+        const price = +t.price, sh = +t.shares;
+        if (!(price > 0) || !(sh > 0)) return;
+        const tk = String(t.ticker || '').trim().toUpperCase();
+        const d = (typeof parseDateLocal === 'function') ? parseDateLocal(t.date) : new Date(t.date);
+        if (!d || !byTk[tk]) return;
+        const by = d.getFullYear();
+        let ref = null;
+        for (let y = by - 1; y >= by - 2; y--) if (byTk[tk][y]) { ref = { year: y, ...byTk[tk][y] }; break; }
+        if (!ref) return;
+        const sy = splitYear[tk];
+        if (sy && ref.year < sy) return;                 // م.22
+        out.push({ ticker: tk, amount: price * sh, ratio: price / ref.fv });
+      });
+      return out;
+    }
+
+
+    function showAppendixBInfo() {
+      const p = h => `<p style="margin:0 0 8px">${h}</p>`;
+      openInfoModal('📐 درجة الملحق (ب) — المنهجية',
+          p('الملحق (ب) في الدستور يعرّف <strong>ستة أبعاد بأوزانها</strong>، ويسجّل الدرجة 7.2/10. لكن الشيفرة لم تكن تحسب أياً منها: الاستبيان أسفل هذه البطاقة يقيس شيئاً آخر تماماً — ثمانية أبعاد بمدخلات تكتبها بيدك. فكان الرقم 7.2 محميّاً بم.38 بلا مصدرٍ يُنتجه.')
+        + p('هذه البطاقة تحسبه من <strong>حيازاتك وملفات تداول وسجلّ التقييمات</strong>: استمرارية التوزيع 30% · العائد التوزيعي 20% · جودة المكونات 15% · نمو التوزيع 15% · التنوع الحقيقي 15% · التسعير عند الدخول 5%.')
+        + p('<strong>العتبات مربوطة بموادّها.</strong> «5 سنوات متصلة» عتبةُ الفئتين (أ) و(ب) في م.25. و«عائد 5.5%» هو العائد الذي تبني عليه م.7 محفظة الهدف. ومناطق التغطية الأربع من م.42-أ حرفياً. ونطاقات السعر من م.48.')
+        + p('<strong>وما سكت عنه الدستور يُعلَن اصطلاحاً.</strong> نمو التوزيع وحده بلا عتبة منصوصة — م.7 تسجّل 2.76% وصفاً للحال لا هدفاً — فالسلّم المستعمل (صفر عند نموٍّ صفري، والكاملة عند 5%) اصطلاحٌ مكتوبٌ في البطاقة، لا نصّ.')
+        + p('<strong>الغياب ليس صفراً (م.20).</strong> البُعد الذي لا تكفي بياناته يخرج من البسط والمقام معاً ويُعلَن «غير مُقيَّم»، والدرجة تُقنَّن على ما قِيس فعلاً. وسهمٌ بلا سلسلة في ملفات تداول لا يُحسب «بلا توزيع متصل» — يُستثنى ويُسمّى (م.21).')
+        + p('<strong>الترجيح بالقيمة السوقية لا بالعدد</strong> — مركزٌ بـ2% لا يزن كمركزٍ بـ15%.')
+        + p('<strong>ولا تُكتب في الدستور.</strong> م.38: الدرجة قياس لا مكافأة. تُعرض المحسوبة بجانب المسجَّلة والفارق بينهما، وتعديل الدستور قرارك وحدك (م.73).'));
+    }
     init();
+    renderAppendixB();
   </script>
 </body>
 </html>
