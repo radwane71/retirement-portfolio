@@ -411,5 +411,72 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
     !/تقريبي \(لقطات شهرية\)/.test(ph));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⑬ الأهداف والدستور — العتبات وم.53 وم.26 وم.28 وم.55/4
+// ══════════════════════════════════════════════════════════════════════
+{
+  const C = require(ROOT + 'js/constitution.js');
+
+  // م.49 — عتبة واحدة عبر المشروع، والافتراضي دستوري لا رقمٌ مكتوب
+  const withOne = [];
+  ['js/targets.js', 'js/dashboard.js', 'js/settings.js', 'js/decision-engine.js'].forEach(f => {
+    const src = fs.readFileSync(ROOT + f, 'utf8');
+    if (/tharwa-alert-green'\)\s*\?\?\s*1\)/.test(src)) withOne.push(f);
+  });
+  t('لا افتراضي 1% متبقٍّ (م.49 تقول 1.5%)', withOne.length === 0, withOne.join(' · '));
+  const set = fs.readFileSync(ROOT + 'js/settings.js', 'utf8');
+  t('إعادة الضبط تكتب القيم الدستورية',
+    /setItem\(userLsKey\('tharwa-alert-green'\),  DEV_IGNORE\)/.test(set),
+    'كانت تكتب 1 فتدهس 1.5 الدستورية بضغطة زرّ');
+  t('DEV_IGNORE ما زالت 1.5', C.DEV_IGNORE === 1.5 && C.DEV_PUMP === 3.0);
+
+  // م.53/1 — الاستدامة تُفحَص قبل صرف الميزانية
+  const tg = fs.readFileSync(ROOT + 'js/targets.js', 'utf8');
+  t('م.53/1 مطبَّقة في إعادة التوازن', /const _sustainFailed = \(tk\) =>/.test(tg)
+    && /\.filter\(c => !_sustainFailed\(c\.ticker\)\)/.test(tg),
+    'الشرط الأول من أربعة كان غائباً كلياً — الصفحتان تعطيان جوابين متعاكسين');
+  t('والمستبعَد بها يُعلَن', /sustainBlocked\.length/.test(tg) && /فشل بوابة الاستدامة/.test(tg));
+
+  // م.57 على التكلفة الفعلية بعد التقريب
+  t('م.57 تُقاس على التكلفة لا على النصيب',
+    /if \(r\.cost > 0 && r\.cost < MIN_BUY_SAR\)/.test(tg),
+    'نصيب 2,400 بسعر 900 يعطي سهمين = 1,800 فعلياً — تحت الحدّ');
+
+  // م.26 — المنطقة الميتة ±15%
+  t('هامش م.26 معرَّف ومُصدَّر', C.HYST_MARGIN === 0.15 && typeof C.hysteresisEligible === 'function');
+  t('الترقية تحتاج +15% فوق العتبة',
+    C.hysteresisEligible(115, 100, true) === true && C.hysteresisEligible(100.4, 100, true) === false,
+    'سهم عند 100.4 مليار كان يبدأ عدّ دورتيه داخل المنطقة الميتة');
+  t('التنزيل يحتاج −15% تحتها',
+    C.hysteresisEligible(84, 100, false) === true && C.hysteresisEligible(99, 100, false) === false);
+  t('داخل المنطقة الميتة لا تُعدّ الدورة',
+    C.applyHysteresis('A', 'B', 5, false, false).deadZone === true
+    && C.applyHysteresis('A', 'B', 5, false, false).cat === 'A',
+    'دورتان مكتملتان لا تحرّكان الفئة إن لم يُبلَغ الهامش');
+  t('وخارجها يعمل العدّ كما كان',
+    C.applyHysteresis('A', 'B', 2, false, true).cat === 'B');
+  const de2 = fs.readFileSync(ROOT + 'js/decision-engine.js', 'utf8');
+  t('المحرّك يمرّر marginMet', /applyHysteresis\(hist\.settled, raw\.cat, hist\.streak \|\| 0, false, _marginMet\)/.test(de2));
+
+  // م.28 — أربعة نطاقات لا عتبة واحدة
+  t('فحص القطاع متدرّج بـ sectorBandOf',
+    /const banded   = rows\.map\(r => \(\{ \.\.\.r, band: sectorBandOf\(r\.pct\) \}\)\)/.test(de2),
+    'كانت عتبة مسطّحة لا تفرّق بين وقف الإضافة والتصحيح الواجب');
+  t('التصحيح الإلزامي يُسمّى واجباً', /التصحيح <b>واجب<\/b> لا اختياري/.test(de2));
+  t('نطاق التنبيه معروض ولا يُكتَم', /notices\.map\(n =>/.test(de2));
+
+  // م.55/4 لا تُعطَّل بمربّع
+  t('منع المنطقتين 🟡/🔴 غير مشروط بـ valAware',
+    /if \(fair\.usable && !fair\.ok\) \{/.test(de2) && !/if \(valAware && fair\.usable/.test(de2),
+    'بإزالة العلامة كانت تصدر أوامر تجميع في منطقة يمنعها الدستور');
+
+  // طبقة الذكاء لا تناقض م.48
+  const di = fs.readFileSync(ROOT + 'js/decision-intel.js', 'utf8');
+  t('طبقة الذكاء تستعمل نطاقات م.48',
+    /valueBandOf\(r\.price \/ r\.fairValue, r\.dispersionCV\)/.test(di)
+    && !/gates\.push\('السعر فوق قيمته العادلة'\)/.test(di),
+    'كانت تستبعد أي هامش سالب — والخطة تحتها تُصدر أمر شراء للسهم نفسه');
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

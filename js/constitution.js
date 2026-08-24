@@ -300,10 +300,41 @@ function classifyStock(f) {
 }
 function _cNum(v) { const n = parseFloat(v); return isFinite(n) ? n : null; }
 
-// م.26 — نطاق التعليق: لا ترقية ولا تنزيل إلا بتجاوز ±15% لدورتين متتاليتين
-function applyHysteresis(prev, next, streakCycles, forceNow) {
+// ══════════════════════════════════════════════════════════════════════
+// م.26 — المنطقة الميتة ±15% حول العتبة، **قبل** عدّ الدورتين
+// ----------------------------------------------------------------------
+// المادة تشترط شرطين معاً: «الترقية: تجاوز العتبة بـ+15% لمدة دورتين»
+// و«التنزيل: النزول تحتها بـ−15% لمدة دورتين». وكان الكود يعدّ الدورتين
+// فقط ولا يفحص ±15% إطلاقاً — لا وجود لـ0.15 في الملف — بينما نصّ السبب
+// المطبوع يقول «تجاوز العتبة بـ±15%». فسهمٌ عند 100.4 مليار يبدأ عدّ
+// دورتيه وهو داخل المنطقة الميتة التي كان يجب أن تمنع العدّ أصلاً، وهذا
+// هو عين التذبذب عند الحدود الذي بُنيت المادة لمنعه.
+//
+// `catRankOf` يرتّب الفئات تنازلياً بالحجم (أ=0 … د=3)، فالترقية تعني
+// انخفاض الرتبة. و`hysteresisEligible` تُجيب: هل تجاوز الرقمُ العتبةَ
+// بالهامش المطلوب في اتجاه الحركة؟
+// ══════════════════════════════════════════════════════════════════════
+const HYST_MARGIN = 0.15;
+const CAT_RANK = { A: 0, B: 1, C: 2, D: 3 };
+function catRankOf(k) { return CAT_RANK[k] != null ? CAT_RANK[k] : 99; }
+
+// هل بلغ المقياس هامشَ م.26 في اتجاه الحركة؟
+//   value: القيمة المقيسة · threshold: العتبة المنصوص عليها
+//   upgrading: true للترقية (تجاوز +15%) · false للتنزيل (نزول −15%)
+function hysteresisEligible(value, threshold, upgrading) {
+  const v = _cNum(value), t = _cNum(threshold);
+  if (v == null || t == null || t === 0) return true;   // بلا مقياس: لا نمنع (م.21)
+  return upgrading ? v >= t * (1 + HYST_MARGIN) : v <= t * (1 - HYST_MARGIN);
+}
+
+function applyHysteresis(prev, next, streakCycles, forceNow, marginMet) {
   if (forceNow) return { cat: next, moved: true, why: 'استثناء فوري (م.26): انقطاع توزيع أو خسارة تشغيلية أو إخلال بتعهد' };
   if (!prev || !next || prev === next) return { cat: next || prev, moved: false, why: '' };
+  // المنطقة الميتة: لم يتجاوز الهامش ⇒ لا تُعدّ الدورة أصلاً
+  if (marginMet === false) {
+    return { cat: prev, moved: false, deadZone: true,
+      why: 'داخل المنطقة الميتة ±15% حول العتبة — لا يُعدّ التغيّر ولا تبدأ الدورتان (م.26)' };
+  }
   if ((streakCycles || 0) >= 2) return { cat: next, moved: true, why: 'تجاوز العتبة بـ±15% لدورتين متتاليتين (م.26)' };
   return { cat: prev, moved: false, why: 'بين العتبتين — يبقى في فئته الحالية حتى تكتمل دورتان (م.26)' };
 }
@@ -386,7 +417,8 @@ if (typeof module !== 'undefined' && module.exports) {
     OVERRIDE_VALID_DAYS, RATING_DIMS,
     GOV_EXPOSURE, GOV_DEFAULT, govExposure,
     ZONE_ORDER, sustainZoneOf, dividendCutBand,
-    classifyStock, applyHysteresis, capOfCategory, sectorBandOf, valueBandOf,
+    classifyStock, applyHysteresis, hysteresisEligible, catRankOf, HYST_MARGIN,
+    capOfCategory, sectorBandOf, valueBandOf,
     deviationBandOf, positionSizeVerdict, isBanned, isNoAccumulate,
     portfolioPhase, trueBreakEven, overrideStatus,
   };

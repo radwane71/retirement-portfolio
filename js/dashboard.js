@@ -1409,8 +1409,8 @@ function renderPortfolioHealthCard() {
 
   const s    = window._ds || {};
   const goal = getRetirementGoal();
-  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? DEV_IGNORE);
+  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP);
 
   // ── 1. تنوع الأسهم والقطاعات ───────────────────────────────
   const stockCount = holdings.length;
@@ -2604,8 +2604,8 @@ function _renderSectorBars(entries, total) {
   const hasSectorTargets = Object.keys(window._sectorTargetMap || {}).length > 0;
 
   // AUDIT-FIX 2026-08: عتبات الانحراف من LS (نفس مفاتيح البانر) بدل 1/3 المثبّتة
-  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? DEV_IGNORE);
+  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP);
 
   const bars = entries.map(([sec, val], i) => {
     const pct    = total > 0 ? (val / total * 100) : 0;
@@ -2644,8 +2644,8 @@ function _renderSectorBars(entries, total) {
 
 function _renderSectorCards(entries, total) {
   // AUDIT-FIX 2026-08: عتبات الانحراف من LS (نفس مفاتيح البانر) بدل 1/3 المثبّتة
-  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const gThr = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? DEV_IGNORE);
+  const yThr = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP);
   const cards = entries.map(([sec, val], i) => {
     const pct    = total > 0 ? (val / total * 100) : 0;
     const target = (window._sectorTargetMap || {})[sec] || 0;
@@ -2685,7 +2685,7 @@ function _renderSectorCards(entries, total) {
 // (targets.js/getAlertThresholds) تقرأ كلها عتبة المستخدم. فمن رفع عتبته إلى 3%
 // كان يرى ✅ في الجدول و🔴 في الكرت للسهم نفسه في اللحظة نفسها. مصدر واحد الآن.
 function _wThrGreen() {
-  const v = +(localStorage.getItem(userLsKey('tharwa-alert-green')) ?? localStorage.getItem('tharwa-alert-green') ?? 1);
+  const v = +(localStorage.getItem(userLsKey('tharwa-alert-green')) ?? localStorage.getItem('tharwa-alert-green') ?? DEV_IGNORE);
   return Number.isFinite(v) && v >= 0 ? v : 1;
 }
 function weightStateOf(cur, tgt, ticker) {

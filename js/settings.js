@@ -269,8 +269,8 @@ async function init() {
 
 // ── عتبات ألوان التنبيهات ─────────────────────────────────────
 function loadAlertThresholds() {
-  const g = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1);
-  const y = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3);
+  const g = +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? DEV_IGNORE);
+  const y = +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP);
   const gEl = document.getElementById('thresh-green');
   const yEl = document.getElementById('thresh-yellow');
   if (gEl) gEl.value = g;
@@ -293,8 +293,11 @@ function saveAlertThresholds() {
 }
 
 function resetAlertThresholds() {
-  localStorage.setItem(userLsKey('tharwa-alert-green'),  1);
-  localStorage.setItem(userLsKey('tharwa-alert-yellow'), 3);
+  // ⚠️ إعادة الضبط تكتب **القيم الدستورية** لا أرقاماً مكتوبة.
+  // م.49: ±1.5% ⇒ لا إجراء · 1.5–3% ⇒ تصحيح بالضخّ. وكانت تكتب 1 و٣،
+  // والمحرّك يقرأ المفتاح نفسه — فيتخلّى عن 1.5 الدستورية بضغطة زرّ.
+  localStorage.setItem(userLsKey('tharwa-alert-green'),  DEV_IGNORE);
+  localStorage.setItem(userLsKey('tharwa-alert-yellow'), DEV_PUMP);
   loadAlertThresholds();
   const el = document.getElementById('thresh-status');
   el.textContent = '↩ تمت إعادة الضبط إلى الافتراضي (1% / 3%)';
@@ -2326,7 +2329,7 @@ async function exportMonthlyReviewMD() {
       // الأخرى تستخدمهما. فكان التقرير يعلن «ضمن النطاق» لسهم تصفه اللوحة والمحرّك
       // بأنه خارجه. الآن العتبة الصفراء للمالك هي الحدّ.
       const _devY = +(localStorage.getItem(userLsKey('tharwa-alert-yellow'))
-                   ?? localStorage.getItem('tharwa-alert-yellow') ?? 3) || 3;
+                   ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP) || 3;
       h3(`الانحرافات عن الأهداف (> ${_devY}% — عتبتك من الإعدادات)`);
       const deviations = stockTargets
         .map(st => {

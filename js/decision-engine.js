@@ -222,13 +222,29 @@ function categoryOf(h) {
   const hist = categoryHistory[h.ticker];
   if (!hist || !hist.settled) return { ...raw, settled: true };
 
-  const hy = applyHysteresis(hist.settled, raw.cat, hist.streak || 0, false);
+  // م.26 — هل بلغ المقياس هامش ±15% في اتجاه الحركة؟
+  // القيمة السوقية هي المقياس المستمرّ الوحيد بين الفئات (100 · 10 · 2 مليار)،
+  // فمنه تُقاس المنطقة الميتة. وسنوات التوزيع عتبات منفصلة لا تتدرّج.
+  const _catThr = { A: 100, B: 10, C: 2, D: 2 };
+  const _up   = catRankOf(raw.cat) < catRankOf(hist.settled);   // ترقية = رتبة أقل
+  const _mcNow = (ti.merged && ti.merged.marketCapB != null) ? +ti.merged.marketCapB : null;
+  const _thr  = _up ? _catThr[raw.cat] : _catThr[hist.settled];
+  const _marginMet = (_mcNow != null && _thr != null)
+    ? hysteresisEligible(_mcNow, _thr, _up)
+    : true;   // بلا قيمة سوقية: لا نمنع الحركة (م.21)
+  const hy = applyHysteresis(hist.settled, raw.cat, hist.streak || 0, false, _marginMet);
   if (hy.cat === raw.cat) return { ...raw, settled: true };
   // مُعلَّق: يبقى على فئته المستقرّة، ويُعلَن أن حسابه يشير لغيرها
   const held = CAT[hy.cat];
   return { ...held, cat: hy.cat, known: true, missing: [], settled: false,
            pendingCat: raw.cat, pendingLabel: raw.label, streak: hist.streak || 0,
-           why: `${hy.why} — الحساب الحالي يشير إلى «${raw.label}»` };
+           deadZone: hy.deadZone === true,
+           why: `${hy.why} — الحساب الحالي يشير إلى «${raw.label}»`
+              + (hy.deadZone && _mcNow != null && _thr != null
+                 ? ` · قيمتها ${formatNum(_mcNow)} مليار، وعتبة الحركة `
+                   + `${formatNum(_thr * (_up ? 1 + HYST_MARGIN : 1 - HYST_MARGIN))} مليار `
+                   + `(${_thr} ± ${(HYST_MARGIN * 100).toFixed(0)}%)`
+                 : '') };
 }
 
 // تُحدَّث مرة لكل دورة: تعدّ الدورات المتتالية التي خالف فيها الحساب المستقرّ
@@ -1813,10 +1829,22 @@ function buildTargetPlan(valAware) {
           why: 'قرارك «مراقبة» — لا مال جديد يدخل حتى ينتهي سبب المراقبة' }));
         return;
       }
-      if (valAware && fair.usable && !fair.ok) {
+      // ══════════════════════════════════════════════════════════════
+      // م.55/4 ممنوعٌ لا تفضيلُ عرض — لا يُعطَّل بمربّع اختيار
+      // --------------------------------------------------------------
+      // كان الشرط `valAware && …`، و`valAware` تأتي من مربّع في الواجهة.
+      // بإزالة العلامة يسقط فحص م.48 كلّه فتصدر أوامر تجميع في المنطقتين
+      // 🟡 و🔴 — وم.55 قائمة **ممنوعات**، والاستثناء المسموح في م.20 هو
+      // الإعلان لا التعطيل.
+      //
+      // `valAware` تبقى تتحكّم في **ترتيب** المرشّحين (`points`) لا في
+      // المنع: أن ترى الأغلى أدنى القائمة شيء، وأن يخرج أمر شراء له شيء آخر.
+      // ══════════════════════════════════════════════════════════════
+      if (fair.usable && !fair.ok) {
         out.deferredSar += sar;
         out.deferred.push(mk({ sar, shares, gapPct,
-          why: `${fair.why} — الفجوة قائمة لكن الشراء عند النزول مشروط لا آلي (§4 الفلتر 3)` }));
+          why: `${fair.why} — الفجوة قائمة، والتوجيه ممنوع في هذه المنطقة (م.55/4). `
+             + 'الشراء عند النزول قرارك أنت لا أمرٌ آلي (الفلتر 3).' }));
         return;
       }
       out.needed += sar;                                  // المُنفَّذ وحده
@@ -2212,7 +2240,13 @@ function renderSectorCheck(totalValue) {
   const rows = Object.entries(bySector)
     .map(([sec, val]) => ({ sec, pct: totalValue > 0 ? val / totalValue * 100 : 0 }))
     .sort((a, b) => b.pct - a.pct);
-  const breaches = rows.filter(r => r.pct > CAPS.sector + SECTOR_BUFFER);
+  // م.28 أربعة نطاقات لا عتبة واحدة: ≤25 تحت السقف · 25–27.5 تنبيه ·
+  // 27.5–30 وقف الإضافة · >30 **تصحيح إلزامي**. وكان الفحص يُعلن خرقاً
+  // واحداً غير متدرّج فوق 27.5 — فلا يُفرَّق بين وقفِ إضافةٍ وتصحيحٍ واجب،
+  // وهما إجراءان مختلفان تماماً. و`sectorBandOf` كانت تُستعمل في موضع واحد.
+  const banded   = rows.map(r => ({ ...r, band: sectorBandOf(r.pct) }));
+  const breaches = banded.filter(r => r.band.action === 'stopAdd' || r.band.action === 'correct');
+  const notices  = banded.filter(r => r.band.action === 'notify');
 
   // AUDIT-FIX 2026-08-21 (#35): سهم بقطاع فارغ يقع في دلو «غير مصنّف» فيُنقص وزن
   // قطاعه الحقيقي — قد يكون قطاع مكسور السقف ويظهر ممتثلاً. يُعلَن ولا يُقدَّر
@@ -2222,13 +2256,26 @@ function renderSectorCheck(totalValue) {
     ? `<div class="de-alert-line">⚠️ ${_unclassified.length} سهماً بلا قطاع (${_unclassified.map(h => escapeHtmlSafe(h.ticker)).join('، ')}) — وزنها لا يُحتسب على قطاعها الحقيقي، فحكم سقف 25% هنا ناقص حتى تُصنَّف من صفحة الحيازات.</div>`
     : '';
 
-  if (!breaches.length) {
+  if (!breaches.length && !notices.length) {
     el.innerHTML = _uncNote + `<p class="text-muted" style="margin:0">${_unclassified.length ? '🟡' : '✅'} كل القطاعات <em>المصنَّفة</em> تحت سقف ${CAPS.sector}% (+منطقة سماح ${SECTOR_BUFFER}%). أعلى قطاع: <strong>${escapeHtmlSafe(rows[0]?.sec || '—')}</strong> (${formatNum(rows[0]?.pct || 0)}%).</p>`;
     return;
   }
-  el.innerHTML = _uncNote + breaches.map(b =>
-    `<div class="de-alert-line">⚠️ تركيز قطاعي: <strong>${escapeHtmlSafe(b.sec)}</strong> = ${formatNum(b.pct)}% &gt; السقف ${CAPS.sector}% + منطقة السماح ${SECTOR_BUFFER}% (الفلتر 4)</div>`
-  ).join('');
+  el.innerHTML = _uncNote
+    + breaches.map(b => {
+        const correct = b.band.action === 'correct';
+        return `<div class="de-alert-line">${correct ? '🔴' : '🟠'} `
+          + `<strong>${escapeHtmlSafe(b.sec)}</strong> = ${formatNum(b.pct)}% — `
+          + `<b>${escapeHtmlSafe(b.band.label)}</b> (م.28 · السقف ${CAPS.sector}%)`
+          + (correct
+              ? `<br><span class="small">تجاوز 30% ⇒ التصحيح <b>واجب</b> لا اختياري. `
+                + `وم.50 ترتّب سقف القطاع (#8) فوق سقف القيمة وفرص التجميع — خفّف من `
+                + `أكبر مراكزه ما يُعيده تحت ${CAPS.sector}%، بشرط ألّا يكون تحت تعادله (م.11).</span>`
+              : `<br><span class="small">الإضافة لهذا القطاع موقوفة حتى ينزل وزنه — والتخفيف غير واجب بعد.</span>`)
+          + `</div>`;
+      }).join('')
+    + notices.map(n =>
+        `<div class="de-alert-line">🟡 <strong>${escapeHtmlSafe(n.sec)}</strong> = ${formatNum(n.pct)}% — `
+      + `<b>${escapeHtmlSafe(n.band.label)}</b> (م.28). لا إجراء مطلوب.</div>`).join('');
 }
 
 // نصوص مساعدة مشتركة لإشارة الاستدامة واتجاه التوزيع

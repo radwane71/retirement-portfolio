@@ -427,8 +427,8 @@ function getSectorWeight(sector) {
 // ── تحديد حالة التنبيه ─────────────────────────────────────
 function getAlertThresholds() {
   return {
-    green:  +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? 1),
-    yellow: +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? 3),
+    green:  +(localStorage.getItem(userLsKey('tharwa-alert-green'))  ?? localStorage.getItem('tharwa-alert-green')  ?? DEV_IGNORE),
+    yellow: +(localStorage.getItem(userLsKey('tharwa-alert-yellow')) ?? localStorage.getItem('tharwa-alert-yellow') ?? DEV_PUMP),
   };
 }
 
@@ -1540,12 +1540,35 @@ function runRebalancing() {
   // م.53/4: وممنوع لسهم في **قائمة الخروج المؤجل** — سهمٌ تنتظر خروجه
   //         لا تضخّ فيه، وإلا رفعتَ ما قرّرتَ تصغيره.
   // ══════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════
+  // م.53/1 — «اجتاز الفلتر 1 في المنطقة 🟢 أو 🟡»
+  // ------------------------------------------------------------------
+  // الشرط **الأول** من أربعة، وكان غائباً كلياً: `grep sustain` على هذا
+  // الملف يعطي صفراً. فصفحة الأهداف تضخّ في سهم يقول محرّك القرار على
+  // الشاشة المجاورة إنه فشل بوابة الاستدامة — وم.55/1 و م.68/17 تمنعانه
+  // نصّاً، والمحرّك يؤجّله فعلاً. الصفحتان تعطيان جوابين متعاكسين.
+  //
+  // المصدر هو `engineCfg` نفسه الذي يقرؤه المحرّك (`decision_engine_v1`)،
+  // فلا حساب موازٍ: `divCoverage === 'weak'` هو ما يسجّله المالك في بطاقة
+  // السهم حين تفشل التغطية. والفراغ **لا يمنع** (م.21: لا يُعاقَب المالك
+  // على بيان ناقص عند المحرّك).
+  // ══════════════════════════════════════════════════════════════════
+  const _sustainFailed = (tk) => {
+    const cfg = engineCfg[tk] || {};
+    const cov = cfg.divCoverage || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
+    const fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
+    return cov === 'weak' || fun === 'loss';
+  };
+
   const _pool = [...candidatesAll, ...plannedAll].filter(c => c.gap > 0.05);
   const zoneBlocked = _pool.filter(c => c.blockedByZone);
   const deferBlocked = _pool.filter(c => !c.blockedByZone && tgDeferredExits[c.ticker]);
+  const sustainBlocked = _pool.filter(c => !c.blockedByZone && !tgDeferredExits[c.ticker]
+                                        && _sustainFailed(c.ticker));
   const candidates = _pool
     .filter(c => !c.blockedByZone)                         // م.55/4
     .filter(c => !tgDeferredExits[c.ticker])               // م.53/4
+    .filter(c => !_sustainFailed(c.ticker))                // م.53/1 و55/1
     .filter(c => !entryFilter || c.inZone)                 // مرشِّح اختياري (أسعارك في المهام)
     // م.54 — الترتيب بالنقاط. عند التساوي تفصل درجة أسعارك (effScore).
     .sort((a, b) => (b.priority - a.priority) || (b.effScore - a.effScore));
@@ -1579,6 +1602,7 @@ function runRebalancing() {
     + (overCapList.length ? ` · <b>${overCapList.length} سهماً هدفه فوق سقف فئته</b> (تجاوز ساري — م.31)` : '')
     + (zoneBlocked.length ? ` · <b>${zoneBlocked.length} سهماً في منطقة 🟡/🔴</b> (${zoneBlocked.map(c => esc(c.ticker)).join('، ')}) — ممنوع توجيه سيولة إليه (م.55/4)` : '')
     + (deferBlocked.length ? ` · <b>${deferBlocked.length} سهماً في قائمة الخروج المؤجل</b> (${deferBlocked.map(c => esc(c.ticker)).join('، ')}) — لا يُضخّ في سهم تنتظر خروجه (م.53/4)` : '')
+    + (sustainBlocked.length ? ` · <b>${sustainBlocked.length} سهماً فشل بوابة الاستدامة</b> (${sustainBlocked.map(c => esc(c.ticker)).join('، ')}) — ممنوع توجيه سيولة إليه (م.53/1 و55/1)` : '')
     + (() => {
         // م.12 و55 — يُعلَن الاستبعاد ولا يختفي السهم بصمت (م.20 في الروح)
         const b = [...holdings, ...userStocks].map(x => x.ticker)
@@ -1746,7 +1770,30 @@ function runRebalancing() {
       const newShares   = +c.shares + sharesToBuy;
       return { ...c, sharesToBuy, cost, newShares, newValue: newShares * price };
     }).filter(r => r.sharesToBuy > 0);
-    return { list, spent };
+
+    // ══════════════════════════════════════════════════════════════
+    // م.57 على **التكلفة الفعلية** لا على النصيب
+    // --------------------------------------------------------------
+    // «الحد الأدنى لأي **عملية شراء** 2,000 ريال» — والعملية هي ما تدفعه
+    // لا ما خُصِّص لك. و`dropBelowMin` تفحص `allocated` **قبل** التقريب
+    // للأسفل، فيتسرّب ما ينزل تحت الحدّ بعده:
+    //     نصيب 2,400 · سعر 900  ⇒ سهمان  ⇒ التكلفة 1,800
+    //     نصيب 2,900 · سعر 1,500 ⇒ سهم    ⇒ التكلفة 1,500
+    // و`js/decision-engine.js` تقيسها على التكلفة الفعلية أصلاً.
+    // ══════════════════════════════════════════════════════════════
+    const kept = [];
+    list.forEach(r => {
+      if (r.cost > 0 && r.cost < MIN_BUY_SAR) {
+        spent -= r.cost;
+        if (!_batchCut.some(x => x.ticker === r.ticker)) _batchCut.push({
+          ticker: r.ticker, name: r.name,
+          why: `${r.sharesToBuy} سهماً بسعر ${formatSAR(+r.current_price || 0)} = `
+             + `${formatSAR(r.cost)} فعلياً — دون الحدّ الأدنى ${formatSAR(MIN_BUY_SAR)} `
+             + `بعد التقريب للأسفل (م.57)`,
+        });
+      } else kept.push(r);
+    });
+    return { list: kept, spent };
   }
 
   // ── حلّ ذاتي الاتساق للمقام (تصحيح ضروري فوق البند 4) ───────
