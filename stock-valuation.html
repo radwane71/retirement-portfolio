@@ -595,6 +595,7 @@
           <button class="btn btn-secondary btn-sm" onclick="downloadHistCSV('all')">⬇️ تنزيل الكل CSV</button>
           <button class="btn btn-secondary btn-sm" onclick="verifyHistorySaved()" title="يقرأ السجل من الخادم مباشرةً ويقارنه بما تراه">🛡️ تحقّق من الحفظ</button>
           <button class="btn btn-secondary btn-sm" onclick="exportHistoryMD()">⬇️ تصدير Markdown</button>
+          <button class="btn btn-secondary btn-sm" onclick="previewValCorrections()" title="يطابق السجل بملف التصحيحات المعتمد ويعرض الفروق قبل الكتابة">🔧 تطبيق التصحيحات</button>
           <button class="btn btn-secondary btn-sm" onclick="recomputeAllHistory()" title="يعيد حساب نتائج كل العمليات المحفوظة بالمعادلة المحدّثة من مدخلاتها الأصلية">🔄 إعادة حساب السجل</button>
           <button class="hist-clear-btn" onclick="clearAllHistory()">🗑️ حذف الكل</button>
         </div>
@@ -706,6 +707,7 @@
   <script src="js/tadawul-data.js?v=20260824y"></script>
   <script src="js/declutter.js?v=20260824y"></script>
   <script src="js/navtoggle.js?v=20260824y"></script>
+  <script src="js/valuation-corrections.js?v=20260824y"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -1888,7 +1890,7 @@
 
       let discount_rate = (num(inp.discountRate) || 0) / 100;
       // البنك لا يُخصم بـ WACC مهما كان المحفوظ في العملية القديمة
-      if (inp.useWacc && companyType !== 'bank') {
+      if (flagOn(inp.useWacc) && companyType !== 'bank') {
         const rf = (num(inp.riskFree)||0)/100, b = num(inp.betaMain) || num(inp.beta) || 1, rm = (num(inp.marketReturn)||0)/100,
               rd = (num(inp.debtCost)||0)/100, tx = (num(inp.taxRate)||0)/100, de = num(inp.debtEquity)||0;
         discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
@@ -2250,6 +2252,14 @@
     });
 
     // ===== سجل العمليات — Supabase =====
+    // العَلَم المنطقي بعد دورة تصدير/استيراد يعود نصاً، و"false" نصٌّ صادق.
+    // كانت تلك القراءة تقلب «لا يوجد دين» إلى مُعلَّم فتُسقط خصم الدين وتضخّم
+    // NAV — وهو بالضبط ما تحذّر منه الصفحة: «فارغ ≠ صفر».
+    function flagOn(v) {
+      if (typeof v === "string") { const s = v.trim().toLowerCase(); return !(s === "" || s === "false" || s === "0" || s === "no"); }
+      return !!v;
+    }
+
     const HIST_DB_KEY = 'valuation_history_v1';
     let _history = [];
     let _histSearch = '';
@@ -2316,7 +2326,7 @@
       let growth_perp = num(inp.growthPerp) / 100;
       let discount_rate = num(inp.discountRate) / 100;
       // البنك لا يُخصم بـ WACC مهما كان المحفوظ (كانت العمليات القديمة تحفظ useWacc للبنك)
-      if (inp.useWacc && companyType !== 'bank') {
+      if (flagOn(inp.useWacc) && companyType !== 'bank') {
         const rf = num(inp.riskFree) / 100, b = (num(inp.betaMain) || num(inp.beta, 1)), rm = num(inp.marketReturn) / 100,
               rd = num(inp.debtCost) / 100, tx = num(inp.taxRate) / 100, de = num(inp.debtEquity);
         discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
@@ -2363,8 +2373,8 @@
               ffo = num(inp.ffo), capRate = num(inp.capRate, 8) / 100,
               pffo = num(inp.pffoMultiple, 12);
         // عملية قديمة قد لا تحمل الحقل أصلاً — يُعلَن ذلك ولا يُقدَّر بصمت (§8)
-        const tdMissing = !inp.noTotalDebt && (inp.totalDebt == null || String(inp.totalDebt).trim() === '');
-        const totalDebtR = inp.noTotalDebt ? 0 : num(inp.totalDebt);
+        const tdMissing = !flagOn(inp.noTotalDebt) && (inp.totalDebt == null || String(inp.totalDebt).trim() === '');
+        const totalDebtR = flagOn(inp.noTotalDebt) ? 0 : num(inp.totalDebt);
         const nav_per_unit = (nav_total - totalDebtR) / totalUnits;
         const pffo_value = ffo > 0 ? ffo * pffo : null;
         const ddm_reit = calculate_gordon(num(inp.dividends), growth_perp_final, discount_rate);
@@ -2410,8 +2420,8 @@
       const useNormFcf = cyc && nFcfRaw != null && nFcfRaw !== 0;
       const eps = useNormEps ? nEpsRaw : epsSpot;
       const fcf = useNormFcf ? nFcfRaw : fcfSpot;
-      const ndMissing = !inp.noNetDebt && (inp.netDebt == null || String(inp.netDebt).trim() === '');
-      const net_debt = inp.noNetDebt ? 0 : num(inp.netDebt);
+      const ndMissing = !flagOn(inp.noNetDebt) && (inp.netDebt == null || String(inp.netDebt).trim() === '');
+      const net_debt = flagOn(inp.noNetDebt) ? 0 : num(inp.netDebt);
       const growth_5yr = num(inp.growth5yr) / 100, sector_pe = num(inp.sectorPe),
             dividends = num(inp.dividends), book_value = num(inp.bookValue),
             bond_yield = num(inp.bondYield, 6.5), fair_pb = num(inp.fairPb, 1.5);
@@ -2458,6 +2468,223 @@
       _histBuilt.clear();
       renderHistory();
       showToast(`✅ أُعيد حساب السجل — ${changed} نتيجة تغيّرت${failed ? ` · ${failed} تعذّرت (مدخلات ناقصة)` : ''}`, 'success');
+    }
+
+
+    // ═══════════════════════════════════════════════════════════════════
+    // تطبيق ملف التصحيحات المعتمد — 2026-08-24  (م.15 · م.19 · م.24)
+    // ═══════════════════════════════════════════════════════════════════
+    // الملف مصدره أرقام تداول الرسمية، فيعلو على ما في السجل (م.15).
+    // المطابقة بالمعرّف أولاً، ثم بالرمز+التاريخ إن تغيّر المعرّف.
+    // **التاريخ لا يُمسّ** — العملية تحتفظ بختمها الأصلي بطلب المالك.
+    // النتائج تُعاد حسابها من المدخلات بمعادلة المنصة نفسها لا تُنسخ من
+    // الملف، وأي فرق بين الاثنين يُعرَض ولا يُبتلع (م.24).
+    const CORR_BACKUP_KEY = 'valuation_history_backup_2026-08-24';
+
+    const CORR_LBL = {
+      ticker:'الرمز', stockName:'الاسم', companyType:'نوع الشركة', scenario:'السيناريو',
+      growth5yr:'نمو 5 سنوات %', growthPerp:'النمو الدائم %', discountRate:'معدل الخصم %',
+      currentPe:'مكرر الربحية الحالي', sectorPe:'مكرر القطاع', dividends:'التوزيع السنوي',
+      bookValue:'القيمة الدفترية للسهم', bondYield:'عائد السندات %', currentPrice:'السعر الحالي',
+      fairPb:'P/B العادل', debtRatio:'نسبة الدين %', liquidityRatio:'نسبة السيولة',
+      earningsQuality:'جودة الأرباح ROE %', betaMain:'بيتا', eps:'الربح للسهم EPS',
+      fcf:'التدفق الحر للسهم', fcfBasis:'أساس التدفق الحر', normEps:'EPS مُطبَّع (م.35)',
+      normFcf:'التدفق الحر المُطبَّع (م.35)', netDebt:'الدين الصافي', totalDebt:'إجمالي الدين',
+      noNetDebt:'لا يوجد دين صافٍ', noTotalDebt:'لا يوجد دين إجمالي',
+      riskFree:'العائد الخالي من المخاطر %', marketReturn:'عائد السوق %', costOfEquity:'كلفة حقوق الملكية %',
+      bankEps:'ربحية السهم (بنك)', bankDps:'توزيع السهم (بنك)', bankPayout:'نسبة التوزيع %',
+      bankRoe:'ROE البنك %', bankCurrentPe:'P/E الحالي (بنك)', bankFairPe:'P/E العادل (بنك)',
+      bankCurrentPb:'P/B الحالي (بنك)', bankFairPb:'P/B العادل (بنك)', bvps:'BVPS الملموسة',
+      cet1:'CET1 %', npl:'المتعثرة %', provCoverage:'تغطية المخصصات %', ldr:'LDR %',
+      ffo:'FFO للوحدة', noi:'NOI', nav:'صافي الموجودات NAV', totalUnits:'عدد الوحدات',
+      capRate:'معدل الرسملة %', pffoMultiple:'مكرر P/FFO', anchorModel:'نموذج المرساة',
+      decision:'القرار', perplexityEval:'تقييم Perplexity',
+      execPrice:'سعر التنفيذ', notes:'ملاحظات', useWacc:'حساب WACC تلقائياً',
+      dataTags:'أوسمة المصادر (م.19)',
+    };
+    const corrLbl = k => CORR_LBL[k] || k;
+
+    // مقارنة رقمية لا نصية: "2.50" و"2.5" ليسا تغييراً، والفراغ ليس صفراً
+    function corrSame(a, b) {
+      const sa = a == null ? '' : String(a).trim();
+      const sb = b == null ? '' : String(b).trim();
+      if (sa === sb) return true;
+      if (sa === '' || sb === '') return false;      // تفريغ حقل تغييرٌ مقصود
+      const na = parseFloat(sa), nb = parseFloat(sb);
+      if (isFinite(na) && isFinite(nb)) return Math.abs(na - nb) < 1e-9;
+      return false;
+    }
+
+    // دمج المدخلات: الملف يعلو على السجل (م.15)، بثلاثة قيود
+    //  • حقل عمودُه غائب عن الملف أصلاً — يبقى كما هو، فالملف لم يتناوله
+    //  • حقل نصّي حرّ (ملاحظاتك، تقييم Perplexity) وخليّته فارغة — يبقى:
+    //    الملف يعلن عن نفسه «تصحيح أخطاء وأرقام فقط»، ومسح نثرك خارج نطاقه
+    //  • ما عدا ذلك، الخليّة الفارغة تفريغٌ مقصود (م.20: يُعلَن ناقصاً لا يُقدَّر صفراً)
+    function corrMergeInputs(oldInp, newInp) {
+      const cols = (typeof VAL_CORRECTIONS_FIELDS !== 'undefined')
+        ? new Set(VAL_CORRECTIONS_FIELDS) : null;
+      const keep = new Set((typeof VAL_CORRECTIONS_KEEP_IF_EMPTY !== 'undefined')
+        ? VAL_CORRECTIONS_KEEP_IF_EMPTY : []);
+      const out = JSON.parse(JSON.stringify(newInp || {}));
+      Object.keys(oldInp || {}).forEach(k => {
+        if (out[k] !== undefined) return;
+        const untouched = cols && !cols.has(k);            // الملف لا يعرف هذا الحقل
+        const freeText  = keep.has(k) && String(oldInp[k] || '').trim() !== '';
+        if (untouched || freeText) out[k] = oldInp[k];
+      });
+      return out;
+    }
+
+    function corrDiff(oldInp, newInp) {
+      const keys = Array.from(new Set([
+        ...Object.keys(oldInp || {}), ...Object.keys(newInp || {}),
+      ]));
+      const out = [];
+      keys.forEach(k => {
+        const a = (oldInp || {})[k], b = (newInp || {})[k];
+        if (!corrSame(a, b)) out.push({ k, from: a, to: b });
+      });
+      return out;
+    }
+
+    function corrMatch() {
+      const list = (typeof VAL_CORRECTIONS !== 'undefined') ? VAL_CORRECTIONS : [];
+      const byId = new Map(_history.map(e => [String(e.id), e]));
+      const used = new Set();
+      const matched = [], missing = [];
+      list.forEach(c => {
+        let e = byId.get(String(c.id));
+        let how = 'المعرّف';
+        if (!e) {
+          // احتياط: المعرّف تغيّر — نطابق بالرمز والتاريخ معاً
+          e = _history.find(h => !used.has(String(h.id))
+            && String((h.inputs || {}).ticker || '') === String(c.inputs.ticker || '')
+            && String(h.date || '') === String(c.date || ''));
+          how = 'الرمز + التاريخ';
+        }
+        if (e) { used.add(String(e.id)); matched.push({ entry: e, corr: c, how, diff: corrDiff(e.inputs, corrMergeInputs(e.inputs, c.inputs)) }); }
+        else missing.push(c);
+      });
+      const untouched = _history.filter(h => !used.has(String(h.id)));
+      return { matched, missing, untouched };
+    }
+
+    async function corrApply(matched) {
+      // نسخة احتياطية قبل أي كتابة — العودة ممكنة بمفتاح واحد
+      let backedUp = false;
+      try { backedUp = !!await saveUserSetting(CORR_BACKUP_KEY, _history); } catch (_) {}
+      const drift = [], failed = [];
+      let changed = 0;
+      matched.forEach(m => {
+        if (!m.diff.length) return;                       // مطابق أصلاً — لا نكتب
+        m.entry.inputs = corrMergeInputs(m.entry.inputs, m.corr.inputs);
+        const res = recomputeResults(m.entry.inputs);     // م.24: المعادلة واحدة
+        if (res) {
+          const fileFv = m.corr.results ? parseFloat(m.corr.results.fairValueAvg) : NaN;
+          m.entry.results = res;
+          if (isFinite(fileFv) && res.fairValueAvg != null
+              && Math.abs(fileFv - res.fairValueAvg) > 0.01) {
+            drift.push({ tk: m.entry.inputs.ticker, date: m.entry.date, file: fileFv, calc: res.fairValueAvg });
+          }
+        } else {
+          // تعذّرت إعادة الحساب — نُبقي نتيجة الملف ونعلنها لا نبتلعها
+          if (m.corr.results) m.entry.results = m.corr.results;
+          failed.push({ tk: m.entry.inputs.ticker, date: m.entry.date });
+        }
+        changed++;
+      });
+      const ok = await persistHistory();
+      invalidateHistIndex(); _histBuilt.clear();
+      renderHistory();
+      return { ok, changed, drift, failed, backedUp };
+    }
+
+    function corrCell(v) {
+      if (v === undefined || v === null || String(v).trim() === '') return '<em class="text-muted">(فارغ)</em>';
+      const s = String(v);
+      return escHist(s.length > 40 ? s.slice(0, 40) + '…' : s);
+    }
+
+    function previewValCorrections() {
+      if (typeof VAL_CORRECTIONS === 'undefined') {
+        showToast('ملف التصحيحات غير محمَّل', 'error'); return;
+      }
+      if (!_history.length) { showToast('السجل فارغ — حمّل الصفحة أولاً', 'info'); return; }
+      const { matched, missing, untouched } = corrMatch();
+      const toEdit = matched.filter(m => m.diff.length);
+      const same   = matched.filter(m => !m.diff.length);
+
+      const grp = {};
+      toEdit.forEach(m => {
+        const t = (m.corr.inputs.ticker || '—') + ' — ' + (m.corr.inputs.stockName || '');
+        (grp[t] = grp[t] || []).push(m);
+      });
+
+      let body = '';
+      Object.keys(grp).sort().forEach(t => {
+        body += '<div style="margin:14px 0 6px;font-weight:700;color:var(--text-1)">' + escHist(t) + '</div>';
+        grp[t].forEach(m => {
+          body += '<div class="small text-muted" style="margin:4px 0">' + escHist(m.entry.date || '')
+                + ' · <span dir="ltr">#' + m.entry.id + '</span> · مطابقة بـ' + escHist(m.how)
+                + ' · <strong>' + m.diff.length + '</strong> حقلاً</div>';
+          body += '<table style="width:100%;border-collapse:collapse;font-size:.82rem;margin-bottom:8px">';
+          body += '<tr style="color:var(--text-muted)"><th style="text-align:right;padding:3px">الحقل</th>'
+                + '<th style="text-align:right;padding:3px">كان</th><th style="text-align:right;padding:3px">صار</th></tr>';
+          m.diff.forEach(d => {
+            body += '<tr style="border-top:1px solid var(--border)"><td style="padding:3px">' + escHist(corrLbl(d.k)) + '</td>'
+                  + '<td style="padding:3px;color:var(--danger,#f85149)">' + corrCell(d.from) + '</td>'
+                  + '<td style="padding:3px;color:var(--success,#3fb950)">' + corrCell(d.to) + '</td></tr>';
+          });
+          body += '</table>';
+        });
+      });
+
+      let notes = '';
+      if (same.length)      notes += '<div>✅ ' + same.length + ' عملية مطابقة أصلاً — لن تُكتب.</div>';
+      if (missing.length)   notes += '<div>⚠️ ' + missing.length + ' عملية في الملف بلا نظير في السجل: '
+        + escHist(missing.map(c => c.inputs.ticker + ' (' + c.date + ')').join(' · '))
+        + ' — <strong>لن تُضاف</strong>.</div>';
+      if (untouched.length) notes += '<div>ℹ️ ' + untouched.length + ' عملية في السجل خارج الملف — تبقى كما هي: '
+        + escHist(untouched.map(e => ((e.inputs || {}).ticker || '؟') + ' (' + (e.date || '') + ')').join(' · ')) + '</div>';
+
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;padding:16px';
+      overlay.innerHTML =
+        '<div style="background:var(--bg-2,#1c2128);border:1px solid var(--border,#30363d);border-radius:12px;max-width:760px;width:100%;max-height:86vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.5)">'
+      + '<div style="padding:16px 20px;border-bottom:1px solid var(--border)">'
+      + '<div style="font-weight:700;color:var(--text-1)">🔧 تصحيحات ' + escHist(VAL_CORRECTIONS_AT) + ' — معاينة قبل الكتابة</div>'
+      + '<div class="small text-muted" style="margin-top:4px">' + toEdit.length
+      + ' عملية ستُعدَّل · التواريخ والمعرّفات لا تتغيّر · نسخة احتياطية تُحفَظ أولاً</div>'
+      + '<div class="small" style="margin-top:8px;line-height:1.7;color:var(--text-muted)">'
+      + 'الملف صحّح <strong>المدخلات</strong> ولم يُعِد تشغيل النماذج، فقيمه العادلة المحفوظة فيه '
+      + 'ما تزال محسوبة بالأرقام القديمة. لذلك تُعاد هنا حسابُ كل قيمة عادلة من المدخلات المصحَّحة '
+      + 'بمعادلة المنصّة — معادلةٌ واحدة لا اثنتان (م.24). فرقٌ عن رقم الملف متوقَّع، وهو التصحيح يعمل.'
+      + '</div></div>'
+      + '<div style="padding:12px 20px;overflow:auto;flex:1">'
+      + (body || '<div class="text-muted">لا فروق — السجل مطابق للملف.</div>')
+      + '<div class="small" style="margin-top:12px;line-height:1.9">' + notes + '</div></div>'
+      + '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:10px">'
+      + '<button id="corr-cancel" class="btn btn-secondary">إلغاء</button>'
+      + '<button id="corr-ok" class="btn btn-primary"' + (toEdit.length ? '' : ' disabled') + '>تطبيق '
+      + toEdit.length + ' تعديلاً وحفظ</button></div></div>';
+      document.body.appendChild(overlay);
+      const close = () => overlay.remove();
+      overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+      overlay.querySelector('#corr-cancel').onclick = close;
+      overlay.querySelector('#corr-ok').onclick = async () => {
+        const btn = overlay.querySelector('#corr-ok');
+        btn.disabled = true; btn.textContent = 'جارٍ الحفظ…';
+        const r = await corrApply(toEdit);
+        close();
+        if (!r.ok) { showToast('تعذّر الحفظ — التصحيحات في الذاكرة فقط، أعد المحاولة', 'error'); return; }
+        let msg = '✅ حُفظت ' + r.changed + ' عملية مصحَّحة';
+        if (r.backedUp)     msg += ' · نسخة احتياطية محفوظة';
+        if (r.drift.length) msg += ' · ⚠️ ' + r.drift.length + ' فرق بين قيمة الملف وإعادة الحساب';
+        if (r.failed.length) msg += ' · ' + r.failed.length + ' تعذّرت إعادة حسابها';
+        showToast(msg, (r.drift.length || r.failed.length) ? 'info' : 'success');
+        if (r.drift.length)  console.table(r.drift);
+        if (r.failed.length) console.table(r.failed);
+      };
     }
 
     // ═══ تصدير كل العمليات الحسابية إلى Markdown (كل صغيرة وكبيرة في السجل) ═══
@@ -3070,8 +3297,8 @@
       setVal('calcExecPrice',  inp.execPrice);
       setVal('perplexityEval', inp.perplexityEval);
       setVal('calcNotes',      inp.notes);
-      document.getElementById('noNetDebt').checked   = !!inp.noNetDebt;
-      document.getElementById('noTotalDebt').checked = !!inp.noTotalDebt;
+      document.getElementById('noNetDebt').checked   = flagOn(inp.noNetDebt);
+      document.getElementById('noTotalDebt').checked = flagOn(inp.noTotalDebt);
       setVal('fcfBasis', inp.fcfBasis || 'fcff');
       setVal('normEps', inp.normEps); setVal('normFcf', inp.normFcf);
 
@@ -3093,7 +3320,7 @@
 
       // إعدادات WACC المحفوظة تُستعاد أيضاً — وإلا أُعيد الحساب بمعدل خصم مختلف عن الأصل
       const wc = document.getElementById('useWacc');
-      wc.checked = !!inp.useWacc && inp.companyType !== 'bank';
+      wc.checked = flagOn(inp.useWacc) && inp.companyType !== 'bank';
       if (wc.checked) {
         setVal('debtCost', inp.debtCost); setVal('taxRate', inp.taxRate); setVal('debtEquity', inp.debtEquity);
         _prevDiscountRate = inp.discountRate;
