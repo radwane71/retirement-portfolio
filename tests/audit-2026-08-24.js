@@ -478,5 +478,98 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
     'كانت تستبعد أي هامش سالب — والخطة تحتها تُصدر أمر شراء للسهم نفسه');
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⑭ التوزيعات — م.22 والمقامات والتغطية والنصوص
+// ----------------------------------------------------------------------
+// السابقة الموثّقة في م.22 نصّاً: «منحة بنك الرياض 1:3 — التوزيع 1.40 ←
+// 1.05. بلا تعديل يبدو *قصاً 25%* وهو خطأ». هنا تُشغَّل حرفياً.
+// ══════════════════════════════════════════════════════════════════════
+{
+  const els = {};
+  const mkEl = () => ({ _html: '', value: '', style: {}, dataset: {},
+    classList: { add() {}, remove() {}, contains: () => false },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); },
+    textContent: '', setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { return c; }, addEventListener() {}, focus() {}, remove() {},
+    scrollIntoView() {}, querySelector: () => null, querySelectorAll: () => [],
+    getContext: () => ({ canvas: {}, createLinearGradient: () => ({ addColorStop() {} }) }) });
+  const byId = (id) => (els[id] = els[id] || mkEl());
+  const c = { console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map, WeakMap,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: () => 0, clearTimeout() {}, setInterval: () => 0, clearInterval() {},
+    requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', body: mkEl(), documentElement: mkEl(),
+      getElementById: byId, querySelector: () => null, querySelectorAll: () => [],
+      createElement: mkEl, addEventListener() {}, createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    location: { href: 'http://x/', hash: '' }, navigator: { userAgent: 'n' },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    alert() {}, confirm: () => true, getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null, showToast() {},
+    XLSX: { utils: {}, write: () => '' },
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; } };
+  c.window = c; c.globalThis = c; c.self = c; vm.createContext(c);
+  ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js',
+   'js/tadawul-data.js', 'js/dividends.js']
+    .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), c, { filename: f }));
+
+  // 1,000 سهم · 1,400 ر.س في 2024 و2025 · منحة 333 سهماً · ثم 1,400 ر.س
+  // المبلغ المستلَم لم يتغيّر إطلاقاً ⇒ النمو الصحيح صفر لا قصّ 25%.
+  vm.runInContext(`
+    holdings = [{ ticker:'RIY', name:'بنك الرياض', shares:1333, current_price:30, avg_price:20, sector:'بنوك' }];
+    dividends = [
+      { ticker:'RIY', name:'بنك الرياض', date:'2024-04-10', amount:1400, year:2024, month:4 },
+      { ticker:'RIY', name:'بنك الرياض', date:'2025-04-10', amount:1400, year:2025, month:4 },
+      { ticker:'RIY', name:'بنك الرياض', date:'2026-04-10', amount:1400, year:2026, month:4 },
+    ];
+    txBuyRows = [
+      { ticker:'RIY', type:'buy',   date:'2023-01-05', shares:1000, price:20, total:20000 },
+      { ticker:'RIY', type:'grant', date:'2026-04-01', shares:333,  price:0,  total:0 },
+    ];
+    txSellRows = []; archivedDividends = [];
+    if (typeof _invalidateSharesCache === 'function') _invalidateSharesCache();
+  `, c);
+
+  let err = null;
+  try { c.renderDividendQuality(); } catch (e) { err = e.constructor.name + ': ' + e.message; }
+  t('جدول الجودة يُرسَم بلا خطأ', err === null, err);
+
+  const h = byId('div-quality-body')._html;
+  t('م.22 — المنحة لا تُقرأ قصّاً', /\+0\.0%/.test(h) && !/-25\.0%/.test(h),
+    (h.match(/[+-]\d+\.\d%/g) || []).join(' '));
+  t('وإعادة البيان مُعلَنة في الصفّ', /م\.22 ↺/.test(h),
+    'الوسم غائب — المالك لا يعرف أن رقمه أُعيد بيانه');
+  t('الدرجة لم تعد مخفوضة بقصٍّ وهمي',
+    +(h.match(/font-weight:700;color:[^"]+">(\d+)</) || [0, 0])[1] >= 80,
+    (h.match(/font-weight:700;color:[^"]+">(\d+)</) || [])[1]);
+
+  const div = fs.readFileSync(ROOT + 'js/dividends.js', 'utf8');
+  t('المنح تُقرأ من txBuyRows لا من متغيّر غير موجود',
+    /const grants = \(txBuyRows \|\| \[\]\)/.test(div));
+  t('العائد السنوي على متوسط رأس المال',
+    /\(beginPort \+ endPort\) \/ 2/.test(div),
+    'مقام «أول يناير» يبالغ 48% في محفظة يدخلها ضخّ شهري');
+  t('وجدول لكل سهم على المقام نفسه', /\(_beg \+ _end\) \/ 2 : _end/.test(div),
+    'كان يقسم على 31 ديسمبر بينما الجدول السنوي على أول يناير');
+  t('Forward YOC بمقام واحد', /const fwdNetCap = _currentCostBasis\(\);/.test(div));
+  t('إجمالي الأرباح يستبعد غير المصروف', /const _paidDiv = dividends\.map/.test(div));
+  t('الجدول الشهري يبوّب بالتاريخ كالرسم', /_divPeriodKey\(x\) === _key/.test(div));
+  t('النمو بين نافذتين غير متجاورتين مُسنوى',
+    /Math\.pow\(fullWins\[0\]\.sum \/ fullWins\[1\]\.sum, 1 \/ _yoyPer\)/.test(div),
+    'نمو سنتين كان يُعرض نمو سنة: +52.9% بدل +23.7%');
+  t('تغطية FCF بمناطق م.42-أ الأربع', /const _covZone = \(v\) =>/.test(div));
+  t('والسالبة تُعرض صفراً لا مضاعفاً سالباً', /التغطية صفر لا رقماً سالباً/.test(div));
+  t('الكود الميت محذوف', !/function _dpsTrendAware/.test(div));
+  t('نصوص Forward تطابق ما يُحسب',
+    (div.match(/مجموع التوزيع للسهم خلال آخر 12 شهراً/g) || []).length >= 4
+    && !/× عدد مرات التوزيع سنوياً/.test(div),
+    'سبعة نصوص كانت تصف «آخر دفعة × الدورية» والكود يحسب مجموع TTM');
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

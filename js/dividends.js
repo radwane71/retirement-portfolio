@@ -18,7 +18,7 @@ window.CARD_INFO = {
       <div class="info-math">
         • <strong>TTM (آخر 12 شهراً):</strong> مجموع ما استلمته فعلاً خلال آخر سنة — دخل حقيقي بلا تقدير.<br>
         • <strong>YOC الفعلي:</strong> = أرباح آخر 12 شهر ÷ تكلفة شرائك للأسهم. يقيس عائد التوزيعات على رأس مالك الأصلي.<br>
-        • <strong>العائد المتوقع (Forward):</strong> = لكل سهم (آخر دفعة ÷ أسهمك وقتها) × عدد مرات التوزيع سنوياً × أسهمك الحالية. تقدير لما ستستلمه في السنة القادمة.<br>
+        • <strong>العائد المتوقع (Forward):</strong> = لكل سهم مجموع التوزيع للسهم خلال آخر 12 شهراً × أسهمك الحالية. تقدير لما ستستلمه في السنة القادمة.<br>
         • <strong>العائد السوقي:</strong> = الدخل المتوقع ÷ القيمة السوقية الحالية — ما يدفعه السوق اليوم مقابل توزيعاتك.
       </div>
       <div class="info-formula">لماذا يختلف YOC عن العائد السوقي؟ لأن YOC يقسم على ما <strong>دفعته</strong> أنت، والسوقي يقسم على <strong>قيمة السهم اليوم</strong>. ارتفاع YOC عن السوقي = اشتريت بسعر جيد.</div>
@@ -208,38 +208,9 @@ function _divPeriodKey(d) {
 //   ②. حدّد الدورية من الفجوة الزمنية بين آخر دفعتين
 //   ③. DPS × الدورية × الأسهم الحالية = الدخل المتوقع من هذا السهم سنوياً
 // هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم
-// ── اختيار DPS المتوقّع: وسيط محصّن، مع استثناء الأسهم النامية ──────
-// dpsSeries: سلسلة DPS بالترتيب الزمني (الأقدم أولاً). freq: الدورية (1/2/4).
-// المنطق:
-//   نفحص آخر دورة سنوية كاملة (آخر freq دفعات). لو كانت تصاعدية بانتظام
-//   (كل دفعة ≥ سابقتها ضمن تسامح 1%، وآخرها أعلى من أولها بأكثر من 3%) →
-//   السهم يرفع توزيعه بثبات، فآخر دفعة معلنة أصدق من الوسيط الذي يتخلّف.
-//   غير ذلك → الوسيط (الافتراضي الآمن ضد التوزيعات الاستثنائية).
-function _dpsTrendAware(dpsSeries, freq) {
-  const n = dpsSeries.length;
-  const window = dpsSeries.slice(-freq);          // آخر دورة سنوية (بالترتيب الزمني)
-  const medianOf = arr => {
-    const s = arr.slice().sort((a, b) => a - b);
-    // AUDIT-FIX 2026-08: وسيط النافذة الزوجية = متوسط العنصرين الأوسطين
-    // (كان يأخذ الأعلى منهما فينحاز لأعلى) — يطابق dashboard.js
-    return s.length % 2 === 0
-      ? (s[s.length / 2 - 1] + s[s.length / 2]) / 2
-      : s[Math.floor(s.length / 2)];
-  };
-  // نحتاج دورة كاملة على الأقل (freq دفعات) لتأكيد الاتجاه، وإلا نرجع للوسيط
-  if (freq >= 2 && window.length >= freq && n >= freq) {
-    const TOL = 0.99;                             // تسامح 1% للتذبذب الطفيف بين دفعات السنة
-    let rising = true;
-    for (let i = 1; i < window.length; i++) {
-      if (window[i] < window[i - 1] * TOL) { rising = false; break; }
-    }
-    const meaningfulGrowth = window[window.length - 1] > window[0] * 1.03;
-    if (rising && meaningfulGrowth) {
-      return { dps: window[window.length - 1], mode: 'rising' };
-    }
-  }
-  return { dps: medianOf(window), mode: 'median' };
-}
+// ⚠️ حُذفت `_dpsTrendAware` (25 سطراً) في أوديت 2026-08-24: صارت كوداً ميتاً
+// بعد انتقال الدخل المتوقّع إلى مجموع DPS آخر 12 شهراً (قرار المالك 2026-08).
+// منطق «الوسيط المحصّن مع استثناء النامي» لم يعد مطلوباً: المجموع يلتقط النمو بنفسه.
 
 function _projectedAnnualIncome() {
   const breakdown = [];
@@ -378,8 +349,16 @@ function renderDivStats(fwdPrecomputed) {
   const daysElapsed = Math.floor((today - startOfYear) / 86400000) + 1;
   const daysInYear  = ((currentYear % 4 === 0 && currentYear % 100 !== 0) || currentYear % 400 === 0) ? 366 : 365;
 
-  const totalAll = dividends.reduce((s, d) => s + +d.amount, 0);
-  const yearDiv  = dividends.filter(d => +d.year === currentYear).reduce((s, d) => s + +d.amount, 0);
+  // ⚠️ المُعلَن بتاريخ صرفٍ قادم ليس دخلاً محقّقاً — و`_ttmDividends` وسلسلة
+  // الدخل المتوقّع تُسقطانه عمداً، وهذان الرقمان لا. و`+d.year` حقلٌ مستقل
+  // قد يخالف التاريخ. قياس: ثلاث توزيعات ×1,000 إحداها مستقبلية ⇒
+  // «إجمالي الأرباح 3,000» والمستلَم 2,000، و«أرباح 2026» 2,000 والفعلي 1,000.
+  const _nowRef  = new Date();
+  const _paidDiv = dividends.map(d => ({ d, dt: dividendFlowDate(d, _nowRef) })).filter(x => x.dt);
+  const _pendingDiv = dividends.length - _paidDiv.length;
+  const totalAll = _paidDiv.reduce((s, x) => s + +x.d.amount, 0);
+  const yearDiv  = _paidDiv.filter(x => x.dt.getFullYear() === currentYear)
+                           .reduce((s, x) => s + +x.d.amount, 0);
   const ttm      = _ttmDividends();
   const netCapital = _currentCostBasis();
 
@@ -445,7 +424,7 @@ function renderDivStats(fwdPrecomputed) {
     </div>
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item"
-      title="Forward Projected = لكل سهم: (آخر دفعة ÷ أسهم وقتها) × الدورية × الأسهم الحالية&#10;هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم&#10;يعكس ما تتوقع استلامه سنوياً من محفظتك الحالية&#10;مغطى: ${coveredByFwd} رمز من أصل ${uniqueTickers}">
+      title="Forward Projected = لكل سهم: مجموع التوزيع للسهم خلال آخر 12 شهراً × أسهمك الحالية&#10;هذا ما تستخدمه ياهو فاينانس وإنفستنج كوم&#10;يعكس ما تتوقع استلامه سنوياً من محفظتك الحالية&#10;مغطى: ${coveredByFwd} رمز من أصل ${uniqueTickers}">
       <div class="tx-stat-val ${fwdYocCls}">${fwdYoc.toFixed(2)}%${_dvBadge}</div>
       <div class="tx-stat-lbl">العائد المتوقع (Forward)</div>
       <div class="tx-stat-sub" style="color:var(--success,#3fb950)">≈ ${formatSAR(fwd.total)} سنوياً</div>
@@ -453,7 +432,7 @@ function renderDivStats(fwdPrecomputed) {
     <div class="tx-stat-divider"></div>
     <div class="tx-stat-item">
       <div class="tx-stat-val text-success"
-        title="الدخل التوزيعي السنوي المتوقع من المحفظة الحالية&#10;= مجموع (آخر DPS × الدورية × الأسهم الحالية) لكل رمز">
+        title="الدخل التوزيعي السنوي المتوقع من المحفظة الحالية&#10;= مجموع (مجموع التوزيع للسهم خلال آخر 12 شهراً × أسهمك الحالية) لكل رمز">
         ${formatSAR(fwd.total)}
       </div>
       <div class="tx-stat-lbl">الدخل المتوقع / سنة</div>
@@ -753,7 +732,7 @@ function buildCostMaps() {
   const yearBuyCost    = {};
   const tickerYearCost = {};
   txBuyRows.forEach(tx => {
-    const yr     = String(new Date(tx.date).getFullYear());
+    const yr     = String((parseDateLocal(tx.date) || new Date(tx.date)).getFullYear());
     const ticker = String(tx.ticker);
     const cost   = tx.type === 'grant' ? 0 : +tx.total || 0;
     yearBuyCost[yr] = (yearBuyCost[yr] || 0) + cost;
@@ -799,10 +778,11 @@ function renderYearlySummary({ yearPortfolio }, fwdPrecomputed) {
 
   // Forward projected للسنة الجارية
   const fwd = fwdPrecomputed || _projectedAnnualIncome();
-  const fwdNetCap = (() => {
-    const tickers = [...new Set([...txBuyRows.map(t => t.ticker), ...txSellRows.map(t => t.ticker)])];
-    return tickers.reduce((s, t) => s + _tickerCostBasisAtYear(t, currentYear), 0);
-  })();
+  // ⚠️ **نفس مقام** شريط الإحصائيات (`_currentCostBasis`). التعليق فوق تلك
+  // الدالة يُعلن توحيد المقام على جدول الحيازات (م.15/2)، وهذا الموضع كان
+  // يُعيد البناء من دفتر المعاملات — فـ`avg_price` محرّراً يدوياً يعطي مقامين
+  // مختلفين لنفس المقياس في الصفحة الواحدة (8.33% مقابل 10.00%).
+  const fwdNetCap = _currentCostBasis();
   const fwdYocPct = fwdNetCap > 0 ? fwd.total / fwdNetCap * 100 : 0;
 
   yEl.innerHTML = `<div class="table-wrapper"><table>
@@ -815,13 +795,30 @@ function renderYearlySummary({ yearPortfolio }, fwdPrecomputed) {
     <tbody>${years.map(y => {
       const isCurrentYear = +y === currentYear;
 
-      // رأس المال في نهاية السنة (أو حتى اليوم للسنة الجارية)
+      // ══════════════════════════════════════════════════════════════
+      // المقام = **متوسط** رأس المال داخل السنة، لا أوّلها ولا آخرها
+      // --------------------------------------------------------------
+      // عائد فترة على رأس مال متحرّك يُقاس على متوسط رأس المال المستثمر
+      // (مبدأ Modified Dietz). ومقامُ «أول المدة» صالح فقط حين لا تدفّق
+      // داخل السنة — وم.7 تفرض ضخّاً 8,000 ر.س شهرياً = 42% من المحفظة،
+      // فالشرط لا يتحقق أبداً.
+      //
+      // والأسوأ أن الصفحة كانت تحمل مقامين متعاكسين لنفس البسط: الجدول
+      // السنوي على **أول يناير** وجدول «لكل سهم» على **31 ديسمبر**.
+      // قياس فعلي — 100,000 أول السنة وضخّ 8,000 شهرياً ⇒ 196,000 آخرها،
+      // وتوزيعات 8,140 (= 5.5% على المتوسط 148,000):
+      //     الجدول السنوي   8.14%  (+48%)
+      //     جدول لكل سهم    4.15%  (−25%)
+      //     الصحيح          5.50%
+      // رقمان متجاوران، أحدهما ضِعف الآخر تقريباً.
+      // ══════════════════════════════════════════════════════════════
       const endPort   = yearPortfolio[y]          ?? 0;
-      // رأس المال بداية السنة = نهاية السنة السابقة (المقام الصحيح للعائد)
       const prevYear  = String(+y - 1);
       const beginPort = yearPortfolio[prevYear]   ?? 0;
-      // السنة الأولى في السجل: لا يوجد "قبلها" → نستخدم نهاية نفس السنة
-      const denominator = beginPort > 0 ? beginPort : endPort;
+      // متوسط بسيط بين طرفَي السنة — تقريبٌ صادق لـMidpoint Dietz، وأقرب
+      // بكثير من أيّ طرف وحده. السنة الأولى بلا «قبلها» ⇒ نهاية السنة.
+      const denominator = (beginPort > 0 && endPort > 0) ? (beginPort + endPort) / 2
+                        : (beginPort > 0 ? beginPort : endPort);
 
       let yieldStr, yieldCls, tooltip;
 
@@ -890,7 +887,7 @@ function renderYearlySummary({ yearPortfolio }, fwdPrecomputed) {
       </td>
       <td class="num text-muted" title="تكلفة الحيازات الحالية">${fwdNetCap > 0 ? formatSAR(fwdNetCap) : '—'}</td>
       <td class="num text-success bold"
-        title="الدخل السنوي المتوقع من المحفظة الحالية&#10;= مجموع (آخر DPS × الدورية × الأسهم الحالية) لكل رمز">
+        title="الدخل السنوي المتوقع من المحفظة الحالية&#10;= مجموع (مجموع التوزيع للسهم خلال آخر 12 شهراً × أسهمك الحالية) لكل رمز">
         ${formatSAR(fwd.total)}
         <br><span class="small text-muted">≈ ${formatSAR(fwd.total/12)} / شهر</span>
       </td>
@@ -921,7 +918,7 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }, fwdPrecom
 
   // السنوات المتاحة (من الأرباح أو المعاملات، مدمجة)
   const divYears  = [...new Set(dividends.map(d => String(d.year)))];
-  const txYears   = [...new Set([...txBuyRows, ...txSellRows].map(tx => String(new Date(tx.date).getFullYear())))];
+  const txYears   = [...new Set([...txBuyRows, ...txSellRows].map(tx => String((parseDateLocal(tx.date) || new Date(tx.date)).getFullYear())))];
   const allYears  = [...new Set([...divYears, ...txYears])].sort((a, b) => b - a);
 
   const tickers    = Object.keys(holdMap).sort((a, b) => holdMap[b].total - holdMap[a].total);
@@ -954,7 +951,13 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }, fwdPrecom
       portVal = tickerYearPortfolio[ticker]?.all ?? null;
     } else {
       divAmt  = h.byYear[selectedYear] || 0;
-      portVal = tickerYearPortfolio[ticker]?.[selectedYear] ?? null;
+      // ⚠️ **نفس مقام الجدول السنوي**: متوسط طرفَي السنة لا نهايتها.
+      // كان هذا الجدول يقسم على 31 ديسمبر والجدول السنوي على أول يناير —
+      // مقامان متعاكسان لنفس البسط في الصفحة الواحدة، والفرق يبلغ الضِّعف
+      // في محفظة يدخلها ضخّ شهري (م.7).
+      const _end  = tickerYearPortfolio[ticker]?.[selectedYear] ?? null;
+      const _beg  = tickerYearPortfolio[ticker]?.[String(+selectedYear - 1)] ?? null;
+      portVal = (_beg > 0 && _end > 0) ? (_beg + _end) / 2 : _end;
     }
 
     return { ticker, name: h.name, divAmt, portVal };
@@ -999,7 +1002,7 @@ function renderHoldingSummary({ tickerYearCost, tickerYearPortfolio }, fwdPrecom
         <th title="صافي رأس المال المستثمر في هذا السهم حتى 31 ديسمبر = مشتريات تراكمية − مبيعات تراكمية">قيمة الاستثمار${selectedYear!=='all'?' '+selectedYear:''}</th>
         <th>الأرباح${selectedYear!=='all'?' '+selectedYear:''}</th>
         <th title="العائد على التكلفة = أرباح ÷ قيمة الاستثمار">YOC % فعلي</th>
-        ${showFwdCol ? `<th title="Forward = آخر DPS × الدورية × الأسهم الحالية — مثل ياهو فاينانس&#10;الأدق للمحافظ النامية" style="color:var(--success)">▶ Forward / سنة</th>` : ''}
+        ${showFwdCol ? `<th title="Forward = مجموع التوزيع للسهم خلال آخر 12 شهراً × أسهمك الحالية — مثل ياهو فاينانس&#10;الأدق للمحافظ النامية" style="color:var(--success)">▶ Forward / سنة</th>` : ''}
         <th>ثقة البيانات</th>
       </tr></thead>
       <tbody>${rows.length ? rows.map(r => {
@@ -1326,7 +1329,12 @@ function _buildIncomeTable() {
   for (let i = 11; i >= 0; i--) {
     const d   = new Date(now.getFullYear(), now.getMonth() - i, 1);
     const yr  = d.getFullYear(), mo = d.getMonth() + 1;
-    const amt = dividends.filter(x => x.year === yr && x.month === mo).reduce((s,x) => s + +x.amount, 0);
+    // ⚠️ التبويب بـ`_divPeriodKey` كما يفعل الرسم في البطاقة نفسها.
+    // إصلاح 2026-08-21 وحّد الرسم على حقل `date` ونسي الجدول، فسجلّ
+    // تاريخه 2026-01-05 وحقلاه year=2025/month=12 يظهر في **شهرين مختلفين**
+    // بحسب أي زرّ تضغط داخل البطاقة الواحدة.
+    const _key = `${yr}-${String(mo).padStart(2, '0')}`;
+    const amt = dividends.filter(x => _divPeriodKey(x) === _key).reduce((s,x) => s + +x.amount, 0);
     total += amt;
     const label = MONTHS_AR[mo-1] + ' ' + yr;
     rows.push(`<tr${amt === 0 ? ' style="opacity:0.4"' : ''}><td>${label}</td><td class="num">${amt > 0 ? formatSAR(amt) : '—'}</td></tr>`);
@@ -1438,6 +1446,51 @@ function renderDividendQuality() {
   Object.values(dpsSeriesByTicker).forEach(a => a.sort((x, y) => x.t - y.t));
   Object.values(rawSeriesByTicker).forEach(a => a.sort((x, y) => x.t - y.t));
 
+  // ══════════════════════════════════════════════════════════════════
+  // م.22 — إعادة بيان DPS عند المنحة قبل أي مقارنة
+  // ------------------------------------------------------------------
+  // `DPS = المبلغ ÷ الأسهم وقت التوزيعة` محصَّن ضد الشراء والبيع الجزئي
+  // (وهو المقصود)، وغير محصَّن ضد **المنحة**: عدد الأسهم يقفز بلا تغيّر في
+  // المبلغ، فينهار DPS بنسبة المنحة ويُقرأ **قصّاً** في `worstDrop`
+  // و`growthScore` و`trend`.
+  //
+  // وم.22 توثّق السابقة بنصّها: «منحة بنك الرياض 1:3 — التوزيع 1.40 ←
+  // 1.05. بلا تعديل يبدو *قصاً 25%* وهو خطأ».
+  //
+  // قياس فعلي على السابقة نفسها: 1,000 سهم، توزيعة 1,400 ر.س في 2024
+  // و2025، ثم منحة 333 سهماً، ثم 1,400 ر.س — المبلغ المستلَم لم يتغيّر:
+  //     الدرجة 54 · النمو 0/35 · «نمو مركّب −13.4%»
+  // والصحيح: نمو صفر، لا قصّ، الاستمرارية كاملة.
+  //
+  // العلاج: كل DPS سابقٍ لمنحةٍ يُضرب في (الأسهم قبلها ÷ بعدها) — أي
+  // يُعاد بيانه إلى أساس اليوم، تماماً كما يفعل `tdNormalizedEps` مع
+  // الربحية. والمنحة تُعرف من معاملات `grant` في دفتر المعاملات.
+  // ══════════════════════════════════════════════════════════════════
+  const _grantRestated = {};
+  Object.keys(dpsSeriesByTicker).forEach(t => {
+    // ⚠️ المنح تعيش داخل `txBuyRows` (السطر 98 يضمّ buy و grant معاً) —
+    // ولا وجود لمتغيّر `transactions` في هذا الملف.
+    const grants = (txBuyRows || [])
+      .filter(x => x.ticker === t && x.type === 'grant' && x.date && +x.shares > 0)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    if (!grants.length) return;
+    const factors = grants.map(g => {
+      const after  = _sharesAtDate(t, g.date);            // شامل المنحة
+      const before = after - (+g.shares || 0);
+      return (before > 0.001 && after > before)
+        ? { ts: (parseDateLocal(g.date) || new Date(g.date)).getTime(), f: before / after, date: g.date }
+        : null;
+    }).filter(Boolean);
+    if (!factors.length) return;
+    let touched = 0;
+    dpsSeriesByTicker[t].forEach(p => {
+      // معامل تراكمي لكل منحة وقعت **بعد** هذه التوزيعة
+      const cum = factors.filter(g => g.ts > p.t).reduce((a, g) => a * g.f, 1);
+      if (cum !== 1) { p.dps *= cum; p.restated = true; touched++; }
+    });
+    if (touched) _grantRestated[t] = { count: touched, grants: factors.map(g => g.date) };
+  });
+
   const tickers = Object.keys(byTickerYear).filter(t => {
     const yrs = Object.keys(byTickerYear[t]).length;
     return yrs >= 1;
@@ -1465,8 +1518,14 @@ function renderDividendQuality() {
     const name = h?.name || dividends.find(d => d.ticker === ticker)?.name || ticker;
     const base = {
       ticker, name, isDPS, inPortfolio: !!h,
+      restated: _grantRestated[ticker] || null,   // م.22 — أُعيد بيان DPS لمنحة
       lastAmount: lastRawAmt,
-      firstYear: rawYears[0], lastYear: rawYears[rawYears.length - 1],
+      // ⚠️ مدى **النوافذ المحسوبة** لا مدى السجل الخام: `series` تُسقط
+      // التوزيعات التي لا معاملة قبلها، فسهمٌ توزيعاته 2023–2026 وأول شراء
+      // له 2025 كان يعرض «2/2 (2023–2026)» بينما النافذتان تغطيان 2025–2026.
+      firstYear: series.length ? new Date(series[0].t).getFullYear() : rawYears[0],
+      lastYear:  series.length ? new Date(series[series.length - 1].t).getFullYear()
+                               : rawYears[rawYears.length - 1],
     };
 
     if (!series.length) {
@@ -1549,9 +1608,17 @@ function renderDividendQuality() {
     const nFull    = fullWins.length;
 
     // ── 1. نمو التوزيعات (0–35) — متاح من نافذتين مكتملتين (~24 شهراً) ──
-    let growthScore = null, yoy = null, cagrWin = null;
+    let growthScore = null, yoy = null, cagrWin = null, yoyGap = null;
     if (nFull >= 2) {
-      yoy = (fullWins[0].sum / fullWins[1].sum - 1) * 100;
+      // ⚠️ `fullWins` مُرشّحة: قد تفصل بين العنصرين نافذةٌ أو أكثر استُبعدت
+      // (دفعة مفقودة، نافذة دخول). والرقم يُعرض تحت «نمو **سنوي**»،
+      // فنمو سنتين يُقرأ نمو سنة: موزّع ربعي نامٍ فُوّتت دفعة منه
+      // أعطى **+52.9%** والصحيح **+23.7%** — ضعف الحقيقة تقريباً،
+      // والرقم يدخل `growthScore` وترتيب الجدول. ومسار CAGR أسفله
+      // يحسب `periods` من فارق `idx` صحيحاً — وهذا المسار لا.
+      const _yoyPer = Math.max(1, fullWins[1].idx - fullWins[0].idx);
+      yoy = (Math.pow(fullWins[0].sum / fullWins[1].sum, 1 / _yoyPer) - 1) * 100;
+      if (_yoyPer > 1) yoyGap = _yoyPer;
       const periods = fullWins[nFull - 1].idx - fullWins[0].idx;   // المسافة بالنوافذ
       if (periods > 0 && fullWins[nFull - 1].sum > 0) {
         cagrWin = (Math.pow(fullWins[0].sum / fullWins[nFull - 1].sum, 1 / periods) - 1) * 100;
@@ -1613,7 +1680,7 @@ function renderDividendQuality() {
     return {
       ...base,
       nWindows, nFull, freq, expectedPerWindow,
-      yoy, cagrWin, cv, worstDrop, broken, daysSinceLast,
+      yoy, cagrWin, yoyGap, cv, worstDrop, broken, daysSinceLast,
       continuityScore, growthScore, volatilityScore,
       totalScore, provisional, trend,
     };
@@ -1683,6 +1750,9 @@ function renderDividendQuality() {
                               border-radius:3px;padding:1px 5px;font-weight:600;cursor:help"> DPS ✓</span>`
                   : `<span title="لا توجد معاملات مسجّلة — الدرجة من المبالغ الخام"
                        style="font-size:.65rem;color:var(--text-muted)"> ⓘ</span>`}
+                ${s.restated ? `<span title="أُعيد بيان ${s.restated.count} توزيعة سابقة لمنحة (${esc(s.restated.grants.join('، '))}) — م.22: بلا إعادة البيان تُقرأ المنحة قصّاً للتوزيع"
+                       style="font-size:.65rem;background:rgba(168,85,247,.15);color:#c084fc;
+                              border-radius:3px;padding:1px 5px;font-weight:600;cursor:help"> م.22 ↺</span>` : ''}
                 ${!s.inPortfolio ? '<span class="small text-muted"> (خارج المحفظة)</span>' : ''}
               </td>
               <td>${esc(s.name)}</td>
@@ -1700,7 +1770,11 @@ function renderDividendQuality() {
               <td style="text-align:center">${scoreBadge(s.volatilityScore, 'انخفاض تذبذب DPS بين النوافذ (CV)', 'يحتاج نافذة أخرى — الثبات متاح من ثلاث نوافذ مكتملة')}</td>
               <td class="num" title="النافذة = 12 شهراً من آخر توزيعة للخلف. «مكتملة» = دفعاتها ≥ ${s.expectedPerWindow} (المتوقَّع من دوريتها)">${s.nFull}/${s.nWindows}
                 <span class="small text-muted">(${s.firstYear}–${s.lastYear})</span></td>
-              <td title="${s.nFull >= 3 ? 'CAGR عبر النوافذ المكتملة' : s.nFull >= 2 ? 'نافذة مقابل النافذة السابقة' : ''}">${cagrFmt(s.nFull >= 3 ? s.cagrWin : s.yoy)}</td>
+              <td title="${s.nFull >= 3 ? 'CAGR عبر النوافذ المكتملة'
+                : s.nFull >= 2
+                  ? (s.yoyGap ? `مُسنوى عبر ${s.yoyGap} نوافذ — النافذتان المكتملتان غير متجاورتين (دفعة مفقودة أو نافذة دخول بينهما)`
+                              : 'نافذة مقابل النافذة السابقة')
+                  : ''}">${cagrFmt(s.nFull >= 3 ? s.cagrWin : s.yoy)}${s.yoyGap ? ' <span class="small text-muted">↔' + s.yoyGap + '</span>' : ''}</td>
               <td class="num">${formatSAR(s.lastAmount)}</td>
               <td>${trendEl(s.trend)}</td>
             </tr>`;
@@ -1890,11 +1964,34 @@ function renderTadawulDividends() {
       else growth = `<td style="color:${g.value >= 0 ? 'var(--success)' : 'var(--danger)'}">${pct}</td>`;
     }
 
+    // ══════════════════════════════════════════════════════════════
+    // التلوين بمناطق م.42-أ الأربع، لا بقاعدتين
+    // --------------------------------------------------------------
+    // كان `cov >= 1 ? أخضر : أصفر` — فتغطية **0.06×** تُلوَّن باللون الذي
+    // تُلوَّن به 0.95×، وم.42-أ تفرّق: 🟢 ≥1.00 · 🟡 0.85–1.00 ·
+    // 🟠 0.60–0.85 · 🔴 <0.60.
+    //
+    // والتغطية السالبة كانت تُطبع «−13.26×» وكأنها مضاعف. تدفّق حرّ سالب
+    // يعني أن التوزيع لم يخرج من تدفّق السنة إطلاقاً — تغطيةٌ **صفرية**،
+    // لا سالبة بمقدار.
+    // ══════════════════════════════════════════════════════════════
     const cov = (typeof tdLatestCoverage === 'function') ? tdLatestCoverage(tk) : null;
-    const covTd = cov
-      ? `<td class="num" title="تغطية التوزيع من التدفق الحر، ${cov.year} — أعلى أفضل (م.42-أ)"`
-        + ` style="color:${cov.value >= 1 ? 'var(--success)' : 'var(--warning)'};cursor:help">${cov.value.toFixed(2)}×</td>`
-      : '<td class="text-muted" title="التدفق الحر غير مستخرَج لهذا السهم (م.20)">—</td>';
+    const _covZone = (v) => v < 0 ? { c: 'var(--danger)',  i: '🔴', l: 'تدفّق حرّ سالب' }
+                          : v >= 1.00 ? { c: 'var(--success)', i: '🟢', l: 'مغطّاة' }
+                          : v >= 0.85 ? { c: 'var(--warning)', i: '🟡', l: 'حدّية' }
+                          : v >= 0.60 ? { c: 'var(--warning)', i: '🟠', l: 'ناقصة' }
+                          :             { c: 'var(--danger)',  i: '🔴', l: 'غير مغطّاة' };
+    let covTd;
+    if (!cov) {
+      covTd = '<td class="text-muted" title="التدفق الحر غير مستخرَج لهذا السهم (م.20)">—</td>';
+    } else {
+      const z = _covZone(cov.value);
+      const neg = cov.value < 0;
+      covTd = `<td class="num" style="color:${z.c};cursor:help" title="`
+        + `${esc(z.l)} — منطقة م.42-أ · سنة ${cov.year}`
+        + (neg ? ` · التدفق الحر سالب (${formatNum(cov.value, 2)}) فالتغطية صفر لا رقماً سالباً` : '')
+        + `">${z.i} ${neg ? '0×' : cov.value.toFixed(2) + '×'}</td>`;
+    }
 
     return `<tr${mine ? '' : ' style="opacity:.55"'}>`
       + `<td><strong class="text-accent">${esc(tk)}</strong>`
