@@ -252,7 +252,19 @@
            القاعدة: ما لسنا واثقين منه 100% لا يُعرض. ⚠️ لا تُعِد التبويب. -->
       <button class="perf-tab"        onclick="showPerfTab('returns')"      id="ptab-returns">📈 العائد بالنسبة</button>
       <button class="perf-tab"        onclick="showPerfTab('div-metrics')"  id="ptab-div-metrics">💰 مؤشرات التوزيعات</button>
+      <button class="perf-tab"        onclick="showPerfTab('entry')"        id="ptab-entry">🎯 التسعير عند الدخول</button>
       <button class="perf-tab"        onclick="showPerfTab('behavioral')"   id="ptab-behavioral">🧠 تحليل السلوك</button>
+    </div>
+
+    <!-- ── TAB: التسعير عند الدخول ── -->
+    <div id="pview-entry" class="card" style="display:none">
+      <div class="section-header">
+        <span class="section-title">🎯 التسعير عند الدخول <span class="eng-label">Entry vs Fair Value</span></span>
+        <button class="info-btn" type="button" onclick="showEntryPricingInfo()">ⓘ</button>
+      </div>
+      <div id="entry-body">
+        <div class="empty-state"><div class="icon">⏳</div><p>جارٍ الحساب…</p></div>
+      </div>
     </div>
 
     <!-- ── TAB: العائد بالنسبة المئوية ── -->

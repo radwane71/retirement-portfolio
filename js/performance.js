@@ -242,7 +242,7 @@ async function init() {
 // ── Tab switcher ──────────────────────────────────────────────────────
 function showPerfTab(tab) {
   _activeTab = tab;
-  ['open','closed','timeline','monthly-chart','returns','div-metrics','behavioral'].forEach(t => {
+  ['open','closed','timeline','monthly-chart','returns','div-metrics','entry','behavioral'].forEach(t => {
     const view = document.getElementById(`pview-${t}`);
     const btn  = document.getElementById(`ptab-${t}`);
     if (view) view.style.display = t === tab ? '' : 'none';
@@ -250,6 +250,7 @@ function showPerfTab(tab) {
   });
   if (tab === 'returns')     renderReturns();
   if (tab === 'div-metrics') renderDividendMetrics();
+  if (tab === 'entry')       renderEntryPricing();
   if (tab === 'behavioral')  renderBehavioralAudit();
 }
 
@@ -1449,6 +1450,199 @@ function renderDividendMetrics() {
 // Win Rate · Hold Days (Winners vs Losers) · Profit Factor
 // Monthly Trade Frequency · Best/Worst Trades
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// التسعير عند الدخول — سعر شرائك مقابل القيمة العادلة المتاحة وقتها
+// ----------------------------------------------------------------------
+// هذا هو الاستعمال الوحيد للسجل التاريخي الذي لا تقدر عليه ملفات تداول:
+// الأساسيات السنوية موجودة فيها أصلاً، أما **قيمةٌ عادلة بنماذج المنصّة
+// نفسها عند لحظة دخولك** فلم تكن موجودة قبل استيراد السجل.
+//
+// أربعة حرّاس، وكلٌّ منها يستبعد صفوفاً ويُعلن كم استبعد — لا يقدّر:
+//
+//  ① **لا استشراف.** تقييم السنة المالية X مبنيٌّ على قوائم تُنشر بعد
+//     انتهائها. فشراء مارس 2024 يُقارَن بتقييم **2023** — آخر ما كان
+//     منشوراً وقتها. مقارنته بتقييم 2024 تسأل: «هل اشتريتَ رخيصاً قياساً
+//     بمعلومةٍ لم تكن تملكها؟» وهو سؤال بلا معنى.
+//
+//  ② **لا مقارنة عبر تجزئة (م.22).** transactions.js يعيد كتابة صفوف
+//     الدفتر بعد التجزئة، فسعر شراء 2021 مخزَّنٌ بأساس ما بعدها؛ بينما
+//     تقييم 2021 محسوبٌ بأساس ما قبلها. النسبة تخرج ×10 في اتجاه «رخيص
+//     جداً». نكتشف القفزة من القيمة الدفترية ونستبعد ما قبلها.
+//
+//  ③ **كل صفقة على حدة.** متوسط التكلفة المجمَّع عبر سنوات لا يقابله
+//     تقييم سنةٍ واحدة. نحسب لكل صفٍّ ثم نرجّح بالمبلغ.
+//
+//  ④ **الرخص ليس إحساناً.** إن رسب السهم في بوابة الاستدامة تلك السنة
+//     فانخفاض السعر إشارة خطر لا فرصة — يُعرض موسوماً لا محتسَباً مدحاً.
+// ══════════════════════════════════════════════════════════════════════
+const ENTRY_VAL_KEY = 'valuation_history_v1';
+const ENTRY_SPLIT_RATIO = 4;      // قفزة القيمة الدفترية التي تدلّ على تجزئة
+let _entryVal = null;             // ticker → { year → {fv, fail, bvps} }
+let _entrySplitYear = {};         // ticker → أول سنة بعد التجزئة
+
+async function loadEntryValuations() {
+  if (_entryVal) return _entryVal;
+  _entryVal = {};
+  let hist = null;
+  try { hist = await loadUserSetting(ENTRY_VAL_KEY); } catch (_) { hist = null; }
+  if (!Array.isArray(hist)) return _entryVal;
+
+  hist.forEach(e => {
+    const tk = String(e?.inputs?.ticker || '').trim().toUpperCase();
+    const ts = (typeof valEntryStamp === 'function') ? valEntryStamp(e) : null;
+    if (!tk || !ts) return;
+    const y = new Date(ts).getFullYear();
+    const fv = (e.results?.fairValueAvg != null && isFinite(+e.results.fairValueAvg) && +e.results.fairValueAvg > 0)
+      ? +e.results.fairValueAvg : null;
+    if (fv == null) return;                       // بلا قيمة عادلة لا مقارنة
+    const bvps = parseFloat(e.inputs?.bookValue ?? e.inputs?.bvps);
+    (_entryVal[tk] = _entryVal[tk] || {});
+    // السنة الواحدة قد يكون لها أكثر من تقييم (2026 مثلاً) — نُبقي الأحدث
+    if (!_entryVal[tk][y] || ts > _entryVal[tk][y].ts) {
+      _entryVal[tk][y] = { ts, fv, fail: e.results?.fairValueUnreliable === true,
+        sustainFail: e.results?.sustainFail === true,
+        bvps: isFinite(bvps) ? bvps : null };
+    }
+  });
+
+  // كشف التجزئة: قفزة هبوطية في القيمة الدفترية بين سنتين متتاليتين
+  _entrySplitYear = {};
+  Object.keys(_entryVal).forEach(tk => {
+    const ys = Object.keys(_entryVal[tk]).map(Number).sort((a, b) => a - b);
+    for (let i = 1; i < ys.length; i++) {
+      const a = _entryVal[tk][ys[i - 1]].bvps, b = _entryVal[tk][ys[i]].bvps;
+      if (a > 0 && b > 0 && a / b >= ENTRY_SPLIT_RATIO) { _entrySplitYear[tk] = ys[i]; break; }
+    }
+  });
+  return _entryVal;
+}
+
+// تقييم السنة السابقة للشراء — آخر ما كان منشوراً وقتها
+function entryRefFor(ticker, buyYear) {
+  const tbl = _entryVal && _entryVal[ticker];
+  if (!tbl) return null;
+  const want = buyYear - 1;
+  // نقبل حتى سنتين للوراء: قد لا يكون للسهم تقييمٌ لكل سنة
+  for (let y = want; y >= want - 1; y--) {
+    if (tbl[y]) return { year: y, ...tbl[y] };
+  }
+  return null;
+}
+
+async function renderEntryPricing() {
+  const el = document.getElementById('entry-body');
+  if (!el) return;
+  el.innerHTML = `<div class="empty-state"><div class="icon">⏳</div><p>جارٍ القراءة…</p></div>`;
+  await loadEntryValuations();
+
+  // المفتوحة والمغلقة معاً — الصفقة المغلقة قرارُ دخولٍ أيضاً
+  const { open, closed } = getPositionData();
+  const positions = [...(open || []), ...(closed || [])];
+  const rows = [];
+  const skipped = { noSeries: 0, noRef: 0, split: 0, grant: 0 };
+  const skippedTk = { noSeries: new Set(), split: new Set() };
+
+  (positions || []).forEach(p => {
+    const tk = String(p.ticker || '').toUpperCase();
+    (p.allBuys || []).forEach(t => {
+      const price = +t.price, sh = +t.shares;
+      if (!(price > 0) || !(sh > 0)) { skipped.grant++; return; }   // منحة أو صفٌّ بلا سعر
+      const d = (typeof parseDateLocal === 'function') ? parseDateLocal(t.date) : new Date(t.date);
+      const by = d ? d.getFullYear() : null;
+      if (!by) { skipped.noRef++; return; }
+      if (!_entryVal[tk]) { skipped.noSeries++; skippedTk.noSeries.add(tk); return; }
+      const ref = entryRefFor(tk, by);
+      if (!ref) { skipped.noRef++; return; }
+      // م.22: الشراء بأساس ما بعد التجزئة والتقييم بأساس ما قبلها
+      const sy = _entrySplitYear[tk];
+      if (sy && ref.year < sy) { skipped.split++; skippedTk.split.add(tk); return; }
+      rows.push({ tk, name: p.name || tk, date: t.date, price, shares: sh,
+        amount: price * sh, refYear: ref.year, fv: ref.fv,
+        ratio: price / ref.fv, unreliable: ref.fail, sustainFail: ref.sustainFail });
+    });
+  });
+
+  const totalBuys = (positions || []).reduce((s, p) => s + (p.allBuys || []).length, 0);
+  if (!rows.length) {
+    el.innerHTML = noteHtml('📭',
+      `<strong>لا صفقة شراء قابلة للقياس بعد.</strong><br>`
+      + `من ${totalBuys} عملية شراء: ${skipped.noSeries} لسهمٍ بلا سلسلة تقييم`
+      + `${skippedTk.noSeries.size ? ' (' + esc([...skippedTk.noSeries].join('، ')) + ')' : ''}، `
+      + `${skipped.noRef} بلا تقييمٍ للسنة السابقة لها، ${skipped.split} عبر تجزئة`
+      + `${skippedTk.split.size ? ' (' + esc([...skippedTk.split].join('، ')) + ') — م.22 توجب إعادة البيان قبل أي مقارنة' : ''}، `
+      + `${skipped.grant} منحة أو بلا سعر.<br>`
+      + `<span class="text-muted">القياس يحتاج تقييماً للسنة المالية السابقة للشراء — `
+      + `فالسلسلة تغطي 2017–2025، والمشتريات الأحدث من آخر تقييم لا مرجع لها بعد.</span>`);
+    return;
+  }
+
+  // الترجيح بالمبلغ: صفقة بـ50 ألفاً ليست كصفقة بألفين
+  const wAmt = rows.reduce((s, r) => s + r.amount, 0);
+  const wRatio = rows.reduce((s, r) => s + r.ratio * r.amount, 0) / wAmt;
+  const under = rows.filter(r => r.ratio < 1);
+  const underAmt = under.reduce((s, r) => s + r.amount, 0);
+  const flagged = rows.filter(r => r.sustainFail);
+
+  const pct = v => (v * 100).toFixed(0) + '%';
+  const bandOf = r => r.ratio <= 0.85 ? ['🟢🟢', '#22c55e'] : r.ratio <= 1.05 ? ['🟢', '#22c55e']
+                    : r.ratio <= 1.20 ? ['⚪', '#94a3b8'] : r.ratio <= 1.40 ? ['🟡', '#f59e0b'] : ['🔴', '#ef4444'];
+
+  rows.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const body = rows.map(r => {
+    const [icon, color] = bandOf(r);
+    return `<tr>
+      <td>${esc(r.date)}</td>
+      <td><strong>${esc(r.tk)}</strong> <span class="text-muted">${esc(r.name)}</span></td>
+      <td>${formatNum(r.price, 2)}</td>
+      <td>${formatNum(r.fv, 2)} <span class="text-muted" style="font-size:.72rem">(${r.refYear})</span></td>
+      <td style="color:${color}"><strong>${icon} ${pct(r.ratio)}</strong></td>
+      <td>${formatSAR(r.amount)}</td>
+      <td>${r.sustainFail ? '<span title="السهم رسب في بوابة الاستدامة تلك السنة — الرخص هنا إشارة خطر لا فرصة" style="color:#ef4444">⛔ استدامة</span>' : ''}
+          ${r.unreliable ? '<span title="الحاسبة رفضت اعتماد رقم واحد لتشتّت النماذج" style="color:#f59e0b">⚠️ تشتّت</span>' : ''}</td>
+    </tr>`;
+  }).join('');
+
+  el.innerHTML =
+    noteHtml('🎯',
+      `<strong>وسطي دخولك المرجَّح بالمبلغ: ${pct(wRatio)} من القيمة العادلة</strong>`
+      + ` — ${wRatio < 1 ? 'أي تحتها' : 'أي فوقها'}.`
+      + `<br>${under.length} من ${rows.length} صفقة دخلت تحت العادلة، وهي `
+      + `<strong>${pct(underAmt / wAmt)}</strong> من رأس المال المقيس.`
+      + (flagged.length ? `<br>⛔ ${flagged.length} صفقة وقعت في سنةٍ رسب فيها السهم في بوابة الاستدامة — `
+          + `الرخص فيها إشارة خطر لا فرصة، فلا تُقرأ مدحاً.` : ''))
+    + `<div class="text-muted" style="font-size:.78rem;line-height:1.9;margin:8px 0 12px">`
+    + `المرجع هو تقييم <strong>السنة المالية السابقة</strong> للشراء — آخر ما كان منشوراً وقتها؛ `
+    + `مقارنتك بتقييم سنة الشراء نفسها تسأل هل اشتريتَ رخيصاً قياساً بمعلومةٍ لم تكن تملكها.<br>`
+    + `⚙️ القيمة العادلة مشتقّة بنماذج المنصّة من أرقام تلك السنة، لا رقمٌ منقول (م.19).<br>`
+    + `<strong>المقيس: ${rows.length} من ${totalBuys} عملية شراء.</strong> المستبعَد: `
+    + `${skipped.noSeries} بلا سلسلة تقييم${skippedTk.noSeries.size ? ' (' + esc([...skippedTk.noSeries].join('، ')) + ')' : ''} · `
+    + `${skipped.noRef} بلا تقييمٍ للسنة السابقة · `
+    + `${skipped.split} عبر تجزئة${skippedTk.split.size ? ' (' + esc([...skippedTk.split].join('، ')) + ') — م.22 توجب إعادة البيان قبل أي مقارنة' : ''} · `
+    + `${skipped.grant} منحة أو بلا سعر.`
+    + `</div>`
+    + `<div class="table-wrapper"><table><thead><tr>`
+    + `<th>التاريخ</th><th>السهم</th><th>سعر شرائك</th><th>العادلة المرجعية</th>`
+    + `<th>السعر ÷ العادلة</th><th>المبلغ</th><th></th>`
+    + `</tr></thead><tbody>${body}</tbody></table></div>`;
+}
+
+function showEntryPricingInfo() {
+  openInfoModal('🎯 التسعير عند الدخول', `
+    <p>يقارن <strong>سعر كل صفقة شراء</strong> بالقيمة العادلة التي تعطيها نماذج المنصّة
+    لذلك السهم في <strong>السنة المالية السابقة</strong> للشراء.</p>
+    <p><strong>لماذا السنة السابقة؟</strong> تقييم سنة 2024 مبنيٌّ على قوائم تُنشر بعد
+    انتهائها. فمقارنة شراءٍ وقع في مارس 2024 بتقييم 2024 تسأل: هل اشتريتَ رخيصاً قياساً
+    بمعلومةٍ لم تكن تملكها؟ — سؤالٌ بلا معنى. المرجع هو آخر ما كان منشوراً وقتها.</p>
+    <p><strong>ما يُستبعَد ويُعلَن:</strong> صفقات الأسهم التي لا سلسلة تقييم لها؛
+    وصفقات تسبق تجزئةً في السهم، لأن دفتر معاملاتك أُعيدت كتابته بعد التجزئة بينما
+    التقييم القديم بأساس ما قبلها — والمقارنة بينهما تخرج بعشرة أضعاف (م.22)؛
+    والمنح، فلا سعر لها.</p>
+    <p><strong>الرخص ليس إحساناً بذاته.</strong> إن رسب السهم في بوابة الاستدامة تلك
+    السنة، فانخفاض سعره إشارة خطر لا فرصة — ولذلك يُوسَم الصفّ ولا يُحتسب مدحاً.</p>
+    <p class="text-muted">النسبة مرجّحة بمبلغ الصفقة: صفقة بخمسين ألفاً ليست كصفقة بألفين.</p>
+  `);
+}
+
 function renderBehavioralAudit() {
   const el = document.getElementById('behavioral-body');
   if (!el) return;
