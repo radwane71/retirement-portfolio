@@ -331,9 +331,24 @@ function buildPositionData() {
     }
   });
 
-  // أرباح لكل رمز
+  // ══════════════════════════════════════════════════════════════════
+  // أرباح لكل رمز — **المستلَمة** لا المُعلَنة
+  // ------------------------------------------------------------------
+  // كان `divsByTicker` (لـXIRR) يُسقط ما لم يُصرَف بعد، و`divMap` — الذي
+  // يولّد `p.divReceived` — لا يُسقط شيئاً. تعريفان داخل الدالة الواحدة.
+  //
+  // قياس فعلي: مركز 1,000 ر.س بأربع دفعات ×25 مستلمة ودفعة 900 مسجّلة
+  // بتاريخ صرفٍ بعد سنة ⇒ «التوزيعات المستلمة» **1,000** بدل **100**،
+  // و«استرداد بالتوزيعات 100%» أي «استرددتَ كامل رأس مالك» — وهو محض
+  // خطأ. وسنوات الاسترداد 0.6 بدل 10.
+  // ══════════════════════════════════════════════════════════════════
   const divMap = {};
-  _divs.forEach(d => { divMap[d.ticker] = (divMap[d.ticker] || 0) + +d.amount; });
+  _divs.forEach(d => {
+    const dt = (typeof dividendFlowDate === 'function')
+      ? dividendFlowDate(d) : (d.date ? new Date(d.date) : null);
+    if (!dt || isNaN(dt)) return;
+    divMap[d.ticker] = (divMap[d.ticker] || 0) + +d.amount;
+  });
 
   // تصنيف كل رمز
   const open    = [];
@@ -398,11 +413,17 @@ function buildPositionData() {
       // الربح المحقق من البيع الجزئي — زمني (WAC وقت كل بيع)
       const costOfSold    = Math.max(0, p.buyCost - _cost);
       p.partialRealizedPnL = _realized;
-      p.totalReturn        = (p.unrealizedPnL || 0) + p.partialRealizedPnL + p.divReceived;
+      // ⚠️ `|| 0` يحوّل `null` إلى صفر: سهم بلا سعر حالي ربحه غير المحقّق
+      // **غير معروف** لا صفر، ومقامه يحتفظ بكامل التكلفة — فيُعرَض الصفّ
+      // «—» في عمود غير المحقّق و«0.00%» في إجمالي العائد. بسطٌ مجهول على
+      // مقامٍ معلوم = قيمة غير معرّفة — وهو المبدأ المطبَّق في `unrealizedPct`.
+      p.totalReturn        = (p.marketValue == null) ? null
+                           : (p.unrealizedPnL || 0) + p.partialRealizedPnL + p.divReceived;
       // AUDIT-FIX (2026-08): المقام = كل ما أُنفق على الرمز (متبقٍّ + مُباع). كان
       // الشرط على costOfRemaining وحده، والصفر يُعرَض 0.00% رغم وجود عائد فعلي.
       p.totalReturnBasis   = costOfRemaining + costOfSold;
-      p.totalReturnPct     = p.totalReturnBasis > 0 ? p.totalReturn / p.totalReturnBasis * 100 : null;
+      p.totalReturnPct     = (p.totalReturn != null && p.totalReturnBasis > 0)
+                           ? p.totalReturn / p.totalReturnBasis * 100 : null;
       // XIRR للمراكز المفتوحة (القيمة الحالية كتدفق نهائي)
       p.xirr = _calcPositionXIRR(p, divsByTicker[p.ticker] || [], p.marketValue);
       if (p.sellShares > 0.001) partial.push(p);
@@ -487,7 +508,7 @@ function renderKPIs() {
     }
     _snapMaxDD = maxDD;
     // AUDIT-FIX (2026-08): شارة النضج على عدد اللقطات بعد إزالة التكرارات لا العدد الخام
-    const _mDD = assessMetricMaturity('risk', { snapshots: sortedSnaps.length });
+    const _mDD = assessMetricMaturity('risk', { snapshots: Math.max(0, Object.keys(twrMap).length - 1) });
     ddEl.innerHTML    = maxDD.toFixed(2) + '%' + maturityBadge(_mDD.level, _mDD.reason);
     ddEl.className    = 'value num ' + (maxDD < -15 ? 'text-danger' : maxDD < -8 ? 'text-warning' : 'text-success');
     ddEl.title        = ddPeakDate ? `من ${formatDate(ddPeakDate)} إلى ${formatDate(ddTroughDate)}` : '';
@@ -595,6 +616,10 @@ function _computeRiskMetrics() {
 }
 
 function renderRiskMetrics() {
+  // الحاشية تُكتب برمجياً بالأساس الفعلي: كانت ثابتة في HTML تقول «لقطات
+  // شهرية» بينما الأساس صار سلسلة أسعار يومية — وصفٌ لا يطابق ما يُحسب.
+  const _dailyBase = (typeof _dailyStocksTRSeries === 'function') && !!_dailyStocksTRSeries();
+  const _subEl = document.getElementById('pk-volatility-sub');
   const volEl = document.getElementById('pk-volatility');
   const shEl  = document.getElementById('pk-sharpe');
   const soEl  = document.getElementById('pk-sortino');
@@ -617,7 +642,12 @@ function renderRiskMetrics() {
 
   // شارة نضج موحّدة: مقاييس المخاطر تحتاج لقطات شهرية كافية
   // AUDIT-FIX (2026-08): العدد بعد إزالة التكرارات (m.nSnaps) لا _snapshots.length الخام
-  const _mRisk = assessMetricMaturity('risk', { snapshots: m.nSnaps });
+  // `nSnaps` صارت عدد **أيام التداول** بعد التحوّل إلى السلسلة اليومية،
+  // وعتبات `assessMetricMaturity` مكتوبة للقطات **شهرية** (< 12 ⇒ تقديرية).
+  // فمحفظة عمرها ستة أشهر تعطي 130 يوماً ⇒ «موثوق» بلا أي شارة، والبوابة
+  // التي وُضعت لتحمي من رقم مبكّر صارت تكتفي بثلاثة أسابيع تداول.
+  // الثقة تتبع **عدد فترات العائد المستقلة** لا عدد الشموع.
+  const _mRisk = assessMetricMaturity('risk', { snapshots: m.nReturns });
   const _rb = maturityBadge(_mRisk.level, _mRisk.reason);
   // وسم الفترة القصيرة: المقاييس محسوبة على مدى الفترة بلا تسنية
   const _spanTag = m.shortSpan ? ' <span class="small text-muted">تراكمي (المدة أقل من سنة)</span>' : '';
@@ -625,6 +655,12 @@ function renderRiskMetrics() {
   if (volEl) {
     volEl.innerHTML  = (m.annVol * 100).toFixed(1) + '%' + _rb + _spanTag;
     volEl.className   = 'value num ' + (m.annVol < 0.15 ? 'text-success' : m.annVol < 0.30 ? 'text-warning' : 'text-danger');
+  }
+  if (_subEl) {
+    _subEl.textContent = (_dailyBase
+      ? `من ${m.nReturns} فترة عائد · أساس: أسعار يومية`
+      : `من ${m.nReturns} فترة عائد · أساس: لقطات صافي الثروة`)
+      + (m.shortSpan ? ' · بلا تسنية' : '');
   }
   const ratioClass = v => v == null ? 'text-muted' : v >= 1 ? 'text-success' : v >= 0 ? 'text-warning' : 'text-danger';
   if (shEl) {
@@ -671,20 +707,25 @@ function renderOpenPositions() {
       <td class="num ${pnlCls} bold">${p.unrealizedPnL != null ? formatSAR(p.unrealizedPnL, true) : '—'}</td>
       <td class="num ${pnlCls}">${p.unrealizedPct != null ? p.unrealizedPct.toFixed(2) + '%' : '—'}</td>
       <td class="num text-success">${p.divReceived > 0 ? formatSAR(p.divReceived) : '—'}</td>
-      <td class="num ${retCls} bold">${formatSAR(p.totalReturn, true)}<br><span class="small t-sub">${p.totalReturnPct != null ? p.totalReturnPct.toFixed(2)+'%' : '—'}</span></td>
+      <td class="num ${retCls} bold">${p.totalReturn == null ? '<span class="text-muted">—</span>' : formatSAR(p.totalReturn, true)}<br><span class="small t-sub">${p.totalReturnPct != null ? p.totalReturnPct.toFixed(2)+'%' : '—'}</span></td>
       <td class="num ${p.xirr == null ? 'text-muted' : p.xirr >= 0 ? 'text-success' : 'text-danger'}" title="XIRR الفردي لهذا المركز — يشمل مشتريات وأرباح والقيمة الحالية">${p.xirr != null ? (p.xirr >= 0 ? '+' : '') + p.xirr.toFixed(2) + '%' + xirrBadge : '—'}</td>
     </tr>`;
   }).join('');
 
   // Totals footer
-  const totalCost   = open.reduce((s, p) => s + p.avgCost * p.remainingShares, 0);
-  const totalMkt    = open.reduce((s, p) => s + (p.marketValue || 0), 0);
-  const totalUPnL   = open.reduce((s, p) => s + (p.unrealizedPnL || 0), 0);
+  // المركز بلا سعر حالي يُستبعَد من **طرفَي** نسبة الإجمالي: دخول تكلفته
+  // في المقام وغياب قيمته عن البسط ينتج «تكلفة 2,000 مقابل قيمة 1,200»
+  // فتُقرأ خسارة 40% وهي ليست كذلك. والعدد المستبعَد يُعلَن في التذييل.
+  const _priced   = open.filter(p => p.marketValue != null);
+  const _noPrice  = open.length - _priced.length;
+  const totalCost   = _priced.reduce((s, p) => s + p.avgCost * p.remainingShares, 0);
+  const totalMkt    = _priced.reduce((s, p) => s + (p.marketValue || 0), 0);
+  const totalUPnL   = _priced.reduce((s, p) => s + (p.unrealizedPnL || 0), 0);
   const totalDiv    = open.reduce((s, p) => s + p.divReceived, 0);
-  const totalRet    = open.reduce((s, p) => s + p.totalReturn, 0);
+  const totalRet    = _priced.reduce((s, p) => s + (p.totalReturn || 0), 0);
   const totalUPct   = totalCost > 0 ? totalUPnL / totalCost * 100 : 0;
   // AUDIT-FIX (2026-08): مقام نسبة الإجمالي = نفس مقام الصف الفردي (تكلفة المتبقي + تكلفة المُباع)
-  const totalRetBasis = open.reduce((s, p) => {
+  const totalRetBasis = _priced.reduce((s, p) => {
     const costOfRem = p.avgCost * p.remainingShares;
     return s + costOfRem + Math.max(0, p.buyCost - costOfRem);
   }, 0);
@@ -694,7 +735,10 @@ function renderOpenPositions() {
          عمودين مجاورين له في الصف نفسه (متوسط التكلفة × الأسهم) في جدول من
          12 عموداً يفرض تمريراً أفقياً. الإجمالي بقي هنا حيث يُقرأ فعلاً. -->
     <td colspan="5"><strong class="small">الإجمالي</strong>
-      <span class="small text-muted">· تكلفة الحيازات ${formatSAR(totalCost)}</span></td>
+      <span class="small text-muted">· تكلفة الحيازات ${formatSAR(totalCost)}</span>
+      ${_noPrice > 0 ? `<span class="small" style="color:var(--st-warn)"
+        title="بلا سعر حالي: يُستبعَد من الإجمالي كلياً — تكلفتُه وقيمتُه معاً — لئلا تُقرأ خسارةً وهمية">
+        · ${_noPrice} سهم بلا سعر مُستبعَد</span>` : ''}</td>
     <td class="num bold text-accent">${formatSAR(totalMkt)}</td>
     <td class="num bold ${totalUPnL>=0?'text-success':'text-danger'}">${formatSAR(totalUPnL,true)}</td>
     <td class="num ${totalUPnL>=0?'text-success':'text-danger'}">${totalUPct.toFixed(2)}%</td>
@@ -807,9 +851,17 @@ function getMonthlyData() {
 function buildMonthlyData() {
   if (!_tx.length && !_divs.length) return [];
 
+  // يشمل المحور أول **تدفّق** أيضاً: إيداعٌ سبق أول شراء كان يضيع، فيبدأ
+  // خطّ «رأس المال التراكمي» من الصفر ثم يقفز عند أول شهر فيه صفّ تدفّق.
+  const _divIsoOf = (d) => {
+    const x = (typeof dividendFlowDate === 'function') ? dividendFlowDate(d) : null;
+    return x ? `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}`
+             + `-${String(x.getDate()).padStart(2, '0')}` : d.date;
+  };
   const allDates = [
     ..._tx.map(t => t.date),
-    ..._divs.map(d => d.date)
+    ..._divs.map(_divIsoOf),
+    ...(_cf || []).map(c => c.date),
   ].filter(Boolean);
   const firstDate = allDates.sort()[0];
   if (!firstDate) return [];
@@ -828,7 +880,14 @@ function buildMonthlyData() {
   // M-8: build prefix-sum map once for all months (O(M) instead of O(N×M))
   const capitalMap = buildCumulativeCapitalMap();
   // For months with no cashflow entry, carry forward the last known total
+  // ⚠️ البداية من مجموع ما سبق أول شهر في القائمة لا من الصفر: رأس المال
+  // التراكمي دالة غير متناقصة من **كل** التدفقات إلى نهاية الشهر، لا من
+  // التي تقع داخل النطاق المعروض وحدها.
   let lastCapital = 0;
+  if (months.length) {
+    const prior = Object.keys(capitalMap).filter(k => k < months[0]).sort();
+    if (prior.length) lastCapital = capitalMap[prior[prior.length - 1]];
+  }
 
   return months.map(ym => {
     const [yr, mo] = ym.split('-').map(Number);
@@ -840,10 +899,13 @@ function buildMonthlyData() {
       return d && d.getFullYear() === yr && d.getMonth() + 1 === mo;
     });
 
+    // ⚠️ `!d.date` وحده يُسقط كل توزيعة مسجَّلة بسنة/شهر — فتختفي من التايم
+    // لاين والرسم والأرباح التراكمية كلّها، والإسقاط في اتجاه واحد دائماً:
+    // يبخس دخلك. `dividendFlowDate` هي التعريف الموحّد في المشروع.
     const monthDiv = _divs.filter(d => {
-      if (!d.date) return false;
-      const dt = parseDateLocal(d.date);
-      return dt && dt.getFullYear() === yr && dt.getMonth() + 1 === mo;
+      const dt = (typeof dividendFlowDate === 'function')
+        ? dividendFlowDate(d) : (d.date ? parseDateLocal(d.date) : null);
+      return dt && !isNaN(dt) && dt.getFullYear() === yr && dt.getMonth() + 1 === mo;
     });
 
     const buys  = monthTx.filter(t => t.type === 'buy' || t.type === 'grant').reduce((s,t) => s + +t.total, 0);
@@ -1206,8 +1268,42 @@ function renderDividendMetrics() {
     _fwdBasis[ticker] = { payments: entries.length, freq, dpsPoints: dpsSeries.length };
     let dps;
     if (dpsSeries.length) {
-      const recent = dpsSeries.slice(-freq).sort((a, b) => a - b);
-      dps = recent[Math.floor(recent.length / 2)];
+      // ══════════════════════════════════════════════════════════════
+      // ⚠️ **مجموع DPS آخر 12 شهراً** — لا «وسيط دفعة × الدورية»
+      // --------------------------------------------------------------
+      // المنهج القديم يفترض تساوي الدفعات، فيسحق النمط السعودي الشائع
+      // (مرحليٌّ صغير + ختاميٌّ كبير). وهو المنهج الذي نقضه المالك في
+      // 2026-08 و`js/dividends.js` يوثّق نقضه بنصّه — وهذه الصفحة بقيت
+      // تشغّله. وم.2 تعرّف التوزيع السنوي «مجموع الأرباع الأربعة».
+      //
+      // قياس فعلي، والتوزيع الحقيقي 1,000 ر.س/سنة في كل الحالات:
+      //   ربعي متساوٍ 0.25×4           ⇒ 1,000 ✅
+      //   نصفي 0.2 مرحلية + 0.8 ختامية ⇒ 800  (−20%)
+      //   ربعي 0.1/0.1/0.1/0.7          ⇒ 400  (−60%)
+      // وفي الأخيرة تُعرض «سنوات الاسترداد 25 سنة» حمراء بدل 10.
+      //
+      // وزيادةً: `recent[floor(len/2)]` على عدد زوجي يأخذ **الأعلى** من
+      // الوسطيَّين لا متوسطهما — فليس وسيطاً أصلاً.
+      // ══════════════════════════════════════════════════════════════
+      const nowTs   = Date.now();
+      const yearAgo = nowTs - 365 * 86400000;
+      let ttmDps = 0, ttmCount = 0;
+      entries.forEach(e => {
+        const pd = parseDateLocal(e.date);
+        const ts = pd ? pd.getTime() : NaN;
+        if (!isFinite(ts) || ts <= yearAgo || ts > nowTs) return;
+        const sh = _sharesAt(ticker, e.date);
+        if (sh >= 0.001) { ttmDps += e.amount / sh; ttmCount++; }
+      });
+      if (ttmDps > 0) {
+        _fwdBasis[ticker].basis = 'ttm';
+        _fwdBasis[ticker].ttmPayments = ttmCount;
+        return ttmDps * remainingShares;
+      }
+      // لا دفعة داخل آخر 12 شهراً: مجموع آخر دورة كاملة مسجَّلة
+      _fwdBasis[ticker].basis = 'lastCycle';
+      const cycle = dpsSeries.slice(-Math.max(1, freq));
+      dps = cycle.reduce((a, b) => a + b, 0) / Math.max(1, freq);
     } else if (remainingShares > 0) {
       // اشترى بعد كل التوزيعات المسجّلة — تقدير من آخر سنة مسجّلة
       const lastYear = Math.max(...entries.map(e => parseDateLocal(e.date).getFullYear()));
@@ -2219,10 +2315,29 @@ function _returnsData() {
              partial: !prior.length || end.date < `${y}-12-25` };
   }).filter(Boolean);
 
-  // ── XIRR على كل معاملاتك (تغطيته أوسع: لا يحتاج أسعاراً تاريخية) ──
+  // ══════════════════════════════════════════════════════════════════
+  // XIRR — لا يدخل ثمنُ أصلٍ ولا تدخل قيمتُه
+  // ------------------------------------------------------------------
+  // سهمٌ بلا `current_price` قيمته `marketValue = null` فتُجمَع **صفراً**،
+  // بينما مشترياته كلها تدخل تدفّقاً سالباً. فيقرأه XIRR **خسارة كاملة**.
+  //
+  // قياس فعلي: سهمان متطابقان اشتُريا قبل سنة بـ1,000 كلٌّ والسعر لم يتحرك
+  // (العائد الحقيقي صفر) — أحدهما بلا سعر:
+  //     TWR = 0.000% ✅   ·   XIRR = −49.96% ❌
+  // والبطاقة تعرضه «عائدك أنت» بلا شارة ولا حاشية.
+  //
+  // العلاج: يُستبعَد المركز من **طرفَي** المعادلة معاً — تدفّقاته وقيمته —
+  // ويُعلَن عددُه. إدخال رأس المال في المقام وإخراج الأصل منه كسرٌ لتعريف
+  // IRR نفسه، لا نقصُ دقّة.
+  // ══════════════════════════════════════════════════════════════════
+  const _openPos  = getPositionData().open || [];
+  const _pricedTk = new Set(_openPos.filter(p => p.marketValue != null).map(p => p.ticker));
+  const _unpriced = _openPos.filter(p => p.marketValue == null).map(p => p.ticker);
+  const _inXirr   = (tk) => _pricedTk.has(tk) || !_openPos.some(p => p.ticker === tk);
+
   const flows = [];
   (_tx || []).forEach(t => {
-    if (!t.date) return;
+    if (!t.date || !_inXirr(t.ticker)) return;
     if (t.type === 'buy')       flows.push({ date: parseDateLocal(t.date), amount: -(+t.total || 0) });
     else if (t.type === 'sell') flows.push({ date: parseDateLocal(t.date), amount:  (+t.total || 0) });
   });
@@ -2231,11 +2346,11 @@ function _returnsData() {
   // بتاريخ صرفٍ قادم لم يُستلَم. كتابةُ منطقٍ موازٍ هنا تعني رقمين لسؤال واحد.
   const _now = new Date();
   (_divs || []).forEach(d => {
+    if (!_inXirr(d.ticker)) return;
     const dt = dividendFlowDate(d, _now);
     if (dt) flows.push({ date: dt, amount: +d.amount || 0 });
   });
-  const mktValue = (getPositionData().open || [])
-    .reduce((a, p) => a + (+p.marketValue || 0), 0);
+  const mktValue = _openPos.reduce((a, p) => a + (+p.marketValue || 0), 0);
   if (mktValue > 0) flows.push({ date: new Date(), amount: mktValue });
   // ⚠️ `computeXIRR` ترجع **نسبة مئوية** (`r * 100`) لا كسراً — كما تستعملها
   // جداول المراكز أعلاه (`p.xirr.toFixed(2) + '%'`). قسمتها هنا تُوحّد الوحدة
@@ -2248,7 +2363,7 @@ function _returnsData() {
 
   const cov = (typeof _dailyCoverage === 'function') ? _dailyCoverage() : null;
   return { ok: true, pts, first, last, years, total, byYear, xirr, spanDays,
-           coverage: cov, series };
+           coverage: cov, series, xirrExcluded: _unpriced };
 }
 
 // عائد مدى بين نقطتَي مؤشر — يُستعمل للمدى المخصّص
@@ -2302,7 +2417,10 @@ function renderReturns() {
         <div class="label">عائدك أنت <span class="eng-label">XIRR</span></div>
         <div class="value num" style="color:${d.xirr == null ? 'var(--text-muted)' : col(d.xirr)}">
           ${d.xirr == null ? '—' : pctS(d.xirr)}</div>
-        <div class="sub">${d.xirr == null ? 'يحتاج تدفّقين بإشارتين' : 'موزون بتوقيت إيداعاتك'}</div>
+        <div class="sub">${d.xirr == null ? 'يحتاج تدفّقين بإشارتين'
+          : d.years < 1
+            ? `مُسنّى من ${d.years.toFixed(1)} سنة — التسنية تضخّم`
+            : 'موزون بتوقيت إيداعاتك'}</div>
       </div>
     </div>`;
 
@@ -2367,6 +2485,12 @@ function renderReturns() {
 
   // ── ④ ما يجب أن يُقال قبل أن يُقرأ الرقم ──
   const missing = (d.coverage && d.coverage.missing) || [];
+  // إفصاحان كانا يُحسبان ولا يُعرضان:
+  //  • `lateEntry` — سهم أسعاره تبدأ بعد أول شراء: جزء من تاريخك معه خارج
+  //    القياس (التدفّق الاصطناعي يمنع «الربح الوهمي» لكنه لا يُعيد المدة).
+  //  • `_cashDragPct` — أثر النقد الراكد، وتعليق المنهجية يَعِد به نصّاً.
+  const lateE = (d.coverage && d.coverage.lateEntry) || [];
+  const drag  = (typeof _cashDragPct === 'function') ? _cashDragPct() : null;
   const notes = noteHtml('📐',
       `<strong>ما يدخل في الرقم:</strong> ارتفاع الأسعار <em>و</em>التوزيعات النقدية `
     + `<em>و</em>الأرباح المحقَّقة من البيع <em>و</em>أسهم المنحة — عائدٌ إجمالي كامل. `
@@ -2382,8 +2506,23 @@ function renderReturns() {
     + `<br><strong>الأساس:</strong> أسهمك وتوزيعاتها (لا نقد راكد ولا عقار) — نفس أساس `
     + `مقاييس المخاطر أعلى الصفحة، فلا رقمان لسؤال واحد.`
     + (missing.length
-        ? `<br>⚠️ <strong>خارج القياس:</strong> ${esc(missing.join('، '))} — لا أسعار تاريخية `
-          + `لها، فلا تدخل TWR (تدخل XIRR لأنه لا يحتاج أسعاراً). م.20.`
+        ? `<br>⚠️ <strong>خارج TWR:</strong> ${esc(missing.join('، '))} — لا أسعار تاريخية لها، `
+          + `فقيمتها لا تُبنى يوماً بيوم. XIRR يشملها ما دام لها سعر حالي (م.20).`
+        : '')
+    + (lateE.length
+        ? `<br>⏳ <strong>دخول متأخّر للقياس:</strong> `
+          + lateE.map(x => `${esc(x.ticker)} من ${esc(x.from)}`).join(' · ')
+          + ` — ما قبل أول سعر معروف خارج TWR. دخولها يُحسب <strong>تدفّقاً</strong> لا ربحاً.`
+        : '')
+    + ((drag && drag.pct > 1)
+        ? `<br>💵 <strong>سحب النقد:</strong> ${drag.pct.toFixed(1)}% من محفظتك نقد غير مستثمَر `
+          + `(${formatSAR(drag.cash)}). القياس أعلاه على <strong>أسهمك وحدها</strong>، فأثر هذا `
+          + `النقد على عائد محفظتك الفعلي خارجه — وهو قرار سيولة لا قرار اختيار أسهم.`
+        : '')
+    + ((d.xirrExcluded && d.xirrExcluded.length)
+        ? `<br>⚠️ <strong>خارج XIRR:</strong> ${esc(d.xirrExcluded.join('، '))} — لا سعر حالي لها. `
+          + `تُستبعَد من طرفَي المعادلة معاً (تدفّقاتها وقيمتها): إدخال ثمنِ أصلٍ وإخراج `
+          + `قيمته يقرأه العائد خسارةً كاملة.`
         : ''),
     'info');
 

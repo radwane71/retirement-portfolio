@@ -364,5 +364,52 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
     && /const _badAmt =/.test(cf));
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⑫ الأداء التاريخي — XIRR والتوزيعات المستلمة والدخل المتوقَّع
+// ══════════════════════════════════════════════════════════════════════
+{
+  const p = fs.readFileSync(ROOT + 'js/performance.js', 'utf8');
+
+  t('XIRR يستبعد السهم بلا سعر من طرفَي المعادلة',
+    /const _inXirr   = \(tk\) =>/.test(p) && /if \(!t\.date \|\| !_inXirr\(t\.ticker\)\) return;/.test(p),
+    'كان يدخل ثمنُه ولا تدخل قيمتُه: محفظة عائدها صفر تُقرأ −49.96%');
+  t('والمستبعَد يُعلَن بالاسم', /خارج XIRR:/.test(p) && /xirrExcluded/.test(p));
+  t('الادّعاء «XIRR لا يحتاج أسعاراً» أُزيل', !/لا يحتاج أسعاراً/.test(p));
+
+  t('divReceived تُسقط المُعلَن غير المصروف',
+    /const dt = \(typeof dividendFlowDate === 'function'\)\n      \? dividendFlowDate\(d\) : \(d\.date \? new Date\(d\.date\) : null\);/.test(p),
+    'كان «استرددتَ كامل رأس مالك» يظهر من دفعة لم تُصرَف');
+
+  t('الدخل المتوقَّع بمجموع DPS آخر 12 شهراً',
+    /_fwdBasis\[ticker\]\.basis = 'ttm';/.test(p) && /return ttmDps \* remainingShares;/.test(p),
+    'المنهج القديم (وسيط × دورية) نقضه المالك في 2026-08 ويبخس النمط السعودي 60%');
+  t('لا وسيط دفعة × دورية متبقٍّ',
+    !/const recent = dpsSeries\.slice\(-freq\)\.sort/.test(p));
+
+  t('التايم لاين يشمل التوزيعة بسنة/شهر',
+    /dividendFlowDate\(d\) : \(d\.date \? parseDateLocal\(d\.date\) : null\)/.test(p));
+  t('محور الأشهر يشمل أول تدفّق', /\.\.\.\(_cf \|\| \[\]\)\.map\(c => c\.date\)/.test(p),
+    'إيداعٌ سبق أول شراء كان يضيع فيبدأ خطّ رأس المال من الصفر');
+  t('رأس المال التراكمي يبدأ ممّا سبق النطاق',
+    /if \(prior\.length\) lastCapital = capitalMap\[prior\[prior\.length - 1\]\];/.test(p));
+
+  t('السهم بلا سعر: العائد «—» لا 0.00%',
+    /p\.totalReturn        = \(p\.marketValue == null\) \? null/.test(p));
+  t('ويُستبعَد من نسبة الإجمالي', /const _priced   = open\.filter\(p => p\.marketValue != null\)/.test(p)
+    && /سهم بلا سعر مُستبعَد/.test(p));
+
+  t('شارة النضج تعدّ فترات العائد لا الأيام',
+    /assessMetricMaturity\('risk', \{ snapshots: m\.nReturns \}\)/.test(p),
+    'كانت تعدّ أيام التداول بعتبات مكتوبة للقطات شهرية');
+  t('بطاقة XIRR تتحفّظ تحت السنة', /مُسنّى من \$\{d\.years\.toFixed\(1\)\} سنة/.test(p));
+  t('إفصاحا الدخول المتأخّر وسحب النقد معروضان',
+    /دخول متأخّر للقياس/.test(p) && /سحب النقد:/.test(p),
+    'كانا يُحسبان ولا يُعرضان — وتعليق المنهجية يَعِد بالثاني نصّاً');
+
+  const ph = fs.readFileSync(ROOT + 'performance.html', 'utf8');
+  t('حاشية التذبذب لم تعد تدّعي «لقطات شهرية»',
+    !/تقريبي \(لقطات شهرية\)/.test(ph));
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);
