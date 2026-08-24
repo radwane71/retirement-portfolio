@@ -2579,8 +2579,15 @@ async function exportMonthlyReviewMD() {
     p('بيانات مخطط الراتب — الدخل الشهري وتوزيعه على: مصاريف، ادخار، أصول، محفظة التقاعد.');
 
     {
-      const entries = (salaryData.entries || []).sort((a, b) =>
-        (a.year !== b.year ? a.year - b.year : a.month - b.month));
+      // ⚠️ التقرير يقرأ نفس مخزن مقسّم الراتب، فيجب أن يطبّق **نفس الفصل**:
+      // الشهر المخطَّط (`status === 'planned'`) مستقبليٌّ لم يقع، وإدخاله في
+      // «إجمالي الدخل المسجّل» يجعل تقريرك يعلن دخلاً لم تستلمه.
+      // الغياب = منفَّذ (توافقاً مع كل سجلّ سابق لهذه الإضافة).
+      const _allSalary = (salaryData.entries || []);
+      const _plannedN  = _allSalary.filter(e => (e && e.status) === 'planned').length;
+      const entries = _allSalary
+        .filter(e => (e && e.status) !== 'planned')
+        .sort((a, b) => (a.year !== b.year ? a.year - b.year : a.month - b.month));
       const cats = salaryData.categories || [];
 
       if (entries.length) {
@@ -2590,6 +2597,10 @@ async function exportMonthlyReviewMD() {
         p(`**عدد الأشهر المسجّلة:** ${entries.length}  `);
         p(`**إجمالي الدخل المسجّل:** ${SAR(totalSalary)} ر.س  `);
         p(`**متوسط الراتب الشهري:** ${SAR(avgSalary)} ر.س`);
+        if (_plannedN) {
+          p(`> ⚠️ **مستبعَد من كل الأرقام أعلاه:** ${_plannedN} شهراً **مخطَّطاً** `
+            + `(مستقبليٌّ لم يقع). التقرير يعلن ما استُلم فعلاً.`);
+        }
 
         // إجمالي التوزيعات لكل فئة
         const catTotals = {};

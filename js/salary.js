@@ -242,12 +242,33 @@ function rangeBounds() {
   return { from, to };
 }
 
-function getFiltered() {
+// ══════════════════════════════════════════════════════════════════════
+// المخطَّط لا يدخل حساباً — والفصل عند بوابة واحدة
+// ----------------------------------------------------------------------
+// `status`: 'actual' (منفَّذ فعلي) | 'planned' (مخطَّط له).
+// **الغياب = منفَّذ** — كل سجلّ سابق لهذه الإضافة يبقى كما كان بلا ترحيل.
+//
+// قرار المالك: «المخطَّط له ما يدخل في الحسابات، هذا شيء مستقبلي، ما يدخل
+// نهائياً في الداشبورد ولا في الحسبة اللي فوق ولا في الثروة».
+//
+// لذلك: `getFiltered()` — البوابة التي تغذّي الإحصائيات والرسوم والملخّصات
+// والتصدير — تُسقط المخطَّط. والجدول وحده يقرأ `getFilteredAll()` ليعرضه
+// موسوماً. بوابةٌ واحدة أضمن من فلترة تُكرَّر في كل مستهلك ويُنسى أحدها.
+// ══════════════════════════════════════════════════════════════════════
+function isPlanned(e) { return (e && e.status) === 'planned'; }
+
+// كل سجلات المدى — بما فيها المخطَّط. للجدول وسجلّ التغييرات فقط.
+function getFilteredAll() {
   const { from, to } = rangeBounds();
   return store.entries.filter(e => {
     const ym = (+e.year || 0) * 100 + (+e.month || 0);
     return ym >= from && ym <= to;
   });
+}
+
+// المنفَّذ فعلياً وحده — كل رقم محسوب في هذه الصفحة يمرّ من هنا.
+function getFiltered() {
+  return getFilteredAll().filter(e => !isPlanned(e));
 }
 
 // ─── Year selects for date range ──────────────────────────────────────────────
@@ -900,19 +921,34 @@ function renderChart4() {
 
 // ─── Table ────────────────────────────────────────────────────────────────────
 function renderTable() {
-  const entries = getFiltered()
+  // ⚠️ الجدول وحده يقرأ **الكل** — كل حساب آخر يمرّ بـ`getFiltered()`.
+  const entries = getFilteredAll()
     .slice().sort((a,b) => a.year!==b.year ? b.year-a.year : b.month-a.month);
 
   // اللون في رأس العمود يُحمَل على نقطة بجانب الاسم — لا على النص وحده
   const catCols = store.categories.map(c =>
     `<th><span class="dot" style="background:${catColor(c.id)}"></span> ${esc(c.name)}</th>`).join('');
   document.getElementById('salary-thead').innerHTML = `<tr>
-    <th>السنة</th><th>الشهر</th><th>الراتب</th>${catCols}<th>المتبقي</th><th>ملاحظات</th><th>إجراءات</th>
+    <th>السنة</th><th>الشهر</th><th>الراتب</th>${catCols}<th>المتبقي</th><th>ملاحظات</th>
+    <th>النوع</th><th>إجراءات</th>
   </tr>`;
+
+  // شريط يُعلن ما هو **خارج** كل رقم في هذه الصفحة — لا يُبتلع بصمت
+  const _plan = entries.filter(isPlanned);
+  const _planBar = document.getElementById('planned-bar');
+  if (_planBar) {
+    const sum = _plan.reduce((s, e) => s + (+e.salary || 0), 0);
+    _planBar.innerHTML = _plan.length
+      ? noteHtml('📅',
+          `<strong>${_plan.length} شهراً مخطَّطاً في هذه الفترة</strong> بمجموع دخلٍ `
+        + `${formatSAR(sum)} — <strong>خارج كل الأرقام أعلاه</strong> وخارج لوحة التحكم `
+        + `وصافي الثروة والتقرير. يظهر في الجدول وحده حتى تحوّله إلى «منفَّذ فعلي».`, 'info')
+      : '';
+  }
 
   if (!entries.length) {
     document.getElementById('salary-tbody').innerHTML =
-      `<tr><td colspan="${store.categories.length + 6}">${emptyBox('لا توجد سجلات في هذه الفترة')}</td></tr>`;
+      `<tr><td colspan="${store.categories.length + 7}">${emptyBox('لا توجد سجلات في هذه الفترة')}</td></tr>`;
     return;
   }
 
@@ -925,19 +961,191 @@ function renderTable() {
       const v = a ? +a.amount || 0 : 0;
       return `<td class="num">${v!==0?formatSAR(v):'<span class="text-dim">—</span>'}</td>`;
     }).join('');
-    return `<tr>
+    const planned = isPlanned(e);
+    const nChg = (store.audit || []).filter(x => x.entryId === e.id).length;
+    return `<tr${planned ? ' class="row-planned"' : ''}>
       <td>${e.year}</td>
       <td>${MONTHS_AR[(+e.month||1)-1]}</td>
       <td class="num">${formatSAR(salary)}</td>
       ${catCells}
       <td class="num" style="color:${stateColorOf(remaining<0?'bad':remaining>0?'warn':'good')}">${formatSAR(remaining, true)}</td>
       <td class="notes-cell">${e.notes && e.notes.trim() ? `<button class="notes-badge" data-note="${esc(e.notes)}" onclick="showNotePopup(this)" title="عرض الملاحظة">💬</button>` : ''}</td>
+      <td><button class="badge-status ${planned ? 'planned' : 'actual'}"
+            onclick="toggleStatus('${e.id}')"
+            title="${planned ? 'مخطَّط له — خارج كل الحسابات. اضغط لتحويله إلى منفَّذ فعلي.'
+                             : 'منفَّذ فعلي — داخل كل الحسابات. اضغط لتحويله إلى مخطَّط.'}"
+            style="border:0;cursor:pointer;font-family:inherit">
+            ${planned ? '📅 مخطَّط' : '✅ منفَّذ'}</button></td>
       <td class="actions-cell">
         <button class="btn-icon" onclick="openEditModal('${e.id}')" title="تعديل">✏️</button>
+        <button class="btn-icon" onclick="openChangeLog('${e.id}')"
+          title="سجلّ التغييرات على هذا الشهر${nChg ? ` (${nChg})` : ' — لا تغييرات بعد'}"
+          style="${nChg ? '' : 'opacity:.45'}">📜${nChg ? `<sup style="font-size:.6rem">${nChg}</sup>` : ''}</button>
         <button class="btn-icon danger" onclick="confirmDelete('${e.id}')" title="حذف">🗑️</button>
       </td>
     </tr>`;
   }).join('');
+}
+
+// تحويل الشهر بين مخطَّط ومنفَّذ بضغطة — وهو **تعديل** فيُسجَّل كغيره
+function toggleStatus(id) {
+  const e = store.entries.find(x => x.id === id);
+  if (!e) return;
+  const before = _auditSnapshot(e);
+  e.status = isPlanned(e) ? 'actual' : 'planned';
+  logChange('edit', e, before);
+  saveStore(store);
+  renderAll();
+  showToast(isPlanned(e)
+    ? `📅 ${MONTHS_AR[(+e.month||1)-1]} ${e.year} صار مخطَّطاً — خرج من كل الحسابات`
+    : `✅ ${MONTHS_AR[(+e.month||1)-1]} ${e.year} صار منفَّذاً — دخل الحسابات`, 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// سجلّ التغييرات — لشهر واحد أو للصفحة كلها
+// ══════════════════════════════════════════════════════════════════════
+function _fmtWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '—';
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} · ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function _renderLogRows(list) {
+  if (!list.length) {
+    return noteHtml('📭', 'لا تغييرات مسجَّلة. يبدأ السجلّ من أول إضافة أو تعديل بعد '
+                        + 'تفعيل هذه الميزة — وما سبقها لا سجلّ له.', '');
+  }
+  const ACT = { add: ['a', '➕ إضافة'], edit: ['e', '✏️ تعديل'], delete: ['d', '🗑️ حذف'] };
+  return list.slice().reverse().map(x => {
+    const [cls, lbl] = ACT[x.action] || ['e', x.action];
+    const when = `${MONTHS_AR[(+x.month || 1) - 1]} ${x.year || ''}`;
+    let body = '';
+    if (x.action === 'edit') {
+      body = `<div class="chg-diff">${x.changes.map(c =>
+        `• ${esc(c.field)}: <b>${esc(c.from)}</b> ← <b>${esc(c.to)}</b>`).join('<br>')}</div>`;
+    } else if (x.action === 'delete' && x.snapshot) {
+      const s = x.snapshot;
+      body = `<div class="chg-diff">الراتب <b>${formatSAR(s.salary)}</b> · `
+           + `${_STATUS_AR[s.status] || s.status}`
+           + (s.notes ? ` · ملاحظة: ${esc(s.notes)}` : '') + `</div>`;
+    }
+    return `<div class="chg-row ${cls}">
+      <div class="chg-when">${_fmtWhen(x.at)}</div>
+      <div class="chg-what">${lbl} — <b>${esc(when)}</b></div>
+      ${body}
+    </div>`;
+  }).join('');
+}
+
+function openChangeLog(entryId) {
+  const all = store.audit || [];
+  const list = entryId ? all.filter(x => x.entryId === entryId) : all;
+  const e = entryId ? store.entries.find(x => x.id === entryId) : null;
+  const title = e ? `📜 سجلّ ${MONTHS_AR[(+e.month || 1) - 1]} ${e.year}` : '📜 سجلّ كل التغييرات';
+  const head = entryId
+    ? ''
+    : noteHtml('🕘', `آخر ${Math.min(all.length, SAL_AUDIT_MAX)} تغيير على هذه الصفحة، الأحدث أولاً. `
+      + `السقف ${SAL_AUDIT_MAX} قيد ويسقط الأقدم أولاً.`, '');
+  openInfoModal(title, head + _renderLogRows(list));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// تخطيط دفعة — أشهرٌ مخطَّطة من تاريخ إلى تاريخ بضغطة
+// ----------------------------------------------------------------------
+// إدخال رواتب حتى 2055 شهراً بشهر = 348 فتحة مودال. الدفعة تولّدها مرة
+// واحدة بقيمة ثابتة، ثم يُعدَّل ما يحتاج تعديلاً.
+//
+// **كلها `planned`** بحكم التعريف — لا خيار: شهرٌ في 2040 ليس منفَّذاً.
+// **ولا تدهس شهراً موجوداً**: الموجود يُتخطّى ويُعلَن عدده، فلا يُمحى
+// تاريخٌ فعليّ بتخطيطٍ مستقبلي.
+// ══════════════════════════════════════════════════════════════════════
+function openPlanBulk() {
+  const now = new Date();
+  const y0 = now.getFullYear(), m0 = now.getMonth() + 2 > 12 ? 1 : now.getMonth() + 2;
+  const yStart = now.getMonth() + 2 > 12 ? y0 + 1 : y0;
+  const el = (id) => document.getElementById(id);
+  el('plan-from-year').value  = yStart;
+  el('plan-from-month').value = m0;
+  el('plan-to-year').value    = Math.min(2100, yStart + 5);
+  el('plan-to-month').value   = 12;
+  el('plan-salary').value     = '';
+  // الفئات: نفس نموذج التخصيص المستعمل في المودال العادي
+  const box = el('plan-allocations');
+  box.innerHTML = store.categories.length
+    ? store.categories.map(c => `
+      <div class="alloc-row">
+        <label><span class="dot" style="background:${catColor(c.id)}"></span> ${esc(c.name)}</label>
+        <input type="number" class="plan-alloc" data-cat="${c.id}" step="0.01" placeholder="0.00">
+      </div>`).join('')
+    : `<p class="text-muted small">لا فئات معرَّفة بعد — أضِف فئة أولاً لتوزّع عليها.</p>`;
+  el('plan-preview').innerHTML = '';
+  el('plan-modal').classList.add('open');
+  updatePlanPreview();
+}
+function closePlanBulk() { document.getElementById('plan-modal').classList.remove('open'); }
+
+function _planRange() {
+  const v = (id) => parseInt(document.getElementById(id).value);
+  const fy = v('plan-from-year'), fm = v('plan-from-month');
+  const ty = v('plan-to-year'),   tm = v('plan-to-month');
+  if (!fy || !fm || !ty || !tm) return null;
+  const from = fy * 12 + (fm - 1), to = ty * 12 + (tm - 1);
+  if (to < from) return { invalid: true };
+  const months = [];
+  for (let k = from; k <= to; k++) months.push({ year: Math.floor(k / 12), month: (k % 12) + 1 });
+  return { months };
+}
+
+function updatePlanPreview() {
+  const out = document.getElementById('plan-preview');
+  if (!out) return;
+  const r = _planRange();
+  if (!r) { out.innerHTML = ''; return; }
+  if (r.invalid) {
+    out.innerHTML = noteHtml('↔️', 'تاريخ البداية بعد تاريخ النهاية — اقلبهما.', 'warn');
+    return;
+  }
+  const exists = r.months.filter(m => store.entries.some(e => +e.year === m.year && +e.month === m.month));
+  const nNew   = r.months.length - exists.length;
+  const salary = parseFloat(document.getElementById('plan-salary').value) || 0;
+  const alloc  = [...document.querySelectorAll('.plan-alloc')]
+    .reduce((s, i) => s + (parseFloat(i.value) || 0), 0);
+  const rem    = salary - alloc;
+  out.innerHTML = kvsHtml([
+    ['أشهر ستُضاف', `${nNew} شهراً`],
+    exists.length ? ['موجودة أصلاً (تُتخطّى)', `${exists.length} شهراً`] : null,
+    salary > 0 ? ['إجمالي الدخل المخطَّط', formatSAR(salary * nNew)] : null,
+    salary > 0 ? ['المتبقي غير الموجّه شهرياً',
+      `<span style="color:${stateColorOf(rem < 0 ? 'bad' : rem > 0 ? 'warn' : 'good')}">${formatSAR(rem, true)}</span>`] : null,
+  ]) + noteHtml('📅', 'كلها <strong>مخطَّطة</strong> — لا تدخل أي حساب حتى تحوّلها إلى «منفَّذ».', 'info');
+}
+
+function executePlanBulk() {
+  const r = _planRange();
+  if (!r || r.invalid) { showToast('راجِع نطاق التواريخ', 'error'); return; }
+  const salary = parseFloat(document.getElementById('plan-salary').value);
+  if (isNaN(salary)) { showToast('أدخِل الراتب المخطَّط', 'error'); return; }
+  const allocations = [...document.querySelectorAll('.plan-alloc')]
+    .map(i => ({ catId: i.dataset.cat, amount: parseFloat(i.value) || 0 }))
+    .filter(a => a.amount !== 0);
+
+  let added = 0, skipped = 0;
+  r.months.forEach(m => {
+    if (store.entries.some(e => +e.year === m.year && +e.month === m.month)) { skipped++; return; }
+    const entry = { id: uid(), year: m.year, month: m.month, salary, notes: '',
+                    allocations: allocations.map(a => ({ ...a })), status: 'planned' };
+    store.entries.push(entry);
+    logChange('add', entry, null);
+    added++;
+  });
+  saveStore(store);
+  closePlanBulk();
+  buildYearSelects();
+  renderAll();
+  showToast(`📅 أُضيف ${added} شهراً مخطَّطاً`
+    + (skipped ? ` · تُخطّي ${skipped} شهراً موجوداً` : '')
+    + ' — لا تدخل الحسابات', 'success');
 }
 
 // ─── Add / Edit Modal ─────────────────────────────────────────────────────────
@@ -949,6 +1157,7 @@ function openAddModal() {
   document.getElementById('entry-month').value  = today.getMonth() + 1;
   document.getElementById('entry-salary').value = '';
   document.getElementById('entry-notes').value  = '';
+  _setStatusSelect('actual');
   buildAllocationsForm([]);
   document.getElementById('entry-modal').classList.add('open');
   document.getElementById('entry-salary').focus();
@@ -963,8 +1172,26 @@ function openEditModal(id) {
   document.getElementById('entry-month').value  = entry.month;
   document.getElementById('entry-salary').value = entry.salary;
   document.getElementById('entry-notes').value  = entry.notes || '';
+  _setStatusSelect(entry.status === 'planned' ? 'planned' : 'actual');
   buildAllocationsForm(entry.allocations || []);
   document.getElementById('entry-modal').classList.add('open');
+}
+
+// الافتراضي عند الإضافة: شهرٌ **مستقبلي** يُقترَح مخطَّطاً، والماضي منفَّذاً.
+// لا يُفرَض — يُقترَح، والمالك يغيّره. والتلميح يقول ما يعنيه الاختيار الآن.
+function _setStatusSelect(v) {
+  const sel = document.getElementById('entry-status');
+  if (sel) sel.value = v;
+  _updateStatusHint();
+}
+function _updateStatusHint() {
+  const sel = document.getElementById('entry-status');
+  const el  = document.getElementById('entry-status-hint');
+  if (!el) return;
+  el.innerHTML = (sel && sel.value === 'planned')
+    ? '⚠️ <b>لا يدخل أي حساب</b> — لا الإحصائيات ولا الرسوم ولا التصدير ولا '
+      + 'لوحة التحكم ولا صافي الثروة. يظهر في الجدول موسوماً حتى تحوّله إلى «منفَّذ».'
+    : '✅ يدخل كل الحسابات في هذه الصفحة وما يقرؤها.';
 }
 
 function buildAllocationsForm(existing) {
@@ -1022,6 +1249,7 @@ function saveEntry() {
   const month  = parseInt(document.getElementById('entry-month').value);
   const salary = parseFloat(document.getElementById('entry-salary').value);
   const notes  = document.getElementById('entry-notes').value.trim();
+  const status = document.getElementById('entry-status')?.value === 'planned' ? 'planned' : 'actual';
 
   if (!year || !month || isNaN(salary)) {
     showToast('يرجى إدخال السنة والشهر والراتب', 'error'); return;
@@ -1034,16 +1262,93 @@ function saveEntry() {
     .filter(a => a.amount !== 0);
 
   if (editingId) {
-    Object.assign(store.entries.find(e => e.id === editingId), { year, month, salary, notes, allocations });
+    const target = store.entries.find(e => e.id === editingId);
+    const before = _auditSnapshot(target);                    // قبل التعديل
+    Object.assign(target, { year, month, salary, notes, allocations, status });
+    logChange('edit', target, before);
     showToast('تم تحديث السجل', 'success');
   } else {
-    store.entries.push({ id: uid(), year, month, salary, notes, allocations });
-    showToast('تم إضافة السجل', 'success');
+    const entry = { id: uid(), year, month, salary, notes, allocations, status };
+    store.entries.push(entry);
+    logChange('add', entry, null);
+    showToast(status === 'planned' ? 'أُضيف شهرٌ مخطَّط — لا يدخل الحسابات' : 'تم إضافة السجل',
+      'success');
   }
   saveStore(store);
   closeModal();
   buildYearSelects();
   renderAll();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// سجلّ التغييرات — كل تعديل على أي شهر، بتاريخه وبما تغيَّر فيه
+// ----------------------------------------------------------------------
+// طلب المالك: «زرّ جنب إجراءات، أي تعديل على أي شهر يبان — لستة كاملة
+// بالتاريخ، إيش تغيّر وإيش ما تغيّر».
+//
+// يُسجَّل **الفرق** لا اللقطة كاملة: «الراتب 18,000 ← 19,500» أوضح من
+// صفحتَي JSON متجاورتين. واللقطة تُحفظ كذلك للحذف — لأن المحذوف لا يبقى
+// له مرجعٌ يُقارَن به.
+//
+// السجلّ داخل نفس المخزن (`store.audit`) فيُزامَن ويُنسَخ احتياطياً معه.
+// وسقفه 2,000 قيد: نموٌّ بلا حدّ يُثقل التزامن، والأقدم يسقط أولاً.
+// ══════════════════════════════════════════════════════════════════════
+// ⚠️ لا تُسمِّه `AUDIT_MAX`: الاسم مأخوذ في `js/constitution-data.js` (سقف سجلّ
+// تدقيق م.72)، والصفحة تحمّل الملفين معاً فيسقط السكربت كلّه بـ«already
+// declared» — لا قسمٌ منه. الفحص أمسكها قبل الشاشة.
+const SAL_AUDIT_MAX = 2000;
+
+function _auditSnapshot(e) {
+  if (!e) return null;
+  return {
+    year: +e.year || 0, month: +e.month || 0, salary: +e.salary || 0,
+    notes: e.notes || '', status: e.status === 'planned' ? 'planned' : 'actual',
+    allocations: (e.allocations || []).map(a => ({ catId: a.catId, amount: +a.amount || 0 })),
+  };
+}
+
+const _AUDIT_LBL = { year: 'السنة', month: 'الشهر', salary: 'الراتب',
+                     notes: 'الملاحظات', status: 'نوع الشهر' };
+const _STATUS_AR = { planned: 'مخطَّط له', actual: 'منفَّذ فعلي' };
+
+function _auditDiff(before, after) {
+  const out = [];
+  if (!before || !after) return out;
+  ['year', 'month', 'salary', 'notes', 'status'].forEach(k => {
+    if (String(before[k]) === String(after[k])) return;
+    const fmtV = (v) => k === 'month' ? (MONTHS_AR[(+v || 1) - 1] || v)
+                      : k === 'salary' ? formatSAR(+v || 0)
+                      : k === 'status' ? (_STATUS_AR[v] || v)
+                      : (String(v).trim() || '—');
+    out.push({ field: _AUDIT_LBL[k], from: fmtV(before[k]), to: fmtV(after[k]) });
+  });
+  // الفئات: لكل فئة تغيّر مبلغها سطرٌ باسمها لا بمعرّفها
+  const sum = (list) => { const m = {}; (list || []).forEach(a => {
+    m[a.catId] = (m[a.catId] || 0) + (+a.amount || 0); }); return m; };
+  const b = sum(before.allocations), a = sum(after.allocations);
+  [...new Set([...Object.keys(b), ...Object.keys(a)])].forEach(id => {
+    const bv = b[id] || 0, av = a[id] || 0;
+    if (Math.abs(bv - av) < 0.005) return;
+    const cat = store.categories.find(c => c.id === id);
+    out.push({ field: cat ? cat.name : 'فئة محذوفة', from: formatSAR(bv), to: formatSAR(av) });
+  });
+  return out;
+}
+
+function logChange(action, entry, before) {
+  if (!store.audit) store.audit = [];
+  const after = _auditSnapshot(entry);
+  const changes = action === 'edit' ? _auditDiff(before, after) : [];
+  // تعديلٌ لم يغيّر شيئاً لا يُسجَّل — سجلٌّ مليء بلا شيء يُخفي ما فيه شيء
+  if (action === 'edit' && !changes.length) return;
+  store.audit.push({
+    id: uid(), at: new Date().toISOString(), action,
+    entryId: entry?.id || null,
+    year: after?.year ?? before?.year ?? null,
+    month: after?.month ?? before?.month ?? null,
+    changes, snapshot: action === 'delete' ? before : null,
+  });
+  if (store.audit.length > SAL_AUDIT_MAX) store.audit = store.audit.slice(-SAL_AUDIT_MAX);
 }
 
 // ─── Delete Single ────────────────────────────────────────────────────────────
@@ -1062,6 +1367,8 @@ function closeDeleteModal() {
 }
 function executeDelete() {
   if (!deletingId) return;
+  const gone = store.entries.find(e => e.id === deletingId);
+  if (gone) logChange('delete', gone, _auditSnapshot(gone));
   store.entries = store.entries.filter(e => e.id !== deletingId);
   saveStore(store);
   closeDeleteModal();
@@ -1080,6 +1387,54 @@ function executeReset() {
   buildYearSelects();
   renderAll();
   showToast('تم حذف جميع السجلات', 'success');
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// صيغة ملف الاستيراد — مكتوبة للمالك، لا مستنبَطة من الكود
+// ----------------------------------------------------------------------
+// المستورِد **مرن عمداً**: يبحث عن صفّ الترويسة أينما كان في الملف (لا
+// يفترضه الأول)، ويطابق أسماء الأعمدة بالاحتواء لا بالتطابق التام، ويقبل
+// أسماء الشهور بالعربي أو بالأرقام. لكن هذه المرونة لم تكن **مكتوبة** في
+// أي مكان، فالمالك يجرّب ويخمّن. هنا تُكتب.
+// ══════════════════════════════════════════════════════════════════════
+function showImportFormat() {
+  const cats = store.categories.length
+    ? store.categories.map(c => c.name)
+    : ['مصاريف', 'ادخار', 'أصول', 'محفظة تقاعد'];
+  const sample = ['السنة', 'الشهر', 'الراتب', ...cats, 'المتبقي', 'ملاحظات', 'النوع'];
+  const row1 = ['2026', 'يناير', '20000', ...cats.map((_, i) => [12000, 3000, 2000, 3000][i] ?? 0),
+                '0', 'راتب + بدل', 'منفذ'];
+  const row2 = ['2027', 'يناير', '22000', ...cats.map((_, i) => [13000, 3500, 2500, 3000][i] ?? 0),
+                '0', 'زيادة متوقعة', 'مخطط'];
+  const tbl = (rows) => `<div class="table-wrap"><table class="salary-table"><thead><tr>`
+    + sample.map(h => `<th style="white-space:nowrap">${esc(h)}</th>`).join('')
+    + `</tr></thead><tbody>` + rows.map(r => `<tr>`
+    + r.map(v => `<td style="white-space:nowrap">${esc(String(v))}</td>`).join('') + `</tr>`).join('')
+    + `</tbody></table></div>`;
+
+  const p = (h) => `<p style="margin:0 0 9px;line-height:1.85">${h}</p>`;
+  openInfoModal('📋 صيغة ملف الاستيراد (CSV)',
+      p(`<strong>أسهل طريق:</strong> اضغط «📤 تصدير CSV» أولاً، افتح الملف، عدّل فيه أو أضف `
+      + `صفوفاً، ثم استورده. الملف المُصدَّر من هنا يُستورَد كما هو دائماً.`)
+    + p(`<strong>الأعمدة الإلزامية ثلاثة:</strong> <b>السنة</b> · <b>الشهر</b> · <b>الراتب</b>. `
+      + `وبقيّتها اختيارية.`)
+    + tbl([row1, row2])
+    + p(`<strong>ما يقبله المستورِد بمرونة:</strong>`)
+    + `<ul style="margin:0 0 10px;padding-inline-start:20px;line-height:1.9">
+        <li>صفّ الترويسة <b>أينما كان</b> في الملف — لا يلزم أن يكون الأول.</li>
+        <li>أسماء الأعمدة بالاحتواء: «إجمالي الراتب» و«الراتب الأساسي» كلاهما يُقرأ عمودَ الراتب.</li>
+        <li>الشهر بالاسم العربي (يناير…) أو برقمه (1–12).</li>
+        <li>كل عمود <b>بين «الراتب» و«المتبقي»</b> يُقرأ <b>فئة توزيع</b> باسمه — وفئةٌ غير
+            موجودة عندك <b>تُنشَأ تلقائياً</b> بنوعها المُخمَّن من اسمها.</li>
+        <li>عمودان بنفس اسم الفئة تُجمَع مبالغهما في تخصيص واحد.</li>
+      </ul>`
+    + p(`<strong>عمود «النوع»</strong> (اختياري، جديد): اكتب <b>مخطط</b> أو <b>planned</b> `
+      + `للشهر المستقبلي، و<b>منفذ</b> أو اتركه فارغاً للمنفَّذ فعلياً. `
+      + `<span style="color:var(--st-warn)">والمخطَّط لا يدخل أي حساب.</span>`)
+    + p(`<strong>ما لا يفعله المستورِد:</strong> لا يستبدل شهراً موجوداً — يتخطّاه ويُعلن العدد. `
+      + `احذف الشهر أولاً إن أردت استبداله.`)
+    + p(`<strong>الترميز:</strong> UTF-8. الملف المُصدَّر من هنا يحمل BOM ليقرأ إكسل العربية صحيحاً. `
+      + `والأرقام تُكتب بلا فواصل آلاف (20000 لا 20,000).`));
 }
 
 // ─── CSV Import ───────────────────────────────────────────────────────────────
@@ -1159,6 +1514,7 @@ function parseAndImportCSV(text) {
   const colSalary = header.findIndex(c => c.includes('الراتب'));
   const colRemaining = header.findIndex(c => c.includes('المتبقي'));
   const colNotes     = header.findIndex(c => c.includes('ملاحظات'));
+  const colStatus    = header.findIndex(c => c.includes('النوع') || /status/i.test(c));
 
   if (colYear < 0 || colMonth < 0 || colSalary < 0) {
     showToast('تعذّر العثور على أعمدة السنة / الشهر / الراتب', 'error'); return;
@@ -1168,6 +1524,7 @@ function parseAndImportCSV(text) {
   // المتبقية فئات (كان header.length - 2 يسقط آخر فئتين بصمت)
   const allColEnd = colRemaining > colSalary ? colRemaining
                   : colNotes     > colSalary ? colNotes
+                  : colStatus    > colSalary ? colStatus
                   : header.length;
   const allocCols = [];
   for (let c = colSalary + 1; c < allColEnd; c++) {
@@ -1186,7 +1543,7 @@ function parseAndImportCSV(text) {
     }
   });
 
-  let imported = 0, skipped = 0;
+  let imported = 0, skipped = 0, plannedCount = 0;
   for (let i = headerIdx + 1; i < lines.length; i++) {
     const row   = lines[i];
     const year  = parseInt((row[colYear] || '').replace(/[^0-9]/g, ''));
@@ -1209,25 +1566,35 @@ function parseAndImportCSV(text) {
       .map(catId => ({ catId, amount: sumByCat[catId] }))
       .filter(a => a.amount !== 0);
 
-    store.entries.push({ id: uid(), year, month, salary, notes, allocations });
+    // النوع: مخطط / planned ⇒ مخطّط، وما عداه منفّذ (والفراغ منفّذ).
+    const _rawSt = colStatus >= 0 ? String(row[colStatus] || '').trim() : '';
+    const status = /مخطط|مخطّط|planned/i.test(_rawSt) ? 'planned' : 'actual';
+    const entry = { id: uid(), year, month, salary, notes, allocations, status };
+    store.entries.push(entry);
+    logChange('add', entry, null);
     imported++;
+    if (status === 'planned') plannedCount++;
   }
 
   saveStore(store);
   buildYearSelects();
   renderAll();
-  showToast(`تم استيراد ${imported} سجل${skipped ? ` (تم تخطي ${skipped} مكرر)` : ''}`, 'success');
+  showToast(`تم استيراد ${imported} سجل`
+    + (plannedCount ? ` · منها ${plannedCount} مخطَّط لا يدخل الحسابات` : '')
+    + (skipped ? ` (تُخطّي ${skipped} مكرر)` : ''), 'success');
 }
 
 // ─── Export CSV ───────────────────────────────────────────────────────────────
 function exportCSV() {
-  const entries = getFiltered()
+  // التصدير يشمل المخطّط **موسوماً بعمود النوع** — فالملف نسخة من
+  // الجدول لا من الحسابات، وإسقاطه يجعل دورة تصدير←استيراد تمحو تخطيطك.
+  const entries = getFilteredAll()
     .slice().sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
 
   if (!entries.length) { showToast('لا توجد بيانات للتصدير', 'error'); return; }
 
   const catNames = store.categories.map(c => c.name);
-  const headers  = ['السنة', 'الشهر', 'الراتب', ...catNames, 'المتبقي', 'ملاحظات'];
+  const headers  = ['السنة', 'الشهر', 'الراتب', ...catNames, 'المتبقي', 'ملاحظات', 'النوع'];
 
   const rows = entries.map(e => {
     const salary   = +e.salary || 0;
@@ -1240,7 +1607,8 @@ function exportCSV() {
     const remaining = salary - allocated;
     const monthName = MONTHS_AR[(+e.month || 1) - 1];
     // Numbers written as plain decimals (no thousands commas) so re-import works cleanly
-    return [e.year, monthName, salary, ...catAmts, remaining, e.notes || ''];
+    return [e.year, monthName, salary, ...catAmts, remaining, e.notes || '',
+            isPlanned(e) ? 'مخطط' : 'منفذ'];
   });
 
   // Escape helper: text fields get quoted, numbers stay bare to avoid comma confusion

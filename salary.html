@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824u">
+  <link rel="stylesheet" href="css/style.css?v=20260824v">
   <style>
     /* ═══════════════════════════════════════════════════════════
        أنماط الصفحة — تخطيط فقط. كل لون من رموز التصميم في css/style.css
@@ -59,6 +59,27 @@
 
     .page-actions { display:flex; gap:10px; flex-wrap:wrap; }
     .sub-label    { font-weight:400; font-size:.75rem; color:var(--text-2); }
+    .field-hint   { font-size:.73rem; color:var(--text-2); margin-top:5px; line-height:1.55; }
+
+    /* ── المخطَّط مقابل المنفَّذ ─────────────────────────────────
+       الصفّ المخطَّط يجب أن يُقرأ مختلفاً **من النظرة الأولى**: هو لا
+       يدخل أي حساب، فتشابهه مع المنفَّذ يجعل المالك يقرأ رقماً ليس في
+       أي مجموع. الفرق بالحدّ الجانبي والخلفية معاً، لا باللون وحده. */
+    tr.row-planned            { background: rgba(99,102,241,.055); }
+    tr.row-planned td:first-child { box-shadow: inset 3px 0 0 #818cf8; }
+    tr.row-planned .num       { opacity:.82; }
+    .badge-status             { font-size:.68rem; padding:2px 7px; border-radius:10px; font-weight:700; white-space:nowrap; }
+    .badge-status.planned     { background: rgba(99,102,241,.16); color:#a5b4fc; }
+    .badge-status.actual      { background: rgba(63,185,80,.14);  color:#4ade80; }
+    /* سجل التغييرات */
+    .chg-row   { border-right:2px solid var(--border); padding:8px 12px 8px 0; margin-bottom:10px; }
+    .chg-row.a { border-right-color:var(--success); }
+    .chg-row.e { border-right-color:var(--accent); }
+    .chg-row.d { border-right-color:var(--danger); }
+    .chg-when  { font-size:.72rem; color:var(--text-2); }
+    .chg-what  { font-size:.82rem; margin-top:3px; }
+    .chg-diff  { font-size:.78rem; color:var(--text-2); margin-top:3px; line-height:1.7; }
+    .chg-diff b{ color:var(--text); font-weight:600; }
 
     /* ── Charts ──────────────────────────────────────────────── */
     .charts-grid-salary { display:grid; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); gap:16px; margin-bottom:20px; }
@@ -442,9 +463,15 @@
     <!-- Table -->
     <div class="card mb-6">
       <div class="card-head">
-        <span class="ttl">🗓️ السجلات الشهرية <span class="sub">حسب الفترة المختارة أعلاه</span></span>
-        <div class="acts"><button class="btn btn-secondary btn-sm" onclick="exportCSV()">📤 تصدير CSV</button></div>
+        <span class="ttl">🗓️ السجلات الشهرية <span class="sub">حسب الفترة المختارة أعلاه — منفَّذاً ومخطَّطاً</span></span>
+        <div class="acts">
+          <button class="btn btn-secondary btn-sm" onclick="openPlanBulk()" title="إضافة أشهر مخطَّطة دفعةً واحدة حتى سنة تختارها">📅 تخطيط دفعة</button>
+          <button class="btn btn-secondary btn-sm" onclick="openChangeLog(null)" title="كل التغييرات على هذه الصفحة بتاريخها">📜 سجلّ التغييرات</button>
+          <button class="btn btn-secondary btn-sm" onclick="showImportFormat()" title="صيغة ملف CSV المقبولة">📋 صيغة الاستيراد</button>
+          <button class="btn btn-secondary btn-sm" onclick="exportCSV()">📤 تصدير CSV</button>
+        </div>
       </div>
+      <div id="planned-bar"></div>
       <div class="table-wrap">
         <table class="salary-table">
           <thead id="salary-thead"></thead>
@@ -479,6 +506,66 @@
     </div>
   </main>
 
+  <!-- ══ تخطيط دفعة — أشهر مخطَّطة من تاريخ إلى تاريخ ══
+       إدخال رواتب حتى 2055 شهراً بشهر = مئات الفتحات. الدفعة تولّدها مرة
+       واحدة بقيمة ثابتة ثم يُعدَّل ما يحتاج. كلها مخطَّطة بحكم التعريف. -->
+  <div class="modal-overlay" id="plan-modal" onclick="if(event.target===this)closePlanBulk()">
+    <div class="modal-box">
+      <h2>📅 تخطيط دفعة أشهر</h2>
+      <p class="small text-muted" style="margin:-6px 0 14px">
+        أشهرٌ <strong>مخطَّطة</strong> بقيمة واحدة — لا تدخل أي حساب حتى تحوّلها.
+        الشهر الموجود أصلاً يُتخطّى ولا يُدهَس.
+      </p>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>من سنة</label>
+          <input type="number" id="plan-from-year" min="2000" max="2100" oninput="updatePlanPreview()">
+        </div>
+        <div class="form-row">
+          <label>من شهر</label>
+          <select id="plan-from-month" onchange="updatePlanPreview()">
+            <option value="1">يناير</option><option value="2">فبراير</option>
+            <option value="3">مارس</option><option value="4">أبريل</option>
+            <option value="5">مايو</option><option value="6">يونيو</option>
+            <option value="7">يوليو</option><option value="8">أغسطس</option>
+            <option value="9">سبتمبر</option><option value="10">أكتوبر</option>
+            <option value="11">نوفمبر</option><option value="12">ديسمبر</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-2col">
+        <div class="form-row">
+          <label>إلى سنة</label>
+          <input type="number" id="plan-to-year" min="2000" max="2100" oninput="updatePlanPreview()">
+        </div>
+        <div class="form-row">
+          <label>إلى شهر</label>
+          <select id="plan-to-month" onchange="updatePlanPreview()">
+            <option value="1">يناير</option><option value="2">فبراير</option>
+            <option value="3">مارس</option><option value="4">أبريل</option>
+            <option value="5">مايو</option><option value="6">يونيو</option>
+            <option value="7">يوليو</option><option value="8">أغسطس</option>
+            <option value="9">سبتمبر</option><option value="10">أكتوبر</option>
+            <option value="11">نوفمبر</option><option value="12">ديسمبر</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <label>الراتب المخطَّط لكل شهر</label>
+        <input type="number" id="plan-salary" min="0" step="0.01" placeholder="0.00" oninput="updatePlanPreview()">
+      </div>
+      <div class="alloc-section">
+        <h3>التوزيع الشهري <small class="sub-label">اتركه فارغاً إن لم تقرّره بعد</small></h3>
+        <div id="plan-allocations" oninput="updatePlanPreview()"></div>
+      </div>
+      <div id="plan-preview" style="margin-top:12px"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closePlanBulk()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="executePlanBulk()">إضافة الأشهر</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Add / Edit Modal -->
   <div class="modal-overlay" id="entry-modal" onclick="if(event.target===this)closeModal()">
     <div class="modal-box">
@@ -500,9 +587,19 @@
           </select>
         </div>
       </div>
-      <div class="form-row">
-        <label>الراتب / إجمالي الدخل</label>
-        <input type="number" id="entry-salary" min="0" step="0.01" placeholder="0.00">
+      <div class="form-2col">
+        <div class="form-row">
+          <label>الراتب / إجمالي الدخل</label>
+          <input type="number" id="entry-salary" min="0" step="0.01" placeholder="0.00">
+        </div>
+        <div class="form-row">
+          <label>نوع الشهر</label>
+          <select id="entry-status">
+            <option value="actual">✅ منفَّذ فعلي — يدخل الحسابات</option>
+            <option value="planned">📅 مخطَّط له — لا يدخل أي حساب</option>
+          </select>
+          <div class="field-hint" id="entry-status-hint"></div>
+        </div>
       </div>
       <div class="alloc-section">
         <h3>توزيع المبالغ <small class="sub-label">مُجمَّعة حسب النوع</small></h3>
@@ -548,15 +645,15 @@
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="js/supabase.js?v=20260824u"></script>
-  <script src="js/utils.js?v=20260824u"></script>
-  <script src="js/constitution.js?v=20260824u"></script>
-  <script src="js/constitution-data.js?v=20260824u"></script>
-  <script src="js/tadawul-data.js?v=20260824u"></script>
-  <script src="js/declutter.js?v=20260824u"></script>
-  <script src="js/navtoggle.js?v=20260824u"></script>
-  <script src="js/auth.js?v=20260824u"></script>
-  <script src="js/salary.js?v=20260824u"></script>
+  <script src="js/supabase.js?v=20260824v"></script>
+  <script src="js/utils.js?v=20260824v"></script>
+  <script src="js/constitution.js?v=20260824v"></script>
+  <script src="js/constitution-data.js?v=20260824v"></script>
+  <script src="js/tadawul-data.js?v=20260824v"></script>
+  <script src="js/declutter.js?v=20260824v"></script>
+  <script src="js/navtoggle.js?v=20260824v"></script>
+  <script src="js/auth.js?v=20260824v"></script>
+  <script src="js/salary.js?v=20260824v"></script>
   <script>init();</script>
 </body>
 </html>
