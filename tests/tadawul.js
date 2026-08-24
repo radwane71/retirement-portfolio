@@ -14,6 +14,8 @@ let ok = 0, bad = 0;
 const t = (n, cond, extra) => { cond === true ? ok++ : bad++;
   console.log((cond === true ? 'PASS ' : 'FAIL ') + n + (cond === true ? '' : '  ← ' + (extra || ''))); };
 
+const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 : eps);
+
 const TICKERS = Object.keys(T.TADAWUL_DATA);
 
 // ── 1) سلامة الاستخراج ───────────────────────────────────────────────
@@ -836,6 +838,94 @@ t('رمز غير معروف يرجع null', T.tdValuationInputs('9999') === null
   c.renderHistory();
   t('البحث عن غير مُقيَّم يقترح فلتر التغطية',
     /اعرض الأسهم بلا تقييم/.test(id2('historyList')._html));
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// ⑪ ربحية سالبة وتدفّق سالب — ثلاثة مسارات لا رفضٌ واحد
+// ----------------------------------------------------------------------
+// الرفض المطلق `eps <= 0 && fcf <= 0` كان صحيحاً عن نماذج الربح والتدفق
+// وخاطئاً عن التقييم كلّه: الشركة لها قيمة ما بقيت حقوق ملكيتها موجبة،
+// والسؤال يتغيّر من «كم تساوي أرباحها» إلى «كم يتبقّى، وكم تصمد».
+//   ① دوريّ في قاعه ⇒ م.35: أرقام مُطبَّعة (سابك: 4 ر.س مقابل 34.5).
+//   ② خسارة بنيوية وحقوق ملكية قائمة ⇒ م.36: دفترية × 0.6–0.8 + مقياسان.
+//   ③ حقوق ملكية مستنفَدة ⇒ لا تقييم — مسألة ملاءة لا قيمة.
+// ══════════════════════════════════════════════════════════════════════
+{
+  const src = fs.readFileSync(ROOT + 'stock-valuation.html', 'utf8');
+
+  t('الرفض المطلق أُزيل',
+    !/if \(eps <= 0 && fcf <= 0\) \{ document\.getElementById\('loadingOverlay'\)/.test(src),
+    'كان يمنع الحساب كلياً ولو كانت حقوق الملكية قائمة');
+
+  t('① الدوريّ يُوجَّه إلى الأرقام المُطبَّعة',
+    /if \(eps <= 0 && fcf <= 0 && cyc && !useNormEps && !useNormFcf\)/.test(src)
+    && /قاع الدورة لا قيمة الشركة \(م\.35\)/.test(src));
+
+  t('② والخسارة البنيوية تمرّ إلى مسار م.36',
+    /const isLossMaking = eps <= 0;/.test(src)
+    && /avgNames = \['القيمة الدفترية × مكرر متحفّظ \(م\.36\)'\]/.test(src));
+
+  t('③ وحقوق الملكية المستنفَدة تُرفض بسببها',
+    /if \(eps <= 0 && fcf <= 0 && !\(book_value > 0\)\)/.test(src)
+    && /مسألة ملاءة لا مسألة قيمة/.test(src),
+    'الرفض هنا صحيح — لا نموذج صالح، ولا يصحّ إخراج رقم');
+
+  // مقياسا م.36 الإلزاميان
+  t('خانات مقياسَي م.36 موجودة',
+    /id="retainedEarnings"/.test(src) && /id="annualBurn"/.test(src)
+    && /id="annualDivCost"/.test(src));
+  t('وتظهر تلقائياً عند الربحية السالبة',
+    /box\.style\.display = \(isFinite\(_epsUsed\) && _epsUsed <= 0/.test(src));
+  t('ولا تظهر لدوريٍّ مُطبَّعته موجبة',
+    /const _epsUsed = _useNorm \? _nEps : num\('eps'\)/.test(src),
+    'دوريٌّ أدخلتَ له مُطبَّعة موجبة ليس خاسراً بمعنى م.36');
+  t('سنوات النفاد تُحسب', /const yrs = re \/ burn;/.test(src));
+  t('ونسبة التوزيع إلى الخسارة', /const r = divCost \/ burn;/.test(src));
+  t('والنقص يُعلَن ولا يُقدَّر',
+    /سنوات النفاد: غير متوفرة ❌ \(م\.20\)/.test(src)
+    && /نسبة التوزيع إلى الخسارة: غير متوفرة ❌ \(م\.20\)/.test(src));
+  t('والمدخلات تُحفظ مع العملية',
+    /retainedEarnings: document\.getElementById\('retainedEarnings'\)/.test(src)
+    && /setVal\('retainedEarnings', inp\.retainedEarnings\)/.test(src),
+    'بلا الحفظ تختلف نتيجة السجل عن نتيجة الشاشة لمدخلات واحدة');
+
+  // الحساب نفسه على أرقام معلومة
+  const el = () => ({ style: {}, value: '', innerHTML: '', textContent: '',
+    classList: { add() {}, remove() {}, contains: () => false },
+    setAttribute() {}, addEventListener() {}, getContext: () => ({}) });
+  const c = { console: { log() {}, warn() {}, error() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: () => 0, clearTimeout() {}, requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', getElementById: el, querySelector: () => null,
+      querySelectorAll: () => [], createElement: el, addEventListener() {},
+      documentElement: el(), body: el(), createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {} },
+    location: { href: 'http://x/', hash: '' }, navigator: { userAgent: 'n' },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null, showToast() {},
+    requireAuth: () => Promise.resolve(null),
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; } };
+  c.window = c; c.globalThis = c; c.self = c; vm.createContext(c);
+  ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js', 'js/tadawul-data.js']
+    .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), c, { filename: f }));
+  const inline3 = [...src.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(m => m[1]).join('\n');
+  try { vm.runInContext(inline3, c, { filename: 'sv' }); } catch (_) {}
+
+  if (typeof c.calculate_book_value === 'function') {
+    // دفترية 12 ر.س بمكرر مقصوص إلى 0.6 ⇒ 7.20 — وهو أدنى نطاق م.36
+    t('الدفترية × 0.6 = الحدّ الأدنى لم.36',
+      near(c.calculate_book_value(12, 0.6), 7.2, 1e-9), c.calculate_book_value(12, 0.6));
+    t('والدفترية × 0.8 = الحدّ الأعلى',
+      near(c.calculate_book_value(12, 0.8), 9.6, 1e-9), c.calculate_book_value(12, 0.8));
+  }
+  // سنوات النفاد: أرباح مبقاة 60 مليوناً وخسارة 15 مليوناً ⇒ أربع سنوات
+  t('سنوات النفاد حسابياً', near(60e6 / 15e6, 4, 1e-9));
+  // نسبة التوزيع إلى الخسارة: توزيع 9 ملايين على خسارة 15 ⇒ 60%
+  t('نسبة التوزيع إلى الخسارة حسابياً', near(9e6 / 15e6, 0.6, 1e-9));
 }
 
 console.log('\n' + ok + ' passed, ' + bad + ' failed');

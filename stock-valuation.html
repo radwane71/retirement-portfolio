@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824x">
+  <link rel="stylesheet" href="css/style.css?v=20260824y">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -430,6 +430,28 @@
         <div class="ig"><label>توزيعات الأرباح السنوية للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('dividends')">ℹ️</button></label><input type="number" id="dividends" value="1.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
         <div class="ig"><label>القيمة الدفترية للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('bookValue')">ℹ️</button></label><input type="number" id="bookValue" value="20.0" step="0.1" min="0" oninput="runFieldChecks()"></div>
         <div class="ig"><label>عائد السندات الحكومية 10 سنوات <span class="unit-tag">%</span> <button class="help-icon" onclick="showHelp('bondYield')">ℹ️</button></label><input type="number" id="bondYield" value="6.5" step="0.1" min="0.1" max="30" oninput="runFieldChecks()"></div>
+
+        <!-- ══ مقياسا م.36 الإلزاميان — للشركة الخاسرة وحدها ══
+             «القيمة الدفترية فقط» تجيب «كم يتبقّى للمساهم»، ولا تجيب «كم
+             تصمد قبل أن يتبقّى أقلّ». والمادة تفرض المقياسين معها لا بدلاً
+             عنها. تظهر الخانتان تلقائياً حين تكون الربحية سالبة. -->
+        <div id="lossMetricsBox" style="display:none;grid-column:1/-1;border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+          <p class="hint" style="margin:0 0 10px">
+            <strong>⚠️ الربحية سالبة — مقياسا المادة 36 الإلزاميان.</strong>
+            القيمة الدفترية تقول كم يتبقّى لك؛ وهذان يقولان <strong>كم تصمد الشركة</strong>،
+            وهو السؤال الأهمّ في شركةٍ تحرق رأس مالها. اتركهما فارغين إن لم تعرف الرقم —
+            يُعلَن النقص ولا يُقدَّر (م.20).
+          </p>
+          <div class="ig"><label>الأرباح المبقاة <span class="unit-tag">ر.س إجمالي</span></label>
+            <input type="number" id="retainedEarnings" step="1000" placeholder="من قائمة المركز المالي">
+            <p class="hint">وسادة الخسارة المتراكمة. سالبةٌ تعني أن الخسائر التهمت الاحتياطي أصلاً.</p></div>
+          <div class="ig"><label>الخسارة السنوية (معدّل الاستنزاف) <span class="unit-tag">ر.س إجمالي</span></label>
+            <input type="number" id="annualBurn" step="1000" placeholder="صافي الخسارة السنوية — رقم موجب">
+            <p class="hint">أدخِلها موجبة. سنوات النفاد = الأرباح المبقاة ÷ هذا الرقم.</p></div>
+          <div class="ig"><label>تكلفة التوزيع السنوية <span class="unit-tag">ر.س إجمالي</span></label>
+            <input type="number" id="annualDivCost" step="1000" placeholder="0 إن لم توزّع">
+            <p class="hint">نسبة التوزيع إلى الخسارة = هذا ÷ الخسارة السنوية. فوق 1 يعني أنها توزّع من رأس المال.</p></div>
+        </div>
         <div class="ig"><label>السعر الحالي للسهم <span class="unit-tag">ر.س/سهم</span> <button class="help-icon" onclick="showHelp('currentPrice')">ℹ️</button></label><input type="number" id="currentPrice" value="50.0" step="0.1" min="0"></div>
         <div class="ig"><label>بيتا Beta <span class="unit-tag">معامل</span> <button class="help-icon" onclick="showHelp('betaMain')">ℹ️</button></label><input type="number" id="betaMain" value="" step="0.05" min="0" placeholder="مثال: 0.85" oninput="runFieldChecks()"><p class="hint">حقل بيتا <strong>الوحيد</strong> في الصفحة: يُسجَّل مع كل عملية، ويغذّي CAPM (تكلفة حقوق الملكية Ke) وحساب WACC التلقائي. مصدر موصى به: TradingView أو StockAnalysis مقابل تاسي. <strong>GuruFocus يرجّع 0.0 للأسهم السعودية و Yahoo يقيس على مؤشر أمريكي — كلاهما غير صالح.</strong></p></div>
       </div>
@@ -676,14 +698,14 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260824x"></script>
-  <script src="js/auth.js?v=20260824x"></script>
-  <script src="js/utils.js?v=20260824x"></script>
-  <script src="js/constitution.js?v=20260824x"></script>
-  <script src="js/constitution-data.js?v=20260824x"></script>
-  <script src="js/tadawul-data.js?v=20260824x"></script>
-  <script src="js/declutter.js?v=20260824x"></script>
-  <script src="js/navtoggle.js?v=20260824x"></script>
+  <script src="js/supabase.js?v=20260824y"></script>
+  <script src="js/auth.js?v=20260824y"></script>
+  <script src="js/utils.js?v=20260824y"></script>
+  <script src="js/constitution.js?v=20260824y"></script>
+  <script src="js/constitution-data.js?v=20260824y"></script>
+  <script src="js/tadawul-data.js?v=20260824y"></script>
+  <script src="js/declutter.js?v=20260824y"></script>
+  <script src="js/navtoggle.js?v=20260824y"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -891,6 +913,23 @@
     function runFieldChecks() {
       const t   = document.getElementById('companyType').value;
       const num = id => { const el = document.getElementById(id); return el ? parseFloat(el.value) : NaN; };
+
+      // ══════════════════════════════════════════════════════════════
+      // خانات م.36 تظهر حين تلزم — لا قبلها ولا بعد فوات الحساب
+      // --------------------------------------------------------------
+      // الربحية المستعملة هي المُطبَّعة إن أُدخلت للدوري (م.35)، وإلا
+      // اللحظية. فدوريٌّ في قاعٍ أدخلتَ له مُطبَّعة موجبة **ليس** خاسراً
+      // بمعنى م.36 — وإظهار خانات النفاد له تشويشٌ لا إفادة.
+      {
+        const _cycNow  = t === 'cyclical';
+        const _nEpsRaw = (document.getElementById('normEps')?.value || '').trim();
+        const _nEps    = _nEpsRaw === '' ? null : parseFloat(_nEpsRaw);
+        const _useNorm = _cycNow && _nEps != null && isFinite(_nEps) && _nEps !== 0;
+        const _epsUsed = _useNorm ? _nEps : num('eps');
+        const box = document.getElementById('lossMetricsBox');
+        if (box) box.style.display = (isFinite(_epsUsed) && _epsUsed <= 0 && t !== 'reit' && t !== 'bank')
+          ? '' : 'none';
+      }
       const raw = id => { const el = document.getElementById(id); return el ? (el.value || '').trim() : ''; };
       const chk = id => { const el = document.getElementById(id); return !!(el && el.checked); };
 
@@ -1488,7 +1527,42 @@
           const eps = useNormEps ? nEps : epsSpot;
           const fcf = useNormFcf ? nFcf : fcfSpot;
 
-          if (eps <= 0 && fcf <= 0) { document.getElementById('loadingOverlay').classList.add('hidden'); showToast('❌ يجب إدخال EPS أو FCF موجب.', 'error'); return; }
+          // ══════════════════════════════════════════════════════════════════
+          // ربحية سالبة **وتدفّق سالب** — الحالة التي كان الرفض فيها مطلقاً
+          // ------------------------------------------------------------------
+          // الرفض `eps <= 0 && fcf <= 0` كان يمنع الحساب كلياً. وهذا صحيح عن
+          // نماذج الربح والتدفق — ولا يصحّ عن التقييم كلّه:
+          //
+          //   • DCF يخصم تدفقات؛ وتدفّقٌ سالب مركَّب يعطي رقماً سالباً بلا معنى.
+          //   • جراهام تشترط EPS > 0 بحكم بنائها.
+          //   • المكرر بمقامٍ سالب عدم.
+          //   • DDM يفترض توزيعاً مستداماً، ومن يخسر ويحرق نقداً لا يموّله من عملياته.
+          //
+          // لكن الشركة **لها قيمة** ما بقيت حقوق ملكيتها موجبة. والسؤال يتغيّر
+          // من «كم تساوي أرباحها» إلى «كم يتبقّى للمساهم، وكم تصمد».
+          //
+          // فالمسارات ثلاثة لا رفضٌ واحد:
+          //   ① دوريّ في قاع دورته  ⇒ م.35: أرقام **مُطبَّعة** 5–7 سنوات.
+          //      وسابك سابقة موثّقة: لحظية 0.50 تعطي 4 ر.س، ومُطبَّعة 2.90
+          //      تعطي 34.5 — ثمانية أضعاف. القاع ليس القيمة.
+          //   ② خسارة بنيوية وحقوق الملكية قائمة ⇒ م.36: الدفترية × 0.6–0.8،
+          //      ومعها مقياسا السيولة الإلزاميان (سنوات النفاد ونسبة التوزيع
+          //      إلى الخسارة).
+          //   ③ حقوق الملكية مستنفَدة (الدفترية ≤ 0) ⇒ لا تقييم. هذه مسألة
+          //      **ملاءة** لا مسألة قيمة، ولا يصحّ إخراج رقم لها.
+          // ══════════════════════════════════════════════════════════════════
+          if (eps <= 0 && fcf <= 0 && cyc && !useNormEps && !useNormFcf) {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            showToast('🏭 شركة دورية بربحية وتدفّق سالبين — هذا قاع الدورة لا قيمة الشركة (م.35). '
+                    + 'أدخِل «EPS مُطبَّع» و«FCF مُطبَّع» (متوسط 5–7 سنوات) قبل الحساب.', 'error');
+            return;
+          }
+          if (eps <= 0 && fcf <= 0 && !(book_value > 0)) {
+            document.getElementById('loadingOverlay').classList.add('hidden');
+            showToast('⛔ ربحية سالبة وتدفّق سالب وقيمة دفترية غير موجبة — لا نموذج تقييم صالح. '
+                    + 'حقوق الملكية مستنفَدة، وهذه مسألة ملاءة لا مسألة قيمة (م.20 و36).', 'error');
+            return;
+          }
 
           // ══════════════════════════════════════════════════════════════
           // م.32 و36 — الشركة الخاسرة: القيمة الدفترية وحدها
@@ -1509,6 +1583,7 @@
           // ══════════════════════════════════════════════════════════════
           const isLossMaking = eps <= 0;
           let extrasLoss = '';
+          let lossMetrics = null;
           if (isLossMaking && !(book_value > 0)) {
             document.getElementById('loadingOverlay').classList.add('hidden');
             showToast('❌ الشركة خاسرة (EPS ≤ 0) — م.36 تحصر تقييمها في القيمة الدفترية، '
@@ -1545,10 +1620,43 @@
             values = { 'القيمة الدفترية × مكرر متحفّظ (م.36)': lossVal };
             avgNames = ['القيمة الدفترية × مكرر متحفّظ (م.36)'];
             bookFloorVal = null;   // هي النموذج نفسه هنا، لا أرضيةً بجواره
-            extrasLoss = `⚠️ الشركة خاسرة (EPS = ${eps}) — م.32 تمنع DCF وجراهام والمكرر `
-              + `وDDM، وم.36 تحصر النموذج في: الدفترية × مكرر متحفّظ (0.6–0.8). `
-              + `المكرر المطبّق ${pbLoss.toFixed(2)}`
+            extrasLoss = `⚠️ الشركة خاسرة (EPS = ${eps})`
+              + (fcf <= 0 ? ` والتدفّق الحر سالب (${fcf})` : '')
+              + ` — م.32 تمنع DCF وجراهام والمكرر وDDM، وم.36 تحصر النموذج في: `
+              + `الدفترية × مكرر متحفّظ (0.6–0.8). المكرر المطبّق ${pbLoss.toFixed(2)}`
               + (fair_pb && (fair_pb < 0.6 || fair_pb > 0.8) ? ` (قُصّ من ${fair_pb})` : '') + '.';
+
+            // ══════════════════════════════════════════════════════════
+            // مقياسا م.36 — «كم تصمد» لا «كم تساوي»
+            // ----------------------------------------------------------
+            // القيمة الدفترية تجيب سؤال المُصفّي: كم يتبقّى للمساهم لو
+            // أُقفلت اليوم. ولا تجيب سؤال المالك: كم يتبقّى **بعد سنتين**
+            // من حرقٍ بهذا المعدّل. والمادة تفرض المقياسين **معها** لا
+            // بدلاً عنها — ولهذا يُعلَن غيابهما ولا يُبتلع (م.20).
+            // ══════════════════════════════════════════════════════════
+            const _n = (id) => { const v = document.getElementById(id)?.value;
+              const x = parseFloat(v); return (v !== '' && isFinite(x)) ? x : null; };
+            const re = _n('retainedEarnings'), burn = _n('annualBurn'), divCost = _n('annualDivCost');
+            lossMetrics = { re, burn, divCost };
+
+            if (burn != null && burn > 0 && re != null) {
+              const yrs = re / burn;
+              lossMetrics.runway = yrs;
+              extrasLoss += ` · ⏳ سنوات نفاد الأرباح المبقاة: ${yrs < 0 ? 'سالبة — الاحتياطي مستنفَد أصلاً' : yrs.toFixed(1) + ' سنة'}`;
+            } else {
+              extrasLoss += ` · ⏳ سنوات النفاد: غير متوفرة ❌ (م.20) — تحتاج الأرباح المبقاة والخسارة السنوية`;
+            }
+            if (burn != null && burn > 0 && divCost != null) {
+              const r = divCost / burn;
+              lossMetrics.divToLoss = r;
+              extrasLoss += ` · 💸 نسبة التوزيع إلى الخسارة: ${(r * 100).toFixed(0)}%`
+                + (r > 0 ? ' — وهي تُوزَّع من رأس المال لا من ربح' : '');
+            } else if (divCost === 0) {
+              lossMetrics.divToLoss = 0;
+              extrasLoss += ` · 💸 لا توزيع — وهو الصحيح لشركة خاسرة`;
+            } else {
+              extrasLoss += ` · 💸 نسبة التوزيع إلى الخسارة: غير متوفرة ❌ (م.20)`;
+            }
           }
 
           const extras = [`السيناريو: ${scenario==='realistic'?'واقعي':scenario==='optimistic'?'متفائل':'محتاط'}`];
@@ -2795,6 +2903,11 @@
         sectorPe:        document.getElementById('sectorPe').value,
         dividends:       document.getElementById('dividends').value,
         bookValue:       document.getElementById('bookValue').value,
+        // مدخلات م.36 — تُحفظ مع العملية وإلا ضاعت عند إعادة الحساب،
+        // فتختلف نتيجة السجل عن نتيجة الشاشة لمدخلات واحدة.
+        retainedEarnings: document.getElementById('retainedEarnings')?.value ?? '',
+        annualBurn:       document.getElementById('annualBurn')?.value ?? '',
+        annualDivCost:    document.getElementById('annualDivCost')?.value ?? '',
         bondYield:       document.getElementById('bondYield').value,
         currentPrice:    document.getElementById('currentPrice').value,
         fairPb:          document.getElementById('fairPb').value,
@@ -2938,6 +3051,9 @@
       setVal('sectorPe',       inp.sectorPe);
       setVal('dividends',      inp.dividends);
       setVal('bookValue',      inp.bookValue);
+      setVal('retainedEarnings', inp.retainedEarnings);
+      setVal('annualBurn',       inp.annualBurn);
+      setVal('annualDivCost',    inp.annualDivCost);
       setVal('bondYield',      inp.bondYield);
       setVal('currentPrice',   inp.currentPrice);
       setVal('fairPb',         inp.fairPb);
