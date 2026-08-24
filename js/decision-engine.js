@@ -127,6 +127,7 @@ let taskConflicts = {}; // ticker → عدد المهام النشطة (>1 = ت�
 let divByTicker = {};  // ticker → [{ amount, date }] من سجل الأرباح الفعلي
 let txByTicker  = {};  // ticker → [{ type, shares, date }] مرتّبة — لاستخراج DPS
 let valByTicker = {};  // ticker → آخر تقييم من حاسبة القيمة العادلة {fair, ts, date, inputs}
+let valSustainTrack = {}; // ticker → مسار بوابة الاستدامة عبر السنوات (م.43)
 let valHistByTicker = {}; // ticker → كل التقييمات (الأحدث أولاً) — الدستور §4 الفلتر 2: «انظر لكل مكون وكل مؤشر على مر الزمان وتطوره»
 let reviewByTicker = {};  // ticker → [{ review_date, notes }] من دفتر المراجعة (الأحدث أولاً)
 let incomeGoalMonthly = 0; // هدف الدخل الشهري (§1) — لقياس مساهمة كل سهم
@@ -1061,6 +1062,40 @@ async function loadAll() {
     if (!earnUp && !divUp && !fcfUp) {
       cur.stabilizationFlag = `⚠️ القيمة العادلة ارتفعت من ${formatNum(prev.fair.avg)} إلى ${formatNum(cur.fair.avg)} (${prev.date || '—'} → ${cur.date || '—'}) بدون دليل ارتفاع فعلي في ${isReit ? 'FFO' : 'EPS'}/FCF/التوزيع بالأرقام المُدخلة — راجع قاعدة التثبيت (الدستور §4 الفلتر 2)`;
     }
+  });
+
+  // ── مسار بوابة الاستدامة عبر السنوات (م.43) ──
+  // المنصّة تحسب حكم الاستدامة لكل تقييم وتحفظه في results.sustainFail،
+  // ولم يكن أحدٌ يقرؤه. ومع السلسلة السنوية صار قابلاً للعدّ، وهو ما تطلبه
+  // م.43 نصّاً: «لا إشارة تُنفَّذ من قراءة واحدة إلا القاطعة» — والإشارة
+  // القوية تحتاج **قراءتين متتاليتين**. فالفشل المعزول في سنةٍ وسط سنواتٍ
+  // سليمة ضجيجٌ لا حكم، والفشل المتتالي حتى آخر قراءة إشارةٌ مؤكَّدة.
+  //
+  // ⚠️ وسمُه «رجعي» ليس تجميلاً: الحكم محسوبٌ بمعادلة اليوم على أرقام تلك
+  // السنة، لا إنذارٌ صدر وقتها. عرضُه بغير ذلك يوهم بأن المنصّة حذّرت آنذاك.
+  valSustainTrack = {};
+  Object.keys(valHistByTicker).forEach(tk => {
+    // الأقدم أولاً — والصفوف التي لا حكم لها تُستثنى ولا تُقرأ نجاحاً (م.21)
+    const asc = (valHistByTicker[tk] || [])
+      .filter(r => r.results && typeof r.results.sustainFail === 'boolean')
+      .slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    if (asc.length < 2) return;
+    const marks = asc.map(r => ({
+      date: r.date, fail: r.results.sustainFail === true,
+      why: Array.isArray(r.results.sustainReasons) ? r.results.sustainReasons : [],
+    }));
+    let longest = 0, run = 0;
+    marks.forEach(m => { if (m.fail) { run++; longest = Math.max(longest, run); } else run = 0; });
+    // المتتالية الجارية: من الآخر إلى الوراء
+    let current = 0;
+    for (let i = marks.length - 1; i >= 0 && marks[i].fail; i--) current++;
+    valSustainTrack[tk] = {
+      marks, n: marks.length, fails: marks.filter(m => m.fail).length,
+      longest, current,
+      confirmed: current >= 2,                       // م.43: إشارة قوية
+      recovered: current === 0 && longest >= 2,      // كان يفشل ثم تعافى
+      lastWhy: marks[marks.length - 1].why,
+    };
   });
 
   // ── م.37 عبر السلسلة كاملةً، لا آخر نقطتين ──
@@ -2697,6 +2732,55 @@ function impactHtml(r, fin, plan, totalValue) {
 // ── ⑥ تطور التقييمات عبر الزمن (الدستور §4 الفلتر 2) ────────────────
 // «انظر لكل مكون وكل مؤشر على مر الزمان وتطوره» — كل تقييماتك للسهم في جدول
 // واحد مع اتجاه كل مؤشر، لتُحكم قاعدة التثبيت بعينك لا بالثقة.
+// ══════════════════════════════════════════════════════════════════════
+// مسار بوابة الاستدامة عبر السنوات (م.43) — قراءة واحدة لا تكفي
+// ══════════════════════════════════════════════════════════════════════
+function sustainTrackHtml(ticker) {
+  const tr = valSustainTrack[ticker];
+  if (!tr) return '';
+  const E = (typeof escapeHtmlSafe === 'function') ? escapeHtmlSafe : (x => String(x == null ? '' : x));
+  const cells = tr.marks.map(m =>
+    `<span title="${E(m.date + (m.fail && m.why.length ? ' — ' + m.why.join(' | ') : ''))}" `
+    + `style="display:inline-block;min-width:2.1rem;text-align:center;padding:2px 4px;margin:1px;`
+    + `border-radius:4px;font-size:.74rem;`
+    + `background:${m.fail ? 'rgba(239,68,68,.16)' : 'rgba(34,197,94,.14)'};`
+    + `color:${m.fail ? '#ef4444' : '#22c55e'}">${E(String(m.date).slice(-4))}</span>`).join('');
+
+  let verdict, tone;
+  if (tr.confirmed) {
+    verdict = `⛔ <strong>فشل مؤكَّد</strong> — ${tr.current} قراءات متتالية آخرها الأحدث. `
+            + `م.43 تعدّ القراءتين المتتاليتين إشارةً قوية، فهذه ليست لقطة.`;
+    tone = '#ef4444';
+  } else if (tr.current === 1) {
+    verdict = `⚠️ <strong>مرشّح</strong> — فشل في آخر قراءة فقط. م.43 تحتاج قراءةً ثانية `
+            + `متتالية قبل اعتماد الإشارة، فلا إجراء بعد.`;
+    tone = '#f59e0b';
+  } else if (tr.recovered) {
+    verdict = `↗️ <strong>تعافٍ</strong> — كان يفشل ${tr.longest} قراءات متتالية ثم اجتاز. `
+            + `اللقطة وحدها كانت ستقول «سليم» وتُخفي أنه خرج من تعثّر قريب.`;
+    tone = '#22c55e';
+  } else if (tr.fails === 0) {
+    verdict = `✅ اجتاز كل القراءات الـ${tr.n}.`;
+    tone = '#22c55e';
+  } else {
+    verdict = `🟡 ${tr.fails} فشل معزول من ${tr.n} قراءة، بلا تتابع. `
+            + `م.43 لا تعتمد إشارةً من قراءة واحدة — هذا ضجيج لا اتجاه.`;
+    tone = '#f59e0b';
+  }
+
+  return `<div class="card" style="margin-top:10px;padding:12px;border-right:3px solid ${tone}">
+    <div style="font-weight:700;margin-bottom:6px">🩺 مسار بوابة الاستدامة
+      <span class="text-muted" style="font-size:.72rem;font-weight:400">
+        — ${tr.n} قراءة سنوية · ⚙️ <strong>حكم رجعي</strong>: بمعادلة اليوم على أرقام كل سنة، لا إنذارٌ صدر وقتها (م.19)</span>
+    </div>
+    <div style="margin:6px 0">${cells}</div>
+    <div style="font-size:.82rem;line-height:1.8">${verdict}</div>
+    ${tr.current > 0 && tr.lastWhy.length
+      ? `<div class="text-muted" style="font-size:.78rem;margin-top:6px">سبب آخر قراءة: ${E(tr.lastWhy.join(' · '))}</div>`
+      : ''}
+  </div>`;
+}
+
 function valuationTimelineHtml(ticker) {
   const hist = valHistByTicker[ticker] || [];
   if (!hist.length) {
@@ -3088,6 +3172,7 @@ function openDetailCard(ticker) {
   }
 
   // ── تطوّر تقييماتك عبر الزمن (الدستور §4 الفلتر 2) ──
+  out.push(sustainTrackHtml(ticker));
   out.push(valuationTimelineHtml(ticker));
 
   // تفصيل نماذج آخر تقييم — أي نموذج أعطى أي قيمة (من حاسبة القيمة العادلة)
