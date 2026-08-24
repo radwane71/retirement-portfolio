@@ -295,7 +295,7 @@ function analyzeWatchImpact(w) {
   else if (secTarget > 0)   reasons.push({ t: 'neu', txt: `وزن قطاع «${sec}» سيصبح ${secWeightAfter.toFixed(1)}% (هدفك ${secTarget.toFixed(1)}% — ضمن النطاق)` });
   else                      reasons.push({ t: 'neu', txt: `يُضاف إلى قطاع «${sec}» الموجود (${secWeightBefore.toFixed(1)}% → ${secWeightAfter.toFixed(1)}%)` });
 
-  if (overCap)              reasons.push({ t: 'neg', txt: `يكسر سقف السهم الدستوري: وزنه بعد الشراء ${posWeightAfter.toFixed(1)}% يتجاوز ${singleCap}%${blueChip ? ' (قيادي — سقف 12%)' : ''} + منطقة السماح ${WL_CAP_BUFFER}% (CLAUDE.md §1)` });
+  if (overCap)              reasons.push({ t: 'neg', txt: `يكسر سقف السهم الدستوري: وزنه بعد الشراء ${posWeightAfter.toFixed(1)}% يتجاوز ${singleCap}% + منطقة السماح ${WL_CAP_BUFFER}% (CLAUDE.md §1)` });
   if (overSectorCap)        reasons.push({ t: 'neg', txt: `يكسر سقف القطاع الدستوري: قطاع «${sec}» سيصبح ${secWeightAfter.toFixed(1)}% متجاوزاً ${WL_CAP_SECTOR}% + منطقة السماح ${WL_SECTOR_BUFFER}% (CLAUDE.md §1)` });
   if (bigPosition)          reasons.push({ t: 'neg', txt: `مركز كبير: وزنه المخطط ${posWeightAfter.toFixed(1)}% يتجاوز 15% — قد يصبح من أكبر مراكزك ويرفع التركيز` });
   if (held)                 reasons.push({ t: 'neu', txt: `هذا السهم موجود في محفظتك — التحليل يفترض رفع وزنه إلى ${posWeightAfter.toFixed(1)}%` });
@@ -372,7 +372,7 @@ function renderContext() {
         <div class="mt-2">${tagHtml(nState === 'good' ? '✅' : '⚠️', `حجم المحفظة ${d.n} سهم (المستهدف ${WL_SIZE_MIN}–${WL_SIZE_MAX})`, nState)}</div>
       </div>
     </div>
-    ${noteHtml('ℹ️', 'كل سهم في القائمة يُحلَّل بمحاكاة إضافته بوزنه المخطط، ثم يُقارن بمقياس التنويع نفسه الموجود في لوحة التحكم — ومعه فحص الأسقف الدستورية (سهم 7% · قيادي 12% · قطاع 25%).', '')}
+    ${noteHtml('ℹ️', 'كل سهم في القائمة يُحلَّل بمحاكاة إضافته بوزنه المخطط، ثم يُقارن بمقياس التنويع نفسه الموجود في لوحة التحكم — ومعه فحص الأسقف الدستورية (سقف الفئة: أ 15% · ب 10% · ج 7% · د 4% — م.25 · وقطاع 25%).', '')}
   </div>`;
 }
 

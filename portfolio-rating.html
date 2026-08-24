@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824o">
+  <link rel="stylesheet" href="css/style.css?v=20260824p">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -298,14 +298,14 @@
   <!-- AUDIT-FIX (2026-08): تثبيت إصدار Chart.js بدل التعويم على @4 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260824o"></script>
-  <script src="js/auth.js?v=20260824o"></script>
-  <script src="js/utils.js?v=20260824o"></script>
-  <script src="js/constitution.js?v=20260824o"></script>
-  <script src="js/constitution-data.js?v=20260824o"></script>
-  <script src="js/tadawul-data.js?v=20260824o"></script>
-  <script src="js/declutter.js?v=20260824o"></script>
-  <script src="js/navtoggle.js?v=20260824o"></script>
+  <script src="js/supabase.js?v=20260824p"></script>
+  <script src="js/auth.js?v=20260824p"></script>
+  <script src="js/utils.js?v=20260824p"></script>
+  <script src="js/constitution.js?v=20260824p"></script>
+  <script src="js/constitution-data.js?v=20260824p"></script>
+  <script src="js/tadawul-data.js?v=20260824p"></script>
+  <script src="js/declutter.js?v=20260824p"></script>
+  <script src="js/navtoggle.js?v=20260824p"></script>
   <script>
     let breakdownChartInst = null;
 
@@ -478,11 +478,22 @@
       const goldMap = { high: 0.5, medium: 0.35, low: 0.15, none: 0 };
       addDim('أصول تحوط (ذهب)', goldMap[gold] || 0, 0.5, gold !== '');
 
-      // لا شيء معبأ إطلاقاً → لا نتيجة
-      if (maxAnswered === 0 && lev === '') return { score: null, breakdown };
+      // ══════════════════════════════════════════════════════════════
+      // لا بُعد معبَّأ ⇒ لا درجة. والخصومات لا تصلح أساساً لدرجة.
+      // --------------------------------------------------------------
+      // كان الشرط `maxAnswered === 0 && lev === ''`، فمن يجيب على سؤال
+      // الرافعة وحده يمرّ بـ`maxAnswered = 0` فيأخذ **10 من لا شيء** ثم
+      // يُخصم منها خصم الرافعة: النتيجة **9.0/10 «محفظة متينة — أمان
+      // عالٍ جداً»** لنموذج فارغ تماماً. والصفحة تعرض فوقها في الوقت
+      // نفسه «⛔ خطر حاد: الرافعة تُضاعف الخسائر».
+      //
+      // م.20: «ممنوع تقدير بيان ناقص بصمت». درجة أمان بلا مدخلات ليست
+      // عشرة — لا يوجد أساس للقياس أصلاً.
+      // ══════════════════════════════════════════════════════════════
+      if (maxAnswered === 0) return { score: null, breakdown };
 
       // تقنين على الأبعاد المعبأة فقط
-      let score = maxAnswered > 0 ? earned / maxAnswered * 10 : 10;
+      let score = earned / maxAnswered * 10;
 
       // ── الخصومات (على مقياس 10): سقوف الدستور ────────────────
       if (lspAnswered) {

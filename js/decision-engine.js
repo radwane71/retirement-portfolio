@@ -941,8 +941,15 @@ async function loadAll() {
   divByTicker = {};
   (rDiv.data || []).forEach(d => {
     const tk = (d.ticker || '').trim().toUpperCase();
-    if (!tk || !d.date) return;
-    (divByTicker[tk] = divByTicker[tk] || []).push({ amount: +d.amount || 0, date: new Date(d.date) });
+    if (!tk) return;
+    // `dividendFlowDate` هي التعريف الواحد لتاريخ التوزيعة عبر المشروع
+    // (utils.js): قراءة محلية، واحتياطي أول الشهر من سنة/شهر، وإسقاط المُعلَن
+    // بتاريخ صرفٍ قادم. `!d.date` وحده كان يُسقط المسجَّل بسنة/شهر.
+    const dt = (typeof dividendFlowDate === 'function')
+      ? dividendFlowDate(d, new Date())
+      : (d.date ? new Date(d.date) : null);
+    if (!dt || isNaN(dt)) return;
+    (divByTicker[tk] = divByTicker[tk] || []).push({ amount: +d.amount || 0, date: dt });
   });
 
   // المعاملات لكل رمز (مرتّبة تصاعدياً) — لاستخراج عدد الأسهم وقت كل توزيع → DPS
@@ -999,8 +1006,16 @@ async function loadAll() {
       // ثم تحفظ المتوسط الحسابي في fairValueAvg على أي حال. كان المحرّك يقرأ الرقم
       // ويتجاهل التحذير، فيرشّح سهماً للتخفيف بناءً على رقم رفضت الحاسبة إعطاءه.
       unreliable: entry.results?.fairValueUnreliable === true,
+      // ⚠️ **وحدة**: الحاسبة تحفظ `dispersionCV` **نسبةً مئوية** (sd/avg×100)،
+      // و`DISPERSION_BANDS` في الدستور **كسور** (0.30 · 0.60). فكان أي تقييم
+      // بأكثر من نموذج (cv ≥ 0.61) يقع في «ثقة منخفضة» ⇒ توسيع النطاقات 20%.
+      //
+      // والأثر ليس تجميلياً: سهم سعره 1.25× العادلة — تضعه م.48 في المنطقة
+      // الصفراء «تخفيف» وتمنع م.55/4 توجيه أي سيولة إليه — كان يخرج **أمر
+      // شراء** بوصفه في المنطقة الخضراء «تجميع». وتشتّت 8%، وهو أفضل اتفاق
+      // ممكن بين النماذج، كان يُسمّى «ثقة منخفضة».
       cv: (entry.results?.dispersionCV != null && isFinite(+entry.results.dispersionCV))
-        ? +entry.results.dispersionCV : null,
+        ? +entry.results.dispersionCV / 100 : null,
     };
     (valHistByTicker[tk] = valHistByTicker[tk] || []).push(rec); // السجل الكامل لتتبّع التطور (§4)
     if (!valByTicker[tk]) valByTicker[tk] = rec;          // أول ظهور = الأحدث
@@ -1441,6 +1456,13 @@ function _sectorPctOf(sector, total) {
   return v / total * 100;
 }
 
+// صفٌّ بلا أمر — يُعلَن ولا يُكتَم (م.12 وم.55/5 وم.18)
+function mkBlocked(r, price, why) {
+  return { ticker: r.ticker, name: r.name, price, weight: r.weight, value: r.value,
+           target: r.targetWeight, cap: r.cap, taskType: r.taskType, sector: r.sector,
+           sar: 0, shares: 0, blocked: true, why };
+}
+
 function buildTargetPlan(valAware) {
   const rows = _results || [];
   const total = rows.reduce((s, r) => s + (+r.value || 0), 0);
@@ -1453,6 +1475,29 @@ function buildTargetPlan(valAware) {
 
   rows.forEach(r => {
     const price = +r.price || 0;
+
+    // م.12 وم.55/5 — المرتبتان 1 و٢ من سلّم م.50. `targets.js` تطبّقهما
+    // منذ البداية؛ والمحرّك لم يكن يعرفهما إطلاقاً، فكانت الخطة
+    // تُصدر **أمر شراء بعشرة آلاف ريال** لسهمٍ يمنعه الدستور
+    // «تحت أي ظرف، ولو استوفى كل الفلاتر» (م.12).
+    if (typeof isBanned === 'function' && isBanned(r.ticker)) {
+      out.deferred.push(mkBlocked(r, price,
+        'استبعاد دائم (م.12) — ممنوع إدراجه في أي مخرَج تحت أي ظرف. '
+      + 'لا أمر شراء ولا تخفيف؛ والخروج قرارك أنت.'));
+      return;
+    }
+    const noAccum = (typeof isNoAccumulate === 'function') && isNoAccumulate(r.ticker);
+
+    // م.18 — «بيانات تجاوزت الحد تُعلَّم ⚠️ ولا يُبنى عليها **قرار وزن**».
+    // بطاقة السهم كانت توقف كل إشارة سعرية، والخطة تمضي وتُصدر أمر تخفيف
+    // على وزنٍ مشتقٍّ من السعر القديم نفسه. الشاشة الواحدة تقول الأمرين.
+    if (priceAlerts && priceAlerts[r.ticker]) {
+      out.deferred.push(mkBlocked(r, price,
+        `السعر عمره ${priceAlerts[r.ticker].days} يوماً (الحدّ ${PRICE_DECISION_MAX_DAYS} — م.18). `
+      + 'الوزن مشتقٌّ من هذا السعر، فلا يُبنى عليه أمر. حدّث الأسعار.'));
+      return;
+    }
+
     const mk = (extra) => {
       const row = {
         ticker: r.ticker, name: r.name, price, weight: r.weight, value: r.value,
@@ -1670,6 +1715,33 @@ function buildTargetPlan(valAware) {
           fix: 'إمّا ترفع هدفه في صفحة الأهداف، أو تغلق مهمة التجميع. المحرّك لا ينقض قرارك.' }));
         return;
       }
+      // ══════════════════════════════════════════════════════════════
+      // م.11 — القاعدة المطلقة تسبق كسر السقف في سلّم م.50
+      // --------------------------------------------------------------
+      // مسارا الخروج (م.27 وفشل الاستدامة) يمرّان بـ`deferredVerdict`؛
+      // مسار **التخفيف** لم يكن يمرّ بها إطلاقاً. فكسرُ سقفٍ كان يُصدر أمر
+      // بيع بخسارة محقّقة، والصفّ نفسه يطبع «تبيع هذا الجزء وأنت خاسر»
+      // ثم يُصدر الأمر. وم.50 ترتّب القاعدة المطلقة **#3** وكسرَ السقف #5،
+      // وم.13 تنصّ أن triggers المالك «تعلو على كل حساب عدا المادتين 11 و44».
+      //
+      // البيع بخسارة لا يصير جائزاً إلا بم.46 (انقطاع توزيع + تآكل)، وهي
+      // تُقيَّم في مسار فشل الاستدامة لا هنا.
+      // ══════════════════════════════════════════════════════════════
+      const trimDivs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+      const trimGate = (typeof deferredVerdict === 'function')
+        ? deferredVerdict(price, r.avgCost, trimDivs, r.shares) : null;
+      if (trimGate && trimGate.verdict !== 'exitNow') {
+        out.deferred.push(mk({ sar: 0, shares: 0, gapPct, capped, expired,
+          why: (r.overCap
+                 ? `وزنه كسر سقف فئته ${r.cap}% ويستوجب تخفيفاً (م.49)`
+                 : `فوق هدفك بـ${formatNum(-gapPct)} نقطة`)
+             + ` — لكن السعر ${formatNum(price)} تحت التعادل الحقيقي `
+             + `${trimGate.breakEven != null ? formatNum(trimGate.breakEven) : '—'}، `
+             + 'فالتخفيف هنا **خسارة محقّقة**. م.11 تعلو على كسر السقف في سلّم م.50.',
+          fix: 'الضخّ الشهري يخفض الوزن بلا بيع (م.58). '
+             + 'وإن تدهورت الأساسيات فالمسار هو م.45 و46 لا التخفيف السعري.' }));
+        return;
+      }
       out.trims.push(mk({ sar, shares, gapPct, capped, expired,
         forced: r.overCap,
         why: r.overCap
@@ -1684,8 +1756,27 @@ function buildTargetPlan(valAware) {
 
     // ③ تحت الهدف ⇒ تجميع، بشرط أن يسمح السعر وقرارك
     // م.57: حدّ الشراء 2,000 ر.س لا 500 — «تجزئة الضخّ تولّد عمولات وتُضعف الأثر»
-    if (gapPct > 0 && devBand.action === 'none') return;   // م.49 — ضمن ±1.5%
+    // م.49 — ضمن ±1.5% ⇒ لا إجراء. **إلا** إن كان الوزن كاسراً لسقف الفئة:
+    // كان السهم الذي وزنه فوق سقفه وهدفه المسجَّل يساوي وزنه أو يفوقه يسقط
+    // من الخطة كلياً — لا تخفيف ولا تأجيل ولا تعارض — والخطة تطبع «✅ لا أمر
+    // مطلوب» بينما بطاقته على الشاشة نفسها حمراء: «كسر السقف الدستوري».
+    if (gapPct >= 0 && r.overCap) {
+      out.conflicts.push(mk({ sar: 0, shares: 0, gapPct,
+        why: `وزنه ${formatNum(r.weight)}% كسر سقف فئته ${r.cap}% (م.49 — تصحيح إلزامي)، `
+           + `بينما هدفك المسجَّل ${formatNum(r.targetWeight)}% يساويه أو يفوقه.`,
+        fix: 'م.31: هدفك يعلو على السقف **دورةً واحدة** ثم يُعرَض للتجديد. '
+           + 'جدِّده صراحةً في صفحة الأهداف، أو اخفضه إلى السقف.' }));
+      return;
+    }
+    if (gapPct > 0 && devBand.action === 'none') return;
     if (gapPct > 0 && sar >= MIN_BUY_SAR) {
+      // م.55/5 — «سدافكو 2270 بقرار المالك الصريح: لا تجميع مهما كانت الإشارات»
+      if (noAccum) {
+        out.deferred.push(mk({ sar: 0, shares: 0, gapPct,
+          why: 'لا تجميع لهذا السهم بقرارك الصريح (م.55/5) — مهما كانت الإشارات. '
+             + `الفجوة عن هدفك ${formatNum(gapPct)} نقطة قائمة ومعلَنة، ولا أمر شراء.` }));
+        return;
+      }
       // م.28 — قطاع بين 27.5% و30%: «وقف الإضافة للقطاع». التجميع هنا
       // يزيد تركيزاً بلغ نطاق الوقف، فيُؤجَّل ويُعلَن سببه القطاعي.
       const secPctNow = _sectorPctOf(r.sector, total);

@@ -78,9 +78,12 @@ const INLINE_OPTS = {
 
 // ── Formatting ────────────────────────────────────────────────
 function formatSAR(amount, showSign = false) {
-  const num = parseFloat(amount) || 0;
-  const abs = Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const raw = parseFloat(amount) || 0;
   // L-3: treat -0 as zero so we never render "+0.00 ر.س" or "-0.00 ر.س"
+  // ⚠️ الإشارة تُشتقّ من الرقم **بعد التقريب**: شرط `num < 0` وحده يلتقط
+  // الصفر الحسابي ولا يلتقط ما يُقرَّب إليه، فكانت −٠.٠٠١ تُطبع «−٠.٠٠ ر.س».
+  const num = Math.round(raw * 100) / 100;
+  const abs = Math.abs(num).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   const sign = showSign ? (num > 0 ? '+' : num < 0 ? '-' : '') : (num < 0 ? '-' : '');
   return `${sign}${abs} ر.س`;
 }

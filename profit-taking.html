@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824o">
+  <link rel="stylesheet" href="css/style.css?v=20260824p">
   <style>
     .legal-note { background: var(--accent-dim); border: 1px solid var(--accent); border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px; color: var(--accent); font-size: 0.82rem; text-align: center; line-height: 1.7; }
 
@@ -211,14 +211,14 @@
 
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260824o"></script>
-  <script src="js/auth.js?v=20260824o"></script>
-  <script src="js/utils.js?v=20260824o"></script>
-  <script src="js/constitution.js?v=20260824o"></script>
-  <script src="js/constitution-data.js?v=20260824o"></script>
-  <script src="js/tadawul-data.js?v=20260824o"></script>
-  <script src="js/declutter.js?v=20260824o"></script>
-  <script src="js/navtoggle.js?v=20260824o"></script>
+  <script src="js/supabase.js?v=20260824p"></script>
+  <script src="js/auth.js?v=20260824p"></script>
+  <script src="js/utils.js?v=20260824p"></script>
+  <script src="js/constitution.js?v=20260824p"></script>
+  <script src="js/constitution-data.js?v=20260824p"></script>
+  <script src="js/tadawul-data.js?v=20260824p"></script>
+  <script src="js/declutter.js?v=20260824p"></script>
+  <script src="js/navtoggle.js?v=20260824p"></script>
   <script>
     async function init() {
       const user = await requireAuth();
@@ -288,9 +288,9 @@
         },
         {
           text: 'بعد ارتفاعه، هل تجاوز وزن هذا السهم سقف الدستور في محفظتك؟',
-          hint: 'سقف الدستور (CLAUDE.md): 15% لكل سهم بلا استثناء. تجاوز السقف خطر تركيز يفرض التخفيف بغضّ النظر عن جودة الشركة — راجع محرّك القرار (الفلتر 4).',
+          hint: 'سقف الدستور (م.25) متدرّج بالفئة: أ 15% · ب 10% · ج 7% · د 4% — و15% سقف الفئة (أ) وحدها لا سقف عام. تجاوز سقف فئتك خطر تركيز يفرض التخفيف بغضّ النظر عن جودة الشركة — راجع محرّك القرار (الفلتر 4).',
           choices: [
-            { label: '🐋 نعم، تجاوز السقف بوضوح (فوق 15%)', pts: 4, concentrated: true },
+            { label: '🐋 نعم، تجاوز سقف فئته بوضوح', pts: 4, concentrated: true },
             { label: '⚖️ اقترب من السقف لكنه ضمن منطقة السماح', pts: 1 },
             { label: '🛡️ لا، وزنه ما زال دون السقف بوضوح', pts: -1 }
           ]
@@ -446,7 +446,7 @@
             <div class="pt-override danger">
               <div class="pt-result-icon">⚖️</div>
               <div class="ov-title" style="color:var(--accent)">تقليم إلزامي لإعادة التوازن</div>
-              <p>السهم حقق ربحاً ممتازاً (+${profitPct.toFixed(1)}%) لكنه انتفخ فوق سقف الدستور. قصّ جزئياً بقدر ما يعيد وزنه إلى السقف (7% للعادي / 12% للقيادي) — هذا قرار <strong>إدارة مخاطر</strong> مستقل عن جودة الشركة نفسها (الفلتر 4 في <a href="decision-engine.html" style="color:var(--accent)">محرّك القرار</a>).</p>
+              <p>السهم حقق ربحاً ممتازاً (+${profitPct.toFixed(1)}%) لكنه انتفخ فوق سقف الدستور. قصّ جزئياً بقدر ما يعيد وزنه إلى سقف فئته (أ 15% · ب 10% · ج 7% · د 4% — م.25) — هذا قرار <strong>إدارة مخاطر</strong> مستقل عن جودة الشركة نفسها (الفلتر 4 في <a href="decision-engine.html" style="color:var(--accent)">محرّك القرار</a>).</p>
             </div>
             ${factorsHtml(reasons)}
             <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;

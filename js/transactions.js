@@ -384,19 +384,50 @@ async function loadTransactions() {
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ترتيب المعاملات لحساب متوسط التكلفة — تعريف واحد يستعمله كل حاسب
+// ----------------------------------------------------------------------
+// الترتيب بالتاريخ وحده **لا يكفي**: معاملتان في اليوم نفسه ترجعان من
+// Postgres بترتيبٍ غير محدَّد. وإذا سبق البيع شراءَه في اليوم نفسه:
+//
+//   الأسهم المملوكة = 0  ⇒  sellShares = min(50, 0) = 0
+//   ⇒ البيع يُلغى من الحيازة كلياً، ومتوسط التكلفة = 0
+//   ⇒ **كامل عائد البيع يُسجَّل ربحاً محقَّقاً**
+//
+// قياس فعلي: شراء 100@10 وبيع 50@12 في اليوم نفسه —
+//   الشراء أولاً (الصحيح): 50 سهماً باقية · ربح +98 ر.س
+//   البيع أولاً:          100 سهم باقية · ربح **+599 ر.س** — ستة أضعاف
+//
+// وكسرُ التعادل بـ`created_at` وحده لا يكفي أيضاً: هو **ترتيب الإدخال**
+// لا الترتيب الاقتصادي. من يسجّل البيع قبل شرائه — استيراداً أو تصحيحاً
+// لاحقاً — يحصل على المقلوب نفسه.
+//
+// القاعدة: التاريخ ← ثم **الاقتناء قبل التصرّف** (buy/grant قبل sell)،
+// وهو العرف المحاسبي: لا يُباع ما لم يُملَك بعد ← ثم created_at ← ثم id.
+// ══════════════════════════════════════════════════════════════════════
+const TX_ORDER = { buy: 0, grant: 0, sell: 1 };
+function txSortForWAC(rows) {
+  return [...(rows || [])].sort((a, b) =>
+    String(a.date || '').localeCompare(String(b.date || '')) ||
+    ((TX_ORDER[a.type] ?? 0) - (TX_ORDER[b.type] ?? 0)) ||
+    String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+    String(a.id || '').localeCompare(String(b.id || ''))
+  );
+}
+
 // ── إعادة حساب كاملة لسهم واحد من صفر بناءً على جميع معاملاته ─
 // بعد كل إضافة أو تعديل أو أرشفة معاملة يُستدعى هذا لضمان دقة WAC
 async function recomputeHoldingFromTx(userId, ticker) {
   // S-2: filter by user_id — defence in depth if RLS is ever misconfigured
   const { data: txAll } = await supabaseClient
     .from('transactions')
-    .select('type, shares, price, total, name')
+    .select('type, shares, price, total, name, date, created_at, id')
     .eq('user_id', userId)
     .eq('ticker', ticker)
     .eq('is_archived', false)
     .order('date', { ascending: true });
 
-  const rows = txAll || [];
+  const rows = txSortForWAC(txAll || []);
 
   // احسب الأسهم الإجمالية والمتوسط المرجح (WAC) من الصفر
   let totalShares = 0;
@@ -667,12 +698,9 @@ function renderTxStats() {
 
   // حساب الربح/الخسارة الحقيقي بطريقة WAC شاملة العمولة والضريبة
   // نمشي على المعاملات ترتيباً تاريخياً ونتتبع التكلفة الكاملة لكل رمز
-  // كسر تعادل نفس اليوم بـ created_at ثم id تصاعدياً — حتى يُحسب الشراء قبل البيع المسجَّل بعده
-  const sorted = [...transactions].sort((a, b) =>
-    (new Date(a.date) - new Date(b.date)) ||
-    String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
-    String(a.id || '').localeCompare(String(b.id || ''))
-  );
+  // نفس ترتيب `recomputeHoldingFromTx` حرفياً — وإلا تباعدت الصفحتان في
+  // متوسط التكلفة والربح المحقَّق لنفس السهم في اليوم نفسه.
+  const sorted = txSortForWAC(transactions);
   const costMap = {}; // ticker → { shares, totalCost (شاملة عمولة + ضريبة) }
 
   // الإحصاءات المحققة تتطلب كامل السجل — نافذة مبتورة تعطي أرقاماً مضللة
@@ -697,8 +725,12 @@ function renderTxStats() {
       // متوسط التكلفة الكاملة للسهم الواحد (شاملة العمولة والضريبة عند الشراء)
       const avgCostPerShare = m.shares > 0 ? m.totalCost / m.shares : 0;
       const costOfSold      = avgCostPerShare * sellShares;
-      // صافي عائد البيع (total البيع = أسهم × سعر − عمولة − ضريبة)
-      const netProceeds     = +t.total;
+      // ⚠️ العائد يُقَصّ بنفس نسبة قصّ العدد. كان يُؤخذ كاملاً (`+t.total`)
+      // بينما التكلفة مقصوصة، فبيعُ 150 سهماً من 100 مملوكة كان يُسجّل ربح
+      // خمسين سهماً **لا تملكها** ربحاً محقَّقاً: +795 بدل +196 ر.س.
+      // ورسالة التأكيد تَعِد صراحةً «ستُحسب العملية بالأسهم المتاحة».
+      const sellRatio       = (+t.shares > 0) ? sellShares / +t.shares : 0;
+      const netProceeds     = (+t.total) * sellRatio;
       const pnl             = netProceeds - costOfSold;
 
       if (pnl >= 0) { profitSells++;  profitAmount += pnl; }

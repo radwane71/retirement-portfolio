@@ -59,12 +59,20 @@ const ALLOWED = {
   tvText:           'واجهة عرض الوسم (م.19)',
 };
 
+// ⚠️ التعليقات تُجرَّد قبل البحث: ذكرُ الاسم في شرحٍ ليس استهلاكاً له.
+// بلا هذا يكفي أن يشرح تعليقٌ لماذا وُضع ثابتٌ ليُحسب «مُستعمَلاً» وهو
+// معطَّل — وهذا يقلب الأداة ضد غرضها: أُنشئت لتكشف مادة **معرَّفة وغير
+// منفَّذة**، فتصير تُغطّي عليها.
+const stripComments = (s) => s
+  .replace(/\/\*[\s\S]*?\*\//g, ' ')
+  .replace(/(^|[^:'"\\])\/\/[^\n]*/g, '$1 ');
+
 const files = [];
 fs.readdirSync(ROOT + 'js')
   .filter(f => f.endsWith('.js') && !f.startsWith('constitution'))
-  .forEach(f => files.push(['js/' + f, fs.readFileSync(ROOT + 'js/' + f, 'utf8')]));
+  .forEach(f => files.push(['js/' + f, stripComments(fs.readFileSync(ROOT + 'js/' + f, 'utf8'))]));
 fs.readdirSync(ROOT).filter(f => f.endsWith('.html'))
-  .forEach(f => files.push([f, fs.readFileSync(ROOT + f, 'utf8')]));
+  .forEach(f => files.push([f, stripComments(fs.readFileSync(ROOT + f, 'utf8'))]));
 
 const WB = String.raw`\b`;                       // لا يُهرَّب يدوياً — انظر الترويسة
 const reOf = n => new RegExp(WB + n + WB);

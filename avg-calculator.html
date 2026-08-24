@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824o">
+  <link rel="stylesheet" href="css/style.css?v=20260824p">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -169,6 +169,7 @@
               <div>المتوسط السعري الجديد</div>
               <span class="result-value zero" id="newAverage">0.00</span>
             </div>
+            <div id="avgFeesLine" class="hint" style="display:none;margin:-6px 0 8px"></div>
             <div class="result-item">
               <div>إجمالي القيمة المستثمرة</div>
               <span class="result-value zero" id="totalValue">0.00</span>
@@ -261,14 +262,14 @@
 
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260824o"></script>
-  <script src="js/auth.js?v=20260824o"></script>
-  <script src="js/utils.js?v=20260824o"></script>
-  <script src="js/constitution.js?v=20260824o"></script>
-  <script src="js/constitution-data.js?v=20260824o"></script>
-  <script src="js/tadawul-data.js?v=20260824o"></script>
-  <script src="js/declutter.js?v=20260824o"></script>
-  <script src="js/navtoggle.js?v=20260824o"></script>
+  <script src="js/supabase.js?v=20260824p"></script>
+  <script src="js/auth.js?v=20260824p"></script>
+  <script src="js/utils.js?v=20260824p"></script>
+  <script src="js/constitution.js?v=20260824p"></script>
+  <script src="js/constitution-data.js?v=20260824p"></script>
+  <script src="js/tadawul-data.js?v=20260824p"></script>
+  <script src="js/declutter.js?v=20260824p"></script>
+  <script src="js/navtoggle.js?v=20260824p"></script>
   <script>
     async function init() {
       const user = await requireAuth();
@@ -305,13 +306,34 @@
       const prices = document.querySelectorAll('.new-price');
       const shares = document.querySelectorAll('.new-shares');
 
+      // ══════════════════════════════════════════════════════════════
+      // م.2 و10 — العمولة والضريبة **داخل** متوسط التكلفة
+      // --------------------------------------------------------------
+      // «متوسط التكلفة = إجمالي المدفوع (شاملاً العمولة والضريبة) ÷ عدد
+      // الأسهم» (م.2)، و«عمولة التداول وضريبة القيمة المضافة عليها
+      // تُدرَج في متوسط التكلفة» (م.10).
+      //
+      // الخانة الأولى تأخذ `holdings.avg_price` — وهو محسوب من إجمالي
+      // مدفوع **شامل** للعمولة. فإدخال العمليات الجديدة خاماً كان يخلط
+      // أساسين، والانحراف في اتجاه واحد دائماً: **متوسط أقل من الحقيقي**.
+      // وهو يضلّل في السؤال الذي بُنيت له الحاسبة — «هل نزل السهم تحت
+      // تعادلي؟» — حيث يقرّر الفرقُ خروجاً بخسارة أو لا (م.45).
+      // ══════════════════════════════════════════════════════════════
       const currentCost = currentAvgCost * currentShares;
       let newCost   = 0;
       let newShares = 0;
+      let newFees   = 0;
+      const _hasComm = typeof calcCommission === 'function';
       for (let i = 0; i < prices.length; i++) {
         const p = Math.max(0, parseFloat(prices[i].value) || 0);
         const s = Math.max(0, parseFloat(shares[i].value) || 0);
-        newCost   += p * s;
+        if (_hasComm && p > 0 && s > 0) {
+          const c = calcCommission(s, p);
+          newCost += c.totalBuy;                 // شامل العمولة والضريبة
+          newFees += c.totalBuy - p * s;
+        } else {
+          newCost += p * s;
+        }
         newShares += s;
       }
 
@@ -319,6 +341,12 @@
       const totalShares = currentShares + newShares;
       const newAverage  = totalShares > 0 ? totalValue / totalShares : 0;
 
+      const feesEl = document.getElementById('avgFeesLine');
+      if (feesEl) {
+        feesEl.style.display = newFees > 0 ? '' : 'none';
+        feesEl.textContent = newFees > 0
+          ? `منها عمولة وضريبة: ${newFees.toFixed(2)} ر.س — مُدرَجة في المتوسط (م.2 و10)` : '';
+      }
       setResult('newAverage',  newAverage.toFixed(2),  newAverage  === 0);
       setResult('totalValue',  totalValue.toFixed(2),  totalValue  === 0);
       setResult('totalShares', totalShares.toFixed(totalShares === Math.floor(totalShares) ? 0 : 2), totalShares === 0);
