@@ -731,5 +731,112 @@ t('رمز غير معروف يرجع null', T.tdValuationInputs('9999') === null
   }
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// ⑩ صندوق «تقييماتي» — البحث بالرمز وفلتر التغطية
+// ----------------------------------------------------------------------
+// البحث بالرمز كان يعمل أصلاً، لكنه يتقاطع مع الفلاتر الأربعة فيعود فارغاً
+// بلا سبب معلَن — والعين تقرأ ذلك «لا تقييم لهذا السهم» لا «مُخفى بفلتر».
+// وسهمٌ لم يُقيَّم قط لا صفَّ له في السجل، فلا يظهر في أي فلتر مهما ضبطتَه.
+// ══════════════════════════════════════════════════════════════════════
+{
+  const els2 = {};
+  const mk2 = () => ({ _html: '', value: '', style: {}, dataset: {},
+    classList: { add() {}, remove() {}, contains: () => false },
+    get innerHTML() { return this._html; }, set innerHTML(v) { this._html = String(v); },
+    textContent: '', setAttribute() {}, getAttribute: () => null,
+    appendChild(c) { return c; }, addEventListener() {}, focus() {}, remove() {},
+    scrollIntoView() {}, querySelector: () => null, querySelectorAll: () => [],
+    getContext: () => ({ canvas: {}, createLinearGradient: () => ({ addColorStop() {} }) }) });
+  const id2 = (i) => (els2[i] = els2[i] || mk2());
+  const c = {
+    console: { log() {}, warn() {}, error() {}, info() {}, debug() {} },
+    Math, Object, Array, Number, String, Boolean, Date, JSON, Set, Map, WeakMap,
+    Promise, RegExp, Error, Intl, isFinite, isNaN, parseInt, parseFloat,
+    encodeURIComponent, decodeURIComponent,
+    setTimeout: (f) => { if (typeof f === 'function') f(); return 0; },
+    clearTimeout() {}, setInterval: () => 0, clearInterval() {}, requestAnimationFrame: () => 0,
+    document: { readyState: 'complete', body: mk2(), documentElement: mk2(),
+      getElementById: id2, querySelector: () => null, querySelectorAll: () => [],
+      createElement: mk2, addEventListener() {}, createTextNode: () => ({}) },
+    localStorage: { getItem: () => null, setItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    location: { href: 'http://x/', hash: '' }, navigator: { userAgent: 'n' },
+    matchMedia: () => ({ matches: false, addEventListener() {} }),
+    fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
+    alert() {}, confirm: () => true, getComputedStyle: () => ({ getPropertyValue: () => '' }),
+    Chart: function () { return { destroy() {}, update() {} }; },
+    supabase: { createClient: () => ({}) }, supabaseClient: null,
+    requireAuth: () => Promise.resolve(null),
+    MutationObserver: function () { this.observe = () => {}; this.disconnect = () => {}; },
+  };
+  c.window = c; c.globalThis = c; c.self = c; vm.createContext(c);
+  ['js/utils.js', 'js/constitution.js', 'js/constitution-data.js', 'js/tadawul-data.js']
+    .forEach(f => vm.runInContext(fs.readFileSync(ROOT + f, 'utf8'), c, { filename: f }));
+  const svHtml2 = fs.readFileSync(ROOT + 'stock-valuation.html', 'utf8');
+  const inline2 = [...svHtml2.matchAll(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/g)]
+    .map(m => m[1]).join('\n');
+  try { vm.runInContext(inline2, c, { filename: 'sv' }); } catch (_) {}
+  c.showToast = () => {};   // بعد التحميل — utils.js تعيد تعريفها
+
+  vm.runInContext(`
+    _history = [
+      { id:1, date:'2026-08-01', inputs:{ ticker:'7202', stockName:'سلوشنز', currentPrice:'300', companyType:'normal' }, results:{ fairValueAvg:280 } },
+      { id:2, date:'2026-07-01', inputs:{ ticker:'4348', stockName:'الخبير ريت', currentPrice:'6', companyType:'reit' }, results:{ fairValueAvg:8 } },
+    ];
+    _svStocks = {
+      '7202': { name:'سلوشنز', shares:100, price:300 },
+      '2222': { name:'أرامكو',  shares:500, price:28 },
+      '4002': { name:'المواساة', shares:0, price:78 },
+    };
+    _histSearch = ''; _histPage = 0;
+  `, c);
+
+  // ① البحث بالرمز داخل الصندوق
+  const bySearch = (q) => { vm.runInContext('_histSearch = ' + JSON.stringify(q) + ';', c);
+    return c.histFiltered().length; };
+  t('البحث برمز 7202 يجده', bySearch('7202') === 1);
+  t('وبرمز 4348 كذلك', bySearch('4348') === 1);
+  t('وبالاسم العربي', bySearch('سلوشنز') === 1);
+  t('ورمز لا وجود له يعود بصفر', bySearch('zzzz') === 0);
+
+  // ② الاختفاء تحت فلتر يُعلَن ويُعالَج
+  id2('hist-f-coverage').value = '';
+  id2('hist-f-type').value = 'bank';
+  vm.runInContext("_histSearch = '7202';", c);
+  c.renderHistory();
+  const h2 = id2('historyList')._html;
+  t('اختفاء البحث تحت فلتر يُعلَن', /تُخفيها/.test(h2),
+    'كان يعود فارغاً فيُقرأ «لا تقييم لهذا السهم»');
+  t('ومعه زرّ مسح الفلاتر', /clearHistFilters/.test(h2));
+  c.clearHistFilters();
+  t('والمسح يُظهرها', c.histFiltered().length === 1, String(c.histFiltered().length));
+
+  // ③ فلتر «بلا تقييم إطلاقاً»
+  vm.runInContext("_histSearch = '';", c);
+  id2('hist-f-coverage').value = 'never';
+  let err = null;
+  try { c.renderHistory(); } catch (e) { err = e.constructor.name + ': ' + e.message; }
+  t('فلتر «بلا تقييم» يُرسم', err === null, err);
+  const h1 = id2('historyList')._html;
+  t('ويعرض المملوك بلا تقييم', /2222/.test(h1) && /في محفظتك/.test(h1));
+  t('ويستبعد المُقيَّم', !/>7202</.test(h1), 'سلوشنز لها تقييم ومع ذلك ظهرت');
+  t('ويشير إلى توفر إيداعات تداول', /إيداعات تداول متاحة/.test(h1));
+  t('ومع كل صفّ زرّ تقييم', /قيّمه الآن/.test(h1) && /svStartNew/.test(h1));
+  t('ويشرح لماذا لا تظهر في الفلاتر', /ليست في السجل أصلاً/.test(h1));
+
+  // ④ فلتر التقادم
+  id2('hist-f-coverage').value = 'stale';
+  err = null;
+  try { c.renderHistory(); } catch (e) { err = e.constructor.name + ': ' + e.message; }
+  t('فلتر التقادم يُرسم بلا خطأ', err === null, err);
+
+  // ⑤ البحث عن رمز بلا تقييم يقترح الفلتر
+  id2('hist-f-coverage').value = '';
+  vm.runInContext("_histSearch = '2222';", c);
+  c.renderHistory();
+  t('البحث عن غير مُقيَّم يقترح فلتر التغطية',
+    /اعرض الأسهم بلا تقييم/.test(id2('historyList')._html));
+}
+
 console.log('\n' + ok + ' passed, ' + bad + ' failed');
 process.exit(bad ? 1 : 0);

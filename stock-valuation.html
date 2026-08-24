@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260824v">
+  <link rel="stylesheet" href="css/style.css?v=20260824w">
   <style>
     /* ── مشترك للحاسبة ── */
     .calc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
@@ -613,6 +613,15 @@
           <option value="0to15">هامش 0–15%</option>
           <option value="neg">سالب (مبالغ فيه)</option>
         </select>
+        <!-- ══ تغطية التقييم — سؤالٌ عمّا **ليس** في السجل ══
+             الفلاتر الأربعة تسأل عن سجلٍّ موجود. وهذا يسأل عن الغائب: سهمٌ
+             لم يُقيَّم قط لا صفَّ له في السجل، فلا يظهر في أي فلتر مهما
+             ضبطتَه — وهو بالضبط ما تحتاج أن تراه. -->
+        <select id="hist-f-coverage" onchange="onHistFilter()" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.82rem;">
+          <option value="">📋 التقييمات المحفوظة</option>
+          <option value="never">🆕 أسهم بلا تقييم إطلاقاً</option>
+          <option value="stale">⏰ تقييمها أقدم من 6 أشهر</option>
+        </select>
         <select id="hist-f-decision" onchange="onHistFilter()" style="padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit;font-size:0.82rem;">
           <option value="">كل القرارات</option>
           <option value="hold">احتفاظ</option>
@@ -667,14 +676,14 @@
   <div id="toast"></div>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0"></script>
-  <script src="js/supabase.js?v=20260824v"></script>
-  <script src="js/auth.js?v=20260824v"></script>
-  <script src="js/utils.js?v=20260824v"></script>
-  <script src="js/constitution.js?v=20260824v"></script>
-  <script src="js/constitution-data.js?v=20260824v"></script>
-  <script src="js/tadawul-data.js?v=20260824v"></script>
-  <script src="js/declutter.js?v=20260824v"></script>
-  <script src="js/navtoggle.js?v=20260824v"></script>
+  <script src="js/supabase.js?v=20260824w"></script>
+  <script src="js/auth.js?v=20260824w"></script>
+  <script src="js/utils.js?v=20260824w"></script>
+  <script src="js/constitution.js?v=20260824w"></script>
+  <script src="js/constitution-data.js?v=20260824w"></script>
+  <script src="js/tadawul-data.js?v=20260824w"></script>
+  <script src="js/declutter.js?v=20260824w"></script>
+  <script src="js/navtoggle.js?v=20260824w"></script>
   <script>
     let modelsChart = null;
     let _lastFairAvg = null; // متوسط القيمة العادلة الرقمي لآخر حساب (لقاعدة التثبيت)
@@ -3334,6 +3343,15 @@
     const HIST_PAGE_SIZE = 25;
     function onHistFilter() { _histPage = 0; renderHistory(); }
 
+    // مسح الفلاتر الأربعة وإبقاء البحث — يُستدعى حين يُخفي فلترٌ نتيجةَ بحثك
+    function clearHistFilters() {
+      ['hist-f-type', 'hist-f-verdict', 'hist-f-margin', 'hist-f-decision', 'hist-f-coverage']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+      _histPage = 0;
+      renderHistory();
+      showToast('🧹 مُسحت الفلاتر — البحث وحده هو العامل الآن', 'info');
+    }
+
     function histFiltered() {
       const fType     = document.getElementById('hist-f-type').value;
       const fVerdict  = document.getElementById('hist-f-verdict').value;
@@ -3488,10 +3506,107 @@
       }
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // تغطية التقييم — الأسهم التي **ليست** في السجل
+    // ------------------------------------------------------------------
+    // الفلاتر الأربعة تسأل عن سجلٍّ موجود. وسهمٌ لم يُقيَّم قط لا صفَّ له
+    // في السجل، فلا يظهر في أي فلتر مهما ضبطتَه — والسؤال «أي أسهمي لم
+    // أقيّمها؟» لا جواب له في الصفحة إطلاقاً.
+    //
+    // المصدر `_svStocks` (حيازاتك + قاعدة أسهمك) المحمَّلة أصلاً للبحث،
+    // وتُضاف إليها أسهم تداول المستخرَجة — فما لك بيانات عنه يستحق تقييماً.
+    // ══════════════════════════════════════════════════════════════════
+    function _coverageRows(kind) {
+      const evaluated = {};   // ticker → أحدث تقييم
+      _history.forEach(e => {
+        const tk = String((e.inputs || {}).ticker || '').trim().toUpperCase();
+        if (!tk) return;
+        const t = entryTime(e);
+        if (!evaluated[tk] || t > evaluated[tk].t) evaluated[tk] = { t, e };
+      });
+
+      const known = {};
+      Object.entries(_svStocks || {}).forEach(([tk, v]) => {
+        known[tk] = { name: v.name || '', owned: (v.shares || 0) > 0, price: v.price || 0 };
+      });
+      if (typeof TADAWUL_DATA !== 'undefined') {
+        Object.entries(TADAWUL_DATA).forEach(([tk, v]) => {
+          if (!known[tk]) known[tk] = { name: v.name || '', owned: false, price: 0, tadawulOnly: true };
+        });
+      }
+
+      const rows = [];
+      Object.entries(known).forEach(([tk, info]) => {
+        const ev = evaluated[tk];
+        if (kind === 'never') {
+          if (!ev) rows.push({ tk, ...info, days: null });
+        } else {
+          if (!ev) return;
+          const days = Math.floor((Date.now() - ev.t) / 86400000);
+          if (days > STALE_DAYS) rows.push({ tk, ...info, days, entry: ev.e });
+        }
+      });
+      // المملوك أولاً، ثم الأقدم تقييماً / الأكبر قيمةً
+      rows.sort((a, b) => (b.owned - a.owned) || ((b.days || 0) - (a.days || 0))
+                       || String(a.tk).localeCompare(String(b.tk)));
+      return rows;
+    }
+
+    function renderCoverage(kind) {
+      const list = document.getElementById('historyList');
+      const rows = _coverageRows(kind);
+      const countEl = document.getElementById('hist-count');
+      if (countEl) countEl.textContent = `${rows.length} سهماً`;
+      document.getElementById('hist-pager').style.display = 'none';
+      document.getElementById('hist-timeline-wrap').style.display = 'none';
+
+      if (!rows.length) {
+        list.innerHTML = noteHtml('✅', kind === 'never'
+          ? 'كل سهمٍ تعرفه المنصة له تقييم محفوظ.'
+          : `لا تقييم أقدم من ${STALE_DAYS} يوماً — كلها حديثة.`, 'info');
+        return;
+      }
+
+      const head = kind === 'never'
+        ? noteHtml('🆕', `<strong>${rows.length} سهماً بلا أي تقييم محفوظ.</strong> `
+          + `هذه لا تظهر في الفلاتر الأربعة لأنها ليست في السجل أصلاً — `
+          + `ومحرّك القرار يقرأ القيمة العادلة من هنا، فما لا تقييم له لا حكم سعري له (الفلتر 3).`, 'warn')
+        : noteHtml('⏰', `<strong>${rows.length} سهماً تقييمه أقدم من ${STALE_DAYS} يوماً</strong> — `
+          + `والدورة الشاملة ستة أشهر (م.59). الأقدم أولاً.`, 'warn');
+
+      list.innerHTML = head + `<div class="table-wrapper"><table>
+        <thead><tr>
+          <th>الرمز</th><th>الاسم</th><th>الحالة</th>
+          <th>${kind === 'never' ? 'مصدر البيانات' : 'عمر التقييم'}</th><th></th>
+        </tr></thead><tbody>` + rows.map(r => {
+          const tdSrc = kind === 'never'
+            ? (typeof TADAWUL_DATA !== 'undefined' && TADAWUL_DATA[r.tk]
+                ? `<span style="color:var(--success)">📗 إيداعات تداول متاحة</span>`
+                : `<span class="text-muted">— أدخِل الأرقام يدوياً</span>`)
+            : `<span style="color:var(--st-warn)">${r.days} يوماً</span>`;
+          return `<tr>
+            <td><strong class="text-accent">${escHist(r.tk)}</strong></td>
+            <td>${escHist(r.name || '—')}</td>
+            <td>${r.owned ? '<span style="color:var(--success)">💼 في محفظتك</span>'
+                          : r.tadawulOnly ? '<span class="text-muted">خارج قائمتك</span>'
+                          : '<span class="text-muted">في قائمتك</span>'}</td>
+            <td>${tdSrc}</td>
+            <td><button class="btn btn-primary btn-sm" onclick="svStartNew('${escHist(r.tk)}')">
+              ${kind === 'never' ? '✏️ قيّمه الآن' : '🔄 أعِد تقييمه'}</button></td>
+          </tr>`;
+        }).join('') + `</tbody></table></div>`;
+    }
+
     function renderHistory() {
       const section = document.getElementById('historySection');
       const list    = document.getElementById('historyList');
       const pager   = document.getElementById('hist-pager');
+
+      // مسار التغطية يسبق كل شيء: هو لا يقرأ السجل بل يسأل عن الغائب عنه،
+      // فيعمل حتى لو كان السجل فارغاً تماماً.
+      const _cov = document.getElementById('hist-f-coverage')?.value || '';
+      if (_cov) { section.style.display = ''; renderCoverage(_cov); return; }
+
       if (_history.length === 0) {
         section.style.display = 'none';
         list.innerHTML = ''; pager.style.display = 'none';
@@ -3530,7 +3645,37 @@
       renderTimeline(filtered);
 
       if (!filtered.length) {
-        list.innerHTML = `<div style="text-align:center;color:var(--text-muted);padding:24px;">لا توجد عمليات مطابقة للفلاتر الحالية</div>`;
+        // ══════════════════════════════════════════════════════════════
+        // «لا نتيجة» له سببان مختلفان — والخلط بينهما يُضلّل
+        // --------------------------------------------------------------
+        // البحث يُطبَّق **داخل** `histFiltered` فيتقاطع مع الفلاتر الأربعة:
+        // فلترٌ متروك على «بنك» يجعل البحث عن رمز شركة تجزئة يعود فارغاً،
+        // والعين تقرأ ذلك «لا تقييم لهذا السهم» لا «مُخفى بفلتر».
+        //
+        // فنحسب الآن كم نتيجة **بالبحث وحده**: إن كانت أكثر من صفر فالسبب
+        // الفلاتر لا الغياب، ويُعرض زرٌّ يمسحها.
+        // ══════════════════════════════════════════════════════════════
+        const bySearchOnly = _histSearch
+          ? _history.filter(e => {
+              const inp = e.inputs || {};
+              return [inp.ticker, inp.stockName, inp.notes, inp.perplexityEval]
+                .map(v => (v || '').toString().toLowerCase()).join('   ').includes(_histSearch);
+            }).length
+          : 0;
+        list.innerHTML = bySearchOnly > 0
+          ? noteHtml('🔎',
+              `<strong>«${escHist(_histSearch)}» له ${bySearchOnly} تقييماً محفوظاً — `
+            + `لكن الفلاتر الحالية تُخفيها.</strong><br>`
+            + `<button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="clearHistFilters()">`
+            + `🧹 امسح الفلاتر وأظهرها</button>`, 'warn')
+          : `<div style="text-align:center;color:var(--text-muted);padding:24px;">`
+            + (_histSearch
+                ? `لا تقييم محفوظ يطابق «${escHist(_histSearch)}». `
+                  + `<button class="btn btn-secondary btn-sm" style="margin-right:8px" `
+                  + `onclick="document.getElementById('hist-f-coverage').value='never';onHistFilter()">`
+                  + `🆕 اعرض الأسهم بلا تقييم</button>`
+                : 'لا توجد عمليات مطابقة للفلاتر الحالية')
+            + `</div>`;
         pager.style.display = 'none';
         return;
       }
