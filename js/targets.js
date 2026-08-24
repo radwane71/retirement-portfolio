@@ -375,9 +375,10 @@ async function loadAll() {
   try {
     const hist = await loadUserSetting('valuation_history_v1');
     if (Array.isArray(hist)) {
-      hist.forEach(e => {
+      // لا نصدّق ترتيبة التخزين — نفرز بالأحدث أولاً (utils.js)
+      valHistNewestFirst(hist).forEach(e => {
         const tk = (e?.inputs?.ticker || '').toUpperCase().trim();
-        if (!tk || valuationLatest[tk]) return;          // أبقِ الأحدث فقط
+        if (!tk || valuationLatest[tk]) return;          // بعد الفرز: أول ظهور = الأحدث
         const res = e.results || {};
         valuationLatest[tk] = {
           // AUDIT-FIX 2026-08-21 (#47): كانت هذه الصفحة وحدها بلا احتياطي تحليل نص
@@ -393,7 +394,7 @@ async function loadAll() {
           date:           e.date || '',
           // e.id هو Date.now() وقت إنشاء التقييم — الطابع الزمني الوحيد القابل
           // للقياس (حقل date نص هجري غير قابل للتحليل) — يُستخدم لشارة «قديم»
-          ts:             (Number.isFinite(+e.id) && +e.id > 0) ? +e.id : null,
+          ts:             valEntryStamp(e),   // من نصّ التاريخ؛ معرّفات السجل التاريخي مصطنعة (1.7e12) فتُظهر تسع سنوات بعمر واحد
           companyType:    e.inputs?.companyType || 'normal',
         };
       });
@@ -1262,8 +1263,14 @@ const PLANNED_PRIORITY_BOOST = 1.15;
 // ══════════════════════════════════════════════════════════════════════
 function tgPriorityOf(ticker, gap, price) {
   const cat  = tgCategoryOf(ticker);
-  const fv   = valuationLatest[ticker]?.fairValueAvg;
-  const band = (fv > 0 && price > 0) ? valueBandOf(price / fv, null) : null;
+  const _v   = valuationLatest[ticker];
+  const fv   = _v?.fairValueAvg;
+  // نفس بوابة القِدَم المطبَّقة في valuationScore على بعد ستين سطراً. كانت
+  // غائبة هنا وحدها، فكان حظر م.55/4 يُفعَّل أو يُرفع بناءً على تقييم تصفه
+  // الصفحة نفسها «⚠️ قديم» في جدولها — تناقض داخلي في ملف واحد.
+  const _vAge   = (_v && _v.ts) ? Math.floor((Date.now() - _v.ts) / 86400000) : null;
+  const _vStale = _vAge != null && _vAge > TG_VAL_STALE_DAYS;
+  const band = (fv > 0 && price > 0 && !_vStale) ? valueBandOf(price / fv, null) : null;
   const catBoost  = cat.known ? cat.boost : 1.00;
   const zoneBoost = band ? band.boost : 1.00;
   return {

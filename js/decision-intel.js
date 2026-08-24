@@ -782,7 +782,7 @@ window.DecisionIntel = (function () {
     // المنع الآن على منطقتَي م.48 اللتين تمنعان السيولة فعلاً (م.55/4).
     // ══════════════════════════════════════════════════════════════════
     if (r.price > 0 && r.fairValue > 0 && typeof valueBandOf === 'function') {
-      const vb = valueBandOf(r.price / r.fairValue, r.dispersionCV);
+      const vb = valueBandOf(r.price / r.fairValue, r.fvCV != null ? r.fvCV : null);   // المحرّك يسمّي الحقل fvCV؛ الاسم القديم لم يكن موجوداً على الصف فكان يُمرَّر undefined وتوسيع م.39 معطَّلاً
       if (vb.action === 'trim' || vb.action === 'exit') {
         gates.push(`${vb.icon} ${vb.label} — ${formatNum(r.price / r.fairValue, 2)}× القيمة العادلة (م.48 و55/4)`);
       }

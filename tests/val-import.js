@@ -221,13 +221,35 @@ t('139 تُضاف',                    mr.toAdd.length === 139);
 t('عملية واحدة خارج الملف تبقى',  mr.untouched.length === 1 && mr.untouched[0].id === 999002);
 t('لا يُعاد ختم التاريخ',         mr.matched.every(m => m.corr.date === m.entry.date));
 
+// ── 6-ب) الترتيب: الأحدث أولاً — أربع صفحات تأخذ «أول ظهور» آخرَ تقييم ──
+vm.runInContext(grab('function histStamp('), ctx);
+const st = d => { ctx.__a = [{ date: d, id: 1 }]; return vm.runInContext('histStamp(...__a)', ctx); };
+t('يقرأ 2017 من النص العربي-الهندي', new Date(st('٣١‏/١٢‏/٢٠١٧، ١٢:٠٠:٠٠ ص')).getFullYear() === 2017);
+t('يقرأ 2026 من النص',              new Date(st('٢٢‏/٨‏/٢٠٢٦، ١:٣٢:٠٠ م')).getFullYear() === 2026);
+t('يتجاهل لاحقة (معدَّل)',           new Date(st('٢٨‏/٦‏/٢٠٢٦، ١٠:١٩:٢٤ م (معدَّل)')).getFullYear() === 2026);
+ctx.__a = [{ date: 'نص لا يُحلَّل', id: 1787401920939 }];
+t('يرتدّ إلى المعرّف عند تعذّر التحليل', vm.runInContext('histStamp(...__a)', ctx) === 1787401920939);
+
+// كل تواريخ الملف تُحلَّل — وإلا ارتدّ الترتيب إلى معرّف مصطنع
+const unparsed = V.filter(e => { ctx.__a = [{ date: e.date, id: 0 }]; return !vm.runInContext('histStamp(...__a)', ctx); });
+t('141 تاريخاً كلها تُحلَّل: ' + unparsed.length, unparsed.length === 0);
+
+// المحاكاة: بعد الفرز، أول ظهور لكل رمز هو أحدث سنة
+const stamped = V.map(e => { ctx.__a = [{ date: e.date, id: e.id }];
+  return { tk: e.inputs.ticker, y: yearOf(e), ts: vm.runInContext('histStamp(...__a)', ctx), id: e.id }; });
+stamped.sort((a, b) => (b.ts - a.ts) || (b.id - a.id));
+const firstSeen = {}, newestYear = {};
+stamped.forEach(r => { if (!firstSeen[r.tk]) firstSeen[r.tk] = r; newestYear[r.tk] = Math.max(newestYear[r.tk] || 0, r.y); });
+const wrongOrder = Object.keys(firstSeen).filter(k => firstSeen[k].y !== newestYear[k]);
+t('أول ظهور لكل رمز = أحدث سنة: ' + wrongOrder.join(','), wrongOrder.length === 0);
+t('الفرز تنازلي في corrApply', html.includes('histStamp(b) - histStamp(a)'));
+
 // ── 7) الصفحة موصولة فعلاً ──
 t('وسم السكربت مضاف',            html.includes('js/valuation-import.js'));
 t('الزر موصول',                   html.includes('onclick="previewValCorrections()"'));
 t('نسخة احتياطية قبل الكتابة',    html.includes('saveUserSetting(CORR_BACKUP_KEY'));
 t('يُعاد الحساب بمعادلة المنصة',  /recomputeResults\(entry\.inputs\)/.test(html));
 t('الإضافة تدفع في السجل',        /_history\.push\(entry\)/.test(html));
-t('السجل يُرتَّب بالمعرّف بعد الإضافة', /_history\.sort\(\(a, b\) => \(a\.id \|\| 0\) - \(b\.id \|\| 0\)\)/.test(html));
 t('فرق الملف عن إعادة الحساب يُعلَن', html.includes('drift.push('));
 t('لا يمسّ e.date', !/m\.entry\.date\s*=/.test(html));
 t('لا يمسّ e.id',   !/m\.entry\.id\s*=/.test(html));

@@ -679,6 +679,7 @@ function evaluateHolding(h, ctx) {
     fairValue: val && val.fair ? val.fair.avg : null, valDate: val ? val.date : null,
     valFair: val && val.fair ? val.fair : null, valInputs: val ? val.inputs : null,
     valAgeDays: valAge, valStale, stabilizationFlag: val ? val.stabilizationFlag : null,
+    stabilizationSeries: val ? val.stabilizationSeries : null,
     fvUnreliable: !!(val && val.unreliable), fvCV: val ? val.cv : null,
     xirr: stockFinancials(h.ticker).xirr,
     blueChip: isBlueChip(h), dev, devBand, overCap, severity: 'green',
@@ -826,7 +827,7 @@ function evaluateHolding(h, ctx) {
     return { ...base, action: 'monitor', label: 'راجع التقييم', priority: 2.8, severity: 'yellow',
       reason: `السعر ${formatNum(price)} يبدو فوق القيمة العادلة ${formatNum(base.fairValue)}، `
         + `لكن **الحاسبة نفسها رفضت اعتماد رقم واحد** لهذا السهم: تشتّت النماذج `
-        + `${base.fvCV != null ? formatNum(base.fvCV, 0) + '% ' : ''}تجاوز العتبة بلا مرساة، `
+        + `${base.fvCV != null ? formatNum(base.fvCV * 100, 0) + '% ' : ''}تجاوز العتبة بلا مرساة، `
         + `والرقم المحفوظ متوسط حسابي «للعلم فقط». فلا يُرشَّح للتخفيف بناءً عليه. `
         + `أعِد تقييمه في حاسبة القيمة العادلة بمرساة، أو اعتمد نطاقاً لا رقماً.` };
   }
@@ -1001,7 +1002,8 @@ async function loadAll() {
   valByTicker = {};
   valHistByTicker = {};
   const prevValByTicker = {};
-  (Array.isArray(rVal) ? rVal : []).forEach(entry => {
+  // لا نصدّق ترتيبة التخزين — نفرز بالأحدث أولاً (utils.js)
+  valHistNewestFirst(rVal).forEach(entry => {
     const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
     if (!tk) return;
     // AUDIT-FIX (2026-07): المصدر الأول هو fairValueAvg الرقمي المخزَّن في السجل
@@ -1010,7 +1012,11 @@ async function loadAll() {
     const avgNum = (entry.results?.fairValueAvg != null && isFinite(+entry.results.fairValueAvg) && +entry.results.fairValueAvg > 0)
       ? +entry.results.fairValueAvg : null;
     const rec = {
-      ts: typeof entry.id === 'number' ? entry.id : parseValEntryDate(entry.date),
+      // نصّ التاريخ يعلو على المعرّف. كان المعرّف يكفي حين كان كلٌّ منها
+      // Date.now() وقت الحساب، لكن العمليات التاريخية المستورَدة معرّفاتها
+      // مصطنعة (1.7e12 ≈ نوفمبر 2023) — فتقييم السنة المالية 2017 يبدو
+      // عمره ثلاث سنوات، و2025 كذلك، فتتساوى تسع سنوات في عمر واحد.
+      ts: parseValEntryDate(entry.date) || (typeof entry.id === 'number' ? entry.id : null),
       date: (entry.date || '').split('،')[0] || '',
       fair: avgNum != null
         ? { avg: avgNum, min: parsedRange?.min ?? avgNum, max: parsedRange?.max ?? avgNum }
@@ -1034,7 +1040,7 @@ async function loadAll() {
         ? +entry.results.dispersionCV / 100 : null,
     };
     (valHistByTicker[tk] = valHistByTicker[tk] || []).push(rec); // السجل الكامل لتتبّع التطور (§4)
-    if (!valByTicker[tk]) valByTicker[tk] = rec;          // أول ظهور = الأحدث
+    if (!valByTicker[tk]) valByTicker[tk] = rec;          // بعد الفرز: أول ظهور = الأحدث
     else if (!prevValByTicker[tk]) prevValByTicker[tk] = rec; // ثاني ظهور = التقييم السابق مباشرة
   });
   // فحص قاعدة التثبيت: القيمة العادلة ارتفعت، هل ارتفعت الأرباح/FCF/التوزيع فعلاً معها؟
@@ -1054,6 +1060,34 @@ async function loadAll() {
     const fcfUp  = curFcf  != null && prevFcf  != null && curFcf  > prevFcf;
     if (!earnUp && !divUp && !fcfUp) {
       cur.stabilizationFlag = `⚠️ القيمة العادلة ارتفعت من ${formatNum(prev.fair.avg)} إلى ${formatNum(cur.fair.avg)} (${prev.date || '—'} → ${cur.date || '—'}) بدون دليل ارتفاع فعلي في ${isReit ? 'FFO' : 'EPS'}/FCF/التوزيع بالأرقام المُدخلة — راجع قاعدة التثبيت (الدستور §4 الفلتر 2)`;
+    }
+  });
+
+  // ── م.37 عبر السلسلة كاملةً، لا آخر نقطتين ──
+  // الفحص أعلاه يقارن التقييمين الأخيرين فقط. وبعد استيراد السجل التاريخي
+  // صار لكل سهم خمس إلى ثماني نقاط سنوية، فالسنة التي ارتفعت فيها القيمة
+  // العادلة بلا سند تضيع بين الطرفين إن لم تكن هي الأخيرة. هذا يمسح كل
+  // انتقال ويعدّ المخالفات، فيُقرأ الاتجاه لا اللقطة.
+  Object.keys(valHistByTicker).forEach(tk => {
+    const rows = (valHistByTicker[tk] || []).filter(r => r.fair && r.fair.avg > 0);
+    if (rows.length < 3) return;                 // نقطتان يكفيهما الفحص أعلاه
+    const asc = rows.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    const isReit = (valByTicker[tk] && valByTicker[tk].inputs.companyType) === 'reit';
+    const earnKey = isReit ? 'ffo' : 'eps';
+    const hits = [];
+    for (let i = 1; i < asc.length; i++) {
+      const a = asc[i - 1], b = asc[i];
+      if (!(b.fair.avg > a.fair.avg * 1.05)) continue;   // ارتفاع يسير لا يُحاكَم
+      const up = (x, y) => { const p = numOf(x), c = numOf(y); return p != null && c != null && c > p * 1.005; };
+      const earnUp2 = up(a.inputs[earnKey] ?? a.inputs.bankEps, b.inputs[earnKey] ?? b.inputs.bankEps);
+      const divUp2  = up(a.inputs.dividends ?? a.inputs.bankDps, b.inputs.dividends ?? b.inputs.bankDps);
+      const fcfUp2  = up(a.inputs.fcf, b.inputs.fcf);
+      if (!earnUp2 && !divUp2 && !fcfUp2) {
+        hits.push(`${a.date || '—'} → ${b.date || '—'} (+${formatNum((b.fair.avg / a.fair.avg - 1) * 100, 0)}%)`);
+      }
+    }
+    if (hits.length && valByTicker[tk]) {
+      valByTicker[tk].stabilizationSeries = { n: hits.length, span: asc.length, hits };
     }
   });
 
@@ -2943,7 +2977,12 @@ function openDetailCard(ticker) {
       `${margin >= 0 ? `هامش أمان ${formatNum(margin)}%` : `مبالغ فيه ${formatNum(Math.abs(margin))}%`}` +
       (r.valDate ? `<br><span class="text-muted">آخر تقييم: ${E(r.valDate)}${r.valStale ? ` · 📅 قديم (${r.valAgeDays} يوم)` : ''}</span>` : '') +
       (r.valAgeDays == null ? '<br><span style="color:#f59e0b">❔ عمر التقييم غير معروف — لا طابع زمني صالح في السجل</span>' : '') +
-      (r.stabilizationFlag ? `<br>${E(r.stabilizationFlag)}` : '')));
+      (r.stabilizationFlag ? `<br>${E(r.stabilizationFlag)}` : '')
+      + (r.stabilizationSeries
+          ? `<br>📉 <strong>م.37 عبر السلسلة:</strong> ${r.stabilizationSeries.n} من ${r.stabilizationSeries.span - 1} انتقالاً `
+            + `ارتفعت فيه القيمة العادلة بلا ارتفاع في الربح أو التوزيع أو التدفق — `
+            + `${E(r.stabilizationSeries.hits.join(' · '))}`
+          : '')));
   } else {
     out.push(_dRow('neutral', 'الفلتر 2 — القيمة العادلة', 'لا يوجد تقييم محفوظ — احسبه في صفحة القيمة العادلة ليُقارن بالسعر.'));
   }

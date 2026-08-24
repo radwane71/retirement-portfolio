@@ -127,21 +127,22 @@ async function init() {
 // المصدر الأول هو results.fairValueAvg الرقمي؛ تحليل نص النطاق احتياطي للسجل القديم.
 function indexValuations(rows) {
   _valHist = {}; _valLast = {};
-  (Array.isArray(rows) ? rows : []).forEach(entry => {
+  // لا نصدّق ترتيبة التخزين — نفرز بالأحدث أولاً (utils.js)
+  valHistNewestFirst(rows).forEach(entry => {
     const tk = String(entry?.inputs?.ticker || '').trim().toUpperCase();
     if (!tk) return;
     const range = parseFairRange(entry.results?.fairValueRange);
     const avg = (entry.results?.fairValueAvg != null && isFinite(+entry.results.fairValueAvg) && +entry.results.fairValueAvg > 0)
       ? +entry.results.fairValueAvg : null;
     const rec = {
-      ts:   typeof entry.id === 'number' ? entry.id : null,
+      ts:   valEntryStamp(entry),   // من نصّ التاريخ؛ المعرّف التاريخي مصطنع
       date: String(entry.date || '').split('،')[0] || '',
       fair: avg != null ? { avg, min: range?.min ?? avg, max: range?.max ?? avg } : range,
       inputs:  entry.inputs  || {},
       results: entry.results || {},
     };
     (_valHist[tk] = _valHist[tk] || []).push(rec);
-    if (!_valLast[tk]) _valLast[tk] = rec; // السجل مرتّب بالأحدث أولاً
+    if (!_valLast[tk]) _valLast[tk] = rec; // بعد الفرز أعلاه: أول ظهور = الأحدث
   });
 }
 
