@@ -178,10 +178,10 @@ function renderTable() {
       : `<span class="badge" style="background:rgba(100,100,100,0.15);color:var(--text-muted)">خارج المحفظة</span>`;
     return `<tr>
       <td><strong class="text-accent">${esc(s.ticker)}</strong></td>
-      <td style="cursor:pointer" title="انقر للتعديل" onclick="editStock('${esc(s.id)}','name','${esc(s.name)}')">${esc(s.name)}</td>
+      <td style="cursor:pointer" title="انقر للتعديل" onclick="editStock('${escAttrJs(s.id)}','name','${escAttrJs(s.name)}')">${esc(s.name)}</td>
       <td style="cursor:pointer" title="انقر للتعديل" onclick="editStockSector('${esc(s.id)}','${esc(s.sector)}')">${esc(s.sector)}</td>
       <td>${badgeHtml}</td>
-      <td><button class="btn btn-danger btn-sm" onclick="deleteStock('${esc(s.id)}','${esc(s.ticker)}')">حذف</button></td>
+      <td><button class="btn btn-danger btn-sm" onclick="deleteStock('${escAttrJs(s.id)}','${escAttrJs(s.ticker)}')">حذف</button></td>
     </tr>`;
   }).join('');
 }

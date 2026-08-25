@@ -355,7 +355,7 @@ function renderGoals(type) {
     const amtCol  = isLife ? `<td class="num" style="white-space:nowrap">${g.amount ? formatSAR(g.amount) : '—'}</td>` : '';
 
     return `<tr>
-      <td><span class="editable-cell" onclick="inlineEditGoal('${type}','${g.id}','desc',this)">${esc(g.desc)}</span></td>
+      <td><span class="editable-cell" onclick="inlineEditGoal('${escAttrJs(type)}','${escAttrJs(g.id)}','desc',this)">${esc(g.desc)}</span></td>
       <td><span class="editable-cell" onclick="inlineEditGoal('${type}','${g.id}','cat',this)">${esc(g.cat||'—')}</span></td>
       <td>
         <select class="pri-sel ${priC}" onchange="updateGoalField('${type}','${g.id}','priority',this.value,this)">${priOpts}</select>

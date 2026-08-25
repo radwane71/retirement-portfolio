@@ -785,7 +785,26 @@ function evaluateHolding(h, ctx) {
   // ── P2: نطاق التخفيف من المهام (الفلتر 3) — السعر دخل نطاق بيع الزائد ──
   const inTrimBand = zones && zones.trimFrom && priceOk && price >= zones.trimFrom;
   // ── P2: كسر السقف الدستوري (دائماً) أو تجاوز الهدف المسجّل خارج العتبة الخضراء ──
-  const overTarget = hasExplicitTarget && dev > thr.green; // فوق الهدف المسجّل
+  // ⚠️ العتبة الصحيحة هنا هي **نطاق م.49** لا عتبة العرض الخضراء (1.5).
+  // كان `dev > thr.green` يجعل أيّ انحراف فوق 1.5 يُنتج `action:'trim'`،
+  // ومنه يحسب `actionPlanOf` عدد أسهم ويطبع «بيع N سهماً» — بينما م.49
+  // تحجز نطاق 1.5–3% لـ«تصحيح بالضخّ والتوزيعات فقط، لا بيع»، وم.58 و
+  // م.68/21 تمنعان البيع فيه صراحةً. وبانيةُ الخطة تُصنّفه `deferred`
+  // بشكل صحيح، فكانت البطاقة والخطة تتناقضان على الشاشة نفسها.
+  const overTargetBand = hasExplicitTarget && dev > 0 ? deviationBandOf(dev) : null;
+  const overTarget = !!(overTargetBand && overTargetBand.action === 'active');
+  // 1.5–3%: انحراف حقيقي لكن علاجه الضخّ لا البيع — يُعلَن ولا يُصدر أمر بيع
+  const pumpOnlyDev = !!(overTargetBand && overTargetBand.action === 'pump');
+
+  if (pumpOnlyDev && !overCap && !inTrimBand) {
+    return { ...base, action: 'hold', severity: 'green',
+      label: `تصحيح بالضخّ — فوق الهدف بـ${devTxt}`,
+      priority: 6,
+      reason: `الوزن ${formatNum(weight)}% فوق الهدف ${formatNum(targetWeight)}% `
+            + `(انحراف ${devTxt}) — ${deviationBandOf(dev).label}. `
+            + 'وجّه الضخّ والتوزيعات لغيره حتى يعود الوزن، ولا تبع (م.58).'
+            + (watchNote ? ` | ملاحظة استدامة: ${watchNote}` : '') };
+  }
 
   if (overCap || overTarget || inTrimBand) {
     const reasons = [];
@@ -1003,6 +1022,7 @@ async function loadAll() {
   valByTicker = {};
   valHistByTicker = {};
   const prevValByTicker = {};
+  // (دالة _dispersionM39 معرَّفة أسفل الملف — م.39)
   // لا نصدّق ترتيبة التخزين — نفرز بالأحدث أولاً (utils.js)
   valHistNewestFirst(rVal).forEach(entry => {
     const tk = (entry.inputs?.ticker || '').trim().toUpperCase();
@@ -1037,8 +1057,14 @@ async function loadAll() {
       // الصفراء «تخفيف» وتمنع م.55/4 توجيه أي سيولة إليه — كان يخرج **أمر
       // شراء** بوصفه في المنطقة الخضراء «تجميع». وتشتّت 8%، وهو أفضل اتفاق
       // ممكن بين النماذج، كان يُسمّى «ثقة منخفضة».
-      cv: (entry.results?.dispersionCV != null && isFinite(+entry.results.dispersionCV))
-        ? +entry.results.dispersionCV / 100 : null,
+      // ⚠️ **صيغة**: م.39 تُعرّف التشتّت حرفياً بـ(أعلى نموذج − أدنى نموذج) ÷
+      // **الوسيط**. و`dispersionCV` الذي تحفظه الحاسبة هو معامل اختلاف
+      // (انحراف معياري ÷ متوسط) — مقياسٌ آخر يعطي رقماً أصغر منهجياً.
+      // قياس فعلي من سجلّك (الرياض 1010): النماذج 15.37 · 23.90 · 34.58 ⇒
+      // التشتّت الدستوري (34.58−15.37)÷23.90 = **80%** «ثقة منخفضة»، بينما
+      // CV = 32% «ثقة متوسطة». وسابقة سلوشنز في م.39 (133→548 = 165%) لا
+      // تُنتَج إلا بصيغة الوسيط. نحسبها من النماذج، وCV احتياطٌ مُعلَن فقط.
+      cv: _dispersionM39(entry.results),
     };
     (valHistByTicker[tk] = valHistByTicker[tk] || []).push(rec); // السجل الكامل لتتبّع التطور (§4)
     if (!valByTicker[tk]) valByTicker[tk] = rec;          // بعد الفرز: أول ظهور = الأحدث
@@ -1603,12 +1629,21 @@ function buildTargetPlan(valAware) {
     };
 
     // ① قرارك الصريح بالخروج — يسبق كل حساب (P0.1)
+    // ⚠️ لكنه **لا** يسبق م.11. سلّم م.50 يرتّب: القاعدة المطلقة #3 ثم
+    // triggers المالك #4، وم.13 نفسها تنصّ أن المشغّلات «تعلو على كل حساب
+    // **عدا المادتين 11 و44**». فكل خروج هنا يمرّ ببوابة التعادل الحقيقي
+    // كما يمرّ مسارا م.27 وفشل الاستدامة.
     if (zeroTargets.has(r.ticker) || r.taskType === 'liquidation') {
-      out.exits.push(mk({
-        sar: r.value, shares: r.shares,
-        why: zeroTargets.has(r.ticker) && r.taskType === 'liquidation' ? 'هدف صفر + مهمة تصفية'
-           : zeroTargets.has(r.ticker) ? 'هدف صفر مقصود' : 'مهمة تصفية مفتوحة',
-      }));
+      const whyZ = zeroTargets.has(r.ticker) && r.taskType === 'liquidation' ? 'هدف صفر + مهمة تصفية'
+                 : zeroTargets.has(r.ticker) ? 'هدف صفر مقصود' : 'مهمة تصفية مفتوحة';
+      const divsZ = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+      const gZ = deferredVerdict(price, r.avgCost, divsZ, r.shares);
+      if (gZ.action === 'defer' || gZ.action === 'unknown') {
+        out.deferredExit.push(mk({ sar: r.value, shares: r.shares, breakEven: gZ.breakEven,
+          why: `⏸️ ${whyZ} — لكن ${gZ.why} (م.11 تعلو على قرار الخروج في سلّم م.50)` }));
+        return;
+      }
+      out.exits.push(mk({ sar: r.value, shares: r.shares, breakEven: gZ.breakEven, why: whyZ }));
       out.fundedBy += r.value;
       return;
     }
@@ -1626,10 +1661,31 @@ function buildTargetPlan(valAware) {
       //   kind='sell'   ⇒ action='exit'  → تصفية كاملة
       //   kind='reduce' ⇒ action='trim'  → تخفيف إلى toWeight فقط (أو احتفاظ)
       // العلاج: نتبع `r.action` الذي حسبه المحرّك ولا نفترض الخروج.
+      // ⚠️ بوابة م.11 قبل أي بيع من مشغّل. م.13 تقول المشغّل «يعلو على كل
+      // حساب **عدا المادتين 11 و44**» — فالمشغّل لا يبرّر خسارة محقّقة.
+      // مثال منطبق: مشغّل عند 29، متوسط التكلفة 31، توزيعات 0.9/سهم ⇒
+      // التعادل الحقيقي 30.1 > 29، فالبيع خسارة محقّقة يمنعها الدستور.
+      const divsT = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+      const gT = deferredVerdict(price, r.avgCost, divsT, r.shares);
+      const trigBlocked = (gT.action === 'defer' || gT.action === 'unknown');
+
       if (r.action === 'exit') {
-        out.exits.push(mk({ sar: r.value, shares: r.shares,
+        if (trigBlocked) {
+          out.deferredExit.push(mk({ sar: r.value, shares: r.shares, breakEven: gT.breakEven,
+            why: `⏸️ انطبق مشغّل ثابت عرّفته أنت (بيع كامل) — لكن ${gT.why} `
+               + `(م.11 تعلو على م.13). ${r.reason || ''}` }));
+          return;
+        }
+        out.exits.push(mk({ sar: r.value, shares: r.shares, breakEven: gT.breakEven,
           why: `⚡ انطبق مشغّل ثابت عرّفته أنت (بيع كامل) — يتجاوز أي حساب آخر. ${r.reason || ''}` }));
         out.fundedBy += r.value;
+        return;
+      }
+      if (r.action === 'trim' && trigBlocked) {
+        out.deferred.push(mk({ sar: 0, shares: 0, breakEven: gT.breakEven,
+          why: `⏸️ انطبق مشغّل ثابت عرّفته أنت (تخفيف) — لكن ${gT.why} `
+             + `(م.11 تعلو على م.13). ${r.reason || ''}`,
+          fix: 'الضخّ الشهري يخفض الوزن بلا بيع (م.58).' }));
         return;
       }
       if (r.action === 'trim') {
@@ -1649,6 +1705,33 @@ function buildTargetPlan(valAware) {
       }
       return;   // action='hold' — المشغّل انطبق والوزن دون هدفه، لا إجراء
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // م.48 — منطقة التصفية (السعر ÷ العادلة > 1.40) عبر حدّ المهام
+    // ------------------------------------------------------------------
+    // البطاقة كانت تُعلن «تصفية» بينما الخطة **لا تفحص هذا المسار إطلاقاً**:
+    // فروعُ الخروج فيها تغطّي هدف الصفر ومهمة التصفية والمشغّل الثابت وم.27
+    // وفشل الاستدامة — وليس تجاوز `liquidate_above`. فسهمٌ تجاوز حدّ تصفيته
+    // واستدامته سليمة كان يسقط إلى منطق فجوة الوزن، وإن كان تحت هدفه ولا
+    // قيمة عادلة محفوظة له (فيُتخطّى حارس `fair.usable`) يصدر له أمر **شراء**
+    // بينما بطاقته على الشاشة نفسها تقول «تصفية». تناقض صريح أمام المالك.
+    if (r.action === 'exit' && r.zones && r.zones.liquidate && price > 0
+        && price > +r.zones.liquidate) {
+      const divsL = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
+      const gL = deferredVerdict(price, r.avgCost, divsL, r.shares);
+      const whyL = `🔻 السعر ${formatNum(price)} تجاوز حدّ التصفية `
+                 + `${formatNum(+r.zones.liquidate)} (م.48)`;
+      if (gL.action === 'defer' || gL.action === 'unknown') {
+        out.deferredExit.push(mk({ sar: r.value, shares: r.shares, breakEven: gL.breakEven,
+          why: `⏸️ ${whyL} — لكن ${gL.why}` }));
+        return;
+      }
+      out.exits.push(mk({ sar: r.value, shares: r.shares, breakEven: gL.breakEven,
+        why: `${whyL} → خروج كامل` }));
+      out.fundedBy += r.value;
+      return;
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // م.27 — الحد الأدنى للمركز: أقلّ من 2% خروج، و2–3% مهلة دورتين
     // ------------------------------------------------------------------
@@ -1815,7 +1898,12 @@ function buildTargetPlan(valAware) {
       const trimDivs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
       const trimGate = (typeof deferredVerdict === 'function')
         ? deferredVerdict(price, r.avgCost, trimDivs, r.shares) : null;
-      if (trimGate && trimGate.verdict !== 'exitNow') {
+      // ⚠️ كان الشرط `trimGate.verdict` — والحقل غير موجود أصلاً: الدالة
+      // تُعيد `action`. فكان `undefined !== 'exitNow'` صادقاً **دائماً**،
+      // فتُدفَع كل أوامر التخفيف إلى التأجيل بحجّة كاذبة «السعر تحت
+      // التعادل» ولو كان السعر ضعف التعادل — أي أن م.25 و28 و49 كانت
+      // معطَّلة عملياً. القيمتان الممكنتان للتأجيل: 'defer' و'unknown'.
+      if (trimGate && trimGate.action !== 'exitNow') {
         out.deferred.push(mk({ sar: 0, shares: 0, gapPct, capped, expired,
           why: (r.overCap
                  ? `وزنه كسر سقف فئته ${r.cap}% ويستوجب تخفيفاً (م.49)`
@@ -2439,8 +2527,8 @@ function cardHtml(r) {
       ${conflictLine}
       <div class="de-card-reason small">${escapeHtmlSafe(r.reason)}</div>
       <div class="de-card-foot">
-        <button class="btn btn-primary btn-sm" onclick="openDetailCard('${escapeHtmlSafe(r.ticker)}')">🔍 تفاصيل كاملة</button>
-        <button class="btn btn-secondary btn-sm" onclick="openStockCard('${escapeHtmlSafe(r.ticker)}')">⚙️ إدخال يدوي</button>
+        <button class="btn btn-primary btn-sm" onclick="openDetailCard('${escAttrJs(r.ticker)}')">🔍 تفاصيل كاملة</button>
+        <button class="btn btn-secondary btn-sm" onclick="openStockCard('${escAttrJs(r.ticker)}')">⚙️ إدخال يدوي</button>
       </div>
     </div>`;
 }
@@ -3224,7 +3312,7 @@ function openDetailCard(ticker) {
   out.push(manualCfgHtml(ticker));
 
   out.push(`<div class="de-card-foot" style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">
-    <button class="btn btn-secondary btn-sm" onclick="closeDetailCard(); openStockCard('${escapeHtmlSafe(ticker)}')">⚙️ تعديل المدخلات اليدوية</button>
+    <button class="btn btn-secondary btn-sm" onclick="closeDetailCard(); openStockCard('${escAttrJs(ticker)}')">⚙️ تعديل المدخلات اليدوية</button>
     <a class="btn btn-secondary btn-sm" href="stock-valuation.html">💹 تحديث القيمة العادلة</a>
     <a class="btn btn-secondary btn-sm" href="tasks.html">📊 خطة الأسعار</a>
     <a class="btn btn-secondary btn-sm" href="review-log.html">📒 تسجيل مراجعة</a>
@@ -3587,3 +3675,35 @@ function csvCell(v) {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ══════════════════════════════════════════════════════════════════════
+// م.39 — التشتّت: (أعلى نموذج − أدنى نموذج) ÷ الوسيط
+// ----------------------------------------------------------------------
+// الوسيط لا المتوسط، ونطاق الحدّين لا الانحراف المعياري. الحاسبة تحفظ
+// `dispersionCV` (انحراف معياري ÷ متوسط) وهو مقياس آخر يعطي رقماً أصغر
+// منهجياً، فكان سهمٌ «ثقته منخفضة» دستورياً يُعامَل معاملة المتوسطة.
+// نحسبها من مصفوفة النماذج المحفوظة، ولا نستعمل CV إلا إن غابت النماذج
+// — وحينها نُعلنها بديلاً لا مطابقاً (م.20: لا تقدير صامت).
+// المخرَج **كسر** لا نسبة مئوية، ليطابق DISPERSION_BANDS في الدستور.
+// ══════════════════════════════════════════════════════════════════════
+function _dispersionM39(results) {
+  const r = results || {};
+  const vals = Array.isArray(r.models)
+    ? r.models.filter(m => m && m.inAvg !== false && isFinite(+m.raw)).map(m => +m.raw)
+    : [];
+
+  if (vals.length >= 2) {
+    const sorted = vals.slice().sort((a, b) => a - b);
+    const n   = sorted.length;
+    const med = n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+    if (med > 0) return (sorted[n - 1] - sorted[0]) / med;
+  }
+
+  // احتياطٌ ثانٍ: الحدّان المحفوظان مع المتوسط بدل الوسيط
+  const mn = +r.fairValueMin, mx = +r.fairValueMax, av = +r.fairValueAvg;
+  if (isFinite(mn) && isFinite(mx) && isFinite(av) && av > 0) return (mx - mn) / av;
+
+  // احتياطٌ أخير: CV — مقياس مختلف، يُقبل فقط لغياب البديل
+  const cv = +r.dispersionCV;
+  return (r.dispersionCV != null && isFinite(cv)) ? cv / 100 : null;
+}

@@ -662,29 +662,25 @@ function renderDivConfidenceBanner(costBasis, ttm, fwdIncome, fwdCoveredCount) {
 // بناء خرائط التكلفة — الحسبة الصحيحة: avg_cost × الأسهم المتبقية
 // ══════════════════════════════════════════════════════════════
 
-// تكلفة الحيازات الفعلية لرمز واحد في نهاية سنة معينة
-// avg_cost = مجموع (price × shares للمشتريات) ÷ إجمالي الأسهم المشتراة
-// costBasis = avg_cost × (أسهم مشتراة − أسهم مباعة)
+// تكلفة الحيازات الفعلية لرمز واحد في نهاية سنة معينة — م.2
+// ----------------------------------------------------------------------
+// كانت هذه الدالة تحسب **متوسط مدى الحياة**: كل المشتريات ÷ كل الأسهم
+// المشتراة، ثم × الأسهم المتبقية. وهو ليس المتوسط المرجّح الزمني الذي
+// تُعرّفه م.2 وتطبّقه بقية الصفحات: الفرق يظهر فور وجود بيع جزئي متبوع
+// بشراء بسعر مختلف. قياس فعلي على «شراء 100@10 → منحة 1:3 → بيع 50@12
+// → شراء 30@11»: الصحيح 955.71 ر.س والقديم 923.60 ر.س — فارق 3.4% على
+// ثلاث معاملات فقط، ويكبر مع كل بيع.
+// والناتج هو **مقام العائد على التكلفة (YOC)** و«استرداد رأس المال»،
+// فكان YOC مبالَغاً فيه لأن المقام أصغر من الحقيقي.
+// الآن يمرّ عبر `walkWAC` في utils.js — المشي الزمني نفسه الذي تستعمله
+// صفحة المعاملات ولوحة التحكم وصفحة الأداء.
 function _tickerCostBasisAtYear(ticker, upToYear) {
-  const allTx = [...txBuyRows, ...txSellRows].filter(t => t.ticker === ticker);
-  let buyShares = 0, buyCost = 0, sellShares = 0;
-  allTx.forEach(t => {
-    if (!t.date) return;
-    if ((parseDateLocal(t.date) || new Date(0)).getFullYear() > upToYear) return;
-    if (t.type === 'buy') {
-      // AUDIT-FIX: use t.total (commission-inclusive) to match recomputeHoldingFromTx WAC
-      buyCost   += +t.total;
-      buyShares += +t.shares;
-    } else if (t.type === 'grant') {
-      buyShares += +t.shares;              // منحة: تضيف أسهم بتكلفة صفر
-    } else if (t.type === 'sell') {
-      sellShares += +t.shares;
-    }
-  });
-  const remaining = buyShares - sellShares;
-  if (remaining < 0.001 || buyShares < 0.001) return 0;
-  const avgCost = buyCost / buyShares;
-  return avgCost * remaining;
+  const rows = [...txBuyRows, ...txSellRows].filter(t =>
+    t.ticker === ticker && t.date &&
+    (parseDateLocal(t.date) || new Date(0)).getFullYear() <= upToYear
+  );
+  const { shares, cost } = walkWAC(rows);
+  return shares < 0.001 ? 0 : cost;
 }
 
 function buildCostMaps() {

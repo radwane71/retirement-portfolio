@@ -369,21 +369,18 @@ function buildPositionData() {
     // AUDIT-FIX (2026-07): الربح المحقق بالمنهج الزمني — متوسط التكلفة وقت كل
     // بيع، لا متوسطاً نهائياً يشمل مشتريات لاحقة للبيع. مطابق تماماً لمنهج
     // لوحة التحكم وسجل المعاملات (إصلاح F-6) — يوحّد الرقم عبر الصفحات الثلاث.
-    const events = [...p.allBuys, ...p.allSells]
-      .slice().sort((a, b) => ((a.date || '') < (b.date || '') ? -1 : (a.date || '') > (b.date || '') ? 1 : 0));
-    let _sh = 0, _cost = 0, _realized = 0;
-    events.forEach(t => {
-      if (t.type === 'sell') {
-        const avg  = _sh > 0 ? _cost / _sh : 0;
-        const sold = Math.min(+t.shares, _sh);
-        _realized += +t.total - avg * sold;
-        _cost = Math.max(0, _cost - avg * sold);
-        _sh   = Math.max(0, _sh - +t.shares);
-      } else { // buy أو grant (المنحة total = 0 فتخفض المتوسط)
-        _cost += +t.total;
-        _sh   += +t.shares;
-      }
-    });
+    // ⚠️ كانت هنا نسخةٌ ثالثة من حلقة WAC، والتعليق أعلاه يدّعي أنها
+    // «مطابقة تماماً» لمنهج اللوحة وسجل المعاملات — ولم تكن. عيبان:
+    //   1. الفرز بالتاريخ **وحده**: بلا «الاقتناء قبل التصرّف» يتقدّم أحياناً
+    //      بيعُ اليوم على شرائه، فيصير المتوسط صفراً وكامل العائد ربحاً.
+    //   2. العائد لم يكن يُقَصّ عند البيع الزائد (`+t.total` كاملاً مقابل
+    //      تكلفة `sold` مقصوصة) — قياس: ربح محقّق 800 بدل 200. وهو الإصلاح
+    //      نفسه الذي طُبِّق في سجل المعاملات واللوحة ونُسي هنا.
+    //   3. المنحة كانت تُعامَل ضمن فرع `buy` فتُضيف `t.total` — وهو صفر عادةً
+    //      لكنه ليس مضموناً؛ `walkWAC` تُصفّرها صراحةً (م.22).
+    // الآن: المشي الزمني الموحَّد في utils.js — تعريف واحد لكل الموقع (م.2).
+    const _w = walkWAC([...p.allBuys, ...p.allSells]);
+    const _sh = _w.shares, _cost = _w.cost, _realized = _w.realized;
     // متوسط التكلفة الزمني للحيازة المتبقية — يطابق holdings.avg_price
     p.avgCost = _sh > 0.001 ? _cost / _sh : (p.buyShares > 0 ? p.buyCost / p.buyShares : 0);
 

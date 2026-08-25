@@ -60,19 +60,7 @@ let _allRef    = [];   // merged reference (DivTracker preferred, broker supplem
 let _matches   = [];
 let _unknownNames = [];   // أسماء الوسيط المجهولة — تبقى بعد التطبيق حتى لا تختفي الإحصاءات
 
-// ── Dirty-tickers: نفس مفتاح وصيغة transactions.js (R-1) ─────────────
-// تغيير التاريخ يغيّر ترتيب البيع بين الشراءات → WAC يحتاج إعادة حساب.
-// صفحة المعاملات تُنهي إعادة الحساب تلقائياً عند فتحها (_flushDirtyTickers).
-const DIRTY_TICKERS_KEY = 'tharwa-dirty-tickers';
-function _markDirtyTickers(userId, tickers) {
-  try {
-    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
-    if (!tickers.length) return;
-    const prev = JSON.parse(localStorage.getItem(key) || '[]');
-    const next = [...new Set([...prev, ...tickers])];
-    localStorage.setItem(key, JSON.stringify(next));
-  } catch (_) {}
-}
+// دوال الرموز المتّسخة (dirty tickers) موحَّدة في `js/utils.js`.
 
 async function init() {
   const user = await requireAuth();
@@ -208,7 +196,14 @@ function findBestMatch(tx, refList) {
   // Prefer DivTracker over Broker; within same source prefer closest price
   const dt = candidates.filter(c => c.source === 'DivTracker');
   const pool = dt.length ? dt : candidates;
-  pool.sort((a, b) => Math.abs(a.price - +tx.price) - Math.abs(b.price - +tx.price));
+  // الترجيح بالسعر وحده يترك عمليتين متطابقتين (نفس العدد ونفس السعر)
+  // بترتيب عشوائي، فيُسنَد تاريخُ إحداهما للأخرى. وترتيب البيع بين
+  // الشراءات هو ما يحكم WAC — فأضفنا قرب التاريخ مرجّحاً ثانياً.
+  pool.sort((a, b) =>
+    (Math.abs(a.price - +tx.price) - Math.abs(b.price - +tx.price)) ||
+    (Math.abs(Date.parse(a.date) - Date.parse(tx.date)) -
+     Math.abs(Date.parse(b.date) - Date.parse(tx.date)))
+  );
   return pool[0];
 }
 
@@ -389,6 +384,11 @@ async function applyChanges() {
   const toFix = _matches.filter(m => m.checked && m.status === 'fix');
   if (!toFix.length) return;
 
+  // اقرأ المستخدم مرة واحدة: يُستعمل لتقييد كل كتابة بـuser_id (دفاع متعدد
+  // الطبقات لو اختلّت RLS مستقبلاً) ولإعادة حساب الحيازات في المكان.
+  const { data: { user } } = await supabaseClient.auth.getUser();
+  if (!user?.id) { showToast('انتهت الجلسة — سجّل الدخول من جديد', 'error'); return; }
+
   const btn    = document.getElementById('apply-btn');
   const status = document.getElementById('apply-status');
   const fill   = document.getElementById('progress-fill');
@@ -402,7 +402,7 @@ async function applyChanges() {
     fill.style.width   = ((done / toFix.length) * 100) + '%';
 
     const { error } = await supabaseClient.from('transactions')
-      .update({ date: m.ref.date }).eq('id', m.tx.id);
+      .update({ date: m.ref.date }).eq('id', m.tx.id).eq('user_id', user.id);
 
     if (error) { errors++; console.error(error); }
     else { m.tx.date = m.ref.date; m.status = 'same'; m.checked = false; fixedTickers.add(m.tx.ticker); }
@@ -412,19 +412,34 @@ async function applyChanges() {
   fill.style.width = '100%';
   btn.disabled     = false;
 
-  // تغيير التاريخ يغيّر ترتيب البيع بين الشراءات → علّم الرموز dirty،
-  // وصفحة المعاملات تُكمل إعادة حساب الحيازات تلقائياً عند فتحها.
+  // تغيير التاريخ يغيّر ترتيب البيع بين الشراءات ⇒ يتغيّر متوسط التكلفة.
+  // كان الرمز يُعلَّم `dirty` فقط، ولا يُفرَّغ العَلَم إلا عند فتح صفحة
+  // المعاملات — وقد لا تُفتح أبداً. حتى ذلك الحين تعرض كل الصفحات متوسطاً
+  // قديماً، ومحرّك القرار يقارن السعر بـ«التعادل الحقيقي» المبني عليه
+  // (م.45) فيصدر «خروج فوري» أو يمنعه بناءً على رقم خاطئ.
+  // نُعيد الحساب هنا في المكان، ونُبقي العَلَم شبكةَ أمان لو انقطع الاتصال.
+  let recomputeNote = '';
   if (fixedTickers.size) {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    if (user?.id) _markDirtyTickers(user.id, [...fixedTickers]);
+    _markDirtyTickers(user.id, [...fixedTickers]);
+    status.textContent = 'جارٍ إعادة حساب الحيازات…';
+    let recomputed = 0;
+    for (const tk of fixedTickers) {
+      try {
+        await recomputeHoldingFromTx(user.id, tk);
+        _unmarkDirtyTicker(user.id, tk);
+        recomputed++;
+      } catch (e) { console.error('recompute failed for', tk, e); }
+    }
+    recomputeNote = (recomputed === fixedTickers.size)
+      ? ` — أُعيد حساب ${recomputed} حيازة`
+      : ` — ⚠️ تعذّرت إعادة حساب ${fixedTickers.size - recomputed} حيازة، افتح صفحة المعاملات لإتمامها`;
   }
-  const recomputeNote = fixedTickers.size ? ' — افتح صفحة المعاملات لإتمام إعادة حساب الحيازات' : '';
 
   if (!errors) {
     showToast(`✅ تم تحديث ${done} معاملة${recomputeNote}`, 'success');
     status.textContent = `✅ اكتمل — ${done} تحديث${recomputeNote}`;
   } else {
-    showToast(`${done-errors} نجح، ${errors} فشل${recomputeNote}`, 'warn');
+    showToast(`${done-errors} نجح، ${errors} فشل${recomputeNote}`, 'warning');
     status.textContent = `⚠️ ${done-errors} نجح، ${errors} فشل${recomputeNote}`;
   }
 

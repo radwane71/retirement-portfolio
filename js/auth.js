@@ -5,6 +5,22 @@ async function requireAuth() {
   const user = session.user;
   window._currentUserId = user.id;   // used by userLsKey() in utils.js
 
+  // ── حالة الحساب: الحظر والتعليق كانا بلا أثر ────────────────────
+  // زرّ «حظر» في لوحة الإدارة يكتب user_profiles.status، ولم يكن أيّ
+  // موضع في التطبيق يقرأ هذا الحقل — فالمحظور يحتفظ بالوصول الكامل
+  // لكل صفحة. نقرأه هنا مع last_seen في نداء واحد.
+  // ملاحظة: هذه بوابة واجهة. الحظر الحقيقي يحتاج تعطيل الحساب من
+  // Admin API أو إسناد السياسات إلى status — انظر ملف التحصين
+  // supabase/migrations/2026-08-26_security_hardening.sql
+  const { data: prof } = await supabaseClient
+    .from('user_profiles').select('status').eq('id', user.id).maybeSingle();
+  // صفٌّ غائب ⇒ لا حكم (م.21: البيان الغائب لا يُحاكَم)
+  if (prof && prof.status && prof.status !== 'active') {
+    await supabaseClient.auth.signOut();
+    window.location.href = 'index.html';
+    return null;
+  }
+
   // تحديث آخر ظهور
   supabaseClient.from('user_profiles')
     .update({ last_seen: new Date().toISOString() })

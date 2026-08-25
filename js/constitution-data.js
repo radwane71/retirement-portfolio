@@ -157,13 +157,36 @@ function periodKey(d) {
   return `${x.getFullYear()}-Q${Math.floor(x.getMonth() / 3) + 1}`;
 }
 
-// كم قراءة **متمايزة الفترة** سُجّلت لهذه الإشارة، وهل اكتمل التأكيد؟
+// ترتيب الفترة رقمياً: 'YYYY-Qn' ⇒ عدد الأرباع منذ الميلاد
+function periodIndex(p) {
+  const m = /^(\d{4})-Q([1-4])$/.exec(String(p || ''));
+  return m ? (+m[1]) * 4 + (+m[2] - 1) : null;
+}
+
+// كم قراءة **متتالية** سُجّلت لهذه الإشارة، وهل اكتمل التأكيد؟
+// ----------------------------------------------------------------------
+// ⚠️ م.43 تشترط «قراءتان **متتاليتان**» للإشارة القوية و«ثلاث قراءات»
+// للمتوسطة. وكان العدّ يجمع الفترات المتمايزة بلا شرط تجاور: سهمٌ فشلت
+// تغطيته في 2024-Q1 ثم تعافى ثمانية أرباع ثم فشل في 2026-Q2 كان يُقرأ
+// «قراءتان ⇒ اكتمل التأكيد ⇒ خروج كامل». وهذا بالضبط حكمُ اللقطة الواحدة
+// الذي وُجدت م.43 لمنعه، موزَّعاً على سنتين — وهو خطأ سابقة جرير والقصيم
+// وسدافكو وكهرباء الموثّقة في م.41.
+// العلاج: نعدّ **السلسلة المتتالية الأخيرة** فقط، فالتعافي يصفّر العدّاد.
 function confirmationOf(signalKey, readings) {
   const meta = SIGNAL_CLASS[signalKey];
   if (!meta) return { known: false, why: `إشارة غير معرَّفة: ${signalKey}` };
   const need = CONFIRM_READS[meta.cls];
-  const periods = [...new Set((readings || []).map(r => r.period || periodKey(r.date)).filter(Boolean))];
-  const have = periods.length;
+  const periods = [...new Set((readings || []).map(r => r.period || periodKey(r.date)).filter(Boolean))]
+    .sort();
+
+  // السلسلة المتتالية المنتهية بآخر فترة مسجَّلة
+  let have = periods.length ? 1 : 0;
+  for (let i = periods.length - 1; i > 0; i--) {
+    const a = periodIndex(periods[i]), b = periodIndex(periods[i - 1]);
+    if (a != null && b != null && a - b === 1) have++;
+    else break;
+  }
+  const streakFrom = periods.length ? periods[periods.length - have] : null;
 
   if (meta.cls === 'weak') {
     return { known: true, cls: meta.cls, label: meta.label, need: 0, have, confirmed: false,
@@ -177,12 +200,16 @@ function confirmationOf(signalKey, readings) {
                : 'لم تُسجَّل قراءة بعد' };
   }
   const confirmed = have >= need;
+  const brokeStreak = periods.length > have;
   return {
-    known: true, cls: meta.cls, label: meta.label, need, have, confirmed, periods,
+    known: true, cls: meta.cls, label: meta.label, need, have, confirmed, periods, streakFrom,
     action: confirmed ? 'execute' : 'await',
     why: confirmed
-      ? `اكتمل التأكيد: ${have} من ${need} قراءات (م.43)`
-      : `القراءات المؤكِّدة ${have} من ${need} المطلوبة — لا تنفيذ قبل اكتمالها (م.43)`,
+      ? `اكتمل التأكيد: ${have} قراءات متتالية من ${need} المطلوبة منذ ${streakFrom} (م.43)`
+      : `القراءات المتتالية ${have} من ${need} المطلوبة — لا تنفيذ قبل اكتمالها (م.43)`
+        + (brokeStreak
+            ? ` — سُجّلت ${periods.length} فترات إجمالاً لكن التعافي بينها قطع التتابع، والعدّ يبدأ من جديد`
+            : ''),
   };
 }
 

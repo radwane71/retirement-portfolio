@@ -348,12 +348,27 @@ function sectorBandOf(pct) {
 }
 
 // م.48 (+ م.39) — منطقة السعر مقابل القيمة العادلة، موسَّعة بمعامل الثقة
+// ----------------------------------------------------------------------
+// ⚠️ م.39 تقول «وسّع نطاقات المادة 42 بـ**±**10%» — والإشارة ± مقصودة:
+// التوسيع في **الاتجاهين**. وكان التطبيق يضرب كل سقف صعوداً فقط، فتتمدّد
+// منطقة التجميع وتنكمش منطقتا التخفيف والتصفية **كلما قلّت الثقة** — أي
+// أن الجهل بالقيمة كان يولّد إغراءً بالشراء.
+//
+// قياس منطبق: تشتّت 65% (ثقة منخفضة، widen 0.20) ونسبة سعر 1.25.
+// م.48 الخام تضع 1.25 في 🟡 «تخفيف» وتمنع م.55/4 توجيه أي سيولة إليه.
+// وبالتوسيع الصاعد: 1.05 × 1.20 = 1.26 ≥ 1.25 ⇒ «تجميع» ⇒ **أمر شراء
+// بسعر 1.25 ضعف القيمة العادلة**، وبناءً على نماذج لا تتفق أصلاً.
+//
+// القاعدة الصحيحة: عدم اليقين يُشدّد جانب الشراء ويُرخي جانب البيع —
+// فلا يخلق شراءً أبداً، ويؤخّر بيعاً قد يكون مبنياً على رقم مهزوز.
 function valueBandOf(ratio, dispersion) {
   const d = DISPERSION_BANDS.find(x => (dispersion == null ? 0 : dispersion) <= x.max);
-  const w = 1 + (d ? d.widen : 0);
-  const band = VALUE_BANDS.find(b => b.max === Infinity || ratio <= b.max * w)
+  const w = d ? d.widen : 0;
+  const isBuySide = b => b.action === 'accumulate2x' || b.action === 'accumulate';
+  const band = VALUE_BANDS.find(b =>
+                 b.max === Infinity || ratio <= b.max * (isBuySide(b) ? 1 - w : 1 + w))
             || VALUE_BANDS[VALUE_BANDS.length - 1];
-  return { ...band, confidence: d ? d.conf : 'high', widen: d ? d.widen : 0 };
+  return { ...band, confidence: d ? d.conf : 'high', widen: w };
 }
 
 // م.49 — نطاق انحراف الوزن عن الهدف

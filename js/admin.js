@@ -387,11 +387,24 @@ async function loadFailedLogins() {
       <td class="small text-muted">${formatDatetime(r.last_attempt)}</td>
       <td>
         ${r.attempt_count >= 5
-          ? `<button class="act-btn danger" onclick="blockIP('${esc(r.ip_address)}','${esc(r.email)}')">حظر</button>`
+          ? `<button class="act-btn danger" data-block-ip="${esc(r.ip_address)}" data-block-email="${esc(r.email)}">حظر</button>`
           : '<span class="small text-muted">—</span>'}
       </td>
     </tr>`).join('');
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// زرّ الحظر يُقرأ من خاصية data لا من نصّ JavaScript مضمَّن — والسبب أمني:
+// صفّ `failed_login_attempts` يحمل بريداً يكتبه **من فشل في تسجيل الدخول**،
+// أي نصّاً من خارج النظام. وبناء `onclick="blockIP('...')"` من هذا النصّ
+// كان ثغرة تنفيذ كود مخزَّنة: `esc` تحوّل ' إلى &#39;، ومحلّل HTML يفكّها
+// **قبل** محرّك JavaScript، فتعود ' وتُنهي النصّ. ومع مستمع مفوَّض واحد
+// لا يوجد نصّ JS يُبنى من بيانات أصلاً — الثغرة تزول بنيوياً لا بالترقيع.
+// ══════════════════════════════════════════════════════════════════════
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-block-ip]');
+  if (btn) blockIP(btn.dataset.blockIp, btn.dataset.blockEmail);
+});
 
 async function blockIP(ip, email) {
   // AUDIT-FIX: replaced blocking confirm() with confirmAsync()
@@ -565,7 +578,13 @@ async function setMaintenance(enable) {
     if (fb) fb.innerHTML = '<span style="color:var(--danger)">خطأ: ' + (e1||e2).message + '</span>';
     // إذا الجدول غير موجود
     if ((e1||e2).message.includes('does not exist') || (e1||e2).code === '42P01') {
-      alert('يجب تشغيل SQL في Supabase أولاً:\n\nCREATE TABLE IF NOT EXISTS site_config (\n  key TEXT PRIMARY KEY,\n  value TEXT NOT NULL DEFAULT \'\'\n);\nALTER TABLE site_config ENABLE ROW LEVEL SECURITY;\nCREATE POLICY "config_admin" ON site_config\n  FOR ALL USING (((auth.jwt() ->> \'is_admin\')::boolean = true));');
+      // لا تُطبع سياسة RLS هنا نصّاً. النسخة التي كانت مطبوعة تستعمل
+      // `auth.jwt() ->> 'is_admin'`، وهو ادّعاء JWT من المستوى الأعلى
+      // تملؤه Supabase من `user_metadata` — **والمستخدم يكتبه بنفسه**
+      // عبر `auth.updateUser`. لصقُها يمنح كلَّ مستخدم مسجَّل صلاحية
+      // FOR ALL على `site_config`، أي تفعيل وضع الصيانة وإقفال الموقع
+      // في وجه مالكه. المصدر الوحيد للسياسات هو ملفات SQL في المستودع.
+      alert('جدول site_config غير موجود.\n\nشغّل الملف admin_schema_v2.sql في Supabase — فيه تعريف الجدول وسياساته الصحيحة عبر public.is_admin().');
     }
     return;
   }

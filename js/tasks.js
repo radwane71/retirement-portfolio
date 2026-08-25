@@ -346,7 +346,7 @@ function renderUntracked(q) {
           <td>${r.hasFair ? `<span style="color:var(--success)">✅ محفوظة</span>`
                           : '<span style="color:var(--st-warn)">— ناقصة</span>'}</td>
           <td style="white-space:nowrap">
-            ${!r.hasCard ? `<button class="btn btn-primary btn-sm" onclick="newCardFor('${esc(r.tk)}','${esc(r.name)}')">+ بطاقة قرار</button>` : ''}
+            ${!r.hasCard ? `<button class="btn btn-primary btn-sm" onclick="newCardFor('${escAttrJs(r.tk)}','${escAttrJs(r.name)}')">+ بطاقة قرار</button>` : ''}
             ${!r.hasFair ? `<a class="btn btn-secondary btn-sm" href="stock-valuation.html">💹 احسب العادلة</a>` : ''}
           </td>
         </tr>`).join('')}

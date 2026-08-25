@@ -251,6 +251,30 @@ function esc(v) {
     .replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// تهريب قيمة تُوضَع **داخل نصّ JavaScript داخل خاصية HTML**
+//   <button onclick="fn('${escAttrJs(v)}')">
+// ----------------------------------------------------------------------
+// `esc` وحدها **لا تكفي** هنا وهذا ليس تشدّداً نظرياً: هي تحوّل ' إلى
+// &#39;، ومحلّل HTML يفكّ الكيان **قبل** أن يرى محرّك JavaScript النصّ —
+// فتعود ' سليمةً وتُنهي النصّ وتفتح الباب لتنفيذ كود.
+// العلاج: تهريب JavaScript أولاً (الشرطة المائلة العكسية، ثم '، ثم
+// الأسطر الجديدة) ثم تهريب HTML فوقه. عندئذ تصير ' مسبوقةً بشرطة مائلة
+// عكسية ثم &#39;، ويفكّها المحلّل إلى ' مهرَّبة — وهو التهريب الصحيح
+// داخل JavaScript، فتبقى القيمة **وسيطاً نصّياً واحداً** لا كوداً.
+// القاعدة: أي قيمة نصّية حرّة (بريد، اسم، رمز سهم) تُمرَّر عبر هذه لا عبر
+// `esc`. والأفضل منهما معاً: خاصية data + مستمع مفوَّض، بلا نصّ JS أصلاً.
+// ══════════════════════════════════════════════════════════════════════
+function escAttrJs(v) {
+  return esc(
+    String(v == null ? '' : v)
+      .split('\\').join('\\\\')
+      .split("'").join("\\'")
+      .split('\r').join('')
+      .split('\n').join('\\n')
+  );
+}
+
 // ── ID generator ─────────────────────────────────────────────
 function uid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return 'id_' + crypto.randomUUID().replace(/-/g, '');
@@ -1224,4 +1248,171 @@ function valHistNewestFirst(list) {
     if (tb == null) return -1;
     return tb - ta;
   });
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// متوسط التكلفة المرجّح (WAC) — تعريفٌ واحد لكل الموقع  ·  م.2
+// ----------------------------------------------------------------------
+// كانت هذه الحلقة مكتوبة ست مرات (transactions · dashboard×2 · performance
+// · dividends · decision-engine)، وكل إصلاح تاريخي طُبِّق على بعضها وفات
+// بعضها — فتباعدت الصفحات وأعطت لنفس السهم متوسطاً مختلفاً. الباب الأول
+// من الدستور يوجب أن يكون لكل مصطلح **تعريف واحد فقط**، وهذا هو.
+//
+// الترتيب بالتاريخ وحده لا يكفي: معاملتان في اليوم نفسه ترجعان من Postgres
+// بترتيبٍ غير محدَّد. وإذا سبق البيعُ شراءَه في اليوم نفسه صار متوسط
+// التكلفة صفراً وكامل عائد البيع ربحاً محقَّقاً (قياس فعلي: +599 بدل +98).
+// القاعدة: التاريخ ← الاقتناء قبل التصرّف ← created_at ← id.
+// ══════════════════════════════════════════════════════════════════════
+const TX_ORDER = { buy: 0, grant: 0, sell: 1 };
+
+function txSortForWAC(rows) {
+  return [...(rows || [])].sort((a, b) =>
+    String(a.date || '').localeCompare(String(b.date || '')) ||
+    ((TX_ORDER[a.type] ?? 0) - (TX_ORDER[b.type] ?? 0)) ||
+    String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
+    String(a.id || '').localeCompare(String(b.id || ''))
+  );
+}
+
+// المشي الزمني على المعاملات. يُعيد الحالة بعد آخر صفّ مشمول.
+//   opts.upTo — نصّ ISO: تُهمَل كل معاملة بعد هذا اليوم (شامل اليوم نفسه)
+// المخرَج: { shares, cost, realized, avg }
+//   cost = إجمالي المدفوع شاملاً العمولة والضريبة (لأن t.total يشملهما)
+//   avg  = متوسط التكلفة كما تُعرّفه م.2
+//
+// ثلاث قواعد مثبتة هنا مرة واحدة بدل ست:
+//   1. المنحة تكلفتها صفر وترفع العدد ⇒ إجمالي التكلفة ثابت والمتوسط ينخفض
+//      تناسبياً (م.22 — منحة الرياض 1:3 ليست قصّ توزيع).
+//   2. البيع لا يغيّر المتوسط — تُخصم التكلفة بمتوسطها لا بسعر البيع.
+//   3. البيع الزائد يُقَصّ **كمّاً وعائداً معاً**. قصّ الكمّ وحده كان يسجّل
+//      ربح أسهمٍ لا تُملَك.
+function walkWAC(rows, opts) {
+  const upTo = (opts && opts.upTo) ? String(opts.upTo) : null;
+  let shares = 0, cost = 0, realized = 0;
+
+  txSortForWAC(rows).forEach(t => {
+    if (upTo && String(t.date || '') > upTo) return;
+    const n = Math.abs(+t.shares) || 0;
+
+    if (t.type === 'buy') {
+      cost   += (+t.total) || 0;
+      shares += n;
+    } else if (t.type === 'grant') {
+      shares += n;                                  // تكلفة صفر — م.22
+    } else if (t.type === 'sell') {
+      const sold  = Math.min(n, shares);            // لا يُباع ما لا يُملَك
+      const ratio = n > 0 ? sold / n : 0;           // العائد يُقَصّ بنفس النسبة
+      const avg   = shares > 0 ? cost / shares : 0;
+      realized += ((+t.total) || 0) * ratio - avg * sold;
+      cost      = Math.max(0, cost - avg * sold);
+      shares    = Math.max(0, shares - sold);
+    }
+  });
+
+  shares = Math.max(0, +shares.toFixed(6));
+  return { shares, cost, realized, avg: shares > 0 ? cost / shares : 0 };
+}
+
+// عدد الأسهم المملوكة في تاريخ معيّن — مقام DPS في كل الصفحات.
+// يمرّ عبر walkWAC عمداً كي يَقُصّ البيع الزائد **عند كل بيع** لا في
+// النهاية فقط: «شراء 100 → بيع 150 → شراء 30» تساوي 30 سهماً لا صفراً.
+function sharesAtDate(rows, dateStr) {
+  return walkWAC(rows, { upTo: dateStr }).shares;
+}
+
+// ── إعادة حساب كاملة لسهم واحد من صفر بناءً على جميع معاملاته ─
+// بعد كل إضافة أو تعديل أو أرشفة معاملة يُستدعى هذا لضمان دقة WAC
+async function recomputeHoldingFromTx(userId, ticker) {
+  // S-2: filter by user_id — defence in depth if RLS is ever misconfigured
+  const { data: txAll } = await supabaseClient
+    .from('transactions')
+    .select('type, shares, price, total, name, date, created_at, id')
+    .eq('user_id', userId)
+    .eq('ticker', ticker)
+    .eq('is_archived', false)
+    .order('date', { ascending: true });
+
+  const rows = txAll || [];
+  let stockName = '';
+  rows.forEach(t => { if (!stockName && t.name) stockName = t.name; });
+
+  // المشي الزمني موحَّد في utils.js — م.2
+  const wac        = walkWAC(rows);
+  const totalShares = wac.shares;
+  const avgPrice    = wac.avg;
+
+  const { data: existing } = await supabaseClient
+    .from('holdings').select('id, current_price, sector, target_weight')
+    .eq('user_id', userId).eq('ticker', ticker).maybeSingle();
+
+  if (totalShares <= 0) {
+    // السهم بيع بالكامل — احذفه من المحفظة
+    if (existing) await supabaseClient.from('holdings').delete().eq('id', existing.id);
+  } else if (existing) {
+    // حدّث الأسهم والمتوسط فقط — احتفظ بالسعر الحالي والقطاع والهدف
+    await supabaseClient.from('holdings').update({
+      shares:    +totalShares.toFixed(6),
+      avg_price: +avgPrice.toFixed(4),
+    }).eq('id', existing.id);
+  } else {
+    // سهم جديد — أضفه
+    // AUDIT-FIX 2026-08-21 (#35): كان القطاع يُكتب فارغاً دائماً من هذا المسار،
+    // بينما مزامنة لوحة التحكم تكتبه من tickerdb. سهم بقطاع فارغ يسقط من مقام
+    // سقف القطاع 25% (الدستور §4 الفلتر 4) فيظهر التركيز أقلّ مما هو — كسر سقف
+    // صامت. نقرأ القطاع الرسمي هنا بنفس المصدر، وإن لم يوجد الرمز نكتب «أخرى»
+    // (قطاع معلَن في OFFICIAL_SECTORS) بدل الفراغ حتى يبقى السهم داخل المقام.
+    const _known = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
+    await supabaseClient.from('holdings').insert([{
+      user_id:      userId,
+      ticker,
+      name:         stockName || (_known && _known.name) || '',
+      sector:       (_known && _known.sector) || 'أخرى',
+      shares:       +totalShares.toFixed(6),
+      avg_price:    +avgPrice.toFixed(4),
+      current_price: +avgPrice.toFixed(4),
+      target_weight: 0,
+    }]);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// الرموز المتّسخة (dirty tickers) — تعريف واحد لكل الموقع
+// ----------------------------------------------------------------------
+// إن أُغلقت الصفحة في منتصف إعادة حساب حيازة، يبقى الرمز معلَّماً هنا
+// فتُستكمل إعادة الحسابات عند أول فتح لصفحة المعاملات. كانت هذه الدوال
+// مكرّرة في `transactions.js` و`reconcile.js` بنسختين مختلفتين — وصفحة
+// المطابقة لم تكن تملك `_unmarkDirtyTicker` أصلاً.
+// ══════════════════════════════════════════════════════════════════════
+const DIRTY_TICKERS_KEY = 'tharwa-dirty-tickers';
+
+function _markDirtyTickers(userId, tickers) {
+  try {
+    if (!tickers || !tickers.length) return;   // لا تمسح المفتاح على قائمة فارغة
+    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
+    const prev = JSON.parse(localStorage.getItem(key) || '[]');
+    localStorage.setItem(key, JSON.stringify([...new Set([...prev, ...tickers])]));
+  } catch (_) {}
+}
+
+// أزل رمزاً واحداً — يُستدعى فقط بعد نجاح إعادة حسابه
+function _unmarkDirtyTicker(userId, ticker) {
+  try {
+    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
+    const rest = JSON.parse(localStorage.getItem(key) || '[]').filter(t => t !== ticker);
+    if (rest.length) localStorage.setItem(key, JSON.stringify(rest));
+    else localStorage.removeItem(key);
+  } catch (_) {}
+}
+
+async function _flushDirtyTickers(userId) {
+  try {
+    const dirty = JSON.parse(localStorage.getItem(`${DIRTY_TICKERS_KEY}:${userId}`) || '[]');
+    if (!dirty.length) return;
+    // لا يُحذف المفتاح قبل إتمام العمل: كل رمز يُزال فور نجاح إعادة حسابه،
+    // فإغلاق الصفحة في منتصف الحلقة لا يُضيّع الرموز المتبقية.
+    for (const ticker of dirty) {
+      await recomputeHoldingFromTx(userId, ticker);
+      _unmarkDirtyTicker(userId, ticker);
+    }
+  } catch (_) {}
 }

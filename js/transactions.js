@@ -22,43 +22,7 @@ let sortDir      = 'desc';
 let _editId      = null;
 let _filterType  = 'all';   // 'all' | 'buy' | 'sell' | 'grant'
 
-// ── Dirty-ticker recovery (R-1) ───────────────────────────────
-// If the page closed mid-recompute after a successful insert, the dirty-tickers
-// flag ensures we finish the holding recompute on next load.
-const DIRTY_TICKERS_KEY = 'tharwa-dirty-tickers';
-
-function _markDirtyTickers(userId, tickers) {
-  try {
-    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
-    if (!tickers.length) { localStorage.removeItem(key); return; }
-    const prev = JSON.parse(localStorage.getItem(key) || '[]');
-    const next = [...new Set([...prev, ...tickers])];
-    localStorage.setItem(key, JSON.stringify(next));
-  } catch (_) {}
-}
-
-// أزل رمزاً واحداً من قائمة dirty — يُستدعى فقط بعد نجاح إعادة حسابه
-function _unmarkDirtyTicker(userId, ticker) {
-  try {
-    const key  = `${DIRTY_TICKERS_KEY}:${userId}`;
-    const rest = JSON.parse(localStorage.getItem(key) || '[]').filter(t => t !== ticker);
-    if (rest.length) localStorage.setItem(key, JSON.stringify(rest));
-    else localStorage.removeItem(key);
-  } catch (_) {}
-}
-
-async function _flushDirtyTickers(userId) {
-  try {
-    const dirty = JSON.parse(localStorage.getItem(`${DIRTY_TICKERS_KEY}:${userId}`) || '[]');
-    if (!dirty.length) return;
-    // لا نحذف المفتاح قبل إتمام العمل: كل رمز يُزال فور نجاح إعادة حسابه فقط،
-    // فإغلاق الصفحة في منتصف الحلقة لا يُضيع الرموز المتبقية.
-    for (const ticker of dirty) {
-      await recomputeHoldingFromTx(userId, ticker);
-      _unmarkDirtyTicker(userId, ticker);
-    }
-  } catch (_) {}
-}
+// دوال الرموز المتّسخة (dirty tickers) موحَّدة في `js/utils.js`.
 
 // ── Init ──────────────────────────────────────────────────────
 async function init() {
@@ -384,109 +348,11 @@ async function loadTransactions() {
   }
 }
 
-// ══════════════════════════════════════════════════════════════════════
-// ترتيب المعاملات لحساب متوسط التكلفة — تعريف واحد يستعمله كل حاسب
-// ----------------------------------------------------------------------
-// الترتيب بالتاريخ وحده **لا يكفي**: معاملتان في اليوم نفسه ترجعان من
-// Postgres بترتيبٍ غير محدَّد. وإذا سبق البيع شراءَه في اليوم نفسه:
-//
-//   الأسهم المملوكة = 0  ⇒  sellShares = min(50, 0) = 0
-//   ⇒ البيع يُلغى من الحيازة كلياً، ومتوسط التكلفة = 0
-//   ⇒ **كامل عائد البيع يُسجَّل ربحاً محقَّقاً**
-//
-// قياس فعلي: شراء 100@10 وبيع 50@12 في اليوم نفسه —
-//   الشراء أولاً (الصحيح): 50 سهماً باقية · ربح +98 ر.س
-//   البيع أولاً:          100 سهم باقية · ربح **+599 ر.س** — ستة أضعاف
-//
-// وكسرُ التعادل بـ`created_at` وحده لا يكفي أيضاً: هو **ترتيب الإدخال**
-// لا الترتيب الاقتصادي. من يسجّل البيع قبل شرائه — استيراداً أو تصحيحاً
-// لاحقاً — يحصل على المقلوب نفسه.
-//
-// القاعدة: التاريخ ← ثم **الاقتناء قبل التصرّف** (buy/grant قبل sell)،
-// وهو العرف المحاسبي: لا يُباع ما لم يُملَك بعد ← ثم created_at ← ثم id.
-// ══════════════════════════════════════════════════════════════════════
-const TX_ORDER = { buy: 0, grant: 0, sell: 1 };
-function txSortForWAC(rows) {
-  return [...(rows || [])].sort((a, b) =>
-    String(a.date || '').localeCompare(String(b.date || '')) ||
-    ((TX_ORDER[a.type] ?? 0) - (TX_ORDER[b.type] ?? 0)) ||
-    String(a.created_at || '').localeCompare(String(b.created_at || '')) ||
-    String(a.id || '').localeCompare(String(b.id || ''))
-  );
-}
+// ترتيب المعاملات ومتوسط التكلفة موحّدان في `js/utils.js`
+// (`txSortForWAC` و`walkWAC`) — تعريف واحد لكل الموقع، م.2.
 
-// ── إعادة حساب كاملة لسهم واحد من صفر بناءً على جميع معاملاته ─
-// بعد كل إضافة أو تعديل أو أرشفة معاملة يُستدعى هذا لضمان دقة WAC
-async function recomputeHoldingFromTx(userId, ticker) {
-  // S-2: filter by user_id — defence in depth if RLS is ever misconfigured
-  const { data: txAll } = await supabaseClient
-    .from('transactions')
-    .select('type, shares, price, total, name, date, created_at, id')
-    .eq('user_id', userId)
-    .eq('ticker', ticker)
-    .eq('is_archived', false)
-    .order('date', { ascending: true });
-
-  const rows = txSortForWAC(txAll || []);
-
-  // احسب الأسهم الإجمالية والمتوسط المرجح (WAC) من الصفر
-  let totalShares = 0;
-  let totalCost   = 0;
-  let stockName   = '';
-
-  rows.forEach(t => {
-    if (!stockName && t.name) stockName = t.name;
-    if (t.type === 'buy') {
-      // use t.total (shares×price + commission + VAT) — consistent with performance.js P&L
-      totalCost   += +t.total;
-      totalShares += +t.shares;
-    } else if (t.type === 'grant') {
-      totalShares += +t.shares;   // منحة: تكلفة = صفر
-    } else if (t.type === 'sell') {
-      const sellShares = Math.min(+t.shares, totalShares);
-      // WAC لا يتغير عند البيع — خصم التكلفة بشكل مباشر لتجنب تراكم أخطاء الفاصلة العائمة
-      const avgCostPerShare = totalShares > 0 ? totalCost / totalShares : 0;
-      totalCost   = Math.max(0, totalCost - avgCostPerShare * sellShares);
-      totalShares -= sellShares;
-    }
-  });
-
-  totalShares = Math.max(0, +totalShares.toFixed(6));
-  const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
-
-  const { data: existing } = await supabaseClient
-    .from('holdings').select('id, current_price, sector, target_weight')
-    .eq('user_id', userId).eq('ticker', ticker).maybeSingle();
-
-  if (totalShares <= 0) {
-    // السهم بيع بالكامل — احذفه من المحفظة
-    if (existing) await supabaseClient.from('holdings').delete().eq('id', existing.id);
-  } else if (existing) {
-    // حدّث الأسهم والمتوسط فقط — احتفظ بالسعر الحالي والقطاع والهدف
-    await supabaseClient.from('holdings').update({
-      shares:    +totalShares.toFixed(6),
-      avg_price: +avgPrice.toFixed(4),
-    }).eq('id', existing.id);
-  } else {
-    // سهم جديد — أضفه
-    // AUDIT-FIX 2026-08-21 (#35): كان القطاع يُكتب فارغاً دائماً من هذا المسار،
-    // بينما مزامنة لوحة التحكم تكتبه من tickerdb. سهم بقطاع فارغ يسقط من مقام
-    // سقف القطاع 25% (الدستور §4 الفلتر 4) فيظهر التركيز أقلّ مما هو — كسر سقف
-    // صامت. نقرأ القطاع الرسمي هنا بنفس المصدر، وإن لم يوجد الرمز نكتب «أخرى»
-    // (قطاع معلَن في OFFICIAL_SECTORS) بدل الفراغ حتى يبقى السهم داخل المقام.
-    const _known = (typeof lookupTicker === 'function') ? lookupTicker(ticker) : null;
-    await supabaseClient.from('holdings').insert([{
-      user_id:      userId,
-      ticker,
-      name:         stockName || (_known && _known.name) || '',
-      sector:       (_known && _known.sector) || 'أخرى',
-      shares:       +totalShares.toFixed(6),
-      avg_price:    +avgPrice.toFixed(4),
-      current_price: +avgPrice.toFixed(4),
-      target_weight: 0,
-    }]);
-  }
-}
+// `recomputeHoldingFromTx` موحَّدة في `js/utils.js` — تستعملها صفحة
+// المعاملات وصفحة المطابقة معاً، فلا تتباعد نسختان.
 
 // ── Filter by type ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════
