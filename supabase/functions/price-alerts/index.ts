@@ -544,8 +544,11 @@ Deno.serve(async (req) => {
       const result = await deliver(
         {
           ...prefs,
-          email_enabled: channel !== 'push' && prefs.email_enabled,
-          push_enabled: channel !== 'email' && prefs.push_enabled,
+          // وضع الاختبار يتجاوز مفاتيح التفضيل عمداً: ضغط زرّ «اختبر البريد»
+          // هو النيّة نفسها، فلا معنى لأن يصمت لأن التنبيهات الدورية موقوفة.
+          // (وجود العنوان ووجود اشتراك يبقيان شرطين — يُفحصان في deliver.)
+          email_enabled: channel !== 'push',
+          push_enabled: channel !== 'email',
         },
         subs,
         '✅ رسالة تجريبية — تنبيهات محفظة ثروة',

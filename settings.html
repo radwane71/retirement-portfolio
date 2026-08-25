@@ -204,6 +204,79 @@
       </div>
     </div>
 
+    <!-- ── Price Alerts / Notifications ── -->
+    <!-- كل المحتوى المتغيّر يُبنى في js/settings.js (قسم NOTIF-SECTION) عبر esc() -->
+    <div class="card mb-6" id="notif-card">
+      <div class="section-header mb-4">
+        <span class="section-title">🔔 التنبيهات</span>
+      </div>
+
+      <div class="note" data-state="" style="margin-bottom:14px">
+        <span class="ic">📣</span>
+        <div>
+          <strong>ما الذي سيصلك بالضبط:</strong>
+          تنبيه <strong>فقط عند دخول سهم منطقة التخفيف (🟡) أو منطقة التصفية (🔴)</strong> —
+          <strong>لا إشعار لمنطقة التجميع</strong> ولا لأي حدث آخر: لا توزيعات، ولا تغيّر سعر، ولا تقارير.
+          <br>
+          <strong>إشعار واحد لكل سهم</strong> حتى يخرج من المنطقة ويعود إليها — فلا يتكرّر التنبيه نفسه كل يوم.
+        </div>
+      </div>
+
+      <!-- ملاحظات البيئة: عدم دعم المتصفح · http · جداول ناقصة · جلسة منتهية -->
+      <div id="notif-env"></div>
+
+      <!-- ── البريد ── -->
+      <div class="toggle-row">
+        <div class="toggle-info">
+          <h4>تنبيهات البريد الإلكتروني</h4>
+          <p>تصلك رسالة عند دخول سهم منطقة التخفيف أو التصفية</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-email-toggle" onchange="notifEmailToggle(this)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="form-group mt-4" style="max-width:420px">
+        <label for="notif-email">بريد استقبال التنبيهات</label>
+        <input type="email" id="notif-email" dir="ltr" placeholder="example@email.com">
+        <div class="small text-muted mt-2">
+          يبدأ ببريد حسابك، ويمكنك تغييره إلى أي بريد آخر تريد وصول التنبيهات إليه.
+        </div>
+      </div>
+      <div class="mt-2">
+        <button class="btn btn-secondary btn-sm" id="notif-save-email" onclick="notifSaveEmail()">💾 حفظ البريد</button>
+      </div>
+
+      <!-- ── إشعارات المتصفح ── -->
+      <div class="toggle-row mt-4" id="notif-push-row" style="display:none">
+        <div class="toggle-info">
+          <h4>إشعارات المتصفح على هذا الجهاز</h4>
+          <p>إشعار فوري من نظام التشغيل — يتطلّب إذناً من المتصفح، ويُسجَّل لكل جهاز على حدة</p>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="notif-push-toggle" onchange="notifPushToggle(this)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <!-- حالة الإذن · هذا الجهاز · عدد الأجهزة · زر إلغاء اشتراك الجهاز -->
+      <div id="notif-status" class="mt-4"></div>
+
+      <!-- ── الاختبار ── -->
+      <div class="mt-4" style="border-top:1px solid var(--border);padding-top:14px">
+        <p class="small text-muted mb-4">
+          الاختبار يستدعي الدالة السحابية فوراً ويعرض ردّها كما هو — نجاحاً أو خطأً بنصّه.
+        </p>
+        <div class="flex gap-2" style="flex-wrap:wrap">
+          <button class="btn btn-secondary" id="notif-test-push"  onclick="notifTestPush()">🔔 اختبر إشعار المتصفح</button>
+          <button class="btn btn-secondary" id="notif-test-email" onclick="notifTestEmail()">✉️ اختبر إشعار البريد</button>
+        </div>
+        <div class="backup-status" id="notif-status-line"></div>
+        <div class="report-box" id="notif-test-report"></div>
+      </div>
+    </div>
+
     <!-- ── Backup & Restore ── -->
     <div class="card mb-6">
       <div class="section-header mb-4">
@@ -464,7 +537,7 @@
   <script src="js/tadawul-data.js?v=20260824y"></script>
   <script src="js/declutter.js?v=20260824y"></script>
   <script src="js/navtoggle.js?v=20260824y"></script>
-  <script src="js/settings.js?v=20260824y"></script>
+  <script src="js/settings.js?v=20260825n"></script>
   <script>
     (async () => {
       const { data: { user } } = await supabaseClient.auth.getUser();

@@ -26,7 +26,25 @@ const TABLES = [
   // ── أُضيفت 2026-08 (كانت تفوت النسخة الاحتياطية بالكامل) ──
   'support_tickets',   // تذاكر الدعم التي فتحها المالك — يقرؤها صاحبها (ticket_select_own)
   'user_profiles',     // ملف الحساب (البريد، الحالة، تاريخ الإنشاء) — مفتاحه id لا user_id
+  // ── أُضيف 2026-08-25 مع نظام التنبيهات ──
+  'notification_prefs', // بريد التنبيهات ومفاتيح التفعيل — تفضيل شخصي محمول بين الأجهزة
 ];
+
+// ══════════════════════════════════════════════════════════════
+// جداول مستثناة من النسخة **عمداً** — لا سهواً.
+// كاشف الجداول غير المسجَّلة يقرأ هذه القائمة فلا يُنبّه عليها كل مرة.
+// أي جدول جديد لا يُدرج هنا ولا في TABLES سيظل يُبلَّغ عنه — وهذا مقصود.
+const INTENTIONALLY_UNBACKED = {
+  push_subscriptions:
+    'مرتبط بجهاز ومتصفح بعينه (endpoint فريد). استعادته على جهاز آخر تكتب اشتراكات ميتة ' +
+    'لا يصلها شيء، وتُظهر عدّاد أجهزة كاذباً. يُعاد إنشاؤه بضغطة تفعيل واحدة.',
+  alert_state:
+    'حالة تسليح مشتقّة تُعيد بناء نفسها من أول فحص دوري (غياب الصفّ = مُسلَّح). ' +
+    'استعادة حالة قديمة قد تكتم تنبيهاً مستحقاً أو تُطلق آخر مكرَّراً.',
+  consent_logs:
+    'سجل موافقة قانوني ثابت بلا سياسة حذف — استعادته تُفقده معناه القانوني.',
+  data_erasure_requests: 'سجل إجرائي إداري لا بيانات محفظة.',
+};
 
 // ══════════════════════════════════════════════════════════════
 // كشف جدول جديد لم يُسجَّل في TABLES — AUDIT-FIX 2026-08-21 (#17)
@@ -45,7 +63,8 @@ async function detectUnlistedTables() {
     const seen = spec && spec.definitions ? Object.keys(spec.definitions)
                : (spec && spec.paths ? Object.keys(spec.paths).filter(k => k.startsWith('/') && k.length > 1).map(k => k.slice(1)) : []);
     const known = new Set(TABLES);
-    const unlisted = seen.filter(t => t && !t.startsWith('rpc/') && !known.has(t)).sort();
+    const unlisted = seen.filter(t => t && !t.startsWith('rpc/') && !known.has(t)
+                                       && !INTENTIONALLY_UNBACKED[t]).sort();
     const missing  = TABLES.filter(t => !seen.includes(t)).sort();
     return { ok: true, seen: seen.length, unlisted, missing };
   } catch (e) {
@@ -5015,3 +5034,833 @@ function tableHtml(headers, rowsHtml) {
 }
 
 init();
+
+// ╔══════════════════════════════════════════════════════════════════════
+// ║  NOTIF-SECTION-START — قسم التنبيهات (بريد + إشعار متصفح)
+// ╠══════════════════════════════════════════════════════════════════════
+// ║ نطاق هذا القسم: كل ما يخص «🔔 التنبيهات» في صفحة الإعدادات فقط.
+// ║ لا يمسّ النسخ الاحتياطي ولا الاستعادة ولا تقرير المراجعة، ولا يضيف
+// ║ جدولاً إلى TABLES (إدراج الجدولين الجديدين في النسخة الاحتياطية قرارٌ
+// ║ منفصل يُنسَّق مع مالك ملف النسخ — انظر تقرير التسليم).
+// ║
+// ║ العقد مع الدالة السحابية `price-alerts` (ثابت):
+// ║   supabaseClient.functions.invoke('price-alerts',
+// ║     { body: { test: true, channel: 'email' | 'push' | 'both' } })
+// ║   → data = { sent: {...}, errors: [...] }
+// ╚══════════════════════════════════════════════════════════════════════
+
+// المفتاح العام لـVAPID. عام بطبيعته — يُشتقّ من الخاص ويُرسل مع كل اشتراك،
+// وأي متصفح يراه. السرّ هو المفتاح الخاص، وهو في الدالة السحابية وحدها.
+const NOTIF_VAPID_PUBLIC =
+  'BL25lcS0pe_hO3qX_nvCXWPOQ1Vlu66ipHdfNgMiImkDNqCppxHDijQbSU3uYSabAZvhc3rk-1C2FAhg5eiZBiw';
+
+const NOTIF_FN         = 'price-alerts';
+const NOTIF_SW_PATH    = 'sw.js';          // نسبي: يعمل ولو نُشر الموقع تحت مسار فرعي
+const NOTIF_PREFS_TBL  = 'notification_prefs';
+const NOTIF_SUBS_TBL   = 'push_subscriptions';
+const NOTIF_DEPLOY_CMD = 'npx supabase functions deploy price-alerts';
+
+// الحالة الحيّة للقسم — تُبنى عند التحميل وتُحدَّث بعد كل إجراء.
+const notifState = {
+  user: null,
+  email: '',
+  emailEnabled: false,
+  pushEnabled: false,
+  prefsRow: null,
+  prefsMissing: false,     // جدول notification_prefs غير موجود
+  subsMissing: false,      // جدول push_subscriptions غير موجود
+  loadError: '',           // خطأ قراءة غير متعلّق بغياب الجدول
+  deviceCount: 0,
+  thisEndpoint: '',
+  thisDeviceSubscribed: false,
+  busy: false,
+};
+
+// ══════════════════════════════════════════════════════════════
+// بيئة المتصفح — ما الذي يعمل هنا فعلاً؟
+// ══════════════════════════════════════════════════════════════
+function notifEnv() {
+  const nav = typeof navigator !== 'undefined' ? navigator : null;
+  const hasSW    = !!(nav && 'serviceWorker' in nav);
+  const hasPush  = (typeof PushManager !== 'undefined');
+  const hasNotif = (typeof Notification !== 'undefined');
+
+  const loc  = typeof location !== 'undefined' ? location : null;
+  const host = loc ? String(loc.hostname || '') : '';
+  const prot = loc ? String(loc.protocol || '') : '';
+  // Push يتطلب سياقاً آمناً. localhost يُعامَل آمناً في كل المتصفحات.
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '';
+  const secure  = prot === 'https:' || isLocal;
+
+  return {
+    hasSW, hasPush, hasNotif, secure, isLocal, protocol: prot, host,
+    supported: hasSW && hasPush && hasNotif,
+    usable: hasSW && hasPush && hasNotif && secure,
+  };
+}
+
+function notifPermission() {
+  if (typeof Notification === 'undefined') return 'unsupported';
+  const p = Notification.permission;
+  return (p === 'granted' || p === 'denied' || p === 'default') ? p : 'default';
+}
+
+const NOTIF_PERM_LABEL = {
+  granted:     'ممنوح',
+  denied:      'مرفوض',
+  default:     'لم يُطلب بعد',
+  unsupported: 'غير مدعوم في هذا المتصفح',
+};
+const NOTIF_PERM_STATE = { granted: 'good', denied: 'bad', default: 'warn', unsupported: 'bad' };
+
+// ══════════════════════════════════════════════════════════════
+// أدوات ترميز — VAPID ومفاتيح الاشتراك
+// ══════════════════════════════════════════════════════════════
+// base64url → Uint8Array (applicationServerKey لا يقبل نصاً في كل المتصفحات)
+function notifUrlB64ToBytes(base64) {
+  const s = String(base64 || '').trim();
+  const pad = '='.repeat((4 - (s.length % 4)) % 4);
+  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(b64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// ArrayBuffer → base64url (احتياط حين لا تتوفّر subscription.toJSON)
+function notifBytesToB64(buf) {
+  if (!buf) return '';
+  const bytes = new Uint8Array(buf);
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+// استخراج الحمولة التي تُحفظ في push_subscriptions.
+// المصدر الأول toJSON() لأنه القياسي؛ وgetKey() احتياطٌ يملأ ما نقص.
+function notifSubPayload(sub) {
+  if (!sub) return { endpoint: '', p256dh: '', auth: '' };
+
+  let j = null;
+  try { if (typeof sub.toJSON === 'function') j = sub.toJSON(); } catch (_) { j = null; }
+
+  const keys = (j && j.keys) || {};
+  let endpoint = String((j && j.endpoint) || sub.endpoint || '');
+  let p256dh   = String(keys.p256dh || '');
+  let auth     = String(keys.auth   || '');
+
+  if ((!p256dh || !auth) && typeof sub.getKey === 'function') {
+    try { if (!p256dh) p256dh = notifBytesToB64(sub.getKey('p256dh')); } catch (_) {}
+    try { if (!auth)   auth   = notifBytesToB64(sub.getKey('auth'));   } catch (_) {}
+  }
+  return { endpoint, p256dh, auth };
+}
+
+// ══════════════════════════════════════════════════════════════
+// تشخيص أخطاء القاعدة — الجدول الغائب ليس خطأً خاماً
+// ══════════════════════════════════════════════════════════════
+function notifTableMissing(err) {
+  if (!err) return false;
+  const code = String(err.code || '');
+  const msg  = String(err.message || err.details || '');
+  if (code === '42P01' || code === 'PGRST205') return true;
+  return /relation .* does not exist/i.test(msg)
+      || /could not find the table/i.test(msg)
+      || /schema cache/i.test(msg);
+}
+
+function notifAuthError(err) {
+  if (!err) return false;
+  const code = String(err.code || '');
+  const msg  = String(err.message || '');
+  return code === 'PGRST301' || code === '401'
+      || /jwt|not authenticated|invalid token|session/i.test(msg);
+}
+
+function notifDbErrText(err) {
+  if (!err) return '';
+  const parts = [err.message, err.details, err.hint].filter(Boolean).map(String);
+  return parts.join(' — ') || String(err);
+}
+
+// ══════════════════════════════════════════════════════════════
+// قراءة/كتابة التفضيلات والاشتراكات
+// ══════════════════════════════════════════════════════════════
+async function notifLoadPrefs(userId) {
+  try {
+    const { data, error } = await supabaseClient
+      .from(NOTIF_PREFS_TBL).select('*').eq('user_id', userId).maybeSingle();
+    if (error) {
+      if (notifTableMissing(error)) return { missing: true };
+      return { error: notifDbErrText(error), auth: notifAuthError(error) };
+    }
+    return { row: data || null };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
+}
+
+async function notifSavePrefs(patch) {
+  if (!notifState.user) return { ok: false, error: 'لا توجد جلسة نشطة.' };
+  const row = Object.assign({
+    user_id:       notifState.user.id,
+    email:         notifState.email,
+    email_enabled: notifState.emailEnabled,
+    push_enabled:  notifState.pushEnabled,
+  }, patch || {}, { updated_at: new Date().toISOString() });
+
+  try {
+    const { error } = await supabaseClient
+      .from(NOTIF_PREFS_TBL).upsert(row, { onConflict: 'user_id' });
+    if (error) {
+      if (notifTableMissing(error)) { notifState.prefsMissing = true; return { ok: false, missing: true }; }
+      return { ok: false, error: notifDbErrText(error), auth: notifAuthError(error) };
+    }
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+
+  notifState.prefsMissing = false;
+  notifState.email        = row.email;
+  notifState.emailEnabled = !!row.email_enabled;
+  notifState.pushEnabled  = !!row.push_enabled;
+  return { ok: true };
+}
+
+async function notifLoadSubs(userId) {
+  try {
+    const { data, error } = await supabaseClient
+      .from(NOTIF_SUBS_TBL).select('endpoint,user_agent').eq('user_id', userId);
+    if (error) {
+      if (notifTableMissing(error)) return { missing: true };
+      return { error: notifDbErrText(error), auth: notifAuthError(error) };
+    }
+    return { rows: Array.isArray(data) ? data : [] };
+  } catch (e) {
+    return { error: String((e && e.message) || e) };
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// عامل الخدمة والاشتراك
+// ══════════════════════════════════════════════════════════════
+async function notifRegisterSW() {
+  const env = notifEnv();
+  if (!env.hasSW) return { ok: false, error: 'هذا المتصفح لا يدعم عامل الخدمة (Service Worker).' };
+  try {
+    const reg = await navigator.serviceWorker.register(NOTIF_SW_PATH);
+    // ننتظر التفعيل: pushManager.subscribe على تسجيل غير مفعَّل يفشل أحياناً.
+    if (navigator.serviceWorker.ready) { try { await navigator.serviceWorker.ready; } catch (_) {} }
+    return { ok: true, reg };
+  } catch (e) {
+    return { ok: false, error: 'تعذّر تسجيل عامل الخدمة: ' + String((e && e.message) || e) };
+  }
+}
+
+async function notifCurrentSub() {
+  const env = notifEnv();
+  if (!env.usable) return null;
+  try {
+    // بلا وسيط: يُرجع التسجيل الذي **يتحكّم بهذه الصفحة** — وهو المطلوب.
+    // تمرير مسار السكربت هنا خطأ شائع (الوسيط عنوان صفحة لا عنوان سكربت).
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg || !reg.pushManager) return null;
+    return (await reg.pushManager.getSubscription()) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// تفعيل إشعارات المتصفح على **هذا الجهاز**: إذن → عامل خدمة → اشتراك → حفظ.
+// كل عائق يُعاد بنصّه، ولا خطوة تُتخطّى بصمت.
+async function notifSubscribeThisDevice() {
+  const env = notifEnv();
+  if (!env.hasNotif || !env.hasSW || !env.hasPush)
+    return { ok: false, error: 'هذا المتصفح لا يدعم إشعارات الويب (Notification / Service Worker / Push).' };
+  if (!env.secure)
+    return { ok: false, error: `إشعارات المتصفح تتطلّب اتصالاً آمناً (https)، والصفحة مفتوحة على «${env.protocol || '؟'}».` };
+  if (!notifState.user)
+    return { ok: false, error: 'انتهت الجلسة — سجّل الدخول من جديد ثم أعد المحاولة.' };
+
+  // 1) الإذن
+  let perm = notifPermission();
+  if (perm === 'default') {
+    try { perm = await Notification.requestPermission(); } catch (e) { perm = notifPermission(); }
+  }
+  if (perm === 'denied')
+    return { ok: false, denied: true, error: 'إذن الإشعارات مرفوض لهذا الموقع، والمتصفح لن يسأل مجدداً حتى تعيده يدوياً.' };
+  if (perm !== 'granted')
+    return { ok: false, error: 'لم يُمنح إذن الإشعارات — أُغلق الطلب دون موافقة.' };
+
+  // 2) عامل الخدمة
+  const sw = await notifRegisterSW();
+  if (!sw.ok) return { ok: false, error: sw.error };
+
+  // 3) الاشتراك
+  let sub = null;
+  try {
+    sub = await sw.reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await sw.reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: notifUrlB64ToBytes(NOTIF_VAPID_PUBLIC),
+      });
+    }
+  } catch (e) {
+    return { ok: false, error: 'فشل إنشاء اشتراك Push: ' + String((e && e.message) || e) };
+  }
+
+  const payload = notifSubPayload(sub);
+  if (!payload.endpoint || !payload.p256dh || !payload.auth)
+    return { ok: false, error: 'الاشتراك أُنشئ ناقصاً (endpoint أو مفاتيح مفقودة) — لا يُحفَظ سجل ناقص.' };
+
+  // 4) الحفظ — unique(user_id, endpoint) يجعل إعادة التفعيل تحديثاً لا تكراراً
+  const row = {
+    user_id:    notifState.user.id,
+    endpoint:   payload.endpoint,
+    p256dh:     payload.p256dh,
+    auth:       payload.auth,
+    user_agent: (typeof navigator !== 'undefined' && navigator.userAgent) ? String(navigator.userAgent).slice(0, 400) : '',
+  };
+  try {
+    const { error } = await supabaseClient
+      .from(NOTIF_SUBS_TBL).upsert(row, { onConflict: 'user_id,endpoint' });
+    if (error) {
+      if (notifTableMissing(error)) { notifState.subsMissing = true; return { ok: false, missing: true }; }
+      return { ok: false, error: notifDbErrText(error), auth: notifAuthError(error) };
+    }
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+
+  notifState.subsMissing = false;
+  notifState.thisEndpoint = payload.endpoint;
+  notifState.thisDeviceSubscribed = true;
+  return { ok: true, endpoint: payload.endpoint, row };
+}
+
+// إلغاء اشتراك هذا الجهاز: يُحذف السجل ويُلغى الاشتراك محلياً.
+async function notifUnsubscribeThisDevice() {
+  if (!notifState.user) return { ok: false, error: 'انتهت الجلسة — سجّل الدخول من جديد.' };
+
+  const sub = await notifCurrentSub();
+  const endpoint = notifState.thisEndpoint || (sub ? notifSubPayload(sub).endpoint : '');
+  if (!endpoint) return { ok: false, error: 'لا يوجد اشتراك مسجَّل على هذا الجهاز.' };
+
+  try {
+    const { error } = await supabaseClient
+      .from(NOTIF_SUBS_TBL).delete().eq('user_id', notifState.user.id).eq('endpoint', endpoint);
+    if (error && !notifTableMissing(error))
+      return { ok: false, error: notifDbErrText(error), auth: notifAuthError(error) };
+  } catch (e) {
+    return { ok: false, error: String((e && e.message) || e) };
+  }
+
+  if (sub && typeof sub.unsubscribe === 'function') { try { await sub.unsubscribe(); } catch (_) {} }
+
+  notifState.thisDeviceSubscribed = false;
+  notifState.thisEndpoint = '';
+  return { ok: true };
+}
+
+// ══════════════════════════════════════════════════════════════
+// استدعاء الدالة السحابية — والنتيجة تُعرض كما رجعت
+// ══════════════════════════════════════════════════════════════
+// كل مخرَج هنا يحمل سبباً: «تم الإرسال ✓» بلا تفصيل ممنوعة، لأن الفشل
+// الصامت في قناة إشعار يعني ألّا يصل تنبيه بيع ولا يعرف المالك.
+async function notifFnErrorDetail(error) {
+  const msg = String((error && error.message) || error || 'خطأ غير معروف');
+  let status = 0, body = '';
+
+  const ctx = error && error.context;
+  if (ctx && typeof ctx === 'object') {
+    status = Number(ctx.status || 0) || 0;
+    if (typeof ctx.text === 'function') {
+      try { body = String(await ctx.text() || '').slice(0, 600); } catch (_) {}
+    }
+  }
+
+  // الدالة تردّ أخطاءها المفهومة جسماً JSON فيه `message` عربي — نُظهره كما هو
+  // بدل نصّ المكتبة العام «non-2xx status code» الذي لا يقول للمالك شيئاً.
+  let fnMsg = '';
+  if (body) {
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && typeof parsed.message === 'string' && parsed.message.trim()) fnMsg = parsed.message.trim();
+      else if (parsed && typeof parsed.error === 'string' && parsed.error.trim()) fnMsg = parsed.error.trim();
+    } catch (_) {}
+  }
+
+  if (status === 404 || /not found|does not exist|failed to fetch/i.test(msg + ' ' + body)) {
+    return {
+      kind: 'not-deployed', status,
+      detail: `الدالة «${NOTIF_FN}» غير منشورة بعد على Supabase (أو تعذّر الوصول إليها).\n`
+            + `انشرها بالأمر:  ${NOTIF_DEPLOY_CMD}`,
+      raw: msg + (body ? ' | ' + body : ''),
+    };
+  }
+  if (status === 401 || status === 403 || /jwt|unauthor|forbidden/i.test(msg + ' ' + body)) {
+    return { kind: 'auth', status, detail: 'الجلسة غير صالحة أو منتهية — سجّل الخروج والدخول ثم أعد المحاولة.', raw: msg + (body ? ' | ' + body : '') };
+  }
+  return {
+    kind: 'error', status,
+    detail: fnMsg || (msg + (body ? '\n' + body : '')),
+    raw: msg + (body ? ' | ' + body : ''),
+  };
+}
+
+async function notifInvoke(channel) {
+  if (typeof supabaseClient === 'undefined' || !supabaseClient
+      || !supabaseClient.functions || typeof supabaseClient.functions.invoke !== 'function') {
+    return { ok: false, kind: 'client', detail: 'نسخة مكتبة Supabase المحمّلة لا تدعم استدعاء الدوال السحابية (functions.invoke).' };
+  }
+
+  let res;
+  try {
+    res = await supabaseClient.functions.invoke(NOTIF_FN, { body: { test: true, channel } });
+  } catch (e) {
+    return { ok: false, kind: 'network', detail: 'تعذّر الوصول إلى الدالة: ' + String((e && e.message) || e) };
+  }
+
+  const data  = res && res.data;
+  const error = res && res.error;
+  if (error) {
+    const info = await notifFnErrorDetail(error);
+    return { ok: false, kind: info.kind, detail: info.detail, status: info.status, raw: info.raw };
+  }
+  return { ok: true, data: data || null };
+}
+
+// ══════════════════════════════════════════════════════════════
+// بناء العرض — نظام مكوّنات اللوحة فقط (note / tag / kvs)
+// ══════════════════════════════════════════════════════════════
+function notifKvs(items) {
+  const rows = (items || []).filter(Boolean)
+    .map(([k, v]) => `<div class="kv"><span>${esc(k)}</span><b>${v}</b></div>`).join('');
+  return rows ? `<div class="kvs">${rows}</div>` : '';
+}
+
+function notifTag(state, text) {
+  const ic = state === 'good' ? '✅' : state === 'warn' ? '⚠️' : state === 'bad' ? '⛔' : 'ℹ️';
+  return `<span class="tag" data-state="${esc(state)}">${ic} ${esc(text)}</span>`;
+}
+
+function notifNote(state, icon, html) {
+  return `<div class="note" data-state="${esc(state)}" style="margin-top:10px"><span class="ic">${esc(icon)}</span><div>${html}</div></div>`;
+}
+
+// نصّ متعدّد الأسطر داخل note: نهرب ثم نحوّل السطر الجديد إلى <br>
+function notifMultiline(text) {
+  return esc(text).replace(/\n/g, '<br>');
+}
+
+function notifFmtVal(v) {
+  if (v === null || v === undefined) return '—';
+  if (typeof v === 'boolean') return v ? 'نعم' : 'لا';
+  if (typeof v === 'object') { try { return JSON.stringify(v); } catch (_) { return String(v); } }
+  return String(v);
+}
+
+// شرح إعادة الإذن المرفوض — الرفض في كروم لا يُسأل عنه مرة أخرى أبداً.
+function notifDeniedHelp() {
+  return notifNote('bad', '⛔',
+    '<strong>إذن الإشعارات مرفوض لهذا الموقع.</strong> المتصفح لن يسألك مرة أخرى، '
+  + 'والزر أعلاه لن يفعل شيئاً حتى تُعيد الإذن يدوياً:'
+  + '<ul style="margin:6px 0 0;padding-inline-start:18px;line-height:1.9">'
+  + '<li>اضغط أيقونة القفل 🔒 (أو ⚙️) يسار شريط العنوان.</li>'
+  + '<li>اختر «إعدادات الموقع» / <span dir="ltr">Site settings</span>.</li>'
+  + '<li>غيّر «الإشعارات» / <span dir="ltr">Notifications</span> من «حظر» إلى «سؤال» أو «سماح».</li>'
+  + '<li>حدّث الصفحة ثم فعّل المفتاح من جديد.</li>'
+  + '</ul>');
+}
+
+// لوحة البيئة: ما الذي يمنع التفعيل قبل أن يحاول المالك أصلاً.
+function notifRenderEnv() {
+  const el = document.getElementById('notif-env');
+  if (!el) return;
+  const env  = notifEnv();
+  const out  = [];
+
+  if (!notifState.user) {
+    out.push(notifNote('bad', '🔒', 'انتهت الجلسة أو لم تسجّل الدخول — لا يمكن قراءة إعدادات التنبيهات ولا حفظها. سجّل الدخول ثم حدّث الصفحة.'));
+  }
+  if (!env.supported) {
+    const miss = [
+      !env.hasNotif ? 'Notification' : '',
+      !env.hasSW    ? 'Service Worker' : '',
+      !env.hasPush  ? 'Push API' : '',
+    ].filter(Boolean).join('، ');
+    out.push(notifNote('warn', '🚫',
+      `هذا المتصفح لا يدعم إشعارات الويب (الناقص: <span dir="ltr">${esc(miss)}</span>). `
+    + 'يحدث هذا في سفاري القديم وفي نافذة التصفّح الخاص. '
+    + '<strong>خيار إشعارات المتصفح مخفيّ هنا</strong> — والبريد يبقى متاحاً ويصلك كالمعتاد.'));
+  } else if (!env.secure) {
+    out.push(notifNote('warn', '🔓',
+      `الصفحة مفتوحة على <span dir="ltr">${esc(env.protocol)}</span> لا <span dir="ltr">https:</span>. `
+    + 'إشعارات Push لا تعمل إلا في سياق آمن (https، أو localhost أثناء التطوير). '
+    + '<strong>افتح الموقع على https ثم أعد المحاولة</strong> — والبريد يعمل في الحالتين.'));
+  }
+
+  if (notifState.prefsMissing || notifState.subsMissing) {
+    const t = [
+      notifState.prefsMissing ? NOTIF_PREFS_TBL : '',
+      notifState.subsMissing  ? NOTIF_SUBS_TBL  : '',
+    ].filter(Boolean).map(x => `<code dir="ltr">${esc(x)}</code>`).join(' و');
+    out.push(notifNote('warn', '🗄️',
+      `<strong>جداول التنبيهات غير موجودة في القاعدة بعد:</strong> ${t}. `
+    + 'هذه ليست عطلاً — الترحيل (migration) لم يُشغَّل. '
+    + 'شغّل ترحيل الإشعارات على Supabase ثم حدّث هذه الصفحة، وبعدها يعمل الحفظ والتسجيل.'));
+  }
+  if (notifState.loadError) {
+    out.push(notifNote('bad', '⚠️', `تعذّرت قراءة إعدادات التنبيهات: ${notifMultiline(notifState.loadError)}`));
+  }
+
+  el.innerHTML = out.join('');
+}
+
+// لوحة الحالة: الإذن، هذا الجهاز، عدد الأجهزة، وزر إلغاء اشتراك الجهاز.
+function notifRenderStatus() {
+  const el = document.getElementById('notif-status');
+  if (!el) return;
+
+  const env  = notifEnv();
+  const perm = notifPermission();
+
+  if (!env.supported || !env.secure) { el.innerHTML = ''; return; }
+
+  const permState = NOTIF_PERM_STATE[perm] || 'warn';
+  const devState  = notifState.thisDeviceSubscribed ? 'good' : 'warn';
+
+  const kvs = notifKvs([
+    ['إذن الإشعارات في هذا المتصفح', notifTag(permState, NOTIF_PERM_LABEL[perm] || perm)],
+    ['هذا الجهاز', notifTag(devState, notifState.thisDeviceSubscribed ? 'مشترك' : 'غير مشترك')],
+    ['عدد الأجهزة المشتركة', notifState.subsMissing
+      ? notifTag('warn', 'الجدول غير موجود')
+      : `<span style="font-variant-numeric:tabular-nums">${esc(String(notifState.deviceCount))}</span>`],
+  ]);
+
+  let extra = '';
+  if (perm === 'denied') extra += notifDeniedHelp();
+
+  if (notifState.thisDeviceSubscribed) {
+    extra += `<div class="mt-4"><button class="btn btn-secondary btn-sm" id="notif-btn-unsub" onclick="notifUnsubClick()">`
+           + `🚫 إلغاء اشتراك هذا الجهاز</button></div>`;
+    if (notifState.deviceCount > 1) {
+      extra += notifNote('', 'ℹ️',
+        `الإلغاء يخصّ <strong>هذا الجهاز فقط</strong> — تبقى ${esc(String(notifState.deviceCount - 1))} من الأجهزة الأخرى مشتركة وتصلها الإشعارات.`);
+    }
+  }
+
+  el.innerHTML = kvs + extra;
+}
+
+// مزامنة المفاتيح والحقول مع الحالة (بلا إطلاق onchange).
+function notifRenderControls() {
+  const env = notifEnv();
+
+  const emailInput = document.getElementById('notif-email');
+  if (emailInput) emailInput.value = notifState.email || '';
+
+  const emailTgl = document.getElementById('notif-email-toggle');
+  if (emailTgl) {
+    emailTgl.checked  = !!notifState.emailEnabled;
+    emailTgl.disabled = !notifState.user;
+  }
+
+  // عدم الدعم أو http ⇒ يُخفى الخيار كلّه بدل زرّ لا يفعل شيئاً (الشرح في notif-env).
+  const pushRow = document.getElementById('notif-push-row');
+  if (pushRow) pushRow.style.display = (env.supported && env.secure) ? '' : 'none';
+
+  const pushTgl = document.getElementById('notif-push-toggle');
+  if (pushTgl) {
+    pushTgl.checked  = !!(notifState.pushEnabled && notifState.thisDeviceSubscribed);
+    pushTgl.disabled = !notifState.user || notifState.busy;
+  }
+
+  const testPush = document.getElementById('notif-test-push');
+  if (testPush) testPush.style.display = (env.supported && env.secure) ? '' : 'none';
+}
+
+function notifRender() {
+  notifRenderEnv();
+  notifRenderControls();
+  notifRenderStatus();
+}
+
+// ══════════════════════════════════════════════════════════════
+// معالِجات الواجهة
+// ══════════════════════════════════════════════════════════════
+async function notifSaveEmail() {
+  const input = document.getElementById('notif-email');
+  const raw   = input ? String(input.value || '').trim() : '';
+  if (!raw) { setStatus('notif-status-line', 'error', '⛔ أدخل بريداً إلكترونياً أولاً.'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) {
+    setStatus('notif-status-line', 'error', '⛔ صيغة البريد غير صحيحة.');
+    return;
+  }
+  const res = await notifSavePrefs({ email: raw });
+  if (res.missing) { notifRender(); setStatus('notif-status-line', 'warning', `⚠️ جدول ${NOTIF_PREFS_TBL} غير موجود — شغّل الترحيل أولاً.`); return; }
+  if (!res.ok)     { setStatus('notif-status-line', 'error', '⛔ تعذّر الحفظ: ' + (res.error || 'خطأ غير معروف')); return; }
+  setStatus('notif-status-line', 'success', `✅ حُفظ بريد التنبيهات: ${raw}`);
+  notifRender();
+}
+
+async function notifEmailToggle(el) {
+  const on = !!(el && el.checked);
+  // البريد المستخدم: ما في الحقل إن وُجد، وإلا بريد الحساب.
+  const input = document.getElementById('notif-email');
+  const email = (input && String(input.value || '').trim()) || notifState.email || '';
+  if (on && !email) {
+    if (el) el.checked = false;
+    setStatus('notif-status-line', 'error', '⛔ أدخل بريداً إلكترونياً قبل تفعيل تنبيهات البريد.');
+    return;
+  }
+  const res = await notifSavePrefs({ email, email_enabled: on });
+  if (res.missing) { if (el) el.checked = false; notifRender(); setStatus('notif-status-line', 'warning', `⚠️ جدول ${NOTIF_PREFS_TBL} غير موجود — شغّل الترحيل أولاً.`); return; }
+  if (!res.ok)     { if (el) el.checked = !on; setStatus('notif-status-line', 'error', '⛔ تعذّر الحفظ: ' + (res.error || 'خطأ غير معروف')); return; }
+  setStatus('notif-status-line', 'success', on ? `✅ تنبيهات البريد مفعّلة على ${email}` : 'تنبيهات البريد موقوفة.');
+  notifRender();
+}
+
+async function notifPushToggle(el) {
+  const want = !!(el && el.checked);
+  if (notifState.busy) { if (el) el.checked = !want; return; }
+  notifState.busy = true;
+  notifRenderControls();
+
+  try {
+    if (want) {
+      setStatus('notif-status-line', 'info', '⏳ جارٍ طلب الإذن وتسجيل هذا الجهاز…');
+      const res = await notifSubscribeThisDevice();
+      if (!res.ok) {
+        if (el) el.checked = false;
+        if (res.missing) setStatus('notif-status-line', 'warning', `⚠️ جدول ${NOTIF_SUBS_TBL} غير موجود — شغّل الترحيل ثم أعد المحاولة.`);
+        else             setStatus('notif-status-line', 'error', '⛔ ' + (res.error || 'تعذّر التفعيل.'));
+        await notifRefresh();
+        return;
+      }
+      await notifSavePrefs({ push_enabled: true });
+      setStatus('notif-status-line', 'success', '✅ سُجّل هذا الجهاز — ستصلك إشعارات المتصفح عند دخول سهم منطقة التخفيف أو التصفية.');
+    } else {
+      setStatus('notif-status-line', 'info', '⏳ جارٍ إلغاء اشتراك هذا الجهاز…');
+      const res = await notifUnsubscribeThisDevice();
+      if (!res.ok) {
+        if (el) el.checked = true;
+        setStatus('notif-status-line', 'error', '⛔ ' + (res.error || 'تعذّر الإلغاء.'));
+        await notifRefresh();
+        return;
+      }
+      // آخر جهاز ⇒ يُطفأ العلم كلّه؛ وإلا يبقى مفعّلاً لبقية الأجهزة.
+      const subs = await notifLoadSubs(notifState.user ? notifState.user.id : '');
+      const left = (subs && subs.rows) ? subs.rows.length : 0;
+      if (left === 0) await notifSavePrefs({ push_enabled: false });
+      setStatus('notif-status-line', 'success', left === 0
+        ? 'أُلغي اشتراك هذا الجهاز، ولا أجهزة أخرى مشتركة.'
+        : `أُلغي اشتراك هذا الجهاز — تبقى ${left} من الأجهزة مشتركة.`);
+    }
+  } finally {
+    notifState.busy = false;
+    await notifRefresh();
+  }
+}
+
+async function notifUnsubClick() {
+  const tgl = document.getElementById('notif-push-toggle');
+  if (tgl) tgl.checked = false;
+  await notifPushToggle({ checked: false });
+}
+
+// ══════════════════════════════════════════════════════════════
+// زرّا الاختبار
+// ══════════════════════════════════════════════════════════════
+function notifRenderTestResult(channel, res, preface) {
+  const chName = channel === 'push' ? 'إشعار المتصفح' : 'إشعار البريد';
+  let html = preface || '';
+
+  if (!res.ok) {
+    const stateIcon = { 'not-deployed': '📦', auth: '🔒', network: '🌐', client: '🧩' }[res.kind] || '⛔';
+    html += notifNote('bad', stateIcon,
+      `<strong>فشل اختبار ${esc(chName)}.</strong><br>${notifMultiline(res.detail || 'خطأ غير معروف')}`
+      + (res.status ? `<br><span class="small">رمز HTTP: <span dir="ltr">${esc(String(res.status))}</span></span>` : '')
+      + (res.raw && res.raw !== res.detail ? `<br><span class="small" dir="ltr" style="opacity:.8">${notifMultiline(res.raw)}</span>` : ''));
+    setReport('notif-test-report', html);
+    return;
+  }
+
+  // ⚠️ لا نفترض شكلاً واحداً للردّ. العقد المُعلن هو { sent, errors }، لكن
+  // الدالة المنشورة تُرجع تفصيلاً أوسع (attempted / email / push / note).
+  // نعرض **ما وصل فعلاً**: لو غاب `sent` نبني الجدول من بقية الحقول بدل
+  // أن نُعلن «لم تُرسل شيئاً» ونحن لم نفهم الردّ — وذلك أسوأ من لا شيء.
+  const d    = res.data || {};
+  const errs = Array.isArray(d.errors) ? d.errors : [];
+  const SKIP = new Set(['errors', 'note', 'mode', 'ok']);
+
+  const rows = (d.sent && typeof d.sent === 'object')
+    ? Object.keys(d.sent).map(k => [k, esc(notifFmtVal(d.sent[k]))])
+    : Object.keys(d).filter(k => !SKIP.has(k)).map(k => [k, esc(notifFmtVal(d[k]))]);
+
+  const declaredOk = (typeof d.ok === 'boolean') ? d.ok : null;
+  const attempted  = (typeof d.attempted === 'boolean') ? d.attempted : null;
+  const good = (declaredOk === null) ? (rows.length > 0 && errs.length === 0) : declaredOk;
+
+  // الحقائق تُجمَع ولا يحجب بعضها بعضاً: «لم ينجح» و«لم يحاول أصلاً»
+  // معلومتان مختلفتان، والثانية هي التي تقول للمالك ما الذي يصلحه.
+  let verdict = '';
+  if (declaredOk === false) verdict += ' وأعلنت أن الإرسال <strong>لم ينجح</strong>.';
+  else if (good)            verdict += ' وأعلنت نجاح الإرسال.';
+  if (attempted === false)  verdict += ' و<strong>لم تحاول الإرسال أصلاً</strong> — لا قناة مفعّلة على الخادم.';
+  if (rows.length === 0)    verdict += ' لم تُرجع الدالة أي قناة أُرسلت — <strong>لم ترسل شيئاً فعلياً</strong>.';
+
+  html += notifNote(good && !errs.length ? 'good' : (errs.length || !good) ? 'bad' : 'warn',
+    good && !errs.length ? '✅' : '⚠️',
+    `<strong>استجابت الدالة «${esc(NOTIF_FN)}» لاختبار ${esc(chName)}.</strong>${verdict}`);
+
+  if (rows.length) html += `<div style="margin-top:10px">${notifKvs(rows)}</div>`;
+
+  if (d.note) html += notifNote('warn', 'ℹ️', notifMultiline(notifFmtVal(d.note)));
+
+  if (errs.length) {
+    html += notifNote('bad', '⛔',
+      '<strong>أخطاء أرجعتها الدالة:</strong>'
+      + '<ul style="margin:6px 0 0;padding-inline-start:18px;line-height:1.9">'
+      + errs.map(e => `<li>${notifMultiline(notifFmtVal(e))}</li>`).join('')
+      + '</ul>');
+  }
+
+  if (channel === 'email') {
+    html += notifNote('warn', '📥',
+      'إن لم تجد الرسالة في الوارد فافحص <strong>البريد المهمَل (Spam/Junk)</strong> — '
+    + 'أول رسالة من مُرسِل جديد تُصنَّف مهملة كثيراً. علّمها «ليست مهملة» مرة واحدة فيصل ما بعدها للوارد.');
+  }
+
+  setReport('notif-test-report', html);
+}
+
+async function notifTestPush() {
+  setReport('notif-test-report', '');
+
+  // فحص محلّي قبل إزعاج الخادم — العائق المحلّي يُشرح ولا يُترجم إلى «فشل الإرسال».
+  const env  = notifEnv();
+  const perm = notifPermission();
+  const blockers = [];
+
+  if (!env.supported) blockers.push('هذا المتصفح لا يدعم إشعارات الويب.');
+  else if (!env.secure) blockers.push(`الصفحة على <span dir="ltr">${esc(env.protocol)}</span> لا https — Push لا يعمل في سياق غير آمن.`);
+  if (perm === 'denied')  blockers.push('إذن الإشعارات <strong>مرفوض</strong> لهذا الموقع — أعِده من إعدادات الموقع.');
+  if (perm === 'default') blockers.push('لم يُطلب إذن الإشعارات بعد — فعّل مفتاح «إشعارات المتصفح» أولاً.');
+  if (!notifState.thisDeviceSubscribed) blockers.push('هذا الجهاز غير مسجَّل في <code dir="ltr">push_subscriptions</code> — فعّل المفتاح أولاً.');
+  if (notifState.subsMissing) blockers.push(`جدول <code dir="ltr">${esc(NOTIF_SUBS_TBL)}</code> غير موجود — شغّل الترحيل أولاً.`);
+
+  if (blockers.length) {
+    setReport('notif-test-report', notifNote('bad', '⛔',
+      '<strong>لن يصلك إشعار متصفح قبل معالجة هذا:</strong>'
+      + `<ul style="margin:6px 0 0;padding-inline-start:18px;line-height:1.9">${blockers.map(b => `<li>${b}</li>`).join('')}</ul>`));
+    setStatus('notif-status-line', 'error', '⛔ الاختبار لم يُرسَل — راجع التفاصيل تحت الأزرار.');
+    return;
+  }
+
+  const btn = document.getElementById('notif-test-push');
+  if (btn) btn.disabled = true;
+  setStatus('notif-status-line', 'info', '⏳ جارٍ استدعاء الدالة السحابية لإرسال إشعار متصفح تجريبي…');
+  try {
+    const res = await notifInvoke('push');
+    notifRenderTestResult('push', res, '');
+    setStatus('notif-status-line', res.ok ? 'success' : 'error',
+      res.ok ? 'استجابت الدالة — التفاصيل أدناه.' : '⛔ فشل الاستدعاء — التفاصيل أدناه.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function notifTestEmail() {
+  setReport('notif-test-report', '');
+
+  const input = document.getElementById('notif-email');
+  const email = (input && String(input.value || '').trim()) || notifState.email || '';
+  const pre   = [];
+
+  if (notifState.prefsMissing)
+    pre.push(`جدول <code dir="ltr">${esc(NOTIF_PREFS_TBL)}</code> غير موجود — الدالة لن تجد بريداً تُرسل إليه.`);
+  if (!email)
+    pre.push('لا يوجد بريد محفوظ — أدخل البريد واحفظه أولاً.');
+  else if (email !== notifState.email)
+    pre.push(`البريد في الحقل (<span dir="ltr">${esc(email)}</span>) لم يُحفظ بعد — الدالة تقرأ <strong>المحفوظ</strong> (<span dir="ltr">${esc(notifState.email || '—')}</span>). احفظ أولاً.`);
+
+  if (pre.length) {
+    setReport('notif-test-report', notifNote('bad', '⛔',
+      '<strong>لن تصلك رسالة قبل معالجة هذا:</strong>'
+      + `<ul style="margin:6px 0 0;padding-inline-start:18px;line-height:1.9">${pre.map(b => `<li>${b}</li>`).join('')}</ul>`));
+    setStatus('notif-status-line', 'error', '⛔ الاختبار لم يُرسَل — راجع التفاصيل تحت الأزرار.');
+    return;
+  }
+
+  const btn = document.getElementById('notif-test-email');
+  if (btn) btn.disabled = true;
+  setStatus('notif-status-line', 'info', '⏳ جارٍ استدعاء الدالة السحابية لإرسال رسالة تجريبية…');
+  try {
+    const res = await notifInvoke('email');
+    const warn = notifState.emailEnabled ? '' :
+      notifNote('warn', 'ℹ️', 'مفتاح «تنبيهات البريد» موقوف حالياً — الاختبار يُجرَّب القناة، لكن التنبيهات الحقيقية لن تُرسَل حتى تفعّله.');
+    notifRenderTestResult('email', res, warn);
+    setStatus('notif-status-line', res.ok ? 'success' : 'error',
+      res.ok ? 'استجابت الدالة — التفاصيل أدناه.' : '⛔ فشل الاستدعاء — التفاصيل أدناه.');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// التحميل والتحديث
+// ══════════════════════════════════════════════════════════════
+async function notifRefresh() {
+  if (!notifState.user) { notifRender(); return; }
+  const uid = notifState.user.id;
+
+  const prefs = await notifLoadPrefs(uid);
+  notifState.prefsMissing = !!prefs.missing;
+  notifState.loadError    = prefs.error || '';
+  if (prefs.row) {
+    notifState.prefsRow     = prefs.row;
+    notifState.email        = String(prefs.row.email || '') || notifState.email;
+    notifState.emailEnabled = !!prefs.row.email_enabled;
+    notifState.pushEnabled  = !!prefs.row.push_enabled;
+  } else if (!prefs.missing && !prefs.error) {
+    // لا صفّ بعد: نبدأ ببريد الحساب مقترَحاً — قابل للتغيير قبل الحفظ.
+    notifState.prefsRow = null;
+    if (!notifState.email) notifState.email = String((notifState.user && notifState.user.email) || '');
+  }
+
+  const subs = await notifLoadSubs(uid);
+  notifState.subsMissing = !!subs.missing;
+  if (subs.rows) {
+    notifState.deviceCount = subs.rows.length;
+    const sub = await notifCurrentSub();
+    const ep  = sub ? notifSubPayload(sub).endpoint : '';
+    notifState.thisEndpoint         = ep;
+    notifState.thisDeviceSubscribed = !!ep && subs.rows.some(r => String(r.endpoint || '') === ep);
+  } else {
+    notifState.deviceCount = 0;
+    notifState.thisDeviceSubscribed = false;
+  }
+
+  notifRender();
+}
+
+async function notifInit() {
+  // القسم يعيش داخل بطاقة واحدة — غيابها يعني أننا لسنا في صفحة الإعدادات.
+  if (typeof document === 'undefined' || !document.getElementById('notif-card')) return;
+
+  try {
+    const { data } = await supabaseClient.auth.getUser();
+    notifState.user = (data && data.user) || null;
+  } catch (_) {
+    notifState.user = null;
+  }
+  if (notifState.user) notifState.email = String(notifState.user.email || '');
+
+  await notifRefresh();
+}
+
+// ╚══ NOTIF-SECTION-END ══════════════════════════════════════════════════
+
+notifInit();
