@@ -1774,6 +1774,7 @@ function _renderPlanResults(snaps, targetFinalValue) {
     <div style="background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px">
       ${headline}
       ${inflNote}
+      ${goalBasisNote(!!inp.adjustInflation, inp.inflationRate, inp.horizonYears)}
     </div>
     <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px" class="small">
       <span>الأفق: <b>${inp.horizonYears} سنة</b></span>
@@ -3415,6 +3416,34 @@ function renderMilestoneTable(horizonYears) {
 }
 
 // ── Goal panel ─────────────────────────────────────────────────────────
+// ══════════════════════════════════════════════════════════════════════
+// م.4 — الهدف «6,000 ريال **بالأسعار الاسمية** بحلول 2045»
+// ----------------------------------------------------------------------
+// مفتاح التضخم مفعَّل افتراضياً، فتُفسَّر أهداف المالك على أنها بقوة شراء
+// **اليوم** — وهو قياسٌ أنفع تخطيطياً لكنه ليس ما تنصّ عليه م.4. والرقمان
+// كانا يظهران على الشاشة نفسها بلا توفيق: بطاقة «معالم الدستور» تعرض
+// 1,310,000 اسمياً، وبطاقتا «توقيت الوصول» و«خطة الضخّ» تقيسان حقيقياً.
+// بتضخم 2.5% على 19 سنة: 6,000 اسمي ⇒ 1,310,000 · و6,000 حقيقي ⇒ 9,592
+// ر.س/شهر ⇒ 2,094,225 — فارق 784,225 ر.س (+60%).
+// لا نُطفئ المفتاح (القرار للمالك) بل نُعلن الأساس صراحةً ونعرض التوفيق.
+// ══════════════════════════════════════════════════════════════════════
+function goalBasisNote(inflOn, inflRate, years) {
+  const yld  = (typeof ASSUMED_YIELD === 'number') ? ASSUMED_YIELD : 0.055;
+  const gm   = (typeof GOAL_MONTHLY_INCOME === 'number') ? GOAL_MONTHLY_INCOME : 6000;
+  if (!inflOn) {
+    return '<div class="small" style="margin-top:6px;color:var(--text-muted)">'
+         + '⚖️ الهدف مقيس <b>اسمياً</b> — مطابق لنصّ م.4 («بالأسعار الاسمية»).</div>';
+  }
+  const mul = Math.pow(1 + (inflRate || 0), years || 0);
+  return '<div class="small" style="margin-top:6px;padding:8px 10px;border-radius:8px;'
+       + 'background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.35)">'
+       + '⚠️ <b>الهدف مقيس بقوة شراء اليوم، وم.4 تنصّ على الأسعار الاسمية.</b><br>'
+       + `بتضخم ${pct(inflRate)} على ${years} سنة: هدف الدستور الاسمي `
+       + `<b>${fmt(gm)}</b> ر.س/شهر ⇒ محفظة <b>${fmt(gm * 12 / yld)}</b>، `
+       + `مقابل <b>${fmt(gm * mul)}</b> ر.س/شهر ⇒ <b>${fmt(gm * mul * 12 / yld)}</b> بالقياس الحقيقي. `
+       + `الفارق <b>${fmt(gm * (mul - 1) * 12 / yld)}</b> ر.س — أطفئ مفتاح التضخم لقراءة م.4 حرفياً.</div>`;
+}
+
 function renderGoalPanel(horizonYears, goalAmount) {
   const card = document.getElementById('goal-result-card');
   const body = document.getElementById('goal-result-body');
@@ -3470,6 +3499,7 @@ function renderGoalPanel(horizonYears, goalAmount) {
         ? `— مقيس بقوة شراء اليوم (مخصوم بتضخم ${pct(inflRate)})`
         : '— مقيس اسمياً (مفتاح التضخم مطفأ)'}</span>
     </div>
+    ${goalBasisNote(inflOn, inflRate, horizonYears)}
     <div class="goal-rows">${rows}</div>`;
 }
 
