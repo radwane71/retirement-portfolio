@@ -154,8 +154,9 @@ async function addSingleTransaction(e) {
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   // R-1: mark dirty before recompute so a crash/close can't leave holdings stale
   _markDirtyTickers(user.id, [payload.ticker]);
-  await recomputeHoldingFromTx(user.id, payload.ticker);
-  _unmarkDirtyTicker(user.id, payload.ticker);   // recompute done — clear this ticker only
+  if (await safeRecompute(user.id, payload.ticker)) {
+    _unmarkDirtyTicker(user.id, payload.ticker);   // recompute done — clear this ticker only
+  }
   showToast('تمت إضافة المعاملة', 'success');
   document.getElementById('tx-form').reset();
   document.getElementById('t-date').value = todayISO();
@@ -316,8 +317,9 @@ async function saveAllStaging() {
   const affectedTickers = [...new Set(payloads.map(p => p.ticker))];
   _markDirtyTickers(user.id, affectedTickers);
   for (const ticker of affectedTickers) {
-    await recomputeHoldingFromTx(user.id, ticker);
-    _unmarkDirtyTicker(user.id, ticker);   // أزل الرمز فقط بعد نجاح إعادة حسابه
+    if (await safeRecompute(user.id, ticker)) {
+      _unmarkDirtyTicker(user.id, ticker);   // أزل الرمز فقط بعد نجاح إعادة حسابه
+    }
   }
 
   showToast(`تم إضافة ${payloads.length} معاملة بنجاح`, 'success');
@@ -353,6 +355,20 @@ async function loadTransactions() {
 
 // `recomputeHoldingFromTx` موحَّدة في `js/utils.js` — تستعملها صفحة
 // المعاملات وصفحة المطابقة معاً، فلا تتباعد نسختان.
+//
+// `recomputeHoldingFromTx` تَرمي الآن عند فشل جلب المعاملات بدل أن تعتبر
+// النتيجة الفارغة «صفر أسهم» وتحذف الحيازة. هذا الغلاف يُظهر الخطأ للمالك
+// ويُبقي عَلَم الرمز المتّسخ قائماً ليُعاد الحساب عند الفتح التالي.
+async function safeRecompute(userId, ticker) {
+  try {
+    await recomputeHoldingFromTx(userId, ticker);
+    return true;
+  } catch (e) {
+    console.error(e);
+    showToast(`⚠️ تعذّرت إعادة حساب ${ticker} — الحيازة لم تتغيّر، وستُعاد المحاولة عند فتح الصفحة`, 'error');
+    return false;
+  }
+}
 
 // ── Filter by type ────────────────────────────────────────────
 // ══════════════════════════════════════════════════════════════════════
@@ -488,8 +504,8 @@ async function applyCorpAction() {
   }
 
   // أعِد حساب الحيازة من المعاملات المعدَّلة (يضبط shares وWAC)
-  await recomputeHoldingFromTx(user.id, ticker);
-  if (!failed) _unmarkDirtyTicker(user.id, ticker);
+  const _recOk = await safeRecompute(user.id, ticker);
+  if (!failed && _recOk) _unmarkDirtyTicker(user.id, ticker);
 
   if (btn) { btn.disabled = false; btn.textContent = 'تطبيق على كل المعاملات'; }
   document.getElementById('corp-modal').style.display = 'none';
@@ -737,13 +753,13 @@ async function onTxSaved(id, field, newVal) {
     // recompute both old and new ticker when ticker field changes
     const tickers = new Set([row.ticker]);
     if (field === 'ticker' && oldTicker && oldTicker !== row.ticker) tickers.add(oldTicker);
-    for (const t of tickers) await recomputeHoldingFromTx(user.id, t);
+    for (const t of tickers) await safeRecompute(user.id, t);
     showToast('تم التحديث وإعادة حساب المحفظة ✓', 'success');
   } else if (field === 'date') {
     // AUDIT-FIX (2026-07): تغيير التاريخ يغيّر الترتيب الزمني — وWAC يعتمد على
     // ترتيب البيع بين الشراءات، فلا بد من إعادة حساب الحيازة (كان يُهمَل سابقاً).
     const { data: { user } } = await supabaseClient.auth.getUser();
-    await recomputeHoldingFromTx(user.id, row.ticker);
+    await safeRecompute(user.id, row.ticker);
     showToast('تم التحديث وإعادة حساب المحفظة ✓', 'success');
   }
   renderTable();
@@ -757,7 +773,7 @@ async function archiveTx(id) {
   const { error } = await supabaseClient.from('transactions').update({ is_archived: true }).eq('id', id);
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
   // إعادة حساب كاملة من الصفر بعد الحذف — أدق من reverseHolding
-  await recomputeHoldingFromTx(user.id, tx.ticker);
+  await safeRecompute(user.id, tx.ticker);
   showToast('تمت الأرشفة وتحديث المحفظة', 'success');
   await loadTransactions();
   renderTable();
@@ -858,7 +874,7 @@ async function saveEditModal() {
   // لو الرمز تغيّر نعيد حساب القديم والجديد كليهما
   const tickers = new Set([ticker]);
   if (oldTx?.ticker && oldTx.ticker !== ticker) tickers.add(oldTx.ticker);
-  for (const t of tickers) await recomputeHoldingFromTx(user.id, t);
+  for (const t of tickers) await safeRecompute(user.id, t);
 
   showToast('تم حفظ التعديلات ✓', 'success');
   document.getElementById('edit-modal').style.display = 'none';

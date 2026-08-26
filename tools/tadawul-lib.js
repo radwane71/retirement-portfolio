@@ -21,11 +21,31 @@ function tdDividendYears(ticker) {
     .map(Number).sort((a, b) => a - b);
 }
 
-// سنوات التوزيع المتصل حتى آخر سنة فيها بيانات (م.25 و2)
+// كل السنوات التي فيها بيانات معلنة (بتوزيع أو بلا توزيع)
+function tdDataYears(ticker) {
+  const r = TADAWUL_DATA[ticker];
+  if (!r) return [];
+  return Object.keys(r.years).map(Number).sort((a, b) => a - b);
+}
+
+// سنوات التوزيع المتصل **حتى آخر سنة فيها بيانات** (م.25 و2)
+// ----------------------------------------------------------------------
 // «الخفض لا يقطع الاتصال؛ الانقطاع الكامل يصفّره» — م.2.
+// ⚠️ كانت الدالة تحسب أطول سلسلة منتهية بآخر سنة **وزّع فيها**، لا بآخر
+// سنة **فيها بيانات**. فسهمٌ وزّع 2019–2022 ثم انقطع سنتين كان يُرجع
+// «4 سنوات متصلة» — والانقطاع الكامل يصفّرها نصّاً في م.2، وهو فوق ذلك
+// إشارة قاطعة تُنفَّذ من قراءة واحدة (م.44).
+// والناتج يغذّي تصنيف الفئة في م.25 (شرط «توزيع متصل ≥ 5/4 سنوات»)
+// ومنه السقف — فالخطأ كان يرفع سقف سهمٍ انقطع توزيعه.
 function tdDividendStreak(ticker) {
-  const ys = tdDividendYears(ticker);
-  if (!ys.length) return 0;
+  const ys   = tdDividendYears(ticker);
+  const all  = tdDataYears(ticker);
+  if (!ys.length || !all.length) return 0;
+
+  // انقطاع: آخر سنة بيانات لم يقع فيها توزيع ⇒ السلسلة مصفَّرة
+  const lastData = all[all.length - 1];
+  if (ys[ys.length - 1] !== lastData) return 0;
+
   let streak = 1;
   for (let i = ys.length - 1; i > 0; i--) {
     if (ys[i] - ys[i - 1] === 1) streak++;

@@ -2120,7 +2120,11 @@ function _sharesAtISO(ticker, iso) {
   for (const t of (_tx || [])) {
     if (t.ticker !== ticker || !t.date || t.date > iso) continue;
     if (t.type === 'buy' || t.type === 'grant') sh += +t.shares || 0;
-    else if (t.type === 'sell') sh -= +t.shares || 0;
+    // القصّ عند **كل** بيع لا في النهاية فقط: «شراء 100 → بيع 150
+    // → شراء 30» تساوي 30 سهماً لا صفراً. وهذا الرقم مقام DPS
+    // (المبلغ ÷ الأسهم وقت التوزيع)، فتصفيرُه يُسقط التوزيعة من
+    // الدخل ومن بوابة الاستدامة (م.42) — نفس منهج walkWAC.
+    else if (t.type === 'sell') sh = Math.max(0, sh - (+t.shares || 0));
   }
   return Math.max(0, sh);
 }

@@ -297,8 +297,14 @@ function loadAlertThresholds() {
 }
 
 function saveAlertThresholds() {
-  const g = +(document.getElementById('thresh-green').value  || 1);
-  const y = +(document.getElementById('thresh-yellow').value || 3);
+  // ⚠️ الافتراضيان هما ثابتا الدستور لا أرقام مكتوبة. كان `|| 1` يكتب
+  // 1% مكان 1.5% (م.49)، والمفتاح نفسه يقرؤه محرّك القرار ولوحة التحكم —
+  // فانحرافٌ في نطاق «لا إجراء» الدستوري كان يولّد اقتراح تصحيح.
+  // ونستعمل فحص isFinite لا `||` حتى لا يبتلع صفراً أدخله المالك عمداً.
+  const _gRaw = parseFloat(document.getElementById('thresh-green').value);
+  const _yRaw = parseFloat(document.getElementById('thresh-yellow').value);
+  const g = Number.isFinite(_gRaw) ? _gRaw : DEV_IGNORE;
+  const y = Number.isFinite(_yRaw) ? _yRaw : DEV_PUMP;
   if (g >= y) {
     document.getElementById('thresh-status').textContent = '⛔ حد الأخضر يجب أن يكون أصغر من حد الأصفر';
     document.getElementById('thresh-status').style.color = 'var(--danger)';
@@ -319,7 +325,7 @@ function resetAlertThresholds() {
   localStorage.setItem(userLsKey('tharwa-alert-yellow'), DEV_PUMP);
   loadAlertThresholds();
   const el = document.getElementById('thresh-status');
-  el.textContent = '↩ تمت إعادة الضبط إلى الافتراضي (1% / 3%)';
+  el.textContent = `↩ تمت إعادة الضبط إلى القيم الدستورية (${DEV_IGNORE}% / ${DEV_PUMP}%) — م.49`;
   el.style.color = 'var(--text-muted)';
 }
 

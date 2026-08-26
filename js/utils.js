@@ -1324,7 +1324,7 @@ function sharesAtDate(rows, dateStr) {
 // بعد كل إضافة أو تعديل أو أرشفة معاملة يُستدعى هذا لضمان دقة WAC
 async function recomputeHoldingFromTx(userId, ticker) {
   // S-2: filter by user_id — defence in depth if RLS is ever misconfigured
-  const { data: txAll } = await supabaseClient
+  const { data: txAll, error: txErr } = await supabaseClient
     .from('transactions')
     .select('type, shares, price, total, name, date, created_at, id')
     .eq('user_id', userId)
@@ -1332,7 +1332,17 @@ async function recomputeHoldingFromTx(userId, ticker) {
     .eq('is_archived', false)
     .order('date', { ascending: true });
 
-  const rows = txAll || [];
+  // ⚠️ حارس وجودي: supabase-js **يَفي بالوعد عند الخطأ** ولا يرمي، فكان
+  // فشل الشبكة أو RLS يُنتج `txAll = null` ⇒ `rows = []` ⇒ الأسهم صفر ⇒
+  // الفرع أدناه **يحذف الحيازة من القاعدة**. أي أن انقطاعاً لحظياً كان
+  // كفيلاً بمسح مركز كامل بلا أي رسالة. ولا يلتقطه `try/catch` حول النداء.
+  // القاعدة: بيانٌ لم يصل ≠ بيانٌ صفر (م.20 و21).
+  if (txErr || !Array.isArray(txAll)) {
+    console.error('recomputeHoldingFromTx: فشل جلب المعاملات — أُلغيت إعادة الحساب', ticker, txErr);
+    throw new Error(`تعذّر جلب معاملات ${ticker}: ${txErr?.message || 'لا استجابة'}`);
+  }
+
+  const rows = txAll;
   let stockName = '';
   rows.forEach(t => { if (!stockName && t.name) stockName = t.name; });
 
