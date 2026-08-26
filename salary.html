@@ -68,6 +68,30 @@
     tr.row-planned            { background: rgba(99,102,241,.055); }
     tr.row-planned td:first-child { box-shadow: inset 3px 0 0 #818cf8; }
     tr.row-planned .num       { opacity:.82; }
+
+    /* ── التحديد الجماعي ─────────────────────────────────────────── */
+    td.sel-cell, th.sel-cell { width: 34px; text-align: center; padding-inline: 6px; }
+    .sel-cell input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--primary, #58a6ff); }
+    tr.row-selected           { background: rgba(88,166,255,.10); }
+    tr.row-selected td:first-child { box-shadow: inset 3px 0 0 var(--primary, #58a6ff); }
+    #bulk-bar:empty           { display: none; }
+    .bulk-bar {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      background: rgba(88,166,255,.08);
+      border: 1px solid rgba(88,166,255,.32);
+      border-radius: 10px; padding: 9px 12px; margin-bottom: 10px;
+    }
+    .bulk-bar .bb-count { font-weight: 700; }
+    .bulk-bar .bb-sum   { color: var(--text-2); font-size: .8rem; }
+    .bulk-bar .bb-spacer{ flex: 1; }
+    /* صفّ حقلٍ في التعديل الجماعي: مربّع تفعيل ثم الحقل */
+    label.bulk-field { display: flex; align-items: center; gap: 8px; cursor: pointer; margin-bottom: 4px; }
+    label.bulk-field input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--primary, #58a6ff); }
+    .bulk-alloc-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .bulk-alloc-row .ba-name { flex: 1; font-size: .84rem; }
+    .bulk-alloc-row input[type="number"] { width: 130px; }
+    .bulk-alloc-row input:disabled, .form-row input:disabled,
+    .form-row select:disabled, .form-row textarea:disabled { opacity: .45; }
     .badge-status             { font-size:.68rem; padding:2px 7px; border-radius:10px; font-weight:700; white-space:nowrap; }
     .badge-status.planned     { background: rgba(99,102,241,.16); color:#a5b4fc; }
     .badge-status.actual      { background: rgba(63,185,80,.14);  color:#4ade80; }
@@ -472,6 +496,8 @@
         </div>
       </div>
       <div id="planned-bar"></div>
+      <!-- شريط التحديد الجماعي — يظهر عند تحديد سجلّ فأكثر -->
+      <div id="bulk-bar"></div>
       <div class="table-wrap">
         <table class="salary-table">
           <thead id="salary-thead"></thead>
@@ -626,6 +652,72 @@
       <div class="modal-actions">
         <button class="btn btn-secondary" onclick="closeDeleteModal()">إلغاء</button>
         <button class="btn btn-danger" onclick="executeDelete()">حذف نهائياً</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       تعديل جماعي — يُطبَّق على المحدَّد كله
+       ------------------------------------------------------------------
+       ⚠️ لا يُعاد استعمال نموذج السجلّ الواحد: فيه السنة والشهر وهما
+       **مفتاح فريد** لكل سجلّ، وفرضهما على مجموعة يُنتج أشهراً مكرَّرة.
+       والأهم: كل حقل هنا يُطبَّق **فقط إن فُعِّل صراحةً** — بلا ذلك يمسح
+       التعديل الجماعي تخصيصات عشرة أشهر بضغطة واحدة وهو لا يقصد إلا
+       تغيير الراتب.
+       ══════════════════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="bulk-edit-modal" onclick="if(event.target===this)closeBulkEdit()">
+    <div class="modal-box">
+      <h2 id="bulk-edit-title">تعديل جماعي</h2>
+      <div class="note" data-state="info" id="bulk-edit-scope"></div>
+
+      <div class="form-row">
+        <label class="bulk-field">
+          <input type="checkbox" id="bulk-do-salary" onchange="_bulkSync()">
+          <span>تغيير الراتب / إجمالي الدخل</span>
+        </label>
+        <input type="number" id="bulk-salary" min="0" step="0.01" placeholder="0.00" disabled>
+      </div>
+
+      <div class="form-row">
+        <label class="bulk-field">
+          <input type="checkbox" id="bulk-do-status" onchange="_bulkSync()">
+          <span>تغيير نوع الشهر</span>
+        </label>
+        <select id="bulk-status" disabled>
+          <option value="actual">✅ منفَّذ فعلي — يدخل الحسابات</option>
+          <option value="planned">📅 مخطَّط له — لا يدخل أي حساب</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label class="bulk-field">
+          <input type="checkbox" id="bulk-do-notes" onchange="_bulkSync()">
+          <span>استبدال الملاحظات</span>
+        </label>
+        <textarea id="bulk-notes" rows="2" placeholder="تُستبدل ملاحظة كل شهر محدَّد..." disabled></textarea>
+      </div>
+
+      <div class="alloc-section">
+        <h3>التخصيصات <small class="sub-label">فعّل الفئة التي تريد تغييرها فقط</small></h3>
+        <div id="bulk-allocations"></div>
+      </div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeBulkEdit()">إلغاء</button>
+        <button class="btn btn-primary"   onclick="saveBulkEdit()">تطبيق على المحدَّد</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bulk Delete Modal -->
+  <div class="modal-overlay" id="bulk-delete-modal" onclick="if(event.target===this)closeBulkDelete()">
+    <div class="confirm-box">
+      <div class="ci">⚠️</div>
+      <h2>حذف جماعي</h2>
+      <p id="bulk-delete-msg"></p>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" onclick="closeBulkDelete()">إلغاء</button>
+        <button class="btn btn-danger" onclick="executeBulkDelete()">حذف المحدَّد نهائياً</button>
       </div>
     </div>
   </div>

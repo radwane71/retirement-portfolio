@@ -294,12 +294,15 @@ function syncFilterVars() {
   filterToMonth   = val('to-month');
 }
 
-function applyDateRange() { syncFilterVars(); renderAll(); }
+// ⚠️ تغيير الفترة يُفرِّغ التحديد: المالك حدّد **ما يراه**، فإبقاء أشهرٍ
+// محدَّدة خارج الشاشة يجعل «حذف المحدَّد» يمسّ ما لا يظهر أمامه.
+function applyDateRange() { selectedIds.clear(); syncFilterVars(); renderAll(); }
 
 function clearDateRange() {
   ['from-year','from-month','to-year','to-month'].forEach(id => {
     const el = document.getElementById(id); if (el) el.value = '';
   });
+  selectedIds.clear();
   syncFilterVars();
   renderAll();
 }
@@ -928,7 +931,11 @@ function renderTable() {
   // اللون في رأس العمود يُحمَل على نقطة بجانب الاسم — لا على النص وحده
   const catCols = store.categories.map(c =>
     `<th><span class="dot" style="background:${catColor(c.id)}"></span> ${esc(c.name)}</th>`).join('');
+  // خانة التحديد أول عمود ⇒ تظهر **يمين السنة** في التخطيط العربي
+  const _allSel = entries.length > 0 && entries.every(e => selectedIds.has(e.id));
   document.getElementById('salary-thead').innerHTML = `<tr>
+    <th class="sel-cell"><input type="checkbox" ${_allSel ? 'checked' : ''}
+      onchange="toggleAllSel(this.checked)" title="تحديد كل الأشهر المعروضة"></th>
     <th>السنة</th><th>الشهر</th><th>الراتب</th>${catCols}<th>المتبقي</th><th>ملاحظات</th>
     <th>النوع</th><th>إجراءات</th>
   </tr>`;
@@ -948,7 +955,8 @@ function renderTable() {
 
   if (!entries.length) {
     document.getElementById('salary-tbody').innerHTML =
-      `<tr><td colspan="${store.categories.length + 7}">${emptyBox('لا توجد سجلات في هذه الفترة')}</td></tr>`;
+      `<tr><td colspan="${store.categories.length + 8}">${emptyBox('لا توجد سجلات في هذه الفترة')}</td></tr>`;
+    renderBulkBar();
     return;
   }
 
@@ -963,7 +971,11 @@ function renderTable() {
     }).join('');
     const planned = isPlanned(e);
     const nChg = (store.audit || []).filter(x => x.entryId === e.id).length;
-    return `<tr${planned ? ' class="row-planned"' : ''}>
+    const sel = selectedIds.has(e.id);
+    const rowCls = [planned ? 'row-planned' : '', sel ? 'row-selected' : ''].filter(Boolean).join(' ');
+    return `<tr${rowCls ? ` class="${rowCls}"` : ''}>
+      <td class="sel-cell"><input type="checkbox" ${sel ? 'checked' : ''}
+        onchange="toggleRowSel('${e.id}', this.checked)"></td>
       <td>${e.year}</td>
       <td>${MONTHS_AR[(+e.month||1)-1]}</td>
       <td class="num">${formatSAR(salary)}</td>
@@ -985,6 +997,204 @@ function renderTable() {
       </td>
     </tr>`;
   }).join('');
+
+  renderBulkBar();
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// التحديد الجماعي — حذفٌ وتعديلٌ لمجموعة أشهر دفعةً واحدة
+// ----------------------------------------------------------------------
+// طلب المالك: «أحدّد ٥ أو ١٠ أو ١٥ شهراً، وأضغط حذف على أيٍّ منها فيُحذف
+// المحدَّد كله؛ وإن عدّلت، يُعدَّل الجروب كله».
+//
+// ثلاث قواعد تحكم التنفيذ:
+//   ① التحديد يعيش خارج الجدول (`selectedIds`) فلا يضيع عند إعادة الرسم —
+//     والصفحة تُعيد الرسم بعد كل تغيير.
+//   ② زرّا الصفّ (✏️ و🗑️) يتحوّلان إلى «جماعي» **فقط** إذا كان الصفّ نفسه
+//     ضمن تحديدٍ فيه أكثر من واحد. صفٌّ خارج التحديد يبقى فردياً — وإلا
+//     حذف المالك عشرة أشهر وهو يقصد واحداً.
+//   ③ السنة والشهر **لا يُعدَّلان جماعياً**: هما المفتاح الفريد لكل سجلّ،
+//     وفرضهما على مجموعة يُنتج أشهراً مكرَّرة.
+// وكل سجلّ يُسجَّل في سجلّ التغييرات منفرداً، فالحذف الجماعي يبقى قابلاً
+// للمراجعة شهراً شهراً.
+// ══════════════════════════════════════════════════════════════════════
+let selectedIds = new Set();
+
+function toggleRowSel(id, on) {
+  if (on) selectedIds.add(id); else selectedIds.delete(id);
+  renderTable();
+}
+
+function toggleAllSel(on) {
+  const ids = getFilteredAll().map(e => e.id);
+  if (on) ids.forEach(i => selectedIds.add(i));
+  else    ids.forEach(i => selectedIds.delete(i));
+  renderTable();
+}
+
+function clearSel() { selectedIds.clear(); renderTable(); }
+
+// المحدَّد الموجود فعلاً (بعد حذف أو تغيير فترة)
+function _selEntries() {
+  return store.entries.filter(e => selectedIds.has(e.id));
+}
+
+function renderBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  if (!bar) return;
+  const sel = _selEntries();
+  if (!sel.length) { bar.innerHTML = ''; return; }
+
+  const sum = sel.reduce((s, e) => s + (+e.salary || 0), 0);
+  const nPlanned = sel.filter(isPlanned).length;
+  bar.innerHTML = `
+    <div class="bulk-bar">
+      <span class="bb-count">✓ ${sel.length} شهراً محدَّداً</span>
+      <span class="bb-sum">مجموع الدخل ${formatSAR(sum)}${nPlanned ? ` · منها ${nPlanned} مخطَّط` : ''}</span>
+      <span class="bb-spacer"></span>
+      <button class="btn btn-secondary btn-sm" onclick="openBulkEdit()">✏️ تعديل المحدَّد</button>
+      <button class="btn btn-danger btn-sm"    onclick="confirmBulkDelete()">🗑️ حذف المحدَّد</button>
+      <button class="btn btn-secondary btn-sm" onclick="clearSel()">إلغاء التحديد</button>
+    </div>`;
+}
+
+// ─── حذف جماعي ───────────────────────────────────────────────────────
+function _selLabels() {
+  return _selEntries().slice()
+    .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month)
+    .map(e => `${MONTHS_AR[(+e.month || 1) - 1]} ${e.year}`);
+}
+
+function confirmBulkDelete() {
+  const sel = _selEntries();
+  if (!sel.length) return;
+  const list  = _selLabels();
+  const shown = list.slice(0, 12).join(' · ') + (list.length > 12 ? ` … و${list.length - 12} غيرها` : '');
+  document.getElementById('bulk-delete-msg').textContent =
+    `سيُحذف ${sel.length} سجلاً نهائياً:\n${shown}\n\nلا يمكن التراجع عن هذا الإجراء.`;
+  document.getElementById('bulk-delete-modal').classList.add('open');
+}
+
+function closeBulkDelete() {
+  document.getElementById('bulk-delete-modal').classList.remove('open');
+}
+
+function executeBulkDelete() {
+  const sel = _selEntries();
+  if (!sel.length) { closeBulkDelete(); return; }
+  sel.forEach(e => logChange('delete', e, _auditSnapshot(e)));   // كلٌّ على حدة — يبقى قابلاً للمراجعة
+  const ids = new Set(sel.map(e => e.id));
+  store.entries = store.entries.filter(e => !ids.has(e.id));
+  selectedIds.clear();
+  saveStore(store);
+  closeBulkDelete();
+  buildYearSelects();
+  renderAll();
+  showToast(`🗑️ حُذف ${sel.length} سجلاً`, 'success');
+}
+
+// ─── تعديل جماعي ─────────────────────────────────────────────────────
+function _bulkSync() {
+  [['bulk-do-salary', 'bulk-salary'], ['bulk-do-status', 'bulk-status'],
+   ['bulk-do-notes', 'bulk-notes']].forEach(([chk, fld]) => {
+    const c = document.getElementById(chk), f = document.getElementById(fld);
+    if (c && f) f.disabled = !c.checked;
+  });
+  document.querySelectorAll('#bulk-allocations .bulk-alloc-row').forEach(row => {
+    const c = row.querySelector('input[type="checkbox"]');
+    const f = row.querySelector('input[type="number"]');
+    if (c && f) f.disabled = !c.checked;
+  });
+}
+
+function openBulkEdit() {
+  const sel = _selEntries();
+  if (!sel.length) return;
+  if (sel.length === 1) { openEditModal(sel[0].id); return; }   // واحدٌ فقط ⇒ النموذج العادي أدقّ
+
+  const list = sel.slice()
+    .sort((a, b) => a.year !== b.year ? a.year - b.year : a.month - b.month);
+  const first = list[0], last = list[list.length - 1];
+  const from = `${MONTHS_AR[(+first.month || 1) - 1]} ${first.year}`;
+  const to   = `${MONTHS_AR[(+last.month  || 1) - 1]} ${last.year}`;
+
+  document.getElementById('bulk-edit-title').textContent = `تعديل ${sel.length} سجلاً دفعةً واحدة`;
+  document.getElementById('bulk-edit-scope').innerHTML =
+      `<span class="ic">📝</span><div>سيُطبَّق على <b>${sel.length}</b> شهراً `
+    + `(${esc(from)} ← ${esc(to)}). <b>الحقول غير المفعَّلة لا تُمسّ</b> — تبقى كما هي `
+    + `في كل شهر. والسنة والشهر لا يُعدَّلان جماعياً لأنهما مفتاح كل سجلّ.</div>`;
+
+  ['bulk-do-salary', 'bulk-do-status', 'bulk-do-notes'].forEach(id => {
+    const c = document.getElementById(id); if (c) c.checked = false;
+  });
+  document.getElementById('bulk-salary').value = '';
+  document.getElementById('bulk-notes').value  = '';
+  document.getElementById('bulk-status').value = 'actual';
+
+  // صفّ لكل فئة — مُعطَّل حتى يُفعَّل، فلا يُمسح تخصيصٌ بالخطأ
+  document.getElementById('bulk-allocations').innerHTML = store.categories.map(c => `
+    <div class="bulk-alloc-row">
+      <input type="checkbox" onchange="_bulkSync()" title="فعّل لتغيير هذه الفئة">
+      <span class="ba-name"><span class="dot" style="background:${catColor(c.id)}"></span> ${esc(c.name)}</span>
+      <input type="number" step="0.01" data-cat="${esc(c.id)}" placeholder="0.00" disabled>
+    </div>`).join('') || '<div class="text-muted small">لا فئات بعد</div>';
+
+  _bulkSync();
+  document.getElementById('bulk-edit-modal').classList.add('open');
+}
+
+function closeBulkEdit() {
+  document.getElementById('bulk-edit-modal').classList.remove('open');
+}
+
+function saveBulkEdit() {
+  const sel = _selEntries();
+  if (!sel.length) { closeBulkEdit(); return; }
+
+  const doSalary = document.getElementById('bulk-do-salary').checked;
+  const doStatus = document.getElementById('bulk-do-status').checked;
+  const doNotes  = document.getElementById('bulk-do-notes').checked;
+  const salary   = parseFloat(document.getElementById('bulk-salary').value);
+  const status   = document.getElementById('bulk-status').value === 'planned' ? 'planned' : 'actual';
+  const notes    = document.getElementById('bulk-notes').value.trim();
+
+  const allocChanges = [...document.querySelectorAll('#bulk-allocations .bulk-alloc-row')]
+    .filter(r => r.querySelector('input[type="checkbox"]').checked)
+    .map(r => {
+      const f = r.querySelector('input[type="number"]');
+      return { catId: f.dataset.cat, amount: parseFloat(f.value) || 0 };
+    });
+
+  if (!doSalary && !doStatus && !doNotes && !allocChanges.length) {
+    showToast('لم تفعّل أي حقل — لا شيء ليُطبَّق', 'error'); return;
+  }
+  if (doSalary && !(salary >= 0)) {
+    showToast('الراتب المُدخَل غير صالح', 'error'); return;
+  }
+
+  sel.forEach(e => {
+    const before = _auditSnapshot(e);
+    if (doSalary) e.salary = salary;
+    if (doStatus) e.status = status;
+    if (doNotes)  e.notes  = notes;
+    if (allocChanges.length) {
+      const arr = (e.allocations || []).slice();
+      allocChanges.forEach(ch => {
+        const i = arr.findIndex(a => a.catId === ch.catId);
+        if (ch.amount === 0) { if (i !== -1) arr.splice(i, 1); }       // صفر = إزالة التخصيص
+        else if (i === -1)   arr.push({ catId: ch.catId, amount: ch.amount });
+        else                 arr[i] = { catId: ch.catId, amount: ch.amount };
+      });
+      e.allocations = arr;
+    }
+    logChange('edit', e, before);     // سجلٌّ منفصل لكل شهر
+  });
+
+  saveStore(store);
+  closeBulkEdit();
+  buildYearSelects();
+  renderAll();
+  showToast(`✅ طُبِّق التعديل على ${sel.length} شهراً`, 'success');
 }
 
 // تحويل الشهر بين مخطَّط ومنفَّذ بضغطة — وهو **تعديل** فيُسجَّل كغيره
@@ -1164,6 +1374,8 @@ function openAddModal() {
 }
 
 function openEditModal(id) {
+  // والمثل في التعديل: صفٌّ ضمن تحديدٍ متعدّد ⇒ تعديل جماعي للمجموعة كلها
+  if (selectedIds.size > 1 && selectedIds.has(id)) { openBulkEdit(); return; }
   const entry = store.entries.find(e => e.id === id);
   if (!entry) return;
   editingId = id;
@@ -1353,6 +1565,10 @@ function logChange(action, entry, before) {
 
 // ─── Delete Single ────────────────────────────────────────────────────────────
 function confirmDelete(id) {
+  // طلب المالك: «إذا كبست حذف في أي مكان من المحدَّدين، أقدر أحذف الجروب
+  // كامل». الشرط: الصفّ نفسه **ضمن** التحديد وفيه أكثر من واحد — وإلا بقي
+  // الحذف فردياً، فلا يمحو المالك عشرة أشهر وهو يقصد شهراً.
+  if (selectedIds.size > 1 && selectedIds.has(id)) { confirmBulkDelete(); return; }
   const entry = store.entries.find(e => e.id === id);
   if (!entry) return;
   const monthName = MONTHS_AR[(+entry.month||1)-1];
