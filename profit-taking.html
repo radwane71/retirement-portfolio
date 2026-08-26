@@ -186,6 +186,26 @@
           <input type="number" id="q_price" placeholder="0.00" min="0.01" step="0.01">
         </div>
         <div class="pt-field">
+          <label>القيمة العادلة للسهم (م.48)</label>
+          <span class="sub">من حاسبة القيمة العادلة — الحكم السعري الدستوري</span>
+          <input type="number" id="q_fair" placeholder="مثال: 52.00" min="0.01" step="0.01">
+        </div>
+        <div class="pt-field">
+          <label>التوزيعات المستلمة لكل سهم</label>
+          <span class="sub">لحساب التعادل الحقيقي (م.2) — ما استُرِدّ رأسُ مالٍ عاد فعلاً</span>
+          <input type="number" id="q_divps" placeholder="مثال: 3.20" min="0" step="0.01">
+        </div>
+        <div class="pt-field">
+          <label>هل التوزيع ينمو؟</label>
+          <span class="sub">م.68/16: ممنوع بيع رابح قوي توزيعه ينمو لمجرد ارتفاع السعر</span>
+          <select id="q_divgrow" style="width:100%;padding:8px;background:var(--bg-3);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-family:inherit">
+            <option value="">— غير محدَّد —</option>
+            <option value="grow">ينمو</option>
+            <option value="flat">ثابت</option>
+            <option value="cut">مقصوص أو منقطع</option>
+          </select>
+        </div>
+        <div class="pt-field">
           <label>متوسط 200 يوم (MA200)</label>
           <span class="sub">لقياس الامتداد الفني عن المتوسط</span>
           <input type="number" id="q_ma200" placeholder="مثال: 45.00" min="0.01" step="0.01">
@@ -241,7 +261,12 @@
       //  الحكم، مع تجاوزات صارمة للتركّز المفرط والنشوة (FOMO).
       // ════════════════════════════════════════════════════════════
 
-      const W = { qual: 0.30, profit: 0.15, ext: 0.25, val: 0.30 };
+      // ⚠️ أوزان أُعيد ضبطها على الدستور: م.48 تجعل «السعر ÷ القيمة العادلة»
+      // هو الحكم السعري، وم.5 تعرّف الأمان باستمرارية التوزيع لا بتقلّب
+      // السعر. فكان أثقل وزن (0.30) للإشارة **السلوكية** وأخفّها للتقييم،
+      // ولا وجود للقيمة العادلة إطلاقاً رغم أن `valueBandOf` و`VALUE_BANDS`
+      // محمَّلتان في هذه الصفحة. الآن: القيمة العادلة أثقل، والسلوكي مساند.
+      const W = { fair: 0.35, qual: 0.15, profit: 0.10, ext: 0.15, val: 0.25 };
 
       const questions = [
         {
@@ -362,6 +387,8 @@
 
       function calculate() {
         const cost = g('q_cost'), price = g('q_price'), ma200 = g('q_ma200'), pe = g('q_pe'), spe = g('q_spe');
+        const fair = g('q_fair'), divPs = g('q_divps');
+        const divGrow = (document.getElementById('q_divgrow') || {}).value || '';
         const msg = document.getElementById('pt-validation');
         document.querySelectorAll('#pt-quant-card input').forEach(el => el.classList.remove('input-error'));
 
@@ -373,10 +400,32 @@
           return;
         }
 
-        const profitPct = (price - cost) / cost * 100;
-        if (profitPct <= 0) {
+        // ══════════════════════════════════════════════════════════
+        // م.2 و م.11 — البوابة على **التعادل الحقيقي** لا على ربحٍ إجمالي
+        // ----------------------------------------------------------
+        // كانت `(price − cost)/cost` إجماليةً بلا عمولة ولا ضريبة، فبربح
+        // ظاهري +0.2% قد يخرج حكم «جني أرباح» بينما البيع بعد العمولة
+        // **خسارة محقّقة** تمنعها م.11 مطلقاً. والصفحة تحمّل utils.js
+        // ولم تستدع `calcCommission` ولا مرة.
+        // والتعادل الحقيقي (م.2) = متوسط التكلفة − التوزيعات المستلمة
+        // للسهم: ما استُرِدّ توزيعاً رأسُ مالٍ عاد فعلاً، وتجاهله يؤجّل
+        // خروجاً صار مربحاً.
+        // ══════════════════════════════════════════════════════════
+        const _divBack   = (divPs != null && divPs > 0) ? divPs : 0;
+        const trueBE     = cost - _divBack;
+        const _commRate  = (typeof COMMISSION_RATE === 'number') ? COMMISSION_RATE : 0.0015;
+        const _vat       = 0.15;
+        const _netPrice  = price * (1 - _commRate * (1 + _vat));   // صافي العائد للسهم بعد العمولة وضريبتها
+        const netProfitPct = trueBE > 0 ? (_netPrice - trueBE) / trueBE * 100 : 0;
+        const profitPct  = netProfitPct;
+
+        if (netProfitPct <= 0) {
           msg.style.display = 'block';
-          msg.textContent = 'ℹ️ السهم في خسارة أو عند التعادل. هذه أداة جني أرباح للأسهم الرابحة فقط. استراتيجية الخسارة (التعزيز/الصبر) خارج نطاقها.';
+          msg.innerHTML = 'ℹ️ بعد العمولة وضريبتها، البيع عند هذا السعر '
+            + `<strong>لا يحقّق ربحاً</strong> مقابل التعادل الحقيقي ${trueBE.toFixed(2)} ر.س`
+            + (_divBack > 0 ? ` (متوسط التكلفة ${cost.toFixed(2)} − توزيعات ${_divBack.toFixed(2)})` : '')
+            + '. <strong>م.11: لا بيع تحت التعادل أبداً</strong> — واستثناؤها الوحيد م.46 '
+            + '(انقطاع توزيع مع تآكل حقوق ملكية)، ومساره محرّك القرار لا هذه الصفحة.';
           return;
         }
         msg.style.display = 'none';
@@ -395,6 +444,42 @@
         if (profitPct > 100) reasons.push({ text: `ربح ضخم +${profitPct.toFixed(1)}% — المخاطرة على الربح المتراكم ترتفع`, sign: 'neg' });
         else if (profitPct > 50) reasons.push({ text: `ربح ممتاز +${profitPct.toFixed(1)}% — يستحق مراقبة لصيقة`, sign: 'neg' });
         else reasons.push({ text: `ربح حالي +${profitPct.toFixed(1)}%`, sign: 'pos' });
+
+        // ══════════════════════════════════════════════════════════
+        // 2.5) م.48 — السعر ÷ القيمة العادلة: الحكم السعري الدستوري
+        // ----------------------------------------------------------
+        // كانت الصفحة تقرّر البيع بلا أي مقارنة بالقيمة العادلة، بعتبات
+        // مخترعة (25/45/70) لا سند لها في الدستور — بينما `valueBandOf`
+        // و`VALUE_BANDS` محمَّلتان هنا أصلاً. م.48 هي مصدر حكم التخفيف
+        // والتصفية: ≤1.05 تجميع · ≤1.20 عادل · ≤1.40 تخفيف · >1.40 تصفية.
+        // ══════════════════════════════════════════════════════════
+        let fairRatio = null, fairBand = null;
+        if (fair !== null && fair > 0) {
+          fairRatio = price / fair;
+          fairBand  = (typeof valueBandOf === 'function') ? valueBandOf(fairRatio, null) : null;
+          // 1.05 (حدّ التجميع) → 0 · 1.40 (حدّ التصفية) → 100
+          present.fair = clamp((fairRatio - 1.05) / (1.40 - 1.05) * 100, 0, 100);
+          if (fairBand) {
+            const _sign = (fairBand.action === 'trim' || fairBand.action === 'exit') ? 'neg' : 'pos';
+            reasons.push({ text: `م.48 — السعر ${price.toFixed(2)} ÷ العادلة ${fair.toFixed(2)} = `
+              + `${fairRatio.toFixed(2)}× ⇒ ${fairBand.icon} ${fairBand.label}`, sign: _sign });
+          }
+        } else {
+          reasons.push({ text: '⚠️ لم تُدخِل القيمة العادلة — الحكم السعري في م.48 غير مُطبَّق، '
+            + 'والنتيجة أدناه سلوكية وفنّية فقط (م.20: يُعلَن ولا يُقدَّر)', sign: 'neg' });
+        }
+
+        // ══════════════════════════════════════════════════════════
+        // م.68/16 — «ممنوع بيع رابح قوي توزيعه ينمو لمجرد ارتفاع السعر»
+        // ══════════════════════════════════════════════════════════
+        if (divGrow === 'grow') {
+          reasons.push({ text: 'توزيعه **ينمو** — م.68/16 تمنع بيعه لمجرد ارتفاع السعر. '
+            + 'التخفيف هنا لا يجوز إلا لكسر سقف (م.25) أو لمنطقة التصفية في م.48، '
+            + 'ولا يجوز لمجرد «ربح كبير».', sign: 'pos' });
+        } else if (divGrow === 'cut') {
+          reasons.push({ text: 'توزيعه مقصوص أو منقطع — هذا مسار بوابة الاستدامة (م.42) '
+            + 'وقائمة الخروج المؤجل (م.45) في محرّك القرار، لا مسار «جني الأرباح».', sign: 'neg' });
+        }
 
         // 3) الامتداد عن MA200: 0% فوقه → 0 ، +50%+ → 100 (تحته → 0)
         let extPct = null;
@@ -432,21 +517,47 @@
         });
         index = clamp(index, 0, 100);
 
-        showResult({ index, present, usedWeights, reasons, profitPct });
+        showResult({ index, present, usedWeights, reasons, profitPct, fairBand, fairRatio, divGrow, trueBE });
       }
 
-      function showResult({ index, present, usedWeights, reasons, profitPct }) {
+      function showResult({ index, present, usedWeights, reasons, profitPct, fairBand, fairRatio, divGrow, trueBE }) {
         document.getElementById('pt-quant-card').style.display = 'none';
         const rc = document.getElementById('pt-result-card');
         rc.style.display = 'block';
 
+        // ══════════════════════════════════════════════════════════
+        // م.48 — منطقة التصفية تسبق كل حكم سلوكي أو فنّي
+        // ----------------------------------------------------------
+        // نسبة > 1.40× العادلة = «تصفية» بنصّ المادة، ولا يُزاحمها مؤشر
+        // مركّب من إشارات سلوكية. تُعرَض قبل بقية النطاقات.
+        // ══════════════════════════════════════════════════════════
+        if (fairBand && fairBand.action === 'exit') {
+          rc.innerHTML = `
+            <div class="pt-override danger">
+              <div class="pt-result-icon">🔴</div>
+              <div class="ov-title" style="color:var(--danger)">م.48 — منطقة التصفية</div>
+              <p>السعر <strong>${fairRatio.toFixed(2)}×</strong> القيمة العادلة، أي فوق حدّ 1.40× —
+              وم.48 تنصّ على <strong>خروج كامل ولو نجح الفلتر 1</strong>.
+              نفّذ عبر <a href="decision-engine.html" style="color:var(--accent)">محرّك القرار</a>
+              ليمرّ القرار على سلّم الأولوية وبوابة التعادل الحقيقي (م.45).</p>
+              ${divGrow === 'grow' ? '<p>⚠️ توزيعه ينمو — راجع م.68/16 قبل التنفيذ: المنع هناك على البيع <em>لمجرد ارتفاع السعر</em>، وهذا خروجٌ لتجاوز العادلة بأكثر من 40%.</p>' : ''}
+            </div>
+            ${factorsHtml(reasons)}
+            <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;
+          rc.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          return;
+        }
+
         // ── تجاوزات صارمة (كلاسيكية) ───────────────────────────────
-        if (flagConcentrated && profitPct > 40) {
+        // ⚠️ كسر السقف كان مشروطاً بربح > 40%، فيسقط صامتاً دون ذلك —
+        // وم.49 توجب التصحيح عند كسر السقف **بغضّ النظر عن الربح**؛ حجم
+        // الربح ليس شرطاً في أي مادة. الشرط أُزيل والنصّ يتكيّف.
+        if (flagConcentrated) {
           rc.innerHTML = `
             <div class="pt-override danger">
               <div class="pt-result-icon">⚖️</div>
               <div class="ov-title" style="color:var(--accent)">تقليم إلزامي لإعادة التوازن</div>
-              <p>السهم حقق ربحاً ممتازاً (+${profitPct.toFixed(1)}%) لكنه انتفخ فوق سقف الدستور. قصّ جزئياً بقدر ما يعيد وزنه إلى سقف فئته (أ 15% · ب 10% · ج 7% · د 4% — م.25) — هذا قرار <strong>إدارة مخاطر</strong> مستقل عن جودة الشركة نفسها (الفلتر 4 في <a href="decision-engine.html" style="color:var(--accent)">محرّك القرار</a>).</p>
+              <p>${profitPct > 40 ? `السهم حقق ربحاً ممتازاً (+${profitPct.toFixed(1)}%) لكنه` : 'السهم'} انتفخ فوق سقف الدستور. قصّ جزئياً بقدر ما يعيد وزنه إلى سقف فئته (أ 15% · ب 10% · ج 7% · د 4% — م.25) — هذا قرار <strong>إدارة مخاطر</strong> مستقل عن جودة الشركة نفسها (الفلتر 4 في <a href="decision-engine.html" style="color:var(--accent)">محرّك القرار</a>).</p>
             </div>
             ${factorsHtml(reasons)}
             <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;
@@ -476,7 +587,7 @@
           summary = 'السهم دخل منطقة تقييم/زخم مرتفع. الاستراتيجية المتوازنة: بِع 20–30% لاسترداد جزء من رأس المال، واترك الباقي ينمو ("اللعب بأموال السوق").';
         } else if (index >= 25) {
           verdict = 'احتفظ ومتابعة'; icon = '🛡️'; cls = 'hold'; barColor = 'var(--success)';
-          summary = 'الارتفاع ما زال مبرّراً نسبياً ولم يبلغ التطرّف. دع أرباحك تركض وراقب الأساسيات. (إن أردت، يمكن استخدام وقف خسارة متحرك كأداة اختيارية لحماية الربح — وليست إلزاماً.)';
+          summary = 'الارتفاع ما زال مبرّراً نسبياً ولم يبلغ التطرّف. دع أرباحك تركض وراقب الأساسيات. (⚠️ لا يُقترَح «وقف خسارة متحرك»: هو أمر سوق قد يُنفَّذ **تحت** متوسط تكلفتك فيخرق م.11، ويجعل التقلّب السعري مشغّل بيع — وم.5 تعرّف الأمان باستمرارية التوزيع لا بثبات السعر. الحماية هنا مراجعةُ الأساسيات لا أمرٌ آلي.)';
         } else {
           verdict = 'احتفاظ صلب'; icon = '🚀'; cls = 'hold'; barColor = 'var(--success)';
           summary = 'الشركة تنمو والتقييم ما زال عادلاً أو رخيصاً رغم ارتفاع السعر. لا مبرّر لجني الربح الآن — "لا تقطف زهورك وتسقي الأعشاب الضارة".';
