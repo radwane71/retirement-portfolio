@@ -89,12 +89,36 @@ function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null
 // عدّاد دائري (.gauge) — رقمٌ واحد داخل حلقة، تحته تسميته
 // يُستعمل داخل `.gauge-row` لعرض أربعة مقاييس جنباً إلى جنب. الحلقة تقول
 // الرقم في ربع مساحة الشريط الأفقي، فتُترك مساحة البطاقة للأرقام لا للزينة.
-function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '', size = 96, title = '' }) {
+//
+// `bands`: نطاقات هذا المقياس وحده — [{ upTo, state, label }] مرتّبة تصاعدياً.
+// إظهارها ضروري لا تجميلي: لكل عدّاد **عتبة مختلفة** (التوازن جيّد عند ٧٠٪،
+// والمخاطر المُزالة لا تُعدّ جيّدة إلا عند ٩٥٪)، فبلا إعلانها يبدو اللون
+// اعتباطياً — ٧٣٪ خضراء و٩٠٪ برتقالية جنباً إلى جنب بلا سبب ظاهر.
+// `here` يُبرِز النطاق الذي تقع فيه القيمة الآن.
+function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '',
+                     size = 96, title = '', bands = null, nowNote = '', hint = '' }) {
   const R = 50, circ = 2 * Math.PI * R;
   const p = Math.max(0, Math.min(100, +pct || 0));
   const off = circ * (1 - p / 100);
   const clr = color || cssVar('--text-2');
-  return `<div class="gauge-cell"${title ? ` title="${title}"` : ''}>
+  const icon = st => st === 'good' ? '✅' : st === 'warn' ? '⚠️' : st === 'best' ? '🌟' : '🔴';
+
+  let tip = '';
+  if (bands && bands.length) {
+    const rows = bands.map(b => `
+      <div class="gt-row"${b.here ? ' data-here="1"' : ''}>
+        <span>${icon(b.state)} ${b.label}</span><b>${b.range}</b>
+      </div>`).join('');
+    tip = `<div class="gc-tip" role="tooltip">
+        <div class="gt-title">${label || 'المقياس'}</div>
+        ${rows}
+        ${nowNote ? `<div class="gt-now">${nowNote}</div>` : ''}
+      </div>`;
+  }
+
+  // بلا نطاقات نُبقي تلميح المتصفّح؛ ومعها التلميح المُنسَّق يغني عنه
+  const nativeTitle = (!tip && title) ? ` title="${title}"` : '';
+  return `<div class="gauge-cell" tabindex="0"${nativeTitle}>
       <div class="gauge sm" style="width:${size}px;height:${size}px">
         <svg viewBox="0 0 120 120" width="${size}" height="${size}">
           <circle class="ring-bg" cx="60" cy="60" r="${R}" fill="none" stroke-width="11"/>
@@ -107,6 +131,8 @@ function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '', size =
         </div>
       </div>
       ${label ? `<div class="gc-label">${label}</div>` : ''}
+      ${hint ? `<div class="gc-hint">${hint}</div>` : ''}
+      ${tip}
     </div>`;
 }
 // صف وزن في قائمة (.brow)
@@ -1896,6 +1922,38 @@ function renderDiversificationCard() {
   const ev         = _divRiskRemoved(_effExact);   // تقدير المخاطر المُزالة (أبحاث) — بالقيمة الدقيقة
   const _mDiv      = assessMetricMaturity('diversification', { stockCount: n });
 
+  // ── نطاقات كل مقياس، لتلميحه عند المرور ───────────────────────
+  // تُشتقّ من نفس الدوال التي تُلوّن العدّاد، فلا يفترق التلميح عن اللون.
+  const _mark = (arr, v) => {
+    const i = arr.findIndex(b => v < b.lt);
+    (arr[i === -1 ? arr.length - 1 : i]).here = true;
+    return arr;
+  };
+  // التوازن: نفس عتبات balState (٥٠ و٧٠)
+  const balBands = v => _mark([
+    { lt: 50,       state: 'bad',  label: 'ضعيف — تركّز عالٍ', range: 'أقل من ٥٠٪' },
+    { lt: 70,       state: 'warn', label: 'متوسط',             range: '٥٠–٦٩٪' },
+    { lt: 90,       state: 'good', label: 'جيّد',              range: '٧٠–٨٩٪' },
+    { lt: Infinity, state: 'best', label: 'ممتاز — أوزان متقاربة', range: '٩٠٪ فأكثر' },
+  ], v);
+  // المخاطر المُزالة: العتبة على **العدد الفعّال** لا على النسبة نفسها
+  const evBands = e => _mark([
+    { lt: 5,        state: 'bad',  label: 'أقل من ٥ فعّالة',  range: '< ٦٠٪' },
+    { lt: 11,       state: 'warn', label: '٥–١٠ فعّالة',      range: '~٧٥–٨٠٪' },
+    { lt: 16,       state: 'warn', label: '١١–١٥ فعّالة',     range: '~٩٠٪' },
+    { lt: 21,       state: 'good', label: '١٦–٢٠ فعّالة',     range: '~٩٥٪ ← الهدف' },
+    { lt: Infinity, state: 'best', label: '٢١ فعّالة فأكثر',  range: '~٩٦–٩٨٪' },
+  ], e);
+  // التقدّم نحو النطاق الموصى به (١٥ سهماً فعّالاً)
+  const progBands = v => _mark([
+    { lt: 50,       state: 'bad',  label: 'بعيد عن النطاق',      range: 'أقل من ٥٠٪' },
+    { lt: 80,       state: 'warn', label: 'في الطريق',           range: '٥٠–٧٩٪' },
+    { lt: 100,      state: 'good', label: 'قريب من النطاق',      range: '٨٠–٩٩٪' },
+    { lt: Infinity, state: 'best', label: 'بلغت النطاق الموصى به', range: '١٠٠٪' },
+  ], v);
+  const progState = progressPct >= 100 ? 'good' : progressPct >= 80 ? 'good'
+                  : progressPct >= 50 ? 'warn' : 'bad';
+
   el.innerHTML = cardHead(
       '🧩 مقياس التنويع', 'Diversification',
       `<button class="btn btn-secondary btn-sm" onclick="showDiversificationAnalysis()">📋 تحليل مفصّل</button>
@@ -1916,27 +1974,45 @@ function renderDiversificationCard() {
         ${gaugeHtml({
           // الحلقة تتبع **التقدّم نحو النطاق الموصى به** كما كانت قبل التغيير،
           // لا موضع المنطقة — حتى لا يتغيّر معنى الرقم الذي اعتاده المالك.
-          valueTxt: effectiveN, sub: 'عدد فعّال', pct: progressPct, color: zoneClr,
+          // واللون من المقياس نفسه لا من موضع المنطقة، وإلا لوّنت الحلقةَ كميةٌ
+          // غير التي تملؤها.
+          valueTxt: effectiveN, sub: 'عدد فعّال', pct: progressPct,
+          color: stateColorOf(progState),
           label: 'العدد الفعّال',
-          title: `تملك ${n} سهماً، وتنوّعها يعادل ${effectiveN} سهماً متساوي الوزن`,
+          hint: `الهدف ${targetN} فعّالاً`,
+          bands: progBands(progressPct),
+          nowNote: `تملك <b>${n}</b> سهماً وتنوّعها يعادل <b>${effectiveN}</b> سهماً متساوي الوزن — `
+                 + `أي <b>${progressPct.toFixed(0)}%</b> من النطاق الموصى به (${targetN} فعّالاً).`,
         })}
         ${gaugeHtml({
           valueTxt: `${balStocks}%`, sub: 'أسهم', pct: balStocks,
           color: stateColorOf(balState(balStocks)),
           label: 'توازن توزيع الأسهم',
-          title: `العدد الفعّال ÷ عدد الأسهم — عتبة الجودة ٧٠٪. HHI الخام ${hhiPct.toFixed(1)}%`,
+          hint: 'الهدف ٧٠٪ فأكثر',
+          bands: balBands(balStocks),
+          nowNote: `العدد الفعّال ÷ عدد الأسهم. كلما تقاربت أوزان مراكزك ارتفع.`
+                 + `<br>HHI الخام: <b>${hhiPct.toFixed(1)}%</b>`,
         })}
         ${gaugeHtml({
           valueTxt: `${balSectors}%`, sub: 'قطاعات', pct: balSectors,
           color: stateColorOf(balState(balSectors)),
           label: 'توازن توزيع القطاعات',
-          title: `عتبة الجودة ٧٠٪. HHI القطاعات الخام ${secPct.toFixed(1)}%`,
+          hint: 'الهدف ٧٠٪ فأكثر',
+          bands: balBands(balSectors),
+          nowNote: `يقيس تقارب أوزان القطاعات لا عددها.`
+                 + `<br>HHI القطاعات الخام: <b>${secPct.toFixed(1)}%</b>`,
         })}
         ${gaugeHtml({
           valueTxt: `${ev.pct}%`, sub: 'مخاطر مُزالة', pct: ev.pct,
           color: stateColorOf(ev.state),
           label: 'موضعك على مرجع الأبحاث',
-          title: 'نسبة المخاطر القابلة للتنويع التي أُزيلت عند عددك الفعّال (Zaimovic 2021)',
+          hint: 'الهدف ٩٥٪ (عند ~٢٠ فعّالاً)',
+          bands: evBands(_effExact),
+          nowNote: `نسبة المخاطر <b>القابلة للتنويع</b> التي أُزيلت عند عددك الفعّال `
+                 + `(Zaimovic 2021 · Domian 2007).`
+                 + `<br>⚠️ العتبة هنا <b>٩٥٪</b> لا ٧٠٪ — ولهذا قد يبدو الرقم عالياً ولونه `
+                 + `تنبيهياً: <b>${ev.pct}%</b> جيّدة بذاتها لكنها دون الهدف، والوصول إليه `
+                 + `يحتاج ~٢٠ سهماً فعّالاً.`,
         })}
       </div>
 

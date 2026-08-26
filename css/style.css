@@ -2004,11 +2004,42 @@ textarea::placeholder {
 }
 .gauge-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
 .gauge-cell .gc-label { font-size: .72rem; color: var(--text-2); line-height: 1.45; }
+/* عتبة هذا المقياس تحت اسمه — تُقرأ بلا مرور بالفأرة، فلا يبقى اللون لغزاً */
+.gauge-cell .gc-hint { font-size: .64rem; color: var(--text-2); opacity: .75; }
 /* عدّاد مصغَّر: النسبة المئوية أطول من رقمٍ مجرَّد فتحتاج خطاً أصغر */
 .gauge.sm .gauge-mid .g-v { font-size: 1.15rem; }
 .gauge.sm .gauge-mid .g-l { font-size: .6rem; }
 @media (max-width: 760px) { .gauge-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 400px) { .gauge-row { grid-template-columns: 1fr; } }
+
+/* ── تلميح المقياس: نطاقاته عند المرور بالفأرة ───────────────────
+   لكل عدّاد **عتباته الخاصّة**: التوازن جيّد عند ٧٠٪، والمخاطر المُزالة
+   لا تُعدّ جيّدة إلا عند ٩٥٪. فبلا إظهار العتبة يبدو اللون اعتباطياً:
+   ٧٣٪ خضراء و٩٠٪ برتقالية جنباً إلى جنب. */
+.gauge-cell { position: relative; }
+.gauge-cell:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 8px; }
+.gc-tip {
+  position: absolute; top: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  width: max-content; max-width: 250px; z-index: 30;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: 10px; padding: 10px 12px; text-align: right;
+  box-shadow: 0 8px 24px rgba(0,0,0,.35);
+  opacity: 0; visibility: hidden; transition: opacity .12s ease;
+  pointer-events: none;
+}
+.gauge-cell:hover .gc-tip,
+.gauge-cell:focus-within .gc-tip { opacity: 1; visibility: visible; }
+.gc-tip .gt-title { font-size: .74rem; font-weight: 700; color: var(--text); margin-bottom: 6px; }
+.gc-tip .gt-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  font-size: .7rem; color: var(--text-2); padding: 2px 0;
+}
+.gc-tip .gt-row b { font-weight: 600; }
+.gc-tip .gt-row[data-here="1"] {
+  color: var(--text); background: color-mix(in srgb, var(--text-2) 14%, transparent);
+  border-radius: 6px; padding: 3px 6px; margin: 2px -6px;
+}
+.gc-tip .gt-now { font-size: .68rem; color: var(--text-2); margin-top: 7px; border-top: 1px solid var(--border); padding-top: 6px; line-height: 1.5; }
 
 /* ── تفصيل يُوسَّع بالنقر داخل بطاقة ─────────────────────────────── */
 details.inline-more > summary {

@@ -81,12 +81,36 @@ function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null
 // عدّاد دائري (.gauge) — رقمٌ واحد داخل حلقة، تحته تسميته
 // يُستعمل داخل `.gauge-row` لعرض أربعة مقاييس جنباً إلى جنب. الحلقة تقول
 // الرقم في ربع مساحة الشريط الأفقي، فتُترك مساحة البطاقة للأرقام لا للزينة.
-function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '', size = 96, title = '' }) {
+//
+// `bands`: نطاقات هذا المقياس وحده — [{ upTo, state, label }] مرتّبة تصاعدياً.
+// إظهارها ضروري لا تجميلي: لكل عدّاد **عتبة مختلفة** (التوازن جيّد عند ٧٠٪،
+// والمخاطر المُزالة لا تُعدّ جيّدة إلا عند ٩٥٪)، فبلا إعلانها يبدو اللون
+// اعتباطياً — ٧٣٪ خضراء و٩٠٪ برتقالية جنباً إلى جنب بلا سبب ظاهر.
+// `here` يُبرِز النطاق الذي تقع فيه القيمة الآن.
+function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '',
+                     size = 96, title = '', bands = null, nowNote = '', hint = '' }) {
   const R = 50, circ = 2 * Math.PI * R;
   const p = Math.max(0, Math.min(100, +pct || 0));
   const off = circ * (1 - p / 100);
   const clr = color || cssVar('--text-2');
-  return `<div class="gauge-cell"${title ? ` title="${title}"` : ''}>
+  const icon = st => st === 'good' ? '✅' : st === 'warn' ? '⚠️' : st === 'best' ? '🌟' : '🔴';
+
+  let tip = '';
+  if (bands && bands.length) {
+    const rows = bands.map(b => `
+      <div class="gt-row"${b.here ? ' data-here="1"' : ''}>
+        <span>${icon(b.state)} ${b.label}</span><b>${b.range}</b>
+      </div>`).join('');
+    tip = `<div class="gc-tip" role="tooltip">
+        <div class="gt-title">${label || 'المقياس'}</div>
+        ${rows}
+        ${nowNote ? `<div class="gt-now">${nowNote}</div>` : ''}
+      </div>`;
+  }
+
+  // بلا نطاقات نُبقي تلميح المتصفّح؛ ومعها التلميح المُنسَّق يغني عنه
+  const nativeTitle = (!tip && title) ? ` title="${title}"` : '';
+  return `<div class="gauge-cell" tabindex="0"${nativeTitle}>
       <div class="gauge sm" style="width:${size}px;height:${size}px">
         <svg viewBox="0 0 120 120" width="${size}" height="${size}">
           <circle class="ring-bg" cx="60" cy="60" r="${R}" fill="none" stroke-width="11"/>
@@ -99,6 +123,8 @@ function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '', size =
         </div>
       </div>
       ${label ? `<div class="gc-label">${label}</div>` : ''}
+      ${hint ? `<div class="gc-hint">${hint}</div>` : ''}
+      ${tip}
     </div>`;
 }
 // صف وزن في قائمة (.brow)
