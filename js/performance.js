@@ -1480,24 +1480,16 @@ let _entrySplitYear = {};         // ticker → أول سنة بعد التجز�
 // ⚠️ كان يَنشُر `_entryVal = {}` **قبل** الانتظار، فأي نداء ثانٍ متزامن يجد
 // الكائن الفارغ ويرتدّ من `if (_entryVal) return` فيرسم «لا صفقات قابلة
 // للقياس» لكل مركز — وهي حالة تقع فعلاً لأن الصفحة تُحمّل التبويبات معاً.
-// الحلّ: تخزين **الوعد** لا النتيجة، فيتشارك المتزامنون نفس العملية.
-let _entryValPromise = null;
+// الحلّ: تخزين **الوعد** لا النتيجة، فيتشارك المتزامنون نفس العملية. ويُخزَّن
+// على الدالة نفسها لا في متغيّر عام، فتبقى مستقلّة قابلة للاستخراج وحدها.
 async function loadEntryValuations() {
   if (_entryVal) return _entryVal;
-  if (_entryValPromise) return _entryValPromise;
-  _entryValPromise = (async () => {
-    const out = {};
-    let hist = null;
-    try { hist = await loadUserSetting(ENTRY_VAL_KEY); } catch (_) { hist = null; }
-    if (!Array.isArray(hist)) { _entryVal = out; return out; }
-    _buildEntryVal(hist, out);
-    _entryVal = out;
-    return out;
-  })();
-  return _entryValPromise;
-}
-
-function _buildEntryVal(hist, _entryVal) {
+  if (loadEntryValuations._inflight) return loadEntryValuations._inflight;
+  loadEntryValuations._inflight = (async () => {
+  const _entryVal = {};
+  let hist = null;
+  try { hist = await loadUserSetting(ENTRY_VAL_KEY); } catch (_) { hist = null; }
+  if (!Array.isArray(hist)) hist = [];
 
   hist.forEach(e => {
     const tk = String(e?.inputs?.ticker || '').trim().toUpperCase();
@@ -1527,6 +1519,12 @@ function _buildEntryVal(hist, _entryVal) {
     }
   });
   return _entryVal;
+  })();
+
+  const _res = await loadEntryValuations._inflight;
+  _entryVal = _res;                       // الإسناد **بعد** الاكتمال لا قبله
+  loadEntryValuations._inflight = null;
+  return _res;
 }
 
 // تقييم السنة السابقة للشراء — آخر ما كان منشوراً وقتها

@@ -22,17 +22,22 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
 // و`created_at` وحده لا يكفي — هو ترتيب الإدخال لا الترتيب الاقتصادي.
 // ══════════════════════════════════════════════════════════════════════
 {
-  const src = fs.readFileSync(ROOT + 'js/transactions.js', 'utf8');
-  t('ترتيب WAC دالة واحدة مشتركة', /function txSortForWAC\(rows\)/.test(src));
+  // ⚠️ 2026-08-26: txSortForWAC و walkWAC و recomputeHoldingFromTx نُقلت
+  // إلى js/utils.js — تعريفٌ واحد لكل الموقع بدل ستّ نسخ متباعدة، وهو نصّ
+  // ما يطالب به رأس هذا الفحص. فالتحقّق ينتقل معها ولا يُلغى.
+  const src  = fs.readFileSync(ROOT + 'js/transactions.js', 'utf8');
+  const util = fs.readFileSync(ROOT + 'js/utils.js', 'utf8');
+  t('ترتيب WAC دالة واحدة مشتركة', /function txSortForWAC\(rows\)/.test(util));
+  t('ولا نسخة ثانية في صفحة المعاملات', !/function txSortForWAC\(/.test(src));
   t('الاستعلام يجلب date و created_at و id',
-    /select\('type, shares, price, total, name, date, created_at, id'\)/.test(src));
-  t('إعادة الحساب تستعمل الترتيب الموحّد', /txSortForWAC\(txAll \|\| \[\]\)/.test(src));
+    /select\('type, shares, price, total, name, date, created_at, id'\)/.test(util));
+  t('إعادة الحساب تستعمل المشي الزمني الموحّد', /walkWAC\(rows\)/.test(util));
   t('الإحصاءات تستعمل الترتيب نفسه', /const sorted = txSortForWAC\(transactions\)/.test(src));
   t('لا فرز يدوي متبقٍّ في الإحصاءات',
     !/\[\.\.\.transactions\]\.sort/.test(src), 'عاد الفرز الموازي');
 
   // تشغيل فعليّ للترتيب المستخرَج من الملف
-  const m = src.match(/const TX_ORDER = [\s\S]*?\n\}/);
+  const m = util.match(/const TX_ORDER = [\s\S]*?\n\}/);
   t('الدالة قابلة للاستخراج', !!m);
   if (m) {
     const ctx = { Math, String, Array, Object }; vm.createContext(ctx);
@@ -139,9 +144,16 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
   t('تشتّت 0.70 = منخفضة ⇒ ±20%', C.valueBandOf(1.0, 0.70).widen === 0.2);
 
   const de = fs.readFileSync(ROOT + 'js/decision-engine.js', 'utf8');
-  t('المحرّك يحوّل CV إلى كسر عند القراءة',
-    /\+entry\.results\.dispersionCV \/ 100 : null/.test(de),
-    'عادت القراءة الخام — وحدة مقلوبة');
+  // ⚠️ 2026-08-26: القراءة لم تعد من dispersionCV مباشرةً. م.39 تُعرّف
+  // التشتّت بـ(أعلى نموذج − أدنى نموذج) ÷ **الوسيط**، وCV مقياسٌ آخر
+  // (انحراف معياري ÷ متوسط) يعطي رقماً أصغر منهجياً: الرياض 1010 تشتّته
+  // الدستوري 80% وCV يقرأه 32%. الحساب الآن في _dispersionM39، وCV احتياطٌ
+  // أخير معلَن. والوحدة تبقى **كسراً** لتطابق DISPERSION_BANDS.
+  t('المحرّك يحسب تشتّت م.39 من النماذج', /cv: _dispersionM39\(entry\.results\)/.test(de));
+  t('والصيغة نطاق الحدّين على الوسيط',
+    /\(sorted\[n - 1\] - sorted\[0\]\) \/ med/.test(de), 'عادت صيغة CV');
+  t('والوحدة كسر لا نسبة مئوية', /cv \/ 100 : null/.test(de),
+    'الاحتياطي يجب أن يقسم على 100');
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -168,9 +180,16 @@ const near = (a, b, eps) => a != null && Math.abs(a - b) < (eps == null ? 1e-6 :
     'كان يسقط من الخطة كلياً بينما بطاقته حمراء');
 
   // م.11 — التخفيف يمرّ ببوابة الخسارة المحققة
+  // ⚠️ 2026-08-26: كان الشرط trimGate.verdict — والحقل غير موجود أصلاً
+  // (الدالة تُعيد action). فـundefined !== 'exitNow' صادقٌ **دائماً**، أي أن
+  // كل أوامر التخفيف كانت تُدفَع إلى التأجيل بحجّة كاذبة «السعر تحت
+  // التعادل» ولو كان ضعفه — فـم.25 و28 و49 معطَّلة عملياً. الفحص كان يثبّت
+  // الخطأ لأنه يطابق النصّ لا السلوك.
   t('التخفيف يمرّ ببوابة م.11', /const trimGate = \(typeof deferredVerdict/.test(de)
-    && /trimGate\.verdict !== 'exitNow'/.test(de),
+    && /trimGate\.action !== 'exitNow'/.test(de),
     'كسر السقف كان يأمر ببيع بخسارة محقّقة');
+  t('ولا يقرأ حقلاً غير موجود', !/trimGate\.verdict/.test(de),
+    'الدالة تُعيد action لا verdict — الشرط يصير صادقاً دائماً');
 
   // التوزيعة المُعلَنة غير المصروفة لا تُنقص التعادل الحقيقي (م.2)
   t('التعادل يقرأ التوزيعة بالتعريف الموحّد',

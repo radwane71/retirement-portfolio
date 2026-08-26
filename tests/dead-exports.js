@@ -51,7 +51,8 @@ const ALLOWED = {
   DECISIVE_SIGNALS: 'قائمة مرجعية تُطابَق بنصّ الدستور في الاختبار (م.44)',
   TV_MISSING:       'قيمة جاهزة للاستعمال',
   RATING_DIMS:      'مرجع منهجية الدرجة (ملحق ب)',
-  INJECTION_START:  'تاريخ مرجعي للإسقاط (م.7)',
+  // 2026-08-26: INJECTION_START لم يعد مهجوراً — buildDcaSchedule في
+  // forecast.js تبدأ الضخّ منه، فحُذف من الاستثناءات.
   dividendDepthYears: 'depthGate (م.41)',
   periodKey:        'pushReading و confirmationOf (م.43)',
   canDriveWeight:   'auditEntry — عمود المدخلات الضعيفة (م.66/2)',

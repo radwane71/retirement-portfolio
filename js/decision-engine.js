@@ -1960,7 +1960,7 @@ function buildTargetPlan(valAware) {
       const trimDivs = (divByTicker[r.ticker] || []).reduce((a, d) => a + (+d.amount || 0), 0);
       const trimGate = (typeof deferredVerdict === 'function')
         ? deferredVerdict(price, r.avgCost, trimDivs, r.shares) : null;
-      // ⚠️ كان الشرط `trimGate.verdict` — والحقل غير موجود أصلاً: الدالة
+      // ⚠️ كان الشرط يقرأ حقلاً باسم «verdict» غير موجود أصلاً: الدالة
       // تُعيد `action`. فكان `undefined !== 'exitNow'` صادقاً **دائماً**،
       // فتُدفَع كل أوامر التخفيف إلى التأجيل بحجّة كاذبة «السعر تحت
       // التعادل» ولو كان السعر ضعف التعادل — أي أن م.25 و28 و49 كانت

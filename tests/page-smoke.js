@@ -158,9 +158,16 @@ pages.forEach(page => {
     const src = stripLiterals(raw);
     const locals = localNames(raw);
     const called = new Set([...src.matchAll(/(?<![.\w$'"`])([a-z_$][\w$]*)\s*\(/g)].map(m => m[1]));
+    // نداءٌ محروسٌ بـ`typeof X === 'function'` ليس نداءً مفقوداً: هذا هو
+    // النمط المعتمد في المشروع لاعتمادٍ اختياري بين الصفحات (مثال:
+    // `recomputeHoldingFromTx` في utils.js تستعمل `lookupTicker` إن كانت
+    // tickerdb.js محمَّلة، وتمضي بدونها). الفحص يبقى قائماً على النداء
+    // **غير** المحروس، وهو المقصود.
+    const guarded = new Set([...raw.matchAll(
+      /typeof\s+([A-Za-z_$][\w$]*)\s*===?\s*['"]function['"]/g)].map(m => m[1]));
     const missing = [...called].filter(n =>
       !locals.has(n) && typeof ctx[n] === 'undefined'
-      && !IGNORE.has(n));
+      && !guarded.has(n) && !IGNORE.has(n));
     missing.forEach(n => problems.push({ page, kind: 'نداء مفقود', detail: `${f} → ${n}()` }));
   });
 });

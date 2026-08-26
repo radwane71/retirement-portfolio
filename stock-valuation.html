@@ -2582,6 +2582,13 @@
       const raw = String((e && e.date) || '')
         .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d))
         .replace(/[^\d/\-.]/g, '');
+      // ISO أولاً (YYYY-MM-DD) — تُكتب بها السجلات المستورَدة والمولَّدة،
+      // ولا يلتقطها نمط d/m/yyyy أدناه فكانت تسقط إلى `id` وهو طابعٌ صناعيّ.
+      const iso = raw.match(/^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})/);
+      if (iso) {
+        const t = new Date(+iso[1], +iso[2] - 1, +iso[3]).getTime();
+        if (isFinite(t)) return t;
+      }
       const m = raw.match(/(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})/);
       if (m) {
         const t = new Date(+m[3], +m[2] - 1, +m[1]).getTime();

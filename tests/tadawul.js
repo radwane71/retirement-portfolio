@@ -559,8 +559,12 @@ t('رمز غير معروف يرجع null', T.tdValuationInputs('9999') === null
   // التاريخ والشاشة يصنّفان من المصدر نفسه — وإلا فئتان لسهم واحد
   {
     const src = fs.readFileSync(ROOT + 'js/decision-engine.js', 'utf8');
+    // 2026-08-26: صار الدمج على سطر مستقلّ لأن `updateCategoryHistory` تحتاج
+    // `merged.marketCapB` أيضاً في فحص هامش ±15% (م.26). الشرط نفسه: التاريخ
+    // يصنّف من **المصدر المدموج** لا من engineCfg عارياً.
     t('التاريخ يصنّف بعد دمج تداول',
-      /classifyStock\(tadawulInputsFor\(r\.ticker/.test(src));
+      /tadawulInputsFor\(r\.ticker[^)]*\)[\s\S]{0,80}classifyStock\(_ti\.merged\)/.test(src)
+      || /classifyStock\(tadawulInputsFor\(r\.ticker/.test(src));
     t('لا بقايا تصنيفٍ من engineCfg عارياً',
       !/classifyStock\(engineCfg\[r\.ticker\] \|\| \{\}\)/.test(src));
     t('البطاقة مُستدعاة عند الفتح', /renderCardTadawul\(ticker/.test(src));
