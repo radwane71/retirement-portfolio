@@ -1918,6 +1918,7 @@ textarea::placeholder {
   background: color-mix(in srgb, var(--text-2) 10%, transparent);
   white-space: nowrap;
 }
+.tag[data-state="best"],
 .tag[data-state="good"] { color: var(--st-good); background: var(--st-good-dim); border-color: color-mix(in srgb, var(--st-good) 34%, transparent); }
 .tag[data-state="warn"] { color: var(--st-warn); background: var(--st-warn-dim); border-color: color-mix(in srgb, var(--st-warn) 34%, transparent); }
 .tag[data-state="bad"]  { color: var(--st-bad);  background: var(--st-bad-dim);  border-color: color-mix(in srgb, var(--st-bad)  34%, transparent); }
@@ -1938,6 +1939,7 @@ textarea::placeholder {
   overflow: hidden; direction: ltr;
 }
 .meter-fill { height: 100%; border-radius: 999px; background: var(--series-2); transition: width .45s cubic-bezier(.4,0,.2,1); }
+.meter[data-state="best"] .meter-fill,
 .meter[data-state="good"] .meter-fill { background: var(--st-good); }
 .meter[data-state="warn"] .meter-fill { background: var(--st-warn); }
 .meter[data-state="bad"]  .meter-fill { background: var(--st-bad); }
@@ -2067,6 +2069,7 @@ details.inline-more[open] > summary { margin-bottom: var(--sp-2); }
   background: var(--bg-2); border-radius: 0 var(--radius) var(--radius) 0;
   padding: 10px 12px; font-size: .79rem; line-height: 1.65; color: var(--text);
 }
+.note[data-state="best"],
 .note[data-state="good"] { border-inline-start-color: var(--st-good); background: var(--st-good-dim); }
 .note[data-state="warn"] { border-inline-start-color: var(--st-warn); background: var(--st-warn-dim); }
 .note[data-state="bad"]  { border-inline-start-color: var(--st-bad);  background: var(--st-bad-dim); }

@@ -53,7 +53,10 @@ function cssVar(name) {
 function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
 // لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
 function stateColorOf(state) {
-  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+  // 'best' حالة إيجابية أعلى من 'good' — تُستعمل في أيقونة النطاق (🌟).
+  // بلا إدراجها هنا كانت تسقط إلى الرمادي، وهو أسوأ من اللون الذي تحلّ محلّه.
+  return cssVar((state === 'good' || state === 'best') ? '--st-good'
+    : state === 'warn' ? '--st-warn'
     : state === 'bad' ? '--st-bad' : '--text-2');
 }
 // رأس بطاقة موحّد (.card-head)

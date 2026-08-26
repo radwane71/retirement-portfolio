@@ -35,7 +35,10 @@ function cssVar(name) {
 function seriesColor(i) { return cssVar('--series-' + ((Math.abs(i | 0) % 6) + 1)); }
 // لون حالة: good / warn / bad — محجوز للحالة فقط، ودائماً مع أيقونة ونص
 function stateColorOf(state) {
-  return cssVar(state === 'good' ? '--st-good' : state === 'warn' ? '--st-warn'
+  // 'best' حالة إيجابية أعلى من 'good' — تُستعمل في أيقونة النطاق (🌟).
+  // بلا إدراجها هنا كانت تسقط إلى الرمادي، وهو أسوأ من اللون الذي تحلّ محلّه.
+  return cssVar((state === 'good' || state === 'best') ? '--st-good'
+    : state === 'warn' ? '--st-warn'
     : state === 'bad' ? '--st-bad' : '--text-2');
 }
 // شفافية على رمز تصميم: #rrggbb + قناة ألفا سِتّ‌عشرية (لا لون جديد يُخترع)
@@ -1839,10 +1842,15 @@ function renderPortfolioHealthCard() {
 //     الأسواق الناشئة، والتنويع لا يُزيل مخاطر الذيل (الانهيارات)
 // state: يُترجَم إلى لون حالة من رموز التصميم، ودائماً مصحوباً بالنص (txt)
 function _divRiskRemoved(effN) {
+  // ⚠️ 2026-08-26 — نطاق ١١–١٥ فعّالاً كان يُوسَم «تنبيه» لأن عتبة ٩٥٪
+  // مأخوذة من Domian 2007 وهي دراسة **سوق متطوّر**. وبطاقة التنويع نفسها
+  // تنصّ أسفلها أن «الأسواق الناشئة تحتاج عدداً **أقل** للتنويع الأمثل»،
+  // وهدف المحفظة المسجَّل هو N الفعّال ≥ ١٥. فوسمُ ٩٠٪ تنبيهاً يطبّق معياراً
+  // لسوقٍ آخر ويناقض نصّ البطاقة وهدفها معاً. صار «جيّداً» بقرار المالك.
   if (effN < 5)  return { pct: 60, txt: '< ٦٠٪',            state: 'bad'  };
   if (effN < 8)  return { pct: 75, txt: '~٧٥٪',             state: 'warn' };
   if (effN < 11) return { pct: 80, txt: '~٨٠٪',             state: 'warn' };
-  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             state: 'warn' };
+  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             state: 'good' };
   if (effN < 21) return { pct: 95, txt: '~٩٥٪',             state: 'good' };
   if (effN < 31) return { pct: 97, txt: '~٩٦–٩٧٪',          state: 'good' };
   return            { pct: 98, txt: '~٩٨٪ (منفعة هامشية)', state: 'good' };
@@ -1940,8 +1948,8 @@ function renderDiversificationCard() {
   const evBands = e => _mark([
     { lt: 5,        state: 'bad',  label: 'أقل من ٥ فعّالة',  range: '< ٦٠٪' },
     { lt: 11,       state: 'warn', label: '٥–١٠ فعّالة',      range: '~٧٥–٨٠٪' },
-    { lt: 16,       state: 'warn', label: '١١–١٥ فعّالة',     range: '~٩٠٪' },
-    { lt: 21,       state: 'good', label: '١٦–٢٠ فعّالة',     range: '~٩٥٪ ← الهدف' },
+    { lt: 16,       state: 'best', label: '١١–١٥ فعّالة',     range: '~٩٠٪' },
+    { lt: 21,       state: 'best', label: '١٦–٢٠ فعّالة',     range: '~٩٥٪ ← الهدف' },
     { lt: Infinity, state: 'best', label: '٢١ فعّالة فأكثر',  range: '~٩٦–٩٨٪' },
   ], e);
   // التقدّم نحو النطاق الموصى به (١٥ سهماً فعّالاً)
@@ -2006,13 +2014,13 @@ function renderDiversificationCard() {
           valueTxt: `${ev.pct}%`, sub: 'مخاطر مُزالة', pct: ev.pct,
           color: stateColorOf(ev.state),
           label: 'موضعك على مرجع الأبحاث',
-          hint: 'الهدف ٩٥٪ (عند ~٢٠ فعّالاً)',
+          hint: 'جيّد من ١١ فعّالاً فأكثر',
           bands: evBands(_effExact),
           nowNote: `نسبة المخاطر <b>القابلة للتنويع</b> التي أُزيلت عند عددك الفعّال `
                  + `(Zaimovic 2021 · Domian 2007).`
-                 + `<br>⚠️ العتبة هنا <b>٩٥٪</b> لا ٧٠٪ — ولهذا قد يبدو الرقم عالياً ولونه `
-                 + `تنبيهياً: <b>${ev.pct}%</b> جيّدة بذاتها لكنها دون الهدف، والوصول إليه `
-                 + `يحتاج ~٢٠ سهماً فعّالاً.`,
+                 + `<br>🌍 عتبة ٩٥٪ مأخوذة من دراسة <b>سوق متطوّر</b>، وتاسي سوق ناشئ `
+                 + `يحتاج عدداً <b>أقل</b> — فـ<b>${ev.pct}%</b> عند عددك الفعّال نتيجة جيّدة، `
+                 + `والزيادة بعدها منفعة هامشية.`,
         })}
       </div>
 
@@ -2043,7 +2051,8 @@ function renderDiversificationCard() {
           ${noteHtml('📚', `
             <b>وفق الأبحاث</b> <span class="text-muted">(مراجعة Zaimovic et al. 2021 — 150 دراسة)</span><br>
             عند <b class="num">${effectiveN}</b> سهماً فعّالاً، أُزيل تقديراً
-            ${tagHtml(ev.state === 'good' ? '✅' : ev.state === 'warn' ? '⚠️' : '🔴', ev.txt, ev.state)}
+            ${tagHtml(ev.state === 'best' ? '🌟' : ev.state === 'good' ? '✅'
+                    : ev.state === 'warn' ? '⚠️' : '🔴', ev.txt, ev.state)}
             من المخاطر القابلة للتنويع.
             ${effectiveN < 20
               ? ` الوصول إلى ~٢٠ يرفعها إلى ~٩٥٪ <span class="text-muted">(Domian 2007)</span>؛ بعدها المنفعة هامشية (+٨٠ سهماً = +٤٪ فقط).`
