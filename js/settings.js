@@ -3537,7 +3537,29 @@ async function exportMonthlyReviewMD() {
     const _sukukActive = (sukukData.opportunities || [])
       .filter(o => o.status === 'مشترك').reduce((s, o) => s + (+o.amount || 0), 0);
     const _reVal       = activeRE.reduce((s, r) => s + +r.current_value, 0);
-    const _assetVal    = activeAssets.reduce((s, a) => s + +a.value, 0);
+    // ══════════════════════════════════════════════════════════════
+    // ازدواج حساب: صفحة صافي الثروة تقبل تصنيفَي `sukuk` و`bank` وتدعو
+    // المالك لإدخالهما يدوياً، ثم كان هذا التقرير يجمعها **فوق**
+    // `_sukukActive` (من صفحة الصكوك) — فيُعدّ الصكّ مرّتين في إجمالي
+    // الأصول وصافي الثروة وقاعدة FIRE. الصفحتان منفردتين سليمتان،
+    // والازدواج يقع حصراً في المستند الذي يُقرَّر عليه.
+    // المصدر الأوثق للصكوك هو صفحة الصكوك (تُزامَن عبر user_settings)،
+    // فإن كان فيها رصيد نُسقط صفوف الصكوك من أصول صافي الثروة ونُعلن ذلك.
+    // ملاحظة: `bank` **لا يُدمَج** مع `portfolioCash` — الأول حساب بنكي
+    // والثاني نقد غير مستثمر عند الوسيط، وهما مبلغان مختلفان فعلاً.
+    // ══════════════════════════════════════════════════════════════
+    const _assetSukuk  = activeAssets.filter(a => a.category === 'sukuk')
+                                     .reduce((s, a) => s + +a.value, 0);
+    const _dedupSukuk  = (_sukukActive > 0 && _assetSukuk > 0);
+    const _assetVal    = activeAssets.reduce((s, a) =>
+                           s + ((_dedupSukuk && a.category === 'sukuk') ? 0 : +a.value), 0);
+    const _dedupNote   = _dedupSukuk
+      ? `
+> ⚠️ أُسقطت صكوكٌ بقيمة ${SAR(_assetSukuk)} ر.س من «أصول أخرى» لأنها مسجَّلة `
+        + `أيضاً في صفحة الصكوك (${SAR(_sukukActive)} ر.س) — وإلا عُدّت مرّتين. `
+        + `المصدر المعتمد هنا صفحة الصكوك.
+`
+      : '';
     const _fwd         = _computeForwardIncome();
 
     h3('العائد المعدَّل بالمخاطر');
@@ -3681,6 +3703,7 @@ async function exportMonthlyReviewMD() {
 
       // تخصيص الأصول %
       h3('تخصيص الأصول (Asset Allocation)');
+      if (_dedupNote) p(_dedupNote);
       const allocTotal = _totalMkt + _reVal + portfolioCash + _sukukActive + _assetVal;
       if (allocTotal > 0) {
         const arow = (lbl, v) => [lbl, SAR(v), PCT(v / allocTotal * 100)];
