@@ -97,6 +97,9 @@ window.CARD_INFO = {
         • <strong>ضخ شهري:</strong> إضافتك تُطبَّق شهرياً تماماً كما في الإسقاط الأساسي (كانت تُضاف سنوياً دفعة واحدة فينحاز الوسيط −3% إلى −4.5%).
       </div>
       <p class="info-note">💡 <strong>ليش الأداة مهمة؟</strong> السيناريوهات العادية تفترض أن السوق يعطيك نفس العائد كل سنة — وهذا وهم. وانهيار السوق <strong>قرب تقاعدك</strong> أخطر من انهيار وأنت شاب (خطر تتابع العوائد). <strong>ولا يُختبَر هذا الخطر إلا إذا فعّلت «مرحلة السحب»</strong> — بدونها المحاكاة تتوقف عند التقاعد ولا تسحب ريالاً.</p>
+      <p class="info-note">📉 <strong>خطر التوزيع مُنمذَج الآن (م.5):</strong> كانت المحاكاة تفترض توزيعك <em>مؤكَّداً إلى الأبد</em> وتُنمذج خطر السعر وحده — أي أنها تختبر كل شيء عدا الخطر الوحيد الذي يهدّد هدفك، ولهذا كانت «نسبة البقاء» تخرج ~99% شبه حتمية. الآن: التوزيع ينمو بـ<strong>2.76%</strong> (م.7) ويُقصّ في سنة هبوط السوق بجزء من نسبة الهبوط، ثم <strong>يتعافى نصف الفجوة كل سنة</strong> — لأن القصّ حدثٌ لا حالة دائمة.<br>
+      <strong>ونسبة القصّ مُدخَل مُعلَن لا رقم مدسوس:</strong> فُحصت بيانات تداول لديك فوجدت ستّ أزواج سنوات صالحة فقط، إحداها برمز واحد، وخمسٌ منها في فترة تعافٍ (+44% في 2024) — عيّنة كهذه تجعل المحاكاة <em>أكثر تفاؤلاً</em> لا أصدق، فلم تُشتقّ منها (م.20).</p>
+      <p class="info-note">⚠️ <strong>ماذا يُحرّك الرقمين فعلاً:</strong> «نسبة البقاء» تكاد لا تتأثّر بخطر التوزيع (99.4% ← 99.0%) لأن السحب يُموَّل من <em>العائد الكلي</em> لا من التوزيع وحده. الأثر يظهر في <strong>الدخل</strong>: احتمال بلوغ 6,000 ر.س/شهر ينزل من 97.8% إلى 96.1% (معتدل) و93.5% (متشدّد)، ووسيط الدخل ينزل 7%–12%. وهدف م.4 يُقاس بالدخل لا ببقاء المحفظة.</p>
       <p class="info-note">🫧 <strong>تناقض مقصود ومُعلَن:</strong> سنة 2005 (+104%) مستبعدة من نوافذ بطاقة السيناريوهات لكنها داخل وعاء السحب هنا. الاستبعاد هناك يخصّ <em>نقاط الدخول</em> (البدء من قمة فقاعة يشوّه إحصاء النوافذ)، أما هنا فالسحب عشوائي داخل مسار طويل وحذف الصعود الحاد وحده يبتر ذيل التوزيع الأيمن.</p>`
   },
 };
@@ -1304,23 +1307,73 @@ function readWithdrawalConfig(retireCalYear) {
 // ══════════════════════════════════════════════════════════════════════
 // مسار واحد: تراكم شهري (مطابق projectScenario) ثم سحب شهري اختياري
 // ══════════════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════════════
+// م.5 — نمو التوزيع وخطر قصّه داخل المحاكاة
+// ----------------------------------------------------------------------
+// كانت `divYield` **ثابتة** على كل مسار وكل سنة: خطر السعر مُنمذَج وخطر
+// التوزيع غير موجود إطلاقاً — فالمحاكاة تختبر كل شيء عدا الخطر الوحيد الذي
+// يهدّد هدف م.4، ولهذا كانت «نسبة البقاء» تخرج ~99% شبه حتمية.
+//
+// عيبان معاً:
+//   ① لا نمو: م.7 تسجّل نمو توزيع مرجّح 2.76% ولم يكن يدخل هنا (كما لم يكن
+//     يدخل projectScenario قبل إصلاحه).
+//   ② لا قصّ: التوزيع لا ينخفض أبداً مهما هبط السوق.
+//
+// **لماذا لم تُشتقّ نسبة القصّ من بيانات تداول:** فحصتُها — 18 رمزاً تُنتج
+// ستّ أزواج سنوات صالحة فقط (2020–2025)، إحداها برمز واحد، وخمسٌ منها في
+// فترة تعافٍ (+44% في 2024). بوتستراب من عيّنة كهذه يجعل المحاكاة **أكثر
+// تفاؤلاً** لا أصدق. فالنسبة مُدخَلٌ صريح مُعلَن قابل للضبط (م.20: يُعلَن
+// ولا يُقدَّر بصمت)، لا رقمٌ مدسوس في الكود.
+//
+// النمذجة: القصّ يقع في سنة الهبوط نفسها — والارتباط حقيقي: الشركات تقصّ
+// حين تنكمش أرباحها، وهو ما يحدث في سنة انهيار السوق. فنستعمل عائد السنة
+// المسحوب أصلاً بدل افتراض حدثٍ مستقلّ:
+//     نمو التوزيع في السنة = 2.76% + (حساسية × أصغر من صفر في عائد السنة)
+// ثم ينجرف العائد على القيمة السوقية بين نمو التوزيع ونمو السعر، تماماً
+// كما في projectScenario — فالدخل ينمو بسياسة الشركات لا بسعر السهم.
+// ══════════════════════════════════════════════════════════════════════
+// نسبة ما يتعافى من القصّ كل سنة. القصّ حدثٌ لا حالة دائمة: الشركة تقصّ
+// حين تنكمش أرباحها ثم تعيد الرفع حين تتعافى. وبلا تعافٍ يصير كل انهيار
+// تاريخي خصماً **أبدياً**، فتتراكم أزمات 2006 و2008 على 29 سنة وتُنتج
+// انهياراً في الدخل لم يقع في أي سوق حقيقي — قياسٌ أجريتُه: وسيط الدخل
+// كان يهبط 40% وهو أثر النموذج لا أثر الخطر.
+const MC_DIV_RECOVERY = 0.50;   // نصف الفجوة يُستردّ كل سنة
+
+// حجم القصّ في سنة عائدها rY: جزءٌ من نسبة الهبوط، وصفرٌ في سنة صاعدة.
+function _mcDivHit(yearReturn, sensitivity) {
+  return Math.min(0.90, Math.max(0, -Math.min(0, yearReturn) * (sensitivity || 0)));
+}
+
 function _simulateMcPath(returns, cfg) {
   const { startValue, lumpSum, horizonYears, schedule, divYield,
-          reinvest, inflationRate, wd } = cfg;
+          reinvest, inflationRate, wd, divRisk } = cfg;
   let value = startValue + lumpSum;
+  const gBase = (typeof DIV_GROWTH_WEIGHTED === 'number') ? DIV_GROWTH_WEIGHTED : 0.0276;
+  // عائد **الاتجاه** على القيمة السوقية: ينمو التوزيع بـم.7 وينجرف مقابل السعر
+  let trendYield = divYield;
+  // فجوة القصّ الجارية (0 = على الاتجاه) — تتراكم بالأزمة وتتعافى بعدها
+  let shortfall = 0;
 
   // ── مرحلة التراكم — شهرية بالضبط كما في projectScenario ──
   for (let y = 0; y < horizonYears; y++) {
-    const mCap = Math.pow(1 + Math.max(-0.999, returns[y]), 1 / 12) - 1;
+    const rY   = Math.max(-0.999, returns[y]);
+    const mCap = Math.pow(1 + rY, 1 / 12) - 1;
+    const mDrift = Math.pow((1 + gBase) / (1 + rY), 1 / 12);
+    // تعافٍ ثم قصّ السنة الجارية
+    shortfall = Math.min(0.90, shortfall * (1 - MC_DIV_RECOVERY) + _mcDivHit(rY, divRisk));
+    const effYield = trendYield * (1 - shortfall);
     for (let m = 0; m < 12; m++) {
       value *= (1 + mCap);
-      const div = value * (divYield / 12);
+      trendYield = Math.max(0, trendYield * mDrift);
+      const div = value * ((trendYield * (1 - shortfall)) / 12);
       if (reinvest) value += div;
       value += schedule[y * 12 + m] || 0;
       if (value < 0) value = 0;
     }
+    void effYield;
   }
   const atRetirement = value;
+  const yieldAtRetirement = trendYield * (1 - shortfall);
 
   // ── مرحلة السحب ──
   let depletedAtYear = null;   // عدد سنوات بعد التقاعد حتى النفاد
@@ -1332,10 +1385,14 @@ function _simulateMcPath(returns, cfg) {
     for (let k = 0; k < wd.years; k++) {
       const mCap = Math.pow(1 + Math.max(-0.999, returns[horizonYears + k]), 1 / 12) - 1;
       const mW   = annualW / 12;
+      const rW   = Math.max(-0.999, returns[horizonYears + k]);
+      const mDriftW = Math.pow((1 + gBase) / (1 + rW), 1 / 12);
+      shortfall = Math.min(0.90, shortfall * (1 - MC_DIV_RECOVERY) + _mcDivHit(rW, divRisk));
       for (let m = 0; m < 12; m++) {
         value *= (1 + mCap);
         // في مرحلة السحب التوزيعات تموّل السحب: تُضاف دائماً (عائد كلّي) ثم يُسحب
-        value += value * (divYield / 12);
+        trendYield = Math.max(0, trendYield * mDriftW);
+        value += value * ((trendYield * (1 - shortfall)) / 12);
         value -= mW;
         if (value <= 0) { value = 0; break; }
       }
@@ -1344,7 +1401,7 @@ function _simulateMcPath(returns, cfg) {
     }
   }
 
-  return { atRetirement, endValue: value, depletedAtYear };
+  return { atRetirement, endValue: value, depletedAtYear, yieldAtRetirement };
 }
 
 function runMonteCarlo() {
@@ -1366,6 +1423,10 @@ function runMonteCarlo() {
   const divYield = (Number.isFinite(divYieldOverride) && divYieldOverride >= 0)
     ? divYieldOverride / 100 : _hist.safeDivYield;
 
+  // م.5 — حساسية التوزيع لهبوط السوق (مُدخَل مُعلَن، لا رقم مدسوس)
+  const _drEl = document.getElementById('inp-div-risk');
+  const divRisk = _drEl ? (parseFloat(_drEl.value) || 0) : 0.35;
+
   // جدول DCA الشهري — يُطبَّق شهرياً (كان يُجمَّع سنوياً دفعة واحدة فينحاز
   // الوسيط −3% إلى −4.5% مقابل projectScenario الشهري)
   const schedule = buildDcaSchedule(getDcaPeriods(), horizonYears * 12);
@@ -1379,16 +1440,17 @@ function runMonteCarlo() {
 
   // بذرة محدَّدة من المدخلات نفسها → نفس المدخلات = نفس النتيجة بايتاً ببايت
   const seedStr = [
-    'mc-v3', N, MC_BLOCK_YEARS, startValue, lumpSum, horizonYears,
+    'mc-v4', N, MC_BLOCK_YEARS, startValue, lumpSum, horizonYears,
     reinvest ? 1 : 0, adjustInfl ? 1 : 0, inflationRate.toFixed(6),
-    goalAmount, _goalType, divYield.toFixed(8), _hist.blendedCapGrowth.toFixed(8),
+    goalAmount, _goalType, divYield.toFixed(8), divRisk.toFixed(4),
+    _hist.blendedCapGrowth.toFixed(8),
     schedule.join(','),
     wd.enabled ? `w:${wd.years}:${wd.mode}:${wd.rate}:${wd.monthly}:${wd.inflate ? 1 : 0}` : 'w:0',
   ].join('|');
   const rnd = _mulberry32(_hashSeed(seedStr));
 
   const cfg = { startValue, lumpSum, horizonYears, schedule, divYield,
-                reinvest, inflationRate, wd };
+                reinvest, inflationRate, wd, divRisk };
 
   const finals = [];        // القيمة عند التقاعد (بقوة شراء اليوم إن فُعِّل التضخم)
   const incomes = [];       // الدخل الشهري عند التقاعد (حقيقي)
@@ -1403,7 +1465,10 @@ function runMonteCarlo() {
     const r = _simulateMcPath(returns, cfg);
 
     const realValue  = r.atRetirement / inflFactorEnd;      // بقوة شراء اليوم
-    const realIncome = (realValue * divYield) / 12;
+    // العائد عند التقاعد **ليس** عائد اليوم: انجرف بنمو التوزيع وبما أصابه
+    // من قصّ في سنوات الهبوط. استعمال divYield الابتدائي كان يُلغي أثر
+    // النمذجة كلها على رقم الدخل المعروض.
+    const realIncome = (realValue * (r.yieldAtRetirement != null ? r.yieldAtRetirement : divYield)) / 12;
     finals.push(realValue);
     incomes.push(realIncome);
     if (goalAmount > 0) {
@@ -1439,7 +1504,10 @@ function runMonteCarlo() {
     endP50: wd.enabled ? _percentile(endReals, 50) : null,
   });
   if (statusEl) {
-    statusEl.textContent = `${N.toLocaleString('ar-SA')} مسار · كتل ${MC_BLOCK_YEARS} سنوات · عوائد تاسي 2004–2024 · بذرة ثابتة`;
+    statusEl.textContent = `${N.toLocaleString('ar-SA')} مسار · كتل ${MC_BLOCK_YEARS} سنوات`
+      + ` · عوائد تاسي 2004–2024 · نمو توزيع ${(DIV_GROWTH_WEIGHTED * 100).toFixed(2)}% (م.7)`
+      + ` · خطر القصّ ${divRisk > 0 ? (divRisk * 100).toFixed(0) + '% من نسبة الهبوط' : 'مُطفأ ⚠️'}`
+      + ' · بذرة ثابتة';
   }
 }
 

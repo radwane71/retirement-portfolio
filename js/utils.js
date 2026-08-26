@@ -531,18 +531,34 @@ function initNavGroups() {
 // C-1: commission rate as a named constant — verify against your broker agreement.
 // Common Tadawul rates: Aljazira/SNB = 0.15% (0.0015), Mubasher/Albilad = 0.25% (0.0025).
 const COMMISSION_RATE = 0.0015; // 1.5‰ — update if your broker charges differently
-// AUDIT-FIX (M4): per-trade commission cap as a named constant. Standard Tadawul brokerage is
-// ~0.155% with a MINIMUM but no maximum — a fixed 100 SAR cap UNDERSTATES friction on trades
-// above ~SAR 66,700 (at 0.15%), slightly inflating net P&L. Verify against your broker agreement:
-// set to Infinity for an uncapped 0.15% schedule, or to your broker's actual cap.
-const COMMISSION_CAP = 100; // SAR — max commission per trade (0 ⇒ none; Infinity ⇒ uncapped)
+const VAT_RATE        = 0.15;   // ضريبة القيمة المضافة على العمولة (م.2 و10)
+
+// ══════════════════════════════════════════════════════════════════════
+// لا سقف للعمولة — بقرار المالك (2026-08-26)
+// ----------------------------------------------------------------------
+// كان السقف 100 ر.س، وهو يقيّد العمولة فوق 66,667 ر.س للعملية الواحدة.
+// قرار المالك: «العمولة بلا حد — بكرا تكون المحفظة مليونية وممكن العمولة
+// تتجاوز الـ100 بالراحة». وهو الجدول القياسي في تداول أصلاً (نسبة بلا
+// حدّ أقصى)، والسقف كان يُنقص العمولة فيُنقص متوسط التكلفة **دائماً** —
+// أي في اتجاه إظهار ربح أكبر — ومنه التعادل الحقيقي الذي تقوم عليه م.45.
+//
+// ⚠️ أثر رجعي: **لا يوجد**. `calcCommission` تملأ حقول النموذج وقت الإدخال
+// فقط، والمخزَّن هو `total` وكل الحسابات تقرؤه. فالمعاملات القائمة لا
+// تتغيّر؛ التغيير يسري على الجديد وعلى أي معاملة تُفتح للتعديل.
+//
+// الحدّ الأدنى: `0` أي بلا حدّ. أكثر عقود الوساطة تفرض حداً أدنى للعملية،
+// فإن كان في عقدك فاضبطه هنا — تركه صفراً يُنقص تكلفة العمليات الصغيرة.
+// ══════════════════════════════════════════════════════════════════════
+const COMMISSION_CAP = Infinity; // ر.س — بلا سقف (الجدول القياسي)
+const COMMISSION_MIN = 0;        // ر.س — الحد الأدنى للعملية (0 ⇒ بلا حدّ)
 
 function calcCommission(shares, price) {
   // نضرب بـ 10000 ونقسم لاحقاً لتجنب أخطاء الفاصلة العائمة في العمليات الحسابية
   const cap10k     = (COMMISSION_CAP > 0 && isFinite(COMMISSION_CAP)) ? COMMISSION_CAP * 10000 : Infinity;
+  const min10k     = (COMMISSION_MIN > 0) ? COMMISSION_MIN * 10000 : 0;
   const tv10k      = Math.round(parseFloat(shares) * parseFloat(price) * 10000);
-  const comm10k    = Math.min(Math.round(tv10k * COMMISSION_RATE), cap10k); // cap = COMMISSION_CAP × 10000
-  const vat10k     = Math.round(comm10k * 0.15);
+  const comm10k    = Math.min(Math.max(Math.round(tv10k * COMMISSION_RATE), min10k), cap10k);
+  const vat10k     = Math.round(comm10k * VAT_RATE);
   const tradeValue = tv10k   / 10000;
   const commission = comm10k / 10000;
   const vat        = vat10k  / 10000;
