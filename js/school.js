@@ -221,6 +221,10 @@ function calcAge(birth) {
   const b = new Date(birth + 'T00:00:00'), now = new Date();
   let y = now.getFullYear() - b.getFullYear();
   let m = now.getMonth() - b.getMonth();
+  // ⚠️ يومُ الشهر كان مُهمَلاً: مولودٌ في 28 من الشهر يُحسب أكبر بشهر كامل
+  // طوال الأيام 1–27 منه. والعمر يحدّد المرحلة الدراسية وعدد السنوات
+  // المتبقية، فالانزياح يزحزح سنة رسوم كاملة في التخطيط.
+  if (now.getDate() < b.getDate()) m--;
   if (m < 0) { y--; m += 12; }
   const parts = [];
   if (y > 0) parts.push(y + ' سنة');

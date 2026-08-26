@@ -998,7 +998,14 @@ async function saveTask() {
   const accumulate= +document.getElementById('task-accumulate').value || null;
   const liquidate = +document.getElementById('task-liquidate').value  || null;
   const trimInput = +document.getElementById('task-trim').value       || null;
-  const trimFrom  = trimInput ?? (liquidate ? +(liquidate - 0.1).toFixed(2) : null);
+  // ⚠️ «تخفيف = تصفية − 0.10 ر.س» مبلغٌ مطلق: على سهم بـ12 ر.س يجعل نطاق
+  // التخفيف 0.8% من السعر، وعلى سهم بـ300 ر.س يجعله 0.03% — بينما م.48
+  // تمنح النطاق عرضاً حقيقياً (1.20–1.40 من العادلة، أي ~14% من مدى
+  // السعر). والنتيجة عملياً إلغاء نطاق التخفيف وإطلاق تنبيهين لحدث واحد.
+  // النسبة تحفظ العرض على أي مستوى سعري: التخفيف عند ~86% من التصفية،
+  // وهي نسبة 1.20 ÷ 1.40 المنصوص عليها في م.48 نفسها.
+  const TRIM_OF_LIQ = 1.20 / 1.40;
+  const trimFrom  = trimInput ?? (liquidate ? +(liquidate * TRIM_OF_LIQ).toFixed(2) : null);
 
   if (!ticker && !notes) { showToast('أدخل رمز السهم أو ملاحظات على الأقل', 'error'); return; }
 
