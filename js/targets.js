@@ -203,8 +203,13 @@ async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-targets');
-  await loadAll();
-  await loadReviewDates();
+  try {
+    await loadAll();
+    await loadReviewDates();
+  } catch (e) {
+    // الرسالة عُرضت في loadAll — نمنع فقط الرفض غير المعالَج
+    console.error(e);
+  }
 }
 
 // تحليل نص نطاق القيمة العادلة — نسخة حرفية من decision-engine.js/parseFairValueRange
@@ -343,6 +348,22 @@ async function loadAll() {
     // أعلام «قيادي» — نفس مصدر محرّك القرار؛ تُستخدم لعرض السقف الصحيح (7% أو 12%)
     loadUserSetting('decision_engine_v1').catch(() => ({})),
   ]);
+
+  // ══════════════════════════════════════════════════════════════════
+  // فحص الأخطاء إلزامي: supabase-js **يفي بالوعد عند الخطأ** ولا يرمي،
+  // فـ`Promise.all` ينجح و`.data` يصير null و`|| []` يبتلعه — فتُرسَم
+  // محفظة **بأوزان صفرية كاملة** بلا أي إنذار، ويُبنى عليها قرار توجيه
+  // السيولة (م.54) وفحص السقوف (م.25). بيانٌ لم يصل ≠ بيانٌ صفر (م.20/21).
+  // ══════════════════════════════════════════════════════════════════
+  const _errs = [
+    ['أسهمك',        usRes],  ['الحيازات',   hRes],
+    ['أهداف الأسهم', stRes],  ['أهداف القطاعات', secRes],
+    ['المهام',       taskRes],
+  ].filter(([, r]) => r && r.error).map(([n, r]) => `${n}: ${r.error.message || 'خطأ'}`);
+  if (_errs.length) {
+    showToast(`⛔ تعذّر تحميل البيانات — ${_errs.join(' · ')}. لم تُرسَم الصفحة على بيانات ناقصة.`, 'error');
+    throw new Error('targets loadAll failed: ' + _errs.join(' | '));
+  }
 
   userStocks = usRes.data || [];
   holdings   = hRes.data || [];
@@ -1130,14 +1151,18 @@ async function saveAllTargets() {
     showToast(`⚠️ تنبيه: أهداف أسهم تتجاوز هدف القطاع:\n${msgs}\nتم الحفظ على أي حال.`, 'warning');
   }
 
-  // تنبيهات بعد الحفظ لا قبله — كلها إعلامية (§8: يُعلَن ولا يُمنَع)
+  // ⚠️ التعليق كان يَعِد بـ«تنبيهات بعد الحفظ لا قبله» — وهي تُطلَق هنا،
+  // أي **قبل** أي كتابة إلى القاعدة. فإن فشل الحفظ لاحقاً يكون المالك قد
+  // قرأ «⚠️ حُفظ…» ثم «خطأ» — رسالتان متناقضتان لعملية واحدة. نجمّعها
+  // ونُطلقها بعد نجاح الكتابة فعلاً.
+  const _postSaveWarnings = [];
   if (capViolations.length) {
-    showToast(`⚠️ حُفظ. ${capViolations.length} هدفاً فوق السقف الدستوري — يُنفَّذ عند min(هدفك، السقف) في محرّك التوازن وخطة الوصول، والفارق مُعلَن هناك.`, 'warning');
+    _postSaveWarnings.push(`⚠️ حُفظ. ${capViolations.length} هدفاً فوق السقف الدستوري — يُنفَّذ عند min(هدفك، السقف) في محرّك التوازن وخطة الوصول، والفارق مُعلَن هناك.`);
   }
   if (stockSum > 100.05) {
-    showToast(`⚠️ حُفظ. إجمالي أهداف الأسهم ${stockSum.toFixed(1)}% يتجاوز 100% — النِّسب المعروضة تُقاس على مقام أكبر من محفظتك.`, 'warning');
+    _postSaveWarnings.push(`⚠️ حُفظ. إجمالي أهداف الأسهم ${stockSum.toFixed(1)}% يتجاوز 100% — النِّسب المعروضة تُقاس على مقام أكبر من محفظتك.`);
   } else if (stockSum < 99.9 && stockSum > 0) {
-    showToast(`⚠️ حُفظ. الإجمالي ${stockSum.toFixed(1)}% — تبقى ${(100-stockSum).toFixed(1)}% غير موزعة.`, 'warning');
+    _postSaveWarnings.push(`⚠️ حُفظ. الإجمالي ${stockSum.toFixed(1)}% — تبقى ${(100-stockSum).toFixed(1)}% غير موزعة.`);
   }
 
   const { data: { user } = {} } = await supabaseClient.auth.getUser();
@@ -1176,6 +1201,9 @@ async function saveAllTargets() {
     .upsert(rows, { onConflict: 'user_id,ticker' });
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
+
+  // الكتابة نجحت — الآن فقط تُعرَض تنبيهات ما بعد الحفظ
+  _postSaveWarnings.forEach(m => showToast(m, 'warning'));
 
   // تُحفظ بعد نجاح الأهداف حتى لا تفترق القائمة عن الأرقام
   zeroTargets = nextZero;

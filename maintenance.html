@@ -77,12 +77,27 @@
       const btn      = document.getElementById('m-btn');
       const errEl    = document.getElementById('err');
       errEl.style.display = 'none';
+      // ⚠️ الشبكة قد ترمي (رفض غير معالَج) قبل بلوغ سطر إعادة التمكين،
+      // فيبقى الزرّ الوحيد للدخول معطَّلاً حتى إعادة تحميل الصفحة.
+      // `finally` تضمن استعادته في كل المسارات.
       btn.textContent = 'جارٍ التحقق…'; btn.disabled = true;
 
-      const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
-      btn.textContent = 'دخول'; btn.disabled = false;
+      let data, error;
+      try {
+        ({ data, error } = await supabaseClient.auth.signInWithPassword({ email, password }));
+      } catch (ex) {
+        error = { message: 'network' };
+        console.error(ex);
+      } finally {
+        btn.textContent = 'دخول'; btn.disabled = false;
+      }
 
-      if (error) { errEl.textContent = 'بيانات غير صحيحة'; errEl.style.display = 'block'; return; }
+      if (error) {
+        errEl.textContent = error.message === 'network'
+          ? 'تعذّر الاتصال — تحقّق من الشبكة ثم أعد المحاولة'
+          : 'بيانات غير صحيحة';
+        errEl.style.display = 'block'; return;
+      }
 
       const user = data.user;
       // AUDIT-FIX: علم الأدمن يُقرأ من app_metadata (يضبطه الخادم فقط) لا user_metadata

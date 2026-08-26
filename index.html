@@ -189,11 +189,21 @@
       const confirm  = document.getElementById('reset-confirm').value;
       if (password !== confirm) { showError('كلمتا المرور غير متطابقتين'); return; }
       const btn = document.getElementById('reset-btn');
+      // ⚠️ الشبكة قد ترمي (رفض غير معالَج) قبل بلوغ سطر إعادة التمكين،
+      // فيبقى الزرّ الوحيد للدخول معطَّلاً حتى إعادة تحميل الصفحة.
+      // `finally` تضمن استعادته في كل المسارات.
       btn.disabled = true;
       btn.textContent = 'جارٍ الحفظ...';
-      const { error } = await supabaseClient.auth.updateUser({ password });
-      btn.disabled = false;
-      btn.textContent = 'حفظ كلمة المرور الجديدة';
+      let error;
+      try {
+        ({ error } = await supabaseClient.auth.updateUser({ password }));
+      } catch (ex) {
+        error = { message: 'تعذّر الاتصال — تحقّق من الشبكة ثم أعد المحاولة' };
+        console.error(ex);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'حفظ كلمة المرور الجديدة';
+      }
       if (error) { showError(error.message); return; }
       showSuccess('✅ تم تغيير كلمة المرور بنجاح! سيتم تحويلك...');
       setTimeout(() => window.location.href = 'dashboard.html', 2000);
@@ -204,13 +214,23 @@
       clearMessages();
       const btn   = document.getElementById('forgot-btn');
       const email = document.getElementById('forgot-email').value.trim();
+      // ⚠️ الشبكة قد ترمي (رفض غير معالَج) قبل بلوغ سطر إعادة التمكين،
+      // فيبقى الزرّ الوحيد للدخول معطَّلاً حتى إعادة تحميل الصفحة.
+      // `finally` تضمن استعادته في كل المسارات.
       btn.disabled = true;
       btn.textContent = 'جارٍ الإرسال...';
-      const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
-        redirectTo: window.location.origin + '/index.html'
-      });
-      btn.disabled = false;
-      btn.textContent = 'إرسال الرابط';
+      let error;
+      try {
+        ({ error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+          redirectTo: window.location.origin + '/index.html'
+        }));
+      } catch (ex) {
+        error = { message: 'تعذّر الاتصال — تحقّق من الشبكة ثم أعد المحاولة' };
+        console.error(ex);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'إرسال الرابط';
+      }
       if (error) { showError(error.message); return; }
       showSuccess('📧 تم الإرسال! تحقق من بريدك — ستجد رابط إعادة تعيين كلمة المرور.');
     }

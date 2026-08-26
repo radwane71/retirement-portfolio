@@ -360,7 +360,12 @@ function saveItem() {
     notes: document.getElementById('i-notes').value.trim()
   };
   if (editingId) {
+    // ⚠️ `findIndex` تُرجع −1 عند عدم العثور، و`list[-1] = {...}` يكتب
+    // خاصية نصّية «-1» على المصفوفة بلا خطأ: التعديل يضيع صامتاً ويظهر
+    // «تم التحديث ✓». يقع فعلاً إن حُذف السجل في تبويب آخر أو انتهت
+    // الجلسة وأُعيد التحميل بين فتح النموذج وحفظه.
     const idx = items.findIndex(x => x.id === editingId);
+    if (idx === -1) { showToast('⚠️ تعذّر العثور على العنصر — أُعيد تحميل الصفحة؟ لم يُحفَظ التعديل', 'error'); return; }
     items[idx] = { ...items[idx], ...obj };
     showToast('تم التحديث ✓', 'success');
   } else {

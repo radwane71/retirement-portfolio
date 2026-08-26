@@ -326,7 +326,12 @@ function saveGoal() {
     notes:    document.getElementById('g-notes').value.trim()
   };
   if (editingId) {
+    // ⚠️ `findIndex` تُرجع −1 عند عدم العثور، و`list[-1] = {...}` يكتب
+    // خاصية نصّية «-1» على المصفوفة بلا خطأ: التعديل يضيع صامتاً ويظهر
+    // «تم التحديث ✓». يقع فعلاً إن حُذف السجل في تبويب آخر أو انتهت
+    // الجلسة وأُعيد التحميل بين فتح النموذج وحفظه.
     const idx = goals.findIndex(x => x.id === editingId);
+    if (idx === -1) { showToast('⚠️ تعذّر العثور على الهدف — لم يُحفَظ التعديل', 'error'); return; }
     goals[idx] = { ...goals[idx], ...obj };
     showToast('تم تحديث الهدف ✓', 'success');
   } else {
