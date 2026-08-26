@@ -1830,8 +1830,13 @@
     async function onAnchorChange() {
       const anchor = document.getElementById('anchorModel').value || '';
       const tk = (document.getElementById('stockTicker').value || '').trim().toUpperCase();
-      // العملية الأحدث لنفس الرمز هي التي نُحدّثها (هي التي أنتجت هذه النتيجة)
-      const entry = _history.find(e => (e.inputs?.ticker || '').toUpperCase() === tk);
+      // ⚠️ «أول مطابقة للرمز = العملية التي أنتجت هذه النتيجة» صحيحٌ فقط عند
+      // حفظٍ **جديد** (unshift). أمّا في وضع التعديل فالسجلّ يُستبدَل في
+      // مكانه، فيُرجع `find` تقييماً **أقدم وآخر** لنفس الرمز — فتُكتب عليه
+      // المرساة و`results` كاملةً، ولا ينالها السجلّ الذي عدّله المالك،
+      // ثم تُعاد الشاشة من أرقام السجلّ الخطأ. نستهدف آخر سجلّ كُتب فعلاً.
+      const entry = (_lastSavedHistId != null && _history.find(e => e.id === _lastSavedHistId))
+                 || _history.find(e => (e.inputs?.ticker || '').toUpperCase() === tk);
       if (!entry) { showToast('احسب أولاً ثم اختر المرساة', 'info'); return; }
       entry.inputs = { ...entry.inputs, anchorModel: anchor };
       const res = recomputeResults(entry.inputs);
@@ -2007,7 +2012,7 @@
           return { label: '⚪ مرجعي فقط', cls: 'rel-na', reason: '(NOI ÷ Cap Rate − الدين) ÷ الوحدات. لا يدخل متوسط القيمة العادلة ولا الرسم البياني — يُعرض للمقارنة فقط' };
         case 'DDM': {
           if (c.dps == null || c.dps <= 0) return { label: '⛔ لا ينطبق', cls: 'rel-na', reason: 'لا توزيعات مُدخَلة — DDM يحتاج توزيعاً موجباً' };
-          const rate = c.companyType === 'bank' ? c.ke : c.discount_rate;
+          const rate = (c.ke != null) ? c.ke : c.discount_rate;   // يطابق المعدّل المستعمل فعلاً
           if (rate == null) return { label: '⛔ غير متوفر', cls: 'rel-na', reason: 'تكلفة حقوق الملكية Ke غير متوفرة — DDM المصرفي يُخصم بـ Ke لا بـ WACC، ولا يُقدَّر بصمت (§8)' };
           const gap = (rate - (c.growth_perp_final || 0)) * 100;
           const rn = c.companyType === 'bank' ? 'Ke' : 'الخصم';
@@ -2274,6 +2279,8 @@
     let _history = [];
     let _histSearch = '';
     let _editingHistId = null;
+    // معرّف آخر سجلّ كُتب فعلاً — تستهدفه المرساة بدل «أول مطابقة للرمز»
+    let _lastSavedHistId = null;
 
     let _histSearchTimer = null;
     function onHistSearch() {
@@ -2337,11 +2344,33 @@
       let discount_rate = num(inp.discountRate) / 100;
       // البنك لا يُخصم بـ WACC مهما كان المحفوظ (كانت العمليات القديمة تحفظ useWacc للبنك)
       if (flagOn(inp.useWacc) && companyType !== 'bank') {
-        const rf = num(inp.riskFree) / 100, b = (num(inp.betaMain) || num(inp.beta, 1)), rm = num(inp.marketReturn) / 100,
-              rd = num(inp.debtCost) / 100, tx = num(inp.taxRate) / 100, de = num(inp.debtEquity);
-        discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
+        // ⚠️ `num(inp.beta, 1)` كان يفترض **بيتا = 1** بصمت عند غيابها — وهو
+        // نصّ ما تمنعه م.20، والمحرّك الحيّ يحجبه صراحةً. بيتا مفترضة تُغيّر
+        // معدّل الخصم ومنه القيمة العادلة كلها. إن غابت: لا WACC مُعاد
+        // الحساب، ويبقى المعدّل المحفوظ كما أدخله المالك.
+        const _bRaw = parseFloat(inp.betaMain ?? inp.beta);
+        const b  = isFinite(_bRaw) && _bRaw > 0 ? _bRaw : null;
+        if (b != null) {
+          const rf = num(inp.riskFree) / 100, rm = num(inp.marketReturn) / 100,
+                rd = num(inp.debtCost) / 100, tx = num(inp.taxRate) / 100, de = num(inp.debtEquity);
+          discount_rate = calculateWACC(rf, b, rm, rd, tx, de);
+        }
       }
       const ke = keFromInputs(inp);
+      // ══════════════════════════════════════════════════════════════
+      // نماذج التوزيعات تُخصم بـ **Ke** لا بـ WACC — نفس قاعدة المحرّك الحيّ
+      // --------------------------------------------------------------
+      // التوزيع تدفّقٌ إلى **المساهم**، فيُخصم بتكلفة حقوق الملكية. وخصمه
+      // بـWACC يقلّل المعدّل كلما ارتفعت الرافعة فيضخّم القيمة (عند D/E = 1
+      // نحو +50%). المحرّك الحيّ يطبّق ذلك على كل نماذج التوزيع، وهذا
+      // المحرّك (الذي يُنتج ما **يُحفَظ**) كان يُبقي WACC للريت دائماً
+      // وللشركة العادية كلما كان الأساس FCFF — وهو الافتراضي.
+      // قياس مُتحقَّق على ريت: DDM على الشاشة 14.71 والمحفوظ 21.25.
+      // والأسوأ أن «إعادة حساب السجل» كانت تُعيد كل سجلّ ريت إلى الرقم
+      // المضخَّم. وإن غابت Ke فلا سقوط على WACC — يُعلَن النقص (م.20).
+      const _needKe   = companyType === 'bank' || companyType === 'reit'
+                     || String(inp.fcfBasis || '') === 'fcfe';
+      const perpRate  = (ke != null) ? ke : (_needKe ? null : discount_rate);
       let growth_perp_final = growth_perp + growth_adj;
       if (growth_perp_final > 0.03) growth_perp_final = 0.03;   // نفس سقف 3% للمعادلة الحية
       if (growth_perp_final < 0)    growth_perp_final = 0;      // أرضية 0 (السيناريو المحتاط)
@@ -2387,7 +2416,8 @@
         const totalDebtR = flagOn(inp.noTotalDebt) ? 0 : num(inp.totalDebt);
         const nav_per_unit = (nav_total - totalDebtR) / totalUnits;
         const pffo_value = ffo > 0 ? ffo * pffo : null;
-        const ddm_reit = calculate_gordon(num(inp.dividends), growth_perp_final, discount_rate);
+        const ddm_reit = (perpRate == null) ? null
+                       : calculate_gordon(num(inp.dividends), growth_perp_final, perpRate);
         const noiRaw = (inp.noi == null || String(inp.noi).trim() === '') ? null : num(inp.noi);
         const caprate_value = (noiRaw != null && noiRaw > 0 && capRate > 0)
           ? (noiRaw / capRate - totalDebtR) / totalUnits : null;
@@ -2442,7 +2472,7 @@
         'DCF': dcf ? dcf.equityValue : null,
         'جراهام': calculateGraham(eps, growth_5yr_adj * 100, bond_yield),
         'مكرر الربحية P/E': calculate_pe(eps, sector_pe),
-        'جوردون': calculate_gordon(dividends, growth_perp_final, basis === 'fcfe' && ke != null ? ke : discount_rate),
+        'جوردون': (perpRate == null) ? null : calculate_gordon(dividends, growth_perp_final, perpRate),
         'القيمة الدفترية': calculate_book_value(book_value, fair_pb),
       };
       const extras = [`السيناريو: ${scenLabel}`];
@@ -2456,6 +2486,31 @@
       if (ndMissing) extras.push('⚠️ الدين الصافي غير مُسجَّل في هذه العملية — حُسب صفراً، والقيمة قد تكون مضخّمة');
       const gate = sustainabilityGate(cyc ? 'cyclical' : 'normal',
         { eps: gateNum(inp.eps), fcf: gateNum(inp.fcf), dividends: gateNum(inp.dividends), normEps: nEpsRaw, normFcf: nFcfRaw });
+      // ══════════════════════════════════════════════════════════════
+      // م.32/م.36 — مسار الشركة الخاسرة (كان غائباً عن هذا المحرّك)
+      // --------------------------------------------------------------
+      // ⚠️ هذا المحرّك يُنتج ما **يُحفَظ**، والمحرّك الحيّ أعلاه يُنتج ما
+      // **يُعرَض** — وكانا يفترقان هنا. عند EPS ≤ 0 تُبطِل جراهام والمكرر
+      // نفسيهما (تحرسان eps<=0)، لكن **DCF وجوردون لا** — تكفيهما fcf>0
+      // و dividends>0. فيُحفَظ في السجل بالضبط ما تمنعه م.32 للشركة
+      // الخاسرة، بينما الشاشة تعرض نموذج م.36 الصحيح.
+      // قياس مُتحقَّق: eps=-2 · fcf=3 · book=20 · fairPb=1.5 ⇒
+      //   الشاشة 16.00 ر.س   ·   المحفوظ 32.03 ر.س (DCF وجوردون).
+      // وكل مستهلك أسفل السلسلة (محرّك القرار، الأهداف، المهام، السجل)
+      // يقرأ **المحفوظ** — فالحارس الدستوري على الشاشة كان لا يحرس شيئاً.
+      // ويتكرّر الافتراق عند إعادة حساب السجل كاملاً وعند التصحيح الجماعي.
+      // ══════════════════════════════════════════════════════════════
+      if (eps <= 0) {
+        if (!(book_value > 0)) return null;   // حقوق ملكية مستنفَدة — لا تقييم (م.20)
+        const pbLoss  = Math.min(0.8, Math.max(0.6, fair_pb || 0.7));
+        const lossKey = 'القيمة الدفترية × مكرر متحفّظ (م.36)';
+        extras.push(`⚠️ الشركة خاسرة (EPS = ${eps}) — م.32 تمنع DCF وجراهام والمكرر `
+          + `وDDM، وم.36 تحصر النموذج في الدفترية × مكرر متحفّظ ${pbLoss.toFixed(2)}`
+          + (fair_pb && (fair_pb < 0.6 || fair_pb > 0.8) ? ` (قُصّ من ${fair_pb})` : ''));
+        return mk({ [lossKey]: calculate_book_value(book_value, pbLoss) },
+                  [lossKey], extras, gate);
+      }
+
       // القيمة الدفترية أرضية تصفوية — خارج المتوسط (تبقى في جدول النماذج للعرض)
       const out = mk(values, ['DCF', 'جراهام', 'مكرر الربحية P/E', 'جوردون'], extras, gate);
       if (out && values['القيمة الدفترية'] > 0) out.bookFloor = values['القيمة الدفترية'];
@@ -3078,10 +3133,20 @@
         const dec  = (last.inputs || {}).decision || '';
         const decMap = { hold:'🤝 احتفاظ', accumulate:'➕ تجميع', trim:'✂️ تخفيف',
                          exit:'🚪 خروج', watch:'👁️ مراقبة' };
-        const days = last.date ? Math.floor((Date.now() - new Date(last.date)) / 86400000) : null;
+        // ⚠️ `new Date(last.date)` على تاريخٍ عربي مثل «٢٢‏/٨‏/٢٠٢٦، ١:٣٢ م»
+        // يُنتج Invalid Date، والطرح يعطي NaN — و`NaN != null` **صادق**،
+        // فكانت البطاقة تطبع «(NaN يوماً)» لكل سهم دائماً. والملف يملك
+        // المحلّل الصحيح `histStamp` أصلاً (وُضع تحديداً لعلامة RLM).
+        // وكذلك `.slice(0,10)` يبتر السنة لأن كل «/» مسبوقة بـU+200F،
+        // فيخرج «٢٢‏/٨‏/٢٠٢» بثلاثة أرقام للسنة — نبني النصّ من الطابع.
+        const _ts  = histStamp(last);
+        const days = _ts > 0 ? Math.floor((Date.now() - _ts) / 86400000) : null;
+        const _dTxt = _ts > 0
+          ? new Date(_ts).toLocaleDateString('en-CA')   // YYYY-MM-DD بلا علامات اتجاه
+          : String(last.date || '—');
         evalBlock = kvsHtml([
           ['عدد التقييمات', String(mine.length)],
-          ['آخر تقييم', escHist(String(last.date || '—').slice(0, 10))
+          ['آخر تقييم', escHist(_dTxt)
             + (days != null ? ` <span class="text-muted" style="font-weight:400">(${days} يوماً)</span>` : '')],
           [(last.results || {}).fairValueAvg ? 'القيمة العادلة' : 'النتيجة',
             (last.results || {}).fairValueAvg
@@ -3294,19 +3359,23 @@
           // يشتقّون عمر التقييم من `id` (الطابع الزمني)، فيظهر التقييم بتاريخ
           // اليوم و«⚠️ قديم» في السطر نفسه — ويبقى الفلتر 3 معطّلاً صامتاً رغم
           // أن المالك حدّثه للتوّ. الآن يُحدَّث الطابع مع التاريخ.
+          const _newId = Date.now();
           _history[idx] = {
             ..._history[idx],
-            id: Date.now(),
+            id: _newId,
             editedFrom: _history[idx].id,
             date: new Date().toLocaleString('ar-SA') + ' (معدَّل)',
             inputs,
             results
           };
+          _lastSavedHistId = _newId;   // المرساة تستهدف هذا السجلّ بعينه
         }
         _editingHistId = null;
         setEditMode(false);
       } else {
-        _history.unshift({ id: Date.now(), date: new Date().toLocaleString('ar-SA'), inputs, results });
+        const _newId = Date.now();
+        _history.unshift({ id: _newId, date: new Date().toLocaleString('ar-SA'), inputs, results });
+        _lastSavedHistId = _newId;
         if (_history.length > 5000) _history.splice(5000);
       }
       invalidateHistIndex(); _histBuilt.clear();
