@@ -1947,6 +1947,16 @@ function buildTargetPlan(valAware) {
     }
     if (gapPct > 0 && devBand.action === 'none') return;
     if (gapPct > 0 && sar >= MIN_BUY_SAR) {
+      // م.53/4 و م.55/2 — سهمٌ في قائمة الخروج المؤجل لا يتلقّى سيولة جديدة.
+      // «أهلية التلقي» تشترط الأربعة معاً، ورابعها «ليس في قائمة الخروج
+      // المؤجل». وكان السهم المؤجَّل خروجه قد يتلقّى أمر شراء إن كان تحت
+      // هدفه — أي نشتري ما قرّرنا الخروج منه، وننتظر سعراً يبتعد.
+      if (deferredExits && deferredExits[r.ticker]) {
+        out.deferred.push(mk({ sar: 0, shares: 0, gapPct,
+          why: 'في قائمة الخروج المؤجل (م.45) — لا سيولة جديدة إليه (م.53/4 و م.55/2). '
+             + `الفجوة عن هدفك ${formatNum(gapPct)} نقطة قائمة ومعلَنة، ولا أمر شراء.` }));
+        return;
+      }
       // م.55/5 — «سدافكو 2270 بقرار المالك الصريح: لا تجميع مهما كانت الإشارات»
       if (noAccum) {
         out.deferred.push(mk({ sar: 0, shares: 0, gapPct,

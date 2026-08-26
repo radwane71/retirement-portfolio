@@ -641,6 +641,14 @@ async function loadAllData() {
   // ══════════════════════════════════════════════════════════════════
   const _heldTickers = new Set(holdings.map(h => String(h.ticker || '').trim().toUpperCase()));
   const _divHeld = divRows.filter(d => _heldTickers.has(String(d.ticker || '').trim().toUpperCase()));
+  // نفس القاعدة مطبَّقة على بسط **الاستقراء**: كان `yearDiv` يُستقرأ وهو من
+  // كل السجلات بما فيها مراكز مُغلَقة، بينما مقامه `costBasis` من الحيازات
+  // القائمة وحدها — الإصلاح طُبِّق على `ttmDiv` أعلاه ونُسي هنا.
+  // `yearDiv` نفسه يبقى كما هو: هو «أرباح السنة» المعروضة، ونقدٌ استُلم فعلاً.
+  const yearDivHeld = _divPaid
+    .filter(x => x.dt.getFullYear() === yr
+              && _heldTickers.has(String(x.d.ticker || '').trim().toUpperCase()))
+    .reduce((s, x) => s + +x.d.amount, 0);
   const ttmDiv = _divHeld.reduce((s, d) => {
     // AUDIT-FIX 2026-08-21 (#51): كان `new Date('YYYY-MM-DD')` يُفسَّر UTC بينما
     // احتياطي year/month في السطر التالي — و tsOf في الدخل المتوقَّع أسفل الملف —
@@ -694,7 +702,7 @@ async function loadAllData() {
   const _cycleDays = _minFreq > 0 ? daysInYear / _minFreq : Infinity;
   const _canExtrapolate = daysElapsed >= 180 && daysElapsed >= _cycleDays * 1.5;
   const annualizedYearDiv = _canExtrapolate
-    ? yearDiv * (daysInYear / daysElapsed)
+    ? yearDivHeld * (daysInYear / daysElapsed)
     : ttmDiv;
   const _annBasis = _canExtrapolate ? 'extrapolated' : 'ttm';
   // المقام للعائد المُسنوى: costBasis (WAC × الأسهم الحالية) هو الأدق لأنه يعكس رأس المال الفعلي المُنشغل
@@ -966,10 +974,11 @@ async function loadAllData() {
     totalSells,
     totalCommission, totalVAT,
     realizedPnL,
-    totalDivAll,     yearDiv,
+    totalDivAll,     yearDiv,     yearDivHeld,
     divYieldYear,    divYieldAll,
     divYieldAnn, divYieldYOC, divYieldMarket, divYieldFwd,
     fwdProjected, fwdByTicker, fwdStale: _fwdStale, ttmDiv, xirr,
+    totalValue, costBasis,
     annualizedYearDiv, daysElapsed, daysInYear, denomAnn,
     annBasis: _annBasis, divDeclaredPending: _divDeclaredPending,
     grantMap, totalGrantShares, totalGrantTickers,
@@ -1056,7 +1065,7 @@ function switchYieldTab(tab) {
     // الشرط هو الأساس المُستخدَم فعلاً لا اليوم وحده — كان السطر يقول
     // «استقراء» بينما الحساب TTM لأن دورية أبطأ موزّع لم تكتمل بعد.
     const note = s.annBasis === 'extrapolated'
-      ? `أرباح ${formatSAR(s.yearDiv||0)} × (${s.daysInYear}÷${s.daysElapsed}) ÷ تكلفة المحفظة (WAC)`
+      ? `أرباح الحيازات القائمة ${formatSAR(s.yearDivHeld||0)} × (${s.daysInYear}÷${s.daysElapsed}) ÷ تكلفة المحفظة (WAC)`
       : `لا استقراء (يوم ${s.daysElapsed||0}، ودورة أبطأ موزّع لم تكتمل) — TTM ${formatSAR(s.ttmDiv||0)} ÷ التكلفة`;
     setText('stat-div-yield-sub', note);
   } else if (tab === 'yoc') {
@@ -1528,10 +1537,15 @@ function renderPortfolioHealthCard() {
   const _top1NameE = esc(top1Name);
   const _largSecE  = esc(largestSectorName);
   let bScore, bLabel, bDetail;
-  if (top1Pct > 30 || top3Pct > 65 || largestSectorPct > 50) {
+  // ⚠️ العتبات هنا (30/20 للسهم و50/38 للقطاع) اجتهادية وتناقض توصيات
+  // **الصفحة نفسها** أسفلها المضبوطة على م.25 و28. وbScore يغذّي رقم
+  // «صحة المحفظة» المعروض، فكان التناقض يظهر للمالك في بطاقتين متجاورتين.
+  // المرجع: سقف أعلى فئة (أ) 15% للسهم الواحد، وم.28 للقطاع.
+  const _capA = (typeof CAT === 'object' && CAT && CAT.A) ? CAT.A.cap : 15;
+  if (top1Pct > _capA * 2 || top3Pct > 65 || largestSectorPct > 30) {
     bScore = 'red';    bLabel = 'تركيز مرتفع جداً';
     bDetail = `أكبر سهم (${_top1NameE}): ${top1Pct.toFixed(1)}% · أكبر 3: ${top3Pct.toFixed(1)}% · أكبر قطاع: ${largestSectorPct.toFixed(1)}%`;
-  } else if (top1Pct > 20 || top3Pct > 50 || largestSectorPct > 38) {
+  } else if (top1Pct > _capA || top3Pct > 50 || largestSectorPct > 25) {
     bScore = 'yellow'; bLabel = 'تركيز مرتفع';
     bDetail = `أكبر سهم (${_top1NameE}): ${top1Pct.toFixed(1)}% · أكبر قطاع (${_largSecE}): ${largestSectorPct.toFixed(1)}%`;
   } else {
@@ -1627,10 +1641,19 @@ function renderPortfolioHealthCard() {
   // T4: تركيز قطاعي
   // AUDIT-FIX (2026-08-21): كانت العتبات 50%/38% وتنصح بـ«دون 35%» بينما الدستور
   // §1 يضع سقف القطاع 25% + منطقة سماح 1.25% — فكانت اللوحة تسكت عن كسر مؤكّد.
-  if (largestSectorPct > 25 + 1.25)
-    tips.push({ lvl:'red',    txt: `قطاع ${_largSecE} يشكل ${largestSectorPct.toFixed(1)}% — كسر سقف القطاع الدستوري 25% (+1.25% سماح). خفّف أو وزّع على قطاعات أخرى` });
-  else if (largestSectorPct > 25)
-    tips.push({ lvl:'yellow', txt: `قطاع ${_largSecE} (${largestSectorPct.toFixed(1)}%) — داخل منطقة السماح فوق سقف 25%، راقبه` });
+  // ⚠️ «+1.25% سماح» رقمٌ لا وجود له في م.28. الدستور يضع أربع مناطق صريحة:
+  //   ≤25 🟢 · 25–27.5 🟡 **تنبيه فقط، لا تصحيح** · 27.5–30 🟠 وقف الإضافة
+  //   · >30 🔴 تصحيح إلزامي.
+  // فكانت اللوحة تأمر بالتخفيف عند 26.3% حيث تقول م.28 «تنبيه فقط»، وتسكت
+  // عن منطقة «وقف الإضافة» كلياً. والمحرّك وصفحة الأهداف على 27.5 —
+  // فالثلاثة كانوا يتناقضون. المصدر الآن `sectorBandOf` في الدستور.
+  const _secBandTip = (typeof sectorBandOf === 'function') ? sectorBandOf(largestSectorPct) : null;
+  if (_secBandTip && largestSectorPct > 25) {
+    const _lvl = (_secBandTip.action === 'correct' || _secBandTip.action === 'stopAdd')
+               ? 'red' : 'yellow';
+    tips.push({ lvl: _lvl,
+      txt: `قطاع ${_largSecE} يشكل ${largestSectorPct.toFixed(1)}% — ${_secBandTip.label} (م.28)` });
+  }
 
   // T5: الأوزان
   if (hasTargets && redDev > 0)
@@ -1640,10 +1663,16 @@ function renderPortfolioHealthCard() {
 
   // T6: التوزيعات
   if (monthlyTarget > 0 && fwdMonthly < monthlyTarget * 0.4) {
-    const fwdYoc = (s.divYieldFwd || 0);
-    if (fwdYoc > 0.5) {
-      const neededPort = (monthlyTarget * 12) / (fwdYoc / 100);
-      tips.push({ lvl:'blue',  txt: `لتحقيق ${formatSAR(monthlyTarget)}/شهر بعائد ${fwdYoc.toFixed(1)}% تحتاج محفظة بحجم ${formatSAR(neededPort)} — اجعل هذا هدفك المرحلي` });
+    // ⚠️ «حجم المحفظة المطلوب» يُقاس بريالٍ **سوقي**، فمقامه العائد السوقي
+    // (الدخل ÷ القيمة السوقية) لا العائد على التكلفة. و`divYieldFwd` مقامه
+    // `costBasis`، وهو أصغر من القيمة السوقية بمقدار ما ارتفعت المحفظة —
+    // فيخرج العائد أعلى والحجم المطلوب **أقلّ** بالنسبة نفسها. بمحفظة
+    // ارتفعت 30% كان الهدف يُعرض أدنى من الحقيقي بنحو 23%.
+    const _mv = +s.totalValue || 0;
+    const fwdMktYield = _mv > 0 ? ((+s.fwdProjected || 0) / _mv * 100) : 0;
+    if (fwdMktYield > 0.5) {
+      const neededPort = (monthlyTarget * 12) / (fwdMktYield / 100);
+      tips.push({ lvl:'blue',  txt: `لتحقيق ${formatSAR(monthlyTarget)}/شهر بعائد سوقي ${fwdMktYield.toFixed(1)}% تحتاج محفظة بحجم ${formatSAR(neededPort)} — اجعل هذا هدفك المرحلي` });
     }
   }
 
@@ -4012,16 +4041,44 @@ async function syncHoldingsFromTx() {
   if (btn) { btn.disabled = true; btn.textContent = 'جارٍ الفحص…'; }
 
   const { data: { user } } = await supabaseClient.auth.getUser();
-  const { data: txAll, error: txErr } = await supabaseClient
+  if (!user) {
+    showToast('انتهت الجلسة — أعد تسجيل الدخول', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'مزامنة من المعاملات'; }
+    return;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // ثلاثة عيوب كانت في استعلامٍ واحد يكتب مصدر الحقيقة `holdings.avg_price`
+  // ------------------------------------------------------------------
+  //  1. **لا كسر تعادل**: الحقول `date` و`created_at` و`id` لم تكن مُختارة
+  //     أصلاً، فلا سبيل لترتيب معاملتين في اليوم نفسه — وترتيب Postgres
+  //     للصفوف المتساوية غير محدَّد. فإن سبق البيعُ شراءَه في اليوم نفسه
+  //     صار متوسط التكلفة صفراً وكامل عائد البيع ربحاً محقَّقاً (قياس:
+  //     +599 بدل +98). الملف يعرف القاعدة في دالة وينقضها في أخرى.
+  //  2. **لا سقف صفوف**: PostgREST يقطع عند 1,000 صفّ صامتاً، فتُحسب
+  //     الحيازات من سجلّ مبتور وتُكتب بلا إنذار.
+  //  3. **لا `user_id`**: خلافاً لنمط الدفاع متعدد الطبقات في بقية الملف.
+  // ══════════════════════════════════════════════════════════════════
+  const TX_SYNC_LIMIT = 5000;
+  const { data: txAll, error: txErr, count } = await supabaseClient
     .from('transactions')
-    .select('ticker, name, type, shares, price, total')
+    .select('ticker, name, type, shares, price, total, date, created_at, id', { count: 'exact' })
+    .eq('user_id', user.id)
     .eq('is_archived', false)
-    .order('date', { ascending: true });
+    .order('date', { ascending: true })
+    .limit(TX_SYNC_LIMIT);
 
   if (txErr || !txAll) {
     showToast('خطأ في جلب المعاملات', 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'مزامنة من المعاملات'; }
     return;
+  }
+
+  if (typeof count === 'number' && count > TX_SYNC_LIMIT) {
+    showToast(`⚠️ أُلغيت المزامنة: ${count} معاملة تتجاوز الحد ${TX_SYNC_LIMIT} — `
+            + 'الحساب سيكون مبتوراً ولن يُكتب شيء', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'مزامنة من المعاملات'; }
+    return;   // لا تُكتب حيازات من سجلّ مبتور أبداً
   }
 
   // احسب الأسهم ومتوسط السعر لكل رمز
@@ -4030,25 +4087,19 @@ async function syncHoldingsFromTx() {
   //    يُظهر انحرافات وهمية لكل الأسهم وقبولها يخفض التكلفة زوراً
   //  • البيع يخصم الأسهم بمتوسط التكلفة وقتها (WAC زمني) مع قصّ البيع الزائد
   const map = {};
+  const byTicker = {};
   txAll.forEach(tx => {
-    if (!map[tx.ticker]) map[tx.ticker] = { name: tx.name, shares: 0, cost: 0 };
-    const m = map[tx.ticker];
-    if (tx.type === 'buy') {
-      m.cost   += +tx.total;
-      m.shares += +tx.shares;
-    } else if (tx.type === 'grant') {
-      m.shares += +tx.shares;   // منحة: تكلفة = صفر
-    } else if (tx.type === 'sell') {
-      const sellShares = Math.min(+tx.shares, m.shares);
-      const avgCostPerShare = m.shares > 0 ? m.cost / m.shares : 0;
-      m.cost   = Math.max(0, m.cost - avgCostPerShare * sellShares);
-      m.shares -= sellShares;
-    }
+    if (!map[tx.ticker]) { map[tx.ticker] = { name: tx.name, shares: 0, cost: 0 }; byTicker[tx.ticker] = []; }
+    if (tx.name && !map[tx.ticker].name) map[tx.ticker].name = tx.name;
+    byTicker[tx.ticker].push(tx);
   });
-  for (const [, m] of Object.entries(map)) {
-    m.shares   = Math.max(0, +m.shares.toFixed(6));
-    m.avgPrice = m.shares > 0 ? m.cost / m.shares : 0;
-  }
+  // المشي الزمني الموحَّد في utils.js — نفس ما تكتبه صفحة المعاملات (م.2)
+  Object.keys(map).forEach(tk => {
+    const w = walkWAC(byTicker[tk]);
+    map[tk].shares   = w.shares;
+    map[tk].cost     = w.cost;
+    map[tk].avgPrice = w.avg;
+  });
 
   // اجلب الـ holdings الحالية + user_stocks
   const [{ data: existingH }, { data: userStocksDB }] = await Promise.all([
@@ -4498,7 +4549,7 @@ function showCardInfo(key) {
         ${s.annBasis === 'extrapolated' ? `
         <div class="info-formula">أرباح ${s.yr||new Date().getFullYear()} × (${s.daysInYear||365}÷${s.daysElapsed||1}) ÷ التكلفة</div>
         <div class="info-math">
-          ${formatSAR(s.yearDiv||0)} × ${((s.daysInYear||365)/(s.daysElapsed||1)).toFixed(2)} = أرباح مُسنواة ${formatSAR(s.annualizedYearDiv||0)}<br>
+          ${formatSAR(s.yearDivHeld||0)} × ${((s.daysInYear||365)/(s.daysElapsed||1)).toFixed(2)} = أرباح مُسنواة ${formatSAR(s.annualizedYearDiv||0)}<br>
           ÷ التكلفة ${formatSAR(s.denomAnn||0)}<br>
           = <strong class="text-success">${(s.divYieldAnn||0).toFixed(2)}%</strong>
         </div>` : `
@@ -4746,7 +4797,16 @@ function startEditCash() {
 function cancelEditCash() {
   const input = g('cash-edit-input');
   const valEl = g('stat-portfolio-cash');
-  if (input) input.style.display = 'none';
+  if (input) {
+    // ⚠️ إخفاء حقلٍ **مركَّز** بـdisplay:none يُطلق `blur`، و`onblur` في
+    // dashboard.html ينادي `saveCash()` — فكان Escape **يحفظ** ما كُتب بدل
+    // أن يُلغيه: تكتب 50000 بالخطأ، تضغط Escape، فتُخزَّن في localStorage
+    // وفي `portfolio_cash` بـSupabase وتدخل إجمالي المحفظة وقاعدة FIRE.
+    // إعادة القيمة الأصلية أولاً تجعل استدعاء blur التالي يرتدّ من حارس
+    // `if (newVal === portfolioCash) return` داخل saveCash.
+    input.value = portfolioCash || '';
+    input.style.display = 'none';
+  }
   if (valEl) valEl.style.display = '';
 }
 

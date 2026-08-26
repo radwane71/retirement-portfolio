@@ -556,6 +556,19 @@ async function saveItem(e) {
   const dup = watchlist.find(w => w.ticker === ticker && w.id !== editingWlId);
   if (dup) { showToast(`⛔ الرمز ${ticker} موجود بالفعل في قائمة المراقبة`, 'error'); return; }
 
+  // م.12 — الاستبعادات الدائمة: «ممنوع اقتراحهما أو إدراجهما في أي مخرَج،
+  // تحت أي ظرف، ولو استوفيا كل الفلاتر». وقائمة المراقبة مخرَجٌ يقود شراءً.
+  if (typeof isBanned === 'function' && isBanned(ticker)) {
+    showToast(`⛔ ${ticker} في الاستبعادات الدائمة (م.12) — ممنوع إدراجه في أي مخرَج`, 'error');
+    return;
+  }
+  // م.55/5 — لا تجميع بقرار المالك الصريح: تُقبل المراقبة ويُمنع سعر الشراء
+  if (typeof isNoAccumulate === 'function' && isNoAccumulate(ticker)
+      && +document.getElementById('wl-planned-pct').value > 0) {
+    showToast(`⛔ ${ticker}: لا تجميع بقرارك الصريح (م.55/5) — اجعل النسبة المخطّطة صفراً`, 'error');
+    return;
+  }
+
   if (!await confirmAsync(editingWlId ? `هل تريد حفظ التعديلات على ${ticker}؟` : `هل تريد إضافة ${ticker} لقائمة المراقبة؟`)) return;
 
   const payload = {
