@@ -21,37 +21,66 @@ function tdDividendYears(ticker) {
     .map(Number).sort((a, b) => a - b);
 }
 
-// كل السنوات التي فيها بيانات معلنة (بتوزيع أو بلا توزيع)
+// كل السنوات التي فيها بيانات مالية معلنة (بغضّ النظر عن التوزيع)
 function tdDataYears(ticker) {
   const r = TADAWUL_DATA[ticker];
   if (!r) return [];
-  return Object.keys(r.years).map(Number).sort((a, b) => a - b);
+  return Object.keys(r.years)
+    .filter(y => {
+      const x = r.years[y];
+      return x && (x.revenue != null || x.eps != null || x.niParent != null);
+    })
+    .map(Number).sort((a, b) => a - b);
 }
 
-// سنوات التوزيع المتصل **حتى آخر سنة فيها بيانات** (م.25 و2)
+// سنوات التوزيع المتصل (م.25 و2) + حالة حداثتها
 // ----------------------------------------------------------------------
 // «الخفض لا يقطع الاتصال؛ الانقطاع الكامل يصفّره» — م.2.
-// ⚠️ كانت الدالة تحسب أطول سلسلة منتهية بآخر سنة **وزّع فيها**، لا بآخر
-// سنة **فيها بيانات**. فسهمٌ وزّع 2019–2022 ثم انقطع سنتين كان يُرجع
-// «4 سنوات متصلة» — والانقطاع الكامل يصفّرها نصّاً في م.2، وهو فوق ذلك
-// إشارة قاطعة تُنفَّذ من قراءة واحدة (م.44).
-// والناتج يغذّي تصنيف الفئة في م.25 (شرط «توزيع متصل ≥ 5/4 سنوات»)
-// ومنه السقف — فالخطأ كان يرفع سقف سهمٍ انقطع توزيعه.
+//
+// ⚠️ لماذا لا نصفّر السلسلة لمجرد أن آخر سنة بيانات بلا توزيع:
+// في هذا المصدر `dps` تساوي `null` حين **لم تُستخرج**، ولا تساوي صفراً
+// أبداً (فُحص: صفر حالة صريحة مقابل 22 حالة غائبة). فالغياب لا يُميَّز عن
+// عدم التوزيع. وتصفيرُ السلسلة من الغياب يُنتج «انقطاع توزيع» — وهي
+// إشارة **قاطعة** تُنفَّذ من قراءة واحدة بلا تأكيد (م.44) وتُنزل السهم
+// لأدنى فئة فوراً (م.26). أي أن نقصاً في ملفٍ عند المحرّك يُخرج مركزاً
+// كاملاً — وهو نصّ ما تمنعه م.21، ومعها م.20 «لا تقدير صامت».
+//
+// فالعدد يبقى كما هو، وتُعلَن الحداثة صراحةً في `tdDividendStreakInfo`
+// ليقرّر المستدعي: انقطاعٌ حقيقي يُثبَت من ملف تداول لا يُستنتج من فراغ.
 function tdDividendStreak(ticker) {
-  const ys   = tdDividendYears(ticker);
-  const all  = tdDataYears(ticker);
-  if (!ys.length || !all.length) return 0;
-
-  // انقطاع: آخر سنة بيانات لم يقع فيها توزيع ⇒ السلسلة مصفَّرة
-  const lastData = all[all.length - 1];
-  if (ys[ys.length - 1] !== lastData) return 0;
-
+  const ys = tdDividendYears(ticker);
+  if (!ys.length) return 0;
   let streak = 1;
   for (let i = ys.length - 1; i > 0; i--) {
     if (ys[i] - ys[i - 1] === 1) streak++;
     else break;
   }
   return streak;
+}
+
+// حالة السلسلة: حتى أي سنة تمتدّ، وكم سنة تخلّفت عن آخر بيانات مالية.
+//   stale = تخلّفت سنتين فأكثر ⇒ لا يُبنى عليها شرط م.25 بلا تحقّق،
+//           ويُوسَم الرقم ⚠️ (م.19) بدل أن يُعدّ توزيعاً متصلاً قائماً.
+function tdDividendStreakInfo(ticker) {
+  const ys   = tdDividendYears(ticker);
+  const all  = tdDataYears(ticker);
+  const years = tdDividendStreak(ticker);
+  if (!ys.length || !all.length) {
+    return { years, throughYear: null, lastDataYear: null, gapYears: null, stale: false, known: false };
+  }
+  const throughYear  = ys[ys.length - 1];
+  const lastDataYear = all[all.length - 1];
+  const gapYears     = lastDataYear - throughYear;
+  return {
+    years, throughYear, lastDataYear, gapYears,
+    stale: gapYears >= 2,
+    known: true,
+    why: gapYears >= 2
+      ? `آخر توزيع مسجَّل ${throughYear} وآخر بيانات ${lastDataYear} — الفارق ${gapYears} سنة. `
+        + 'الغياب في هذا المصدر لا يُميَّز عن عدم التوزيع، فلا يُحكَم بالانقطاع '
+        + 'إلا من ملف تداول صراحةً (م.20 و21 و44).'
+      : '',
+  };
 }
 
 // آخر تغطية توزيع من التدفق الحر (م.42-أ — أعلى أفضل)

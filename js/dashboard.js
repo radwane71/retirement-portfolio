@@ -744,7 +744,9 @@ async function loadAllData() {
       for (const r of rows) {
         if (r.date > dateStr) break;
         if (r.type === 'buy' || r.type === 'grant') s += r.shares;
-        else if (r.type === 'sell') s -= r.shares;
+        // القصّ عند كل بيع لا في النهاية — «شراء 100 → بيع 150 → شراء 30»
+        // تساوي 30 سهماً لا صفراً (نفس منهج walkWAC في utils.js)
+        else if (r.type === 'sell') s = Math.max(0, s - (+r.shares || 0));
       }
       return Math.max(0, s);
     };
@@ -776,6 +778,13 @@ async function loadAllData() {
           lastValidDate = dt;
         }
       }
+      // م.22 — إعادة بيان المنحة قبل جمع نافذة الاثني عشر شهراً.
+      // بلا هذا: البسط بأساس ما قبل المنحة والمقام بأسهم اليوم ⇒ سابقة
+      // الرياض 1:3 تعطي 1,866 ر.س بدل 1,400 (+33%) على دخلٍ لم يتغيّر.
+      applyGrantRestatement(dpsSeries, grantRestateFactors(
+        (tickerTimeline[h.ticker] || []).filter(x => x.type === 'grant'),
+        d => sharesAt(h.ticker, d)));
+
       // L-3: use median inter-dividend gap for frequency — robust to skipped dividends
       // (يُحسب قبل الاحتياطي لأن الاحتياطي يحتاجه لتفادي مضاعفة الدخل)
       let freq = 1;

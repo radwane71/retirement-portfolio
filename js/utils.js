@@ -1426,3 +1426,45 @@ async function _flushDirtyTickers(userId) {
     }
   } catch (_) {}
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// م.22 — إعادة بيان DPS عبر أسهم المنحة
+// ----------------------------------------------------------------------
+// سلسلة DPS تُبنى بقسمة مبلغ كل توزيعة على الأسهم المملوكة **وقتها**، ثم
+// يُضرب مجموع آخر اثني عشر شهراً في أسهم **اليوم** لاشتقاق الدخل المتوقَّع.
+// وبين الأمرين قد تقع منحة: فيصير البسط بأساس قديم والمقام بأساس جديد.
+//
+// سابقة الرياض 1:3 (أبريل 2026) حرفياً كما في م.22:
+//   DPS قبل المنحة 1.40 على 1,000 سهم، وبعدها 1,333 سهماً
+//   بلا إعادة بيان: 1.40 × 1,333 = 1,866 ر.س  ← تضخيم +33%
+//   بإعادة البيان: 1.40 × (1000/1333) = 1.05 ⇒ 1.05 × 1,333 = 1,400 ر.س ✅
+// والدستور ينصّ أن هذا **تخفيف لا قصّ**، فالدخل لم يتغيّر.
+//
+// `grantRows`: صفوف المنح [{date, shares}] · `sharesAtFn(dateStr)` تُعيد
+// الأسهم المملوكة في ذلك اليوم **شاملةً** المنحة.
+function grantRestateFactors(grantRows, sharesAtFn) {
+  return (grantRows || [])
+    .filter(g => g && g.date && +g.shares > 0)
+    .map(g => {
+      const after  = +sharesAtFn(g.date) || 0;      // شامل المنحة
+      const before = after - (+g.shares || 0);
+      return (before > 0.001 && after > before)
+        ? { ts: (parseDateLocal(g.date) || new Date(g.date)).getTime(), f: before / after }
+        : null;
+    })
+    .filter(Boolean);
+}
+
+// يضرب كل نقطة DPS بمعامل تراكمي لكل منحة وقعت **بعدها**. يعدّل المصفوفة
+// في مكانها ويُعيد عدد النقاط التي أُعيد بيانها.
+function applyGrantRestatement(dpsSeries, factors) {
+  if (!factors || !factors.length || !Array.isArray(dpsSeries)) return 0;
+  let touched = 0;
+  dpsSeries.forEach(p => {
+    const ts  = p.t != null ? p.t
+              : (parseDateLocal(p.date) || new Date(p.date)).getTime();
+    const cum = factors.filter(g => g.ts > ts).reduce((a, g) => a * g.f, 1);
+    if (cum !== 1) { p.dps *= cum; p.restated = true; touched++; }
+  });
+  return touched;
+}

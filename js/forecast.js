@@ -446,7 +446,9 @@ function _fwdSharesAtDate(txMap, ticker, dateStr) {
   for (const t of (txMap[ticker] || [])) {
     if (parseDateLocal(t.date) > cutoff) break;   // مرتّبة — خروج مبكر
     if (t.type === 'buy' || t.type === 'grant') shares += +t.shares;
-    else if (t.type === 'sell')                 shares -= +t.shares;
+    // القصّ عند كل بيع لا في النهاية — «شراء 100 → بيع 150 → شراء 30»
+    // تساوي 30 سهماً لا صفراً (نفس منهج walkWAC في utils.js)
+    else if (t.type === 'sell') shares = Math.max(0, shares - (+t.shares || 0));
   }
   return Math.max(0, shares);
 }
@@ -483,6 +485,14 @@ function forecastProjectedAnnualIncome(holdingRows, divRows, txRows) {
         lastValidShares = sh; lastValidDate = dt; lastValidAmt = +tickerDivs[i].amount;
       }
     }
+
+
+    // م.22 — إعادة بيان المنحة قبل جمع نافذة الاثني عشر شهراً.
+    // بلا هذا: البسط بأساس ما قبل المنحة والمقام بأسهم اليوم ⇒ سابقة
+    // الرياض 1:3 تعطي 1,866 ر.س بدل 1,400 (+33%) على دخلٍ لم يتغيّر.
+    applyGrantRestatement(dpsSeries, grantRestateFactors(
+      (txMap[ticker] || []).filter(x => x.type === 'grant'),
+      d => _fwdSharesAtDate(txMap, ticker, d)));
 
     // DPS السنوي المتوقَّع = مجموع DPS آخر 12 شهراً (قرار المالك 2026-08)
     let dps, lastDivDate, sharesAtRefDiv, usedFallback = false, dpsTrend = 'ttm';

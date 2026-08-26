@@ -142,7 +142,28 @@ function tgIsBlueChip(ticker) {
   return ticker === '2222';
 }
 // فئة السهم من مدخلاته المحفوظة في بطاقة محرّك القرار (م.25)
-function tgCategoryOf(ticker) { return classifyStock(engineCfg[ticker] || {}); }
+// ----------------------------------------------------------------------
+// ⚠️ محرّك القرار يدمج مدخلات تداول الرسمية **قبل** التصنيف؛ وكانت هذه
+// الصفحة تصنّف من `engineCfg` الخام وحده رغم أن `js/tadawul-data.js`
+// محمَّل هنا و`tdCategoryInputs` متاحة. فسهمٌ لم يملأ المالك بطاقته يدوياً
+// يخرج هنا «غير مصنَّف ⇒ سقف 15%» ويخرج في المحرّك على الشاشة المجاورة
+// «فئة ج ⇒ سقف 7%» — رقمان لسهم واحد في اليوم نفسه، وهو ما بُني ملف
+// الدستور لمنعه. والأثر ثلاثي: السقف (م.25)، ومُعامِل الفئة في نقاط
+// الأولوية (م.54: 1.00 بدل 1.30/1.15/0.80 فينقلب الترتيب)، وقياس تجاوز
+// المالك في م.31.
+// إدخال المالك يعلو دائماً — بيانات تداول تملأ الفراغ فقط (م.15/1).
+function tgCategoryInputs(ticker) {
+  const cfg = engineCfg[ticker] || {};
+  if (typeof tdCategoryInputs !== 'function') return cfg;
+  const h  = (typeof holdings !== 'undefined' ? holdings : []).find(x => x.ticker === ticker);
+  const td = tdCategoryInputs(ticker, +(h && h.current_price) || 0) || {};
+  const merged = { ...cfg };
+  ['streakYears', 'coverage', 'marketCapB'].forEach(k => {
+    if (td[k] != null && (cfg[k] == null || cfg[k] === '')) merged[k] = td[k];
+  });
+  return merged;
+}
+function tgCategoryOf(ticker) { return classifyStock(tgCategoryInputs(ticker)); }
 // السقف = سقف الفئة. غير المصنَّف يأخذ سقف أعلى فئة **مؤقتاً** حتى تكتمل
 // بياناته — لأن فرض سقف أدنى بسبب نقصٍ عند المحرّك معاقبةٌ للمالك (م.21).
 function tgCapOf(ticker) {
@@ -1564,7 +1585,15 @@ function runRebalancing() {
     const cfg = engineCfg[tk] || {};
     const cov = cfg.divCoverage || ({ yes: 'covered', no: 'weak' })[cfg.divCovered];
     const fun = cfg.fundamentals || ({ yes: 'healthy', no: 'soft' })[cfg.fundHealthy];
-    return cov === 'weak' || fun === 'loss';
+    // ⚠️ كان: `cov === 'weak' || fun === 'loss'` — والفرعان مقلوبان:
+    //   • `'loss'` **لا وجود لها** في نطاق `fundamentals`
+    //     (healthy | soft | deteriorating) ⇒ الشرط كودٌ ميت.
+    //   • `'uncovered'` (🔴 غير مغطّى مزمن) لم تكن محجوبة إطلاقاً.
+    //   • `'weak'` (🟡 ضعف ربع واحد) كانت محجوبة، وم.53/1 تُجيز 🟢 **و**🟡
+    //     نصّاً: «اجتاز الفلتر 1 في المنطقة 🟢 أو 🟡».
+    // فالفلتر كان يمرّر الفاشل ويحجب المؤهَّل — ومع سقف السهمين في م.57
+    // يغيّر ذلك **هوية** السهمين المشترَيين لا ترتيبهما فقط.
+    return cov === 'uncovered' || fun === 'deteriorating';
   };
 
   const _pool = [...candidatesAll, ...plannedAll].filter(c => c.gap > 0.05);
