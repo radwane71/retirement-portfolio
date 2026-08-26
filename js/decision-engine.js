@@ -257,10 +257,38 @@ async function updateCategoryHistory(rows) {
     // ⚠️ لا `engineCfg` عارياً: `categoryOf` تصنّف **بعد** دمج تداول، فلو
     // صنّف التاريخ قبله لاختلف التصنيفان للسهم نفسه في اليوم نفسه —
     // ولثبّت التاريخ فئةً لا تراها الشاشة. المصدر واحد أو لا يكون.
-    const raw = classifyStock(tadawulInputsFor(r.ticker, +r.current_price || 0).merged);
+    const _ti = tadawulInputsFor(r.ticker, +r.current_price || 0);
+    const raw = classifyStock(_ti.merged);
     if (!raw.known) return;
     const h = next[r.ticker] || { settled: raw.cat, pending: null, streak: 0, lastCycle: cycle };
     if (h.lastCycle === cycle && next[r.ticker]) return;   // دورة واحدة = قراءة واحدة
+
+    // ══════════════════════════════════════════════════════════════════
+    // م.26 — المنطقة الميتة ±15% تُطبَّق على **العدّ** لا على العرض فقط
+    // ------------------------------------------------------------------
+    // `categoryOf` تحسب `marginMet` وتمرّرها لـ`applyHysteresis` عند الرسم،
+    // لكن هذه الدالة — وهي التي تُراكم الدورات و**تُثبّت** الفئة — كانت
+    // تعدّ كل دورة بلا أي فحص للهامش. فسهمٌ يتذبذب حول 100 مليار بمقدار
+    // 1% كان يُرقَّى أو يُنزَّل بعد دورتين، وهو نصّ ما وُضعت م.26 لمنعه:
+    // «بين العتبتين يبقى في فئته الحالية». الهامش يُقاس على القيمة السوقية
+    // لأنها المقياس المستمرّ الوحيد بين الفئات.
+    // ══════════════════════════════════════════════════════════════════
+    if (raw.cat !== h.settled) {
+      const _thrMap = { A: 100, B: 10, C: 2, D: 2 };
+      const _up   = catRankOf(raw.cat) < catRankOf(h.settled);
+      const _mcNow = (_ti.merged && _ti.merged.marketCapB != null) ? +_ti.merged.marketCapB : null;
+      const _thr  = _up ? _thrMap[raw.cat] : _thrMap[h.settled];
+      // بلا قيمة سوقية لا نمنع الحركة (م.21: لا يُعاقَب المالك على بيان ناقص)
+      const _ok = (_mcNow != null && _thr != null)
+        ? hysteresisEligible(_mcNow, _thr, _up) : true;
+      if (!_ok) {
+        // داخل المنطقة الميتة: لا تبدأ الدورتان ولا تُعدّ
+        h.pending = null; h.streak = 0; h.lastCycle = cycle;
+        next[r.ticker] = h; changed = true;
+        return;
+      }
+    }
+
     if (raw.cat === h.settled) { h.pending = null; h.streak = 0; }
     else if (raw.cat === h.pending) { h.streak = (h.streak || 0) + 1; }
     else { h.pending = raw.cat; h.streak = 1; }
@@ -3361,6 +3389,7 @@ function openStockCard(ticker) {
   setNum('de-card-sov',    cfg.sovereignPct);
   setNum('de-card-streak', cfg.streakYears);
   setNum('de-card-cov',    cfg.coverage);
+  setNum('de-card-bridge', cfg.bridgeYears);   // م.42-ب
   setSelect('de-card-fund', cfg.isManagedFund === true ? 'yes' : '');
   setNum('de-card-histyears', cfg.divHistoryYears);
   setSelect('de-card-erosion', cfg.equityEroding === true ? 'yes' : '');
@@ -3602,6 +3631,10 @@ async function saveStockCard(e) {
   cfg.sovereignPct = numOf('de-card-sov');
   cfg.streakYears  = numOf('de-card-streak');
   cfg.coverage     = numOf('de-card-cov');
+  // م.42-ب — سنوات الجسر: كان الحقل يُقرأ في ثلاثة مواضع من
+  // `sustainZoneOf` ولا يُكتب في أي موضع (لا حقل في الواجهة ولا سطر حفظ)،
+  // فالمُعدِّل الإلزامي في المنطقتين 🟡 و🟠 لم يكن يعمل إطلاقاً.
+  cfg.bridgeYears  = numOf('de-card-bridge');
   cfg.isManagedFund = v('de-card-fund') === 'yes' ? true : undefined;
   // م.41 — عمق التاريخ وعلامات الدوري، وم.46 تآكل حقوق الملكية
   cfg.divHistoryYears = numOf('de-card-histyears');
