@@ -1992,6 +1992,37 @@ textarea::placeholder {
 .gauge-mid .g-v { font-size: 1.7rem; font-weight: 700; color: var(--text); line-height: 1; font-variant-numeric: tabular-nums; }
 .gauge-mid .g-l { font-size: .66rem; color: var(--text-2); margin-top: 2px; }
 
+/* ── صفّ عدّادات دائرية: أربعة جنباً إلى جنب ─────────────────────
+   البطاقة تعرض **الأرقام** فقط، والشرح يُطوى خلف سطر يُوسَّع بالنقر.
+   كانت المقاييس الثلاثة أشرطة أفقية تمتدّ بعرض البطاقة كاملاً فتأكل
+   المساحة بلا أن تُضيف رقماً — والدائرة تقول الرقم نفسه في ربع المساحة. */
+.gauge-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--sp-3);
+  align-items: start;
+}
+.gauge-cell { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
+.gauge-cell .gc-label { font-size: .72rem; color: var(--text-2); line-height: 1.45; }
+/* عدّاد مصغَّر: النسبة المئوية أطول من رقمٍ مجرَّد فتحتاج خطاً أصغر */
+.gauge.sm .gauge-mid .g-v { font-size: 1.15rem; }
+.gauge.sm .gauge-mid .g-l { font-size: .6rem; }
+@media (max-width: 760px) { .gauge-row { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 400px) { .gauge-row { grid-template-columns: 1fr; } }
+
+/* ── تفصيل يُوسَّع بالنقر داخل بطاقة ─────────────────────────────── */
+details.inline-more > summary {
+  cursor: pointer; list-style: none; user-select: none;
+  font-size: .78rem; color: var(--text-2);
+  display: inline-flex; align-items: center; gap: 6px;
+}
+details.inline-more > summary::-webkit-details-marker { display: none; }
+details.inline-more > summary::marker { content: ''; }
+details.inline-more > summary:hover { color: var(--text); }
+details.inline-more > summary .chev { transition: transform .15s ease; display: inline-block; }
+details.inline-more[open] > summary .chev { transform: rotate(90deg); }
+details.inline-more[open] > summary { margin-bottom: var(--sp-2); }
+
 /* ── لوحة مفاتيح/قيم مضغوطة ─────────────────────────────────────── */
 .kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--sp-2) var(--sp-4); }
 .kvs .kv { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); font-size: .79rem; padding: 5px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent); }

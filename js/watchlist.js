@@ -78,6 +78,29 @@ function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null
       ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
     </div>`;
 }
+// عدّاد دائري (.gauge) — رقمٌ واحد داخل حلقة، تحته تسميته
+// يُستعمل داخل `.gauge-row` لعرض أربعة مقاييس جنباً إلى جنب. الحلقة تقول
+// الرقم في ربع مساحة الشريط الأفقي، فتُترك مساحة البطاقة للأرقام لا للزينة.
+function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '', size = 96, title = '' }) {
+  const R = 50, circ = 2 * Math.PI * R;
+  const p = Math.max(0, Math.min(100, +pct || 0));
+  const off = circ * (1 - p / 100);
+  const clr = color || cssVar('--text-2');
+  return `<div class="gauge-cell"${title ? ` title="${title}"` : ''}>
+      <div class="gauge sm" style="width:${size}px;height:${size}px">
+        <svg viewBox="0 0 120 120" width="${size}" height="${size}">
+          <circle class="ring-bg" cx="60" cy="60" r="${R}" fill="none" stroke-width="11"/>
+          <circle cx="60" cy="60" r="${R}" fill="none" stroke="${clr}" stroke-width="11" stroke-linecap="round"
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 60 60)"/>
+        </svg>
+        <div class="gauge-mid">
+          <div class="g-v">${valueTxt}</div>
+          ${sub ? `<div class="g-l">${sub}</div>` : ''}
+        </div>
+      </div>
+      ${label ? `<div class="gc-label">${label}</div>` : ''}
+    </div>`;
+}
 // صف وزن في قائمة (.brow)
 function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
   const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);

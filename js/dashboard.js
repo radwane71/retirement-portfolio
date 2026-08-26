@@ -86,6 +86,29 @@ function meterHtml({ label, valueTxt, pct, state = '', foot = '', markPct = null
       ${foot ? `<div class="meter-foot">${foot}</div>` : ''}
     </div>`;
 }
+// عدّاد دائري (.gauge) — رقمٌ واحد داخل حلقة، تحته تسميته
+// يُستعمل داخل `.gauge-row` لعرض أربعة مقاييس جنباً إلى جنب. الحلقة تقول
+// الرقم في ربع مساحة الشريط الأفقي، فتُترك مساحة البطاقة للأرقام لا للزينة.
+function gaugeHtml({ valueTxt, sub = '', label = '', pct = 0, color = '', size = 96, title = '' }) {
+  const R = 50, circ = 2 * Math.PI * R;
+  const p = Math.max(0, Math.min(100, +pct || 0));
+  const off = circ * (1 - p / 100);
+  const clr = color || cssVar('--text-2');
+  return `<div class="gauge-cell"${title ? ` title="${title}"` : ''}>
+      <div class="gauge sm" style="width:${size}px;height:${size}px">
+        <svg viewBox="0 0 120 120" width="${size}" height="${size}">
+          <circle class="ring-bg" cx="60" cy="60" r="${R}" fill="none" stroke-width="11"/>
+          <circle cx="60" cy="60" r="${R}" fill="none" stroke="${clr}" stroke-width="11" stroke-linecap="round"
+            stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}" transform="rotate(-90 60 60)"/>
+        </svg>
+        <div class="gauge-mid">
+          <div class="g-v">${valueTxt}</div>
+          ${sub ? `<div class="g-l">${sub}</div>` : ''}
+        </div>
+      </div>
+      ${label ? `<div class="gc-label">${label}</div>` : ''}
+    </div>`;
+}
 // صف وزن في قائمة (.brow)
 function browHtml({ name, color, pct, valueTxt, diffTxt = '', diffState = '', barPct = null, title = '', sub = '' }) {
   const w = Math.max(0, Math.min(100, barPct == null ? pct : barPct)).toFixed(1);
@@ -1857,8 +1880,7 @@ function renderDiversificationCard() {
   // 14.5 كانت تُقرَّب إلى 15 فتُمنح «بلغت النطاق ✓» وهي دونه.
   const _effExact   = (typeof effectiveNExact === 'number' && isFinite(effectiveNExact)) ? effectiveNExact : effectiveN;
   const progressPct = Math.min(100, _effExact / targetN * 100);
-  const circ        = 314.159;                       // 2π·50
-  const dashoff     = circ * (1 - progressPct / 100);
+  // (حساب الحلقة صار داخل `gaugeHtml` — لا نسخة ثانية هنا)
   const progressTxt = _effExact >= targetN
     ? 'بلغت نطاق التنويع الموصى به ✓'
     : `${progressPct.toFixed(0)}% من نطاق التنويع الموصى به (${targetN} سهماً — عددك الفعّال ${_effExact.toFixed(1)})`;
@@ -1881,74 +1903,82 @@ function renderDiversificationCard() {
     ) + `
     <div class="stack-4">
 
-      <!-- الحلقة + الحُكم -->
-      <div class="flex gap-4" style="align-items:center;flex-wrap:wrap">
-        <div class="gauge" style="width:108px;height:108px">
-          <svg viewBox="0 0 120 120" width="108" height="108">
-            <circle class="ring-bg" cx="60" cy="60" r="50" fill="none" stroke-width="11"/>
-            <circle cx="60" cy="60" r="50" fill="none" stroke="${zoneClr}" stroke-width="11" stroke-linecap="round"
-              stroke-dasharray="${circ.toFixed(1)}" stroke-dashoffset="${dashoff.toFixed(1)}" transform="rotate(-90 60 60)"/>
-          </svg>
-          <div class="gauge-mid">
-            <div class="g-v">${effectiveN}</div>
-            <div class="g-l">عدد فعّال</div>
-          </div>
+      <!-- ══════════════════════════════════════════════════════════
+           أربعة عدّادات دائرية جنباً إلى جنب
+           ------------------------------------------------------------
+           كانت المقاييس الثلاثة (توازن الأسهم · توازن القطاعات · موضعك
+           على مرجع الأبحاث) أشرطةً أفقية تمتدّ بعرض البطاقة كاملاً،
+           فتأكل المساحة بلا أن تُضيف رقماً — والدائرة تقول الرقم نفسه في
+           ربع المساحة. والشرح الطويل صار مطويّاً يُوسَّع بالنقر: البطاقة
+           تعرض الأرقام، ومن أراد التفصيل فتحه.
+           ══════════════════════════════════════════════════════════ -->
+      <div class="gauge-row">
+        ${gaugeHtml({
+          // الحلقة تتبع **التقدّم نحو النطاق الموصى به** كما كانت قبل التغيير،
+          // لا موضع المنطقة — حتى لا يتغيّر معنى الرقم الذي اعتاده المالك.
+          valueTxt: effectiveN, sub: 'عدد فعّال', pct: progressPct, color: zoneClr,
+          label: 'العدد الفعّال',
+          title: `تملك ${n} سهماً، وتنوّعها يعادل ${effectiveN} سهماً متساوي الوزن`,
+        })}
+        ${gaugeHtml({
+          valueTxt: `${balStocks}%`, sub: 'أسهم', pct: balStocks,
+          color: stateColorOf(balState(balStocks)),
+          label: 'توازن توزيع الأسهم',
+          title: `العدد الفعّال ÷ عدد الأسهم — عتبة الجودة ٧٠٪. HHI الخام ${hhiPct.toFixed(1)}%`,
+        })}
+        ${gaugeHtml({
+          valueTxt: `${balSectors}%`, sub: 'قطاعات', pct: balSectors,
+          color: stateColorOf(balState(balSectors)),
+          label: 'توازن توزيع القطاعات',
+          title: `عتبة الجودة ٧٠٪. HHI القطاعات الخام ${secPct.toFixed(1)}%`,
+        })}
+        ${gaugeHtml({
+          valueTxt: `${ev.pct}%`, sub: 'مخاطر مُزالة', pct: ev.pct,
+          color: stateColorOf(ev.state),
+          label: 'موضعك على مرجع الأبحاث',
+          title: 'نسبة المخاطر القابلة للتنويع التي أُزيلت عند عددك الفعّال (Zaimovic 2021)',
+        })}
+      </div>
+
+      <!-- الحُكم والأرقام المساندة -->
+      <div class="stack-2">
+        <div class="flex gap-2" style="align-items:center;flex-wrap:wrap">
+          ${tagHtml(zoneIcon, zoneLabel, zoneState)}${maturityBadge(_mDiv.level, _mDiv.reason)}
         </div>
-        <div class="stack-2" style="flex:1;min-width:200px">
-          <div class="flex gap-2" style="align-items:center;flex-wrap:wrap">
-            ${tagHtml(zoneIcon, zoneLabel, zoneState)}${maturityBadge(_mDiv.level, _mDiv.reason)}
-          </div>
-          <div class="hero-cap">${progressTxt}</div>
+        <div class="hero-cap">${progressTxt}</div>
+        <div class="flex gap-2" style="flex-wrap:wrap">
+          <span class="tag">📊 ${n} سهم</span>
+          <span class="tag">🗂️ ${sectorCount} قطاع</span>
+          <span class="tag">🎯 أكبر ${top1Pct.toFixed(1)}% (${esc(top1Name)})</span>
+        </div>
+      </div>
+
+      <!-- الشرح — مطويّ حتى يطلبه المستخدم -->
+      <details class="inline-more">
+        <summary><span class="chev">▸</span> ماذا تعني هذه الأرقام؟ (المنهجية ومرجع الأبحاث)</summary>
+        <div class="stack-2">
           <div class="small text-muted">
             تملك ${n} سهماً، لكن بسبب تفاوت أوزانها فإن تنوّعها يعادل
             <b class="num">${effectiveN}</b> سهماً متساوي الوزن.
             كلما اقترب الرقمان كان توزيعك أكثر توازناً.
+            <br>عتبة الجودة في مقياسَي التوازن هي <b>٧٠٪</b>.
+            مقياس HHI الخام: أسهم ${hhiPct.toFixed(1)}% · قطاعات ${secPct.toFixed(1)}%.
           </div>
-          <div class="flex gap-2" style="flex-wrap:wrap">
-            <span class="tag">📊 ${n} سهم</span>
-            <span class="tag">🗂️ ${sectorCount} قطاع</span>
-            <span class="tag">🎯 أكبر ${top1Pct.toFixed(1)}% (${esc(top1Name)})</span>
-          </div>
-          <div><button class="btn btn-secondary btn-sm" type="button" onclick="showDiversificationBreakdown()">🔬 تحليل مفصّل — أي سهم يرفع العدد الفعّال وأيّه يخفضه</button></div>
+          ${noteHtml('📚', `
+            <b>وفق الأبحاث</b> <span class="text-muted">(مراجعة Zaimovic et al. 2021 — 150 دراسة)</span><br>
+            عند <b class="num">${effectiveN}</b> سهماً فعّالاً، أُزيل تقديراً
+            ${tagHtml(ev.state === 'good' ? '✅' : ev.state === 'warn' ? '⚠️' : '🔴', ev.txt, ev.state)}
+            من المخاطر القابلة للتنويع.
+            ${effectiveN < 20
+              ? ` الوصول إلى ~٢٠ يرفعها إلى ~٩٥٪ <span class="text-muted">(Domian 2007)</span>؛ بعدها المنفعة هامشية (+٨٠ سهماً = +٤٪ فقط).`
+              : ` أنت في منطقة المنفعة الهامشية — زيادة العدد بعد ~٢٠ لا تُضيف تنويعاً يُذكر <span class="text-muted">(Domian 2007)</span>.`}
+            <br>المحطات على مرجع الأبحاث: ٥ · ٨–١٠ · ١٥ (Evans &amp; Archer) · ٢٠ · ٣٠+
+            <br>🌍 <b>سوقك ناشئ (تاسي):</b> الأبحاث تُظهر أن الأسواق الناشئة تحتاج عدداً
+            <b>أقل</b> للتنويع الأمثل من المتطورة، لكنها أعلى تذبذباً ومخاطر ذيل —
+            والتنويع <b>لا يحمي من الانهيارات</b> (الارتباطات ترتفع وقت الأزمات).`)}
+          <div><button class="btn btn-secondary btn-sm" type="button" onclick="showDiversificationBreakdown()">🔬 أي سهم يرفع العدد الفعّال وأيّه يخفضه</button></div>
         </div>
-      </div>
-
-      <!-- مقياسا توازن التوزيع (أطول = أكثر توازناً = أفضل) -->
-      <div class="stack">
-        ${meterHtml({
-          label: 'توازن توزيع الأسهم',
-          valueTxt: `${balIcon(balStocks)} ${balStocks}%`,
-          pct: balStocks, state: balState(balStocks), markPct: 70,
-        })}
-        ${meterHtml({
-          label: 'توازن توزيع القطاعات',
-          valueTxt: `${balIcon(balSectors)} ${balSectors}%`,
-          pct: balSectors, state: balState(balSectors), markPct: 70,
-          foot: `العلامة = عتبة الجودة ٧٠٪. مقياس HHI الخام: أسهم ${hhiPct.toFixed(1)}% · قطاعات ${secPct.toFixed(1)}%`,
-        })}
-      </div>
-
-      <!-- لوحة الأدلّة العلمية -->
-      <div class="stack">
-        ${meterHtml({
-          label: '📚 موضعك على مرجع الأبحاث (٠–٣٠ سهماً فعّالاً)',
-          valueTxt: `${effectiveN} سهم فعّال`,
-          pct: Math.min(100, effectiveN / 30 * 100),
-          state: zoneState, markPct: 50,
-          foot: 'العلامة = ١٥ سهماً فعّالاً (Evans & Archer). المحطات: ٥ · ٨–١٠ · ١٥ · ٢٠ · ٣٠+',
-        })}
-        ${noteHtml('📚', `
-          <b>وفق الأبحاث</b> <span class="text-muted">(مراجعة Zaimovic et al. 2021 — 150 دراسة)</span><br>
-          عند <b class="num">${effectiveN}</b> سهماً فعّالاً، أُزيل تقديراً
-          ${tagHtml(ev.state === 'good' ? '✅' : ev.state === 'warn' ? '⚠️' : '🔴', ev.txt, ev.state)}
-          من المخاطر القابلة للتنويع.
-          ${effectiveN < 20
-            ? ` الوصول إلى ~٢٠ يرفعها إلى ~٩٥٪ <span class="text-muted">(Domian 2007)</span>؛ بعدها المنفعة هامشية (+٨٠ سهماً = +٤٪ فقط).`
-            : ` أنت في منطقة المنفعة الهامشية — زيادة العدد بعد ~٢٠ لا تُضيف تنويعاً يُذكر <span class="text-muted">(Domian 2007)</span>.`}
-          <br>🌍 <b>سوقك ناشئ (تاسي):</b> الأبحاث تُظهر أن الأسواق الناشئة تحتاج عدداً
-          <b>أقل</b> للتنويع الأمثل من المتطورة، لكنها أعلى تذبذباً ومخاطر ذيل —
-          والتنويع <b>لا يحمي من الانهيارات</b> (الارتباطات ترتفع وقت الأزمات).`)}
-      </div>
+      </details>
 
       <!-- النصيحة -->
       ${noteHtml(zoneIcon, advice, zoneState)}
