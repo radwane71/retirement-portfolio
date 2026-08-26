@@ -180,6 +180,20 @@
             </div>
           </div>
 
+          <!-- ══════════════════════════════════════════════════════════
+               الحاسبة العكسية — كانت غائبة كلياً
+               «كم سهماً أشتري لأنزل بمتوسطي إلى X؟» هو السؤال الذي تُطرح
+               الصفحة لأجله، ولم تكن تجيبه. والجبر بسيط لكنه ينهار بلا
+               حارس: لو كان سعر الشراء ≥ الهدف فالمعادلة تعطي عدداً سالباً
+               أو لانهائياً، والنتيجة **مستحيلة رياضياً** لا «رقماً كبيراً».
+               ══════════════════════════════════════════════════════════ -->
+          <h3 style="color:var(--text);font-size:0.95rem;margin:22px 0 14px;padding-right:10px;border-right:3px solid var(--accent);">🎯 الحاسبة العكسية — كم سهماً أحتاج؟</h3>
+          <div class="operation-row">
+            <div class="input-field"><label>المتوسط المستهدف</label><input type="number" id="targetAvg" placeholder="0.00" step="0.01" min="0" oninput="calcSharesForTarget()"></div>
+            <div class="input-field"><label>سعر الشراء المتاح</label><input type="number" id="targetBuyPrice" placeholder="0.00" step="0.01" min="0" oninput="calcSharesForTarget()"></div>
+          </div>
+          <div id="targetResult" class="results-box" style="display:none"></div>
+
           <button class="clear-btn" onclick="confirmClear()">🔄 مسح كل البيانات</button>
         </div>
       </div>
@@ -398,6 +412,65 @@
       } else {
         impactBox.style.display = 'none';
       }
+    }
+
+
+    // ══════════════════════════════════════════════════════════════════
+    // كم سهماً عند سعر p لبلوغ متوسط مستهدف T؟
+    // ------------------------------------------------------------------
+    // من تعريف م.2:  (C₀ + n·p·(1+ع)) ÷ (S₀ + n) = T
+    //            ⇒  n = (T·S₀ − C₀) ÷ (p·(1+ع) − T)
+    // حيث ع = نسبة العمولة + ضريبتها (تُدرَج في التكلفة — م.2 و10).
+    //
+    // ثلاث حالات مستحيلة يجب إعلانها لا تمريرها كرقم:
+    //   • p·(1+ع) ≥ T ⇒ كل سهم جديد **يرفع** المتوسط أو يُبقيه — لا حلّ.
+    //   • T ≥ المتوسط الحالي ⇒ لا حاجة للتخفيض أصلاً.
+    //   • S₀ = 0 ⇒ لا متوسط قائم، فالمتوسط الجديد = سعر الشراء نفسه.
+    // ══════════════════════════════════════════════════════════════════
+    function calcSharesForTarget() {
+      const box = document.getElementById('targetResult');
+      if (!box) return;
+      const T  = parseFloat(document.getElementById('targetAvg').value) || 0;
+      const p  = parseFloat(document.getElementById('targetBuyPrice').value) || 0;
+      const S0 = Math.max(0, parseFloat(document.getElementById('currentShares').value)  || 0);
+      const A0 = Math.max(0, parseFloat(document.getElementById('currentAvgCost').value) || 0);
+
+      if (!(T > 0) || !(p > 0)) { box.style.display = 'none'; return; }
+      box.style.display = '';
+      const show = (html) => { box.innerHTML = '<h3>🎯 النتيجة</h3>' + html; };
+
+      if (!(S0 > 0) || !(A0 > 0)) {
+        show('<div class="hint">أدخل متوسطك الحالي وعدد أسهمك أعلاه أولاً — بلا مركز قائم يكون المتوسط الجديد هو سعر الشراء نفسه.</div>');
+        return;
+      }
+      if (T >= A0) {
+        show(`<div class="hint">المتوسط المستهدف ${T.toFixed(2)} ليس أقلّ من متوسطك الحالي ${A0.toFixed(2)} — لا حاجة لتخفيض.</div>`);
+        return;
+      }
+      // تكلفة السهم الواحد شاملةً العمولة وضريبتها
+      let unit = p;
+      if (typeof calcCommission === 'function') {
+        const c = calcCommission(1000, p);
+        unit = c.totalBuy / 1000;
+      }
+      if (unit >= T) {
+        show(`<div class="hint">⛔ <strong>مستحيل رياضياً.</strong> تكلفة السهم عند هذا السعر `
+          + `${unit.toFixed(2)} ر.س (شاملة العمولة) <strong>ليست أقلّ</strong> من المتوسط المستهدف `
+          + `${T.toFixed(2)} — فكل سهم تشتريه يرفع متوسطك أو يُبقيه. `
+          + `لبلوغ ${T.toFixed(2)} تحتاج سعر شراء أقلّ منه.</div>`);
+        return;
+      }
+      const C0 = A0 * S0;
+      const n  = (T * S0 - C0) / (unit - T);
+      const nUp = Math.ceil(n);                    // تداول لا يتداول كسور أسهم
+      const cost = nUp * unit;
+      const minBuy = (typeof MIN_BUY_SAR === 'number') ? MIN_BUY_SAR : 2000;
+      show(`
+        <div class="result-item"><div>عدد الأسهم المطلوب</div><span class="result-value">${nUp.toLocaleString('en-US')}</span></div>
+        <div class="result-item"><div>التكلفة (شاملة العمولة)</div><span class="result-value">${cost.toFixed(2)}</span></div>
+        <div class="result-item"><div>المتوسط بعدها</div><span class="result-value">${((C0 + cost) / (S0 + nUp)).toFixed(2)}</span></div>
+        ${cost < minBuy ? `<div class="hint">⚠️ التكلفة دون الحدّ الأدنى للعملية ${minBuy.toLocaleString('en-US')} ر.س (م.57) — «تجزئة الضخّ تولّد عمولات وتُضعف الأثر».</div>` : ''}
+        <div class="hint">⚠️ تخفيض المتوسط ليس سبباً للشراء بذاته. الشراء يخضع لأهلية التلقّي في م.53 — بوابة الاستدامة، ومساحة الوزن، ومنطقة السعر مقابل القيمة العادلة.</div>`);
     }
 
     function setResult(id, value, isZero) {

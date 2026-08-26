@@ -170,7 +170,17 @@
         <div class="info-box"><h4>📋 مستوى الأمان</h4><p id="securityLevelInfo">6 أشهر - مناسب للعمل الحر والقطاعات المتذبذبة</p></div>
         <div class="calc-input-group"><label for="currentSavings" style="color:var(--success);">💰 ما وفّرته حتى الآن</label><input type="number" id="currentSavings" class="savings-input" value="0" min="0" step="500" placeholder="0"></div>
         <div class="calc-input-group"><label for="monthlySavings" style="color:var(--success);">📥 قدرتك على الادخار شهرياً</label><input type="number" id="monthlySavings" class="savings-input" value="1000" min="0" step="100"></div>
-        <div class="info-box"><h4>💡 نصيحة</h4><p>احتفظ بصندوق الطوارئ في حساب بنكي منفصل، سهل الوصول إليه.</p></div>
+        <div class="info-box"><h4>💡 نصيحة</h4><p>احتفظ بصندوق الطوارئ في حساب بنكي منفصل، سهل الوصول إليه.</p>
+          <p style="margin-top:8px"><strong>⚠️ لا تخلطه بالنقد غير المستثمر في المحفظة.</strong>
+          نقدُ الوسيط يدخل «إجمالي المحفظة» وقاعدة FIRE في لوحة التحكم، والمادة 56
+          تُلزم بتوجيهه للاستثمار خلال ثلاثة أشهر — أمّا هذا الصندوق فيبقى خارج السوق.
+          عدُّهما معاً يضخّم صافي ثروتك ويستعجل تقاعدك.</p>
+          <p style="margin-top:8px"><strong>الأرقام هنا بأسعار اليوم.</strong>
+          المصروف ينمو بالتضخّم، فهدفٌ يُبلَغ بعد خمس سنوات يغطّي مدةً أقصر مما تظنّ
+          — راجعه كل دورة بدل افتراض ثباته (م.20: لا تقدير صامت).</p>
+          <p style="margin-top:8px"><strong>وفي مرحلة السحب (2048 فأكثر)</strong> يتغيّر
+          التعريف: م.64 توجب احتياطي سيولة يعادل <strong>دخل</strong> اثني عشر شهراً،
+          لا مصروفها — وهما رقمان مختلفان.</p></div>
         <div id="errorBox" class="error-box">⚠️ يرجى إدخال مصروف شهري واحد على الأقل.</div>
         <button class="calc-btn" onclick="calculateEmergencyFund()">احسب صندوق الطوارئ</button>
       </div>
@@ -247,7 +257,53 @@
     function updateSecurityLevel() {
       const m = {'3':'3 أشهر — مناسب للموظف المستقر','6':'6 أشهر — مناسب للعمل الحر','9':'9 أشهر — للدخل غير المنتظم','12':'12 شهراً — لأصحاب الأعمال'};
       document.getElementById('securityLevelInfo').textContent = m[document.getElementById('coveragePeriod').value];
+      // النتائج المعروضة كانت تتجمّد على المدة القديمة: تُغيّر «6 أشهر» إلى
+      // «12» فيتغيّر النصّ ويبقى الرقم — رقمان متناقضان على الشاشة نفسها.
+      if (document.getElementById('resultsSection').style.display === 'block') calculateEmergencyFund();
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // حفظ واسترجاع — الصفحة كانت بلا أي تخزين: تُغلقها فتضيع كل مدخلاتك
+    // وتعود القيم الافتراضية (3000 · 500 · …) وتُعرَض كأنها نتيجتك.
+    // ══════════════════════════════════════════════════════════════════
+    const EF_KEY = 'tharwa-emergency-fund';
+    const EF_FIELDS = ['housing','utilities','living','transport','commitments',
+                       'others','coveragePeriod','currentSavings','monthlySavings'];
+    function efKey() {
+      return (typeof userLsKey === 'function') ? userLsKey(EF_KEY) : EF_KEY;
+    }
+    function efSave() {
+      try {
+        const o = {};
+        EF_FIELDS.forEach(f => { const el = document.getElementById(f); if (el) o[f] = el.value; });
+        localStorage.setItem(efKey(), JSON.stringify(o));
+      } catch (_) { /* وضع التصفّح الخاص — لا يُعطَّل الحساب */ }
+    }
+    function efLoad() {
+      try {
+        const raw = localStorage.getItem(efKey()) || localStorage.getItem(EF_KEY);
+        if (!raw) return false;
+        const o = JSON.parse(raw);
+        if (!o || typeof o !== 'object') return false;
+        EF_FIELDS.forEach(f => {
+          const el = document.getElementById(f);
+          if (el && o[f] != null && o[f] !== '') el.value = o[f];
+        });
+        return true;
+      } catch (_) { return false; }
+    }
+    function efInit() {
+      const had = efLoad();
+      updateSecurityLevel();
+      EF_FIELDS.forEach(f => {
+        const el = document.getElementById(f);
+        if (!el) return;
+        el.addEventListener('input',  () => { efSave(); });
+        el.addEventListener('change', () => { efSave(); });
+      });
+      if (had) calculateEmergencyFund();
+    }
+    document.addEventListener('DOMContentLoaded', efInit);
 
     function calculateEmergencyFund() {
       const expenses = {
@@ -296,6 +352,7 @@
       if (pct>=100) card.classList.add('result-positive');
       else if (pct>=50) card.classList.add('result-warning');
       else card.classList.add('result-negative');
+      efSave();
       document.getElementById('resultsSection').style.display = 'block';
       document.getElementById('resultsSection').scrollIntoView({behavior:'smooth'});
     }
