@@ -234,8 +234,15 @@ function hasStalePrice() {
 let _priceRefreshTimer = null;
 let _lastPriceRefreshAt = 0;   // آخر استدعاء فعلي — يمنع التحديث المتكرر عند تبديل التبويبات
 
+let _refreshInFlight = false;
 async function refreshPrices(silent = false) {
-  const btn = document.getElementById('refresh-prices-btn');
+  // ⚠️ بلا حارس: نقرتان متتاليتان (أو نقرة أثناء التحديث التلقائي الصامت)
+  // تُشغّلان `loadAllData` مرّتين متزامنتين، وكلتاهما تكتب في نفس المتغيّرات
+  // العامة (holdings · divRows · window._ds) — فتُرسم الصفحة من خليط
+  // نتيجتين. ونقرة أثناء تحديث صامت كانت تخطف الزرّ نصّاً وحالةً.
+  if (_refreshInFlight) return;
+  _refreshInFlight = true;
+  const btn = silent ? null : document.getElementById('refresh-prices-btn');
   _lastPriceRefreshAt = Date.now();
   try {
     if (btn) { btn.disabled = true; btn.textContent = '⏳ جاري التحديث...'; }
@@ -282,6 +289,7 @@ async function refreshPrices(silent = false) {
     if (!silent) console.warn('refreshPrices error:', e);
     if (btn) btn.textContent = '❌ خطأ';
   } finally {
+    _refreshInFlight = false;
     if (btn) setTimeout(() => { btn.disabled = false; btn.textContent = '🔄 تحديث الأسعار'; }, 3000);
   }
 }
@@ -2233,10 +2241,20 @@ function showDiversificationAnalysis() {
     </div>`;
 
   document.body.appendChild(overlay);
-  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-  document.addEventListener('keydown', function esc(e) {
-    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
-  });
+  // ⚠️ كان المستمع يُزال **فقط** عند الإغلاق بـEscape. والإغلاق بزرّ ✕ أو
+  // بالنقر على الخلفية يتركه معلّقاً على `document` ممسكاً بـoverlay محذوف
+  // (تسريب)، ويتراكم مستمع لكل فتحة — وهي بطاقة تُفتح كثيراً. بقية نوافذ
+  // الملف طبّقت الإصلاح الصحيح ولم يصل إلى هذه.
+  // (وتسمية الدالة `esc` كانت تحجب مساعد التهريب العام `esc()` داخل نطاقها.)
+  const _onEsc = e => { if (e.key === 'Escape') _closeOverlay(); };
+  const _closeOverlay = () => {
+    document.removeEventListener('keydown', _onEsc);
+    overlay.remove();
+  };
+  overlay.addEventListener('click', e => { if (e.target === overlay) _closeOverlay(); });
+  const _x = overlay.querySelector('.modal-close');
+  if (_x) { _x.onclick = _closeOverlay; }
+  document.addEventListener('keydown', _onEsc);
 }
 
 // ── معلومات منهجية محلل الصحة ───────────────────────────────

@@ -36,6 +36,12 @@
     @media (max-width: 700px) { .rl-bottom-row { grid-template-columns: 1fr; } }
 
     .rl-notes { width:100%; min-height:80px; resize:vertical; }
+    /* حقول م.72 — نفس مظهر بقية مدخلات النموذج */
+    .rl-input {
+      width:100%; padding:8px 10px; background:var(--bg-3);
+      border:1px solid var(--border); border-radius:var(--radius);
+      color:var(--text); font-family:inherit; font-size:.88rem;
+    }
 
     .attach-zone {
       border: 2px dashed var(--border);
@@ -283,6 +289,50 @@
           <div class="attach-file-list" id="attach-preview"></div>
         </div>
 
+        <!-- ══════════════════════════════════════════════════════════
+             م.72 — سجلّ التدقيق: الحقول الأربعة التي كانت ناقصة
+             «كل إشارة تُسجَّل بـ: التاريخ | الرمز | المادة المنطبقة |
+              البيانات المستخدمة ومصادرها | القرار | ما إذا نُفِّذ»
+             كان الجدول يحمل حقلين من الستة، فلا يصلح السجلّ تدقيقاً:
+             لا يُعرَف أي مادة طُبِّقت ولا من أين جاءت الأرقام ولا ما
+             قُرِّر ولا هل نُفِّذ. وم.71 توجب مراجعة القرار بالنسخة
+             السارية وقته، وهي غير ممكنة بلا تسجيل المادة.
+             ══════════════════════════════════════════════════════════ -->
+        <div class="form-group" style="margin:0 0 12px">
+          <label>المادة المنطبقة (م.72)</label>
+          <input type="text" class="rl-input" id="rl-article"
+                 placeholder="مثال: م.42-أ — بوابة الاستدامة · أو م.48 — سقف القيمة">
+        </div>
+
+        <div class="form-group" style="margin:0 0 12px">
+          <label>البيانات المستخدمة ومصادرها (م.72 · م.19)</label>
+          <input type="text" class="rl-input" id="rl-sources"
+                 placeholder="مثال: ✅ ملف تداول 411_2310_2026-07-27 · ⚙️ تغطية محسوبة منه">
+        </div>
+
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:0 0 12px">
+          <div class="form-group" style="margin:0;flex:1;min-width:180px">
+            <label>القرار (م.3)</label>
+            <select class="rl-input" id="rl-decision">
+              <option value="">— لم يُحسَم —</option>
+              <option value="hold">احتفظ — لا إجراء</option>
+              <option value="accumulate">تجميع</option>
+              <option value="trim">تخفيف</option>
+              <option value="exit">خروج</option>
+              <option value="deferred_exit">خروج مؤجل</option>
+              <option value="watch">مراقبة</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;flex:1;min-width:180px">
+            <label>هل نُفِّذ؟ (م.72)</label>
+            <select class="rl-input" id="rl-executed">
+              <option value="">— لم يُحسَم بعد —</option>
+              <option value="yes">نعم — نُفِّذ</option>
+              <option value="no">لا — لم يُنفَّذ</option>
+            </select>
+          </div>
+        </div>
+
         <!-- الملاحظات -->
         <div class="form-group" style="margin:0">
           <label>ملاحظات التقييم</label>
@@ -364,6 +414,37 @@
             <div style="font-size:.85rem;margin-top:4px">انقر لإضافة ملفات</div>
           </div>
           <div class="attach-file-list" id="edit-attach-preview"></div>
+        </div>
+        <!-- م.72 — نفس حقول نموذج الإضافة حتى لا يفقدها التعديل -->
+        <div class="form-group" style="margin:0 0 12px">
+          <label>المادة المنطبقة (م.72)</label>
+          <input type="text" class="rl-input" id="edit-article">
+        </div>
+        <div class="form-group" style="margin:0 0 12px">
+          <label>البيانات المستخدمة ومصادرها (م.72 · م.19)</label>
+          <input type="text" class="rl-input" id="edit-sources">
+        </div>
+        <div style="display:flex;gap:12px;flex-wrap:wrap;margin:0 0 12px">
+          <div class="form-group" style="margin:0;flex:1;min-width:170px">
+            <label>القرار (م.3)</label>
+            <select class="rl-input" id="edit-decision">
+              <option value="">— لم يُحسَم —</option>
+              <option value="hold">احتفظ — لا إجراء</option>
+              <option value="accumulate">تجميع</option>
+              <option value="trim">تخفيف</option>
+              <option value="exit">خروج</option>
+              <option value="deferred_exit">خروج مؤجل</option>
+              <option value="watch">مراقبة</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0;flex:1;min-width:170px">
+            <label>هل نُفِّذ؟ (م.72)</label>
+            <select class="rl-input" id="edit-executed">
+              <option value="">— لم يُحسَم بعد —</option>
+              <option value="yes">نعم — نُفِّذ</option>
+              <option value="no">لا — لم يُنفَّذ</option>
+            </select>
+          </div>
         </div>
         <div class="form-group" style="margin:0">
           <label>الملاحظات</label>

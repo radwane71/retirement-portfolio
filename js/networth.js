@@ -185,7 +185,12 @@ async function init() {
   const user = await requireAuth();
   if (!user) return;
   setActiveNav('nav-networth');
-  await loadAll();
+  try {
+    await loadAll();
+  } catch (e) {
+    console.error(e);   // الرسالة عُرضت في loadAll — نمنع الرفض غير المعالَج
+    return;             // ولا تُرسَم الصفحة على بيانات ناقصة
+  }
   renderTotals();
   renderCompositionChart();
   renderAssetsTable();
@@ -202,6 +207,22 @@ async function loadAll() {
     supabaseClient.from('holdings').select('shares, current_price'),
     supabaseClient.from('real_estate').select('current_value, status').eq('is_active', true)
   ]);
+
+  // ══════════════════════════════════════════════════════════════════
+  // فحص الأخطاء إلزامي: supabase-js **يفي بالوعد عند الخطأ** ولا يرمي،
+  // فـ`Promise.all` ينجح و`.data` يصير null و`|| []` يبتلعه. وفشلُ
+  // `holdings` وحده يعرض **صافي ثروة أصغر** بمقدار المحفظة كلها بلا أي
+  // إنذار — وقد تُحفَظ اللقطة على هذا الرقم فيدخل السلسلة التاريخية.
+  // بيانٌ لم يصل ليس بياناً صفر (م.20 و21).
+  // ══════════════════════════════════════════════════════════════════
+  const _errs = [
+    ['اللقطات', rSnap], ['الأصول', rAssets], ['الالتزامات', rLiabs],
+    ['الحيازات', rHoldings], ['العقارات', rRe],
+  ].filter(([, r]) => r && r.error).map(([n, r]) => `${n}: ${r.error.message || 'خطأ'}`);
+  if (_errs.length) {
+    showToast(`⛔ تعذّر تحميل البيانات — ${_errs.join(' · ')}. لم تُرسَم الصفحة، ولا تحفظ لقطة الآن.`, 'error');
+    throw new Error('networth loadAll failed: ' + _errs.join(' | '));
+  }
 
   snapshots = rSnap.data || [];
   nwAssets  = rAssets.data || [];

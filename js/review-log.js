@@ -286,6 +286,11 @@ async function saveEntry() {
         sector:      document.getElementById('rl-sector').value.trim() || null,
         review_date: date,
         notes:       document.getElementById('rl-notes').value.trim()  || null,
+        // م.72 — الحقول الأربعة المتبقّية من الستة المنصوص عليها
+        article:     document.getElementById('rl-article').value.trim() || null,
+        sources:     document.getElementById('rl-sources').value.trim() || null,
+        decision:    document.getElementById('rl-decision').value || null,
+        executed:    (v => v === '' ? null : v === 'yes')(document.getElementById('rl-executed').value),
         updated_at:  new Date().toISOString(),
       })
       .select()
@@ -321,7 +326,7 @@ async function saveEntry() {
 }
 
 function resetForm() {
-  ['rl-ticker','rl-name','rl-sector','rl-notes'].forEach(id => {
+  ['rl-ticker','rl-name','rl-sector','rl-notes','rl-article','rl-sources','rl-decision','rl-executed'].forEach(id => {
     document.getElementById(id).value = '';
   });
   document.getElementById('rl-date').value  = todayISO();
@@ -374,6 +379,11 @@ function openEdit(id) {
   document.getElementById('edit-sector').value = e.sector      || '';
   document.getElementById('edit-date').value   = e.review_date || '';
   document.getElementById('edit-notes').value  = e.notes       || '';
+  // م.72 — الحقول الأربعة
+  document.getElementById('edit-article').value  = e.article  || '';
+  document.getElementById('edit-sources').value  = e.sources  || '';
+  document.getElementById('edit-decision').value = e.decision || '';
+  document.getElementById('edit-executed').value = e.executed == null ? '' : (e.executed ? 'yes' : 'no');
   renderEditExistingAtts(id);
   renderFilePreviews(editPendingFiles, 'edit-attach-preview');
   document.getElementById('edit-modal').classList.add('open');
@@ -425,6 +435,10 @@ async function saveEdit() {
         sector:      document.getElementById('edit-sector').value.trim() || null,
         review_date: date,
         notes:       document.getElementById('edit-notes').value.trim()  || null,
+        article:     document.getElementById('edit-article').value.trim() || null,
+        sources:     document.getElementById('edit-sources').value.trim() || null,
+        decision:    document.getElementById('edit-decision').value || null,
+        executed:    (v => v === '' ? null : v === 'yes')(document.getElementById('edit-executed').value),
         updated_at:  new Date().toISOString(),
       })
       .eq('id', id)
