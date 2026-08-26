@@ -982,6 +982,41 @@ function buildScenarios(divOverride) {
 // ── Core monthly projection engine ─────────────────────────────────────
 // يُشغّل محاكاة شهرية دقيقة تشمل: نمو رأس المال، الأرباح، إعادة الاستثمار،
 // إضافات دورية، تعديل التضخم
+// ══════════════════════════════════════════════════════════════════════
+// م.14 و62 و63 و64 — مراحل المحفظة داخل الإسقاط
+// ----------------------------------------------------------------------
+// الدستور يقسم الأفق ثلاث مراحل بمعاملات مختلفة جوهرياً:
+//   تجميع (حتى 2044-12-31): إعادة استثمار **100%** إلزامية + ضخّ  — م.14
+//   انتقال (2045–2047):     **50%** تُسحَب و50% يُعاد استثماره     — م.63
+//   سحب   (2048 فأكثر):     **0%** — التوزيعات تُسحَب بالكامل      — م.64
+// وكان المحرّك يطبّق **قيمة واحدة** لإعادة الاستثمار على الأفق كله وضخّاً
+// ثابتاً حتى نهايته. بالأفق الافتراضي 35 سنة يعني ذلك إعادة استثمار كاملة
+// وضخّاً 8,000 حتى **2061** — سبع عشرة سنة داخل مرحلة السحب بسياسة معاكسة
+// لنصّ الدستور. وثوابت المراحل كانت معرَّفة ولا تُستدعى في أي حساب.
+function reinvestShareAt(calYear, userFlag) {
+  if (!userFlag) return 0;                                   // المالك أطفأ إعادة الاستثمار
+  const accEnd = (typeof ACCUM_END_YEAR === 'number') ? ACCUM_END_YEAR : 2044;
+  const trEnd  = (typeof TRANSITION_END_YEAR === 'number') ? TRANSITION_END_YEAR : 2047;
+  if (calYear <= accEnd) return 1.0;   // م.14
+  if (calYear <= trEnd)  return 0.5;   // م.63
+  return 0.0;                          // م.64
+}
+
+// جدولان زمنيان بدل عَلَمين ثابتين
+function buildPhaseSchedules(totalMonths, userReinvest, dcaSchedule) {
+  const accEnd = (typeof ACCUM_END_YEAR === 'number') ? ACCUM_END_YEAR : 2044;
+  const now = new Date();
+  const reinvest = new Array(totalMonths);
+  const dca = (dcaSchedule || new Array(totalMonths).fill(0)).slice();
+  for (let m = 0; m < totalMonths; m++) {
+    const y = new Date(now.getFullYear(), now.getMonth() + m + 1, 1).getFullYear();
+    reinvest[m] = reinvestShareAt(y, userReinvest);
+    // م.63: «الضخّ يتوقف أو يستمر بقرار المالك» — الافتراض التوقف عند نهاية التجميع
+    if (y > accEnd) dca[m] = 0;
+  }
+  return { reinvest, dca };
+}
+
 function projectScenario(scenario, params) {
   const {
     startValue, dcaSchedule, lumpSum,
@@ -1015,9 +1050,13 @@ function projectScenario(scenario, params) {
   const totalMonths    = horizonYears * 12;
   const monthlyInfl    = Math.pow(1 + inflationRate, 1/12) - 1;
 
+  // جدولا المرحلة: نسبة إعادة الاستثمار والضخّ لكل شهر (م.14/63/64)
+  const _phase = buildPhaseSchedules(totalMonths, !!reinvestDividends, dcaSchedule);
+
   // المحفظة الاستثمارية فقط — لا عقارات ولا صافي ثروة (تُتابَع في صفحاتها)
   let value               = startValue + lumpSum;
   let cumulativeDividends = 0;
+  let cumulativeWithdrawn = 0;      // ما سُحب فعلاً بعد بدء الانتقال (م.63/64)
   let cumulativeAdded     = lumpSum;
   let inflationFactor     = 1;
 
@@ -1038,10 +1077,12 @@ function projectScenario(scenario, params) {
     curAnnualYield *= yieldDrift;
     const divEarned = value * (curAnnualYield / 12);
     cumulativeDividends += divEarned;
-    if (reinvestDividends) value += divEarned;
+    const _rs = _phase.reinvest[m - 1] || 0;      // نسبة إعادة الاستثمار لهذا الشهر
+    value += divEarned * _rs;
+    cumulativeWithdrawn += divEarned * (1 - _rs);
 
-    // 3. الإضافة الشهرية (DCA) — متغيرة حسب الجدول
-    const monthlyAdd = dcaSchedule ? (dcaSchedule[m - 1] || 0) : 0;
+    // 3. الإضافة الشهرية (DCA) — متغيرة حسب الجدول والمرحلة
+    const monthlyAdd = _phase.dca[m - 1] || 0;
     value           = Math.max(0, value + monthlyAdd);
     cumulativeAdded += monthlyAdd;
 
@@ -1052,11 +1093,14 @@ function projectScenario(scenario, params) {
     if (m % 12 === 0) {
       const realVal      = adjustInflation ? value / inflationFactor : value;
       const yourCap      = startValue + cumulativeAdded;
-      const priceGrowth  = Math.max(0, value - yourCap - (reinvestDividends ? cumulativeDividends : 0));
+      // ما أُعيد استثماره فعلاً = الموزَّع − المسحوب (يتغيّر بالمرحلة، م.63/64)
+      const _reinvested  = cumulativeDividends - cumulativeWithdrawn;
+      const priceGrowth  = Math.max(0, value - yourCap - _reinvested);
       snapshots.push({
         year:              m / 12,
         value,
         cumDiv:            cumulativeDividends,
+        cumWithdrawn:      cumulativeWithdrawn,
         cumAdded:          cumulativeAdded,
         realValue:         realVal,
         monthlyIncome:     value * (curAnnualYield / 12),

@@ -609,6 +609,36 @@ function sustainabilityOf(h) {
       return { ...base, status: 'watch', gatedBy: 'م.43', depth, confirm: conf,
                reason: `${base.reason} — ${conf.why}` };
     }
+
+    // ══════════════════════════════════════════════════════════════════
+    // م.41 — نظام نقاط «دوري مقابل بنيوي» قبل الحكم بالفشل
+    // ------------------------------------------------------------------
+    // «ممنوع الحكم بفشل الاستدامة قبل استخراج التوزيعات المدفوعة فعلياً
+    // لأربع سنوات» ثم تُحتسب ست علامات: 4–6 دوري ⇒ **احتفظ ولا تخفّض** ·
+    // 2–3 مختلط ⇒ خفّض ربع فئة ومراقبة مكثفة · 0–1 بنيوي ⇒ الفلتر 1-ب.
+    // وكانت `cyclicalScore` تُستدعى في `renderCardCyclical` **للعرض فقط**،
+    // و`cyclicalMarks` تُحفظ ولا تُقرأ في أي قرار — فالمادة كلها معطَّلة.
+    // والخطأ الموثَّق فيها بعينه: الحكم على جرير والقصيم وسدافكو والكهرباء
+    // بالخطر من لقطة نصف سنة واحدة.
+    // الإشارة القاطعة (م.44) لا تمرّ من هنا: `stopped` تُعالَج قبل ذلك.
+    // ══════════════════════════════════════════════════════════════════
+    const _marks = (engineCfg[h.ticker] || {}).cyclicalMarks;
+    if (!stopped && _marks && Object.keys(_marks).length
+        && typeof cyclicalScore === 'function') {
+      const cyc = cyclicalScore(_marks);
+      if (cyc.action === 'hold') {
+        return { ...base, status: 'watch', gatedBy: 'م.41', depth, confirm: conf, cyclical: cyc,
+                 reason: `${base.reason} — لكن ${cyc.why} (${cyc.score} من ${cyc.max} علامات: ${cyc.hit.join('، ')})` };
+      }
+      if (cyc.action === 'demoteQuarter') {
+        return { ...base, status: 'watch', gatedBy: 'م.41', depth, confirm: conf, cyclical: cyc,
+                 demoteQuarter: true,
+                 reason: `${base.reason} — ${cyc.why} (${cyc.score} من ${cyc.max} علامات)` };
+      }
+      // 'toFilter1b' ⇒ بنيوي: يمضي إلى الفشل ومنه إلى الفلتر 1-ب (م.45)
+      return { ...base, status: 'fail', depth, confirm: conf, cyclical: cyc };
+    }
+
     return { ...base, status: 'fail', depth, confirm: conf };
   }
 
