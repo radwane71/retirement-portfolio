@@ -129,9 +129,29 @@ function getDcaPeriods() {
   return periods;
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// جدول الضخّ الشهري — يبدأ من **تاريخ بدء الضخّ** لا من اليوم
+// ----------------------------------------------------------------------
+// م.7 تحدّد بداية الضخّ المنتظم بيناير 2027، والثابت `INJECTION_START`
+// معرَّف في الدستور — وكان **ميتاً**: لا قارئ له خارج ملف اختبار. والجدول
+// يبدأ من الشهر صفر أي **اليوم**، فيُحتسب ضخٌّ في الأشهر الفاصلة لن يقع.
+// من 2026-08 إلى 2027-01 = خمسة أشهر × 8,000 = 40,000 ر.س وهمية، تصير
+// نحو 285,000 بالتركيب حتى 2055 — على إسقاطٍ يقود قرار التقاعد كلّه.
+// الأشهر السابقة للبدء تبقى أصفاراً، والفترات تُزاح ولا تُقصّ.
+// ══════════════════════════════════════════════════════════════════════
+function _monthsUntilInjectionStart() {
+  if (typeof INJECTION_START !== 'string') return 0;
+  const start = parseDateLocal(INJECTION_START);
+  if (!start) return 0;
+  const now = new Date();
+  const months = (start.getFullYear() - now.getFullYear()) * 12
+               + (start.getMonth() - now.getMonth());
+  return Math.max(0, months);
+}
+
 function buildDcaSchedule(periods, totalMonths) {
   const schedule = new Array(totalMonths).fill(0);
-  let cursor = 0;
+  let cursor = _monthsUntilInjectionStart();   // أشهر ما قبل البدء تبقى صفراً
   for (const p of periods) {
     const end = Math.min(cursor + Math.round(p.years * 12), totalMonths);
     for (let m = cursor; m < end; m++) schedule[m] = p.amount;
@@ -931,19 +951,24 @@ function buildScenarios(divOverride) {
   // بعد تصحيح عائد التوزيعات إلى forward صار العائد الفعلي قد يتجاوز سقف 6%،
   // فكان min(0.06, div+0.01) يُنتج «متفائلاً» توزيعُه أقل من «المعتدل» (تناقض).
   // الحلّ: السقف يُلغي الزيادة فقط ولا يُنزل السيناريو الأعلى تحت الأساس.
+  // م.7 — نمو التوزيع المرجّح المسجَّل. مصدره الدستور لا رقمٌ مكتوب هنا.
+  const DIV_G = (typeof DIV_GROWTH_WEIGHTED === 'number') ? DIV_GROWTH_WEIGHTED : 0.0276;
   _scenarios = [
     { key:'conservative',
       capRate: Math.max(0, Math.min(base * 0.8, MARKET_LOW)),
       // الأرضية المطلقة 1% كانت ترفع توزيع «المتحفّظ» فوق «المعتدل»
       // عند عائد دون 1.25%: بإدخال 0.5% تخرج cons 1.00% و base 0.50%.
       // السقف يلغي الزيادة ولا يقلب الترتيب — نفس علاج السطر المتفائل.
-      divRate: Math.min(div, Math.max(0.01, div * 0.80)) },
+      divRate: Math.min(div, Math.max(0.01, div * 0.80)),
+      divGrowth: DIV_G * 0.5 },
     { key:'base',
       capRate: base,
-      divRate: div },
+      divRate: div,
+      divGrowth: DIV_G },
     { key:'optimistic',
       capRate: Math.max(base, Math.min(OPT_CAP, base + 0.025)),
-      divRate: Math.max(div,  Math.min(0.06,    div  + 0.010)) },
+      divRate: Math.max(div,  Math.min(0.06,    div  + 0.010)),
+      divGrowth: DIV_G * 1.5 },
   ];
 }
 
@@ -960,7 +985,26 @@ function projectScenario(scenario, params) {
   const monthlyCapRate = Math.pow(1 + scenario.capRate, 1/12) - 1;
   // الدخل الشهري = العائد السنوي ÷ 12 — الدلالة المعتادة لدخل توزيعات سنوي،
   // موحّدة مع مونتي كارلو (÷12) ومع توثيق تذييل جدول المعالم في forecast.html
-  const monthlyDivRate = scenario.divRate / 12;
+  // ══════════════════════════════════════════════════════════════════
+  // ⚠️ العائد **ينجرف**، ولا يبقى ثابتاً على القيمة السوقية
+  // ------------------------------------------------------------------
+  // بعائدٍ ثابت يصير نمو الدخل = نمو رأس المال حتماً (4.4%)، بينما م.7
+  // تسجّل «نمو التوزيع المرجّح = 2.76%». على 19 سنة إلى 2045:
+  //   (1.0440 / 1.0276)^19 = 1.351  ⇒ مبالغة **35%** في الدخل الشهري.
+  // وبطاقة نمو التوزيع في هذه الصفحة كانت **تقيس** الفجوة وتقول للمالك
+  // «الإسقاط على الأرجح يبالغ في دخلك» — فيرى تحذيراً صحيحاً ورقماً
+  // خاطئاً جنباً إلى جنب، والرقم هو ما يقود الجدول والرسم ومونتي كارلو.
+  //
+  // النمذجة: التوزيع للسهم ينمو بـ`divGrowth` والسعر ينمو بـ`capRate`،
+  // فنسبة العائد على القيمة السوقية تتحرك بينهما شهرياً. والمال المُضاف
+  // يشتري دخلاً بالعائد **الجاري وقت الشراء** — وهو ما ينتج تلقائياً
+  // لأنه ينضمّ إلى `value` ويُضرب في العائد الجاري نفسه.
+  // ══════════════════════════════════════════════════════════════════
+  const mDivGrowth = Math.pow(1 + (scenario.divGrowth || 0), 1/12) - 1;
+  // انجراف العائد شهرياً: (1+نمو التوزيع) ÷ (1+نمو السعر)
+  const yieldDrift = (1 + mDivGrowth) / (1 + monthlyCapRate);
+  let curAnnualYield = scenario.divRate;
+  const monthlyDivRate = scenario.divRate / 12;   // العائد الابتدائي (للقطة السنة صفر)
   const totalMonths    = horizonYears * 12;
   const monthlyInfl    = Math.pow(1 + inflationRate, 1/12) - 1;
 
@@ -983,8 +1027,9 @@ function projectScenario(scenario, params) {
     // 1. نمو رأس المال (سعر السهم)
     value *= (1 + monthlyCapRate);
 
-    // 2. الأرباح الموزعة
-    const divEarned = value * monthlyDivRate;
+    // 2. الأرباح الموزعة — بالعائد الجاري بعد الانجراف
+    curAnnualYield *= yieldDrift;
+    const divEarned = value * (curAnnualYield / 12);
     cumulativeDividends += divEarned;
     if (reinvestDividends) value += divEarned;
 
@@ -1007,8 +1052,10 @@ function projectScenario(scenario, params) {
         cumDiv:            cumulativeDividends,
         cumAdded:          cumulativeAdded,
         realValue:         realVal,
-        monthlyIncome:     value * monthlyDivRate,
-        monthlyIncomeReal: adjustInflation ? (value * monthlyDivRate) / inflationFactor : value * monthlyDivRate,
+        monthlyIncome:     value * (curAnnualYield / 12),
+        monthlyIncomeReal: adjustInflation
+                             ? (value * (curAnnualYield / 12)) / inflationFactor
+                             : value * (curAnnualYield / 12),
         yourCapital:       yourCap,
         priceGrowth,
       });
