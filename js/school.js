@@ -742,7 +742,11 @@ function renderGrades() {
   html += `<td class="${gCls(overallAvg)}" style="font-weight:700">${overallAvg !== null ? overallAvg.toFixed(1)+'%' : '—'}</td></tr>`;
   html += `</tbody></table>`;
   if (_weightNote) {
-    html += `<div class="small text-muted" style="margin-top:8px;line-height:1.7">${esc(_weightNote)}</div>`;
+    // `keep-visible` مقصود: هذا **إفصاح** عن تقدير لا شرح تعليمي. طوله يقع
+    // عند حدّ التنقية (٨٩ حرفاً والحدّ ٩٠)، فأيّ وزن عشري أو عدد فصول أكبر
+    // يدفعه فوق الحدّ فيختفي — ويبقى العنوان يقول «(موزون)» بلا بيان كيف
+    // وُزِّع المتبقّي. اختفاء بيانِ تقديرٍ يجعله تقديراً صامتاً (م.20).
+    html += `<div class="small text-muted keep-visible" style="margin-top:8px;line-height:1.7">${esc(_weightNote)}</div>`;
   }
   wrap.innerHTML = html;
 

@@ -4207,8 +4207,15 @@ async function syncHoldingsFromTx() {
     return;
   }
 
-  if (typeof count === 'number' && count > TX_SYNC_LIMIT) {
-    showToast(`⚠️ أُلغيت المزامنة: ${count} معاملة تتجاوز الحد ${TX_SYNC_LIMIT} — `
+  // ⚠️ الحارس يقيس **ما وصل** لا ما طلبناه. `TX_SYNC_LIMIT` سقفنا نحن، لكن
+  // القاطع الحقيقي هو حدّ PostgREST نفسه (1,000 افتراضاً) وهو يقطع بصمت
+  // دون سقفنا. فمقارنة `count > 5000` تمرّ على 1,500 معاملة وُصِّل منها ألف،
+  // وتُكتب الحيازات من سجلّ مبتور. المقارنة الصحيحة: أنقصُ ممّا يقول العدّاد.
+  const truncated = (typeof count === 'number' && count > txAll.length)
+                 || txAll.length >= TX_SYNC_LIMIT;
+  if (truncated) {
+    const nAll = typeof count === 'number' ? count : `أكثر من ${txAll.length}`;
+    showToast(`⚠️ أُلغيت المزامنة: وصل ${txAll.length} صفّاً من ${nAll} معاملة — `
             + 'الحساب سيكون مبتوراً ولن يُكتب شيء', 'error');
     if (btn) { btn.disabled = false; btn.textContent = 'مزامنة من المعاملات'; }
     return;   // لا تُكتب حيازات من سجلّ مبتور أبداً

@@ -233,7 +233,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
   <script src="js/supabase.js?v=20260826b"></script>
   <script src="js/auth.js?v=20260826b"></script>
-  <script src="js/utils.js?v=20260826b"></script>
+  <script src="js/utils.js?v=20260827a"></script>
   <script src="js/constitution.js?v=20260826b"></script>
   <script src="js/constitution-data.js?v=20260826b"></script>
   <script src="js/tadawul-data.js?v=20260826b"></script>
@@ -267,6 +267,9 @@
       // ولا وجود للقيمة العادلة إطلاقاً رغم أن `valueBandOf` و`VALUE_BANDS`
       // محمَّلتان في هذه الصفحة. الآن: القيمة العادلة أثقل، والسلوكي مساند.
       const W = { fair: 0.35, qual: 0.15, profit: 0.10, ext: 0.15, val: 0.25 };
+      // العدّاد يُشتقّ من الأوزان لا يُكتب يدوياً: «5 من 4» كانت تظهر فعلياً
+      // بعد إضافة إشارة `fair` — الرقم الثابت لا يتبع الجدول أعلاه.
+      const TOTAL_SIGNALS = Object.keys(W).length;
 
       const questions = [
         {
@@ -414,7 +417,9 @@
         const _divBack   = (divPs != null && divPs > 0) ? divPs : 0;
         const trueBE     = cost - _divBack;
         const _commRate  = (typeof COMMISSION_RATE === 'number') ? COMMISSION_RATE : 0.0015;
-        const _vat       = 0.15;
+        // ضريبة القيمة المضافة من المصدر الواحد (م.2) — رقمٌ حرفيّ هنا
+        // يعني أن تغيّر النسبة يُصلَح في مكان ولا يُصلَح في هذا.
+        const _vat       = (typeof VAT_RATE === 'number') ? VAT_RATE : 0.15;
         const _netPrice  = price * (1 - _commRate * (1 + _vat));   // صافي العائد للسهم بعد العمولة وضريبتها
         const netProfitPct = trueBE > 0 ? (_netPrice - trueBE) / trueBE * 100 : 0;
         const profitPct  = netProfitPct;
@@ -605,12 +610,13 @@
           <div class="pt-index-scale"><span>0 — احتفاظ</span><span>مؤشر التطرّف: ${index.toFixed(0)}/100</span><span>100 — بيع</span></div>
 
           <div class="pt-breakdown">
+            ${scoreBox('مقابل العادلة (م.48)', present.fair, usedWeights.fair)}
             ${scoreBox('سلوكي', present.qual, usedWeights.qual)}
             ${scoreBox('حجم الربح', present.profit, usedWeights.profit)}
             ${scoreBox('امتداد MA200', present.ext, usedWeights.ext)}
             ${scoreBox('علاوة التقييم', present.val, usedWeights.val)}
           </div>
-          <div style="font-size:0.74rem;color:var(--text-2);margin-bottom:6px">عدد الإشارات المُحتسبة: ${fieldsCount} من 4 — الأوزان مُعاد توزيعها على المتاح</div>
+          <div style="font-size:0.74rem;color:var(--text-2);margin-bottom:6px">عدد الإشارات المُحتسبة: ${fieldsCount} من ${TOTAL_SIGNALS} — الأوزان مُعاد توزيعها على المتاح</div>
 
           ${factorsHtml(reasons)}
           <button class="btn btn-secondary mt-4" onclick="ProfitEngine.start(); window.scrollTo({top:0,behavior:'smooth'})">🔄 تقييم سهم آخر</button>`;

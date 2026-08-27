@@ -266,8 +266,17 @@
       setLoading('login-btn', true);
       const email    = document.getElementById('login-email').value.trim();
       const password = document.getElementById('login-password').value;
-      const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
-      setLoading('login-btn', false);
+      // ⚠️ نفس حماية handleReset/handleForgot: رمية شبكة قبل `setLoading(false)`
+      // تترك زرّ الدخول معطَّلاً بلا رسالة حتى إعادة تحميل الصفحة.
+      let error;
+      try {
+        ({ error } = await supabaseClient.auth.signInWithPassword({ email, password }));
+      } catch (ex) {
+        error = { message: 'تعذّر الاتصال — تحقّق من الشبكة ثم أعد المحاولة' };
+        console.error(ex);
+      } finally {
+        setLoading('login-btn', false);
+      }
       if (error) { showError(error.message === 'Invalid login credentials' ? 'بريد إلكتروني أو كلمة مرور غير صحيحة' : error.message); return; }
       window.location.href = 'dashboard.html';
     }
@@ -283,8 +292,15 @@
       if (password.length < 6)  { showError('يجب أن تكون كلمة المرور 6 أحرف على الأقل'); return; }
 
       setLoading('reg-btn', true);
-      const { data: signUpData, error } = await supabaseClient.auth.signUp({ email, password });
-      setLoading('reg-btn', false);
+      let signUpData, error;
+      try {
+        ({ data: signUpData, error } = await supabaseClient.auth.signUp({ email, password }));
+      } catch (ex) {
+        error = { message: 'تعذّر الاتصال — تحقّق من الشبكة ثم أعد المحاولة' };
+        console.error(ex);
+      } finally {
+        setLoading('reg-btn', false);
+      }
 
       if (error) { showError(error.message); return; }
 

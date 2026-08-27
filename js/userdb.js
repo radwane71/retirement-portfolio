@@ -179,7 +179,7 @@ function renderTable() {
     return `<tr>
       <td><strong class="text-accent">${esc(s.ticker)}</strong></td>
       <td style="cursor:pointer" title="انقر للتعديل" onclick="editStock('${escAttrJs(s.id)}','name','${escAttrJs(s.name)}')">${esc(s.name)}</td>
-      <td style="cursor:pointer" title="انقر للتعديل" onclick="editStockSector('${esc(s.id)}','${esc(s.sector)}')">${esc(s.sector)}</td>
+      <td style="cursor:pointer" title="انقر للتعديل" onclick="editStockSector('${escAttrJs(s.id)}','${escAttrJs(s.sector)}')">${esc(s.sector)}</td>
       <td>${badgeHtml}</td>
       <td><button class="btn btn-danger btn-sm" onclick="deleteStock('${escAttrJs(s.id)}','${escAttrJs(s.ticker)}')">حذف</button></td>
     </tr>`;

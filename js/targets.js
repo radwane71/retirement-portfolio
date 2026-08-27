@@ -1230,14 +1230,18 @@ async function saveSectorTargets() {
   const secCapViolations = collectSectorCapViolations();
   if (secCapViolations.length) markCapViolations(secCapViolations);
 
+  // ⚠️ تُجمَع ولا تُطلَق هنا: كل نصّ منها يبدأ بـ«حُفظ» والحفظ لم يقع بعد.
+  // فشلُ الـupsert بعدها يترك المالك وقد قرأ «حُفظ» ثلاث مرات ولم يُكتب شيء —
+  // وهو العيب نفسه المُصلَح في `saveAllTargets`.
   const secSum = sumTargetInputs('sector-targets-tbody');
+  const warns = [];
   if (secCapViolations.length) {
-    showToast(`⚠️ حُفظ. ${secCapViolations.length} قطاعاً فوق سقف ${TG_CAP_SECTOR}% — محرّك القرار يرصد التركيز الفعلي ويأمر بالتخفيف عند تجاوزه.`, 'warning');
+    warns.push(`⚠️ حُفظ. ${secCapViolations.length} قطاعاً فوق سقف ${TG_CAP_SECTOR}% — محرّك القرار يرصد التركيز الفعلي ويأمر بالتخفيف عند تجاوزه.`);
   }
   if (secSum > 100.05) {
-    showToast(`⚠️ حُفظ. إجمالي أهداف القطاعات ${secSum.toFixed(1)}% يتجاوز 100%.`, 'warning');
+    warns.push(`⚠️ حُفظ. إجمالي أهداف القطاعات ${secSum.toFixed(1)}% يتجاوز 100%.`);
   } else if (secSum < 99.9 && secSum > 0) {
-    showToast(`⚠️ حُفظ. الإجمالي ${secSum.toFixed(1)}% — تبقى ${(100-secSum).toFixed(1)}% غير موزعة.`, 'warning');
+    warns.push(`⚠️ حُفظ. الإجمالي ${secSum.toFixed(1)}% — تبقى ${(100-secSum).toFixed(1)}% غير موزعة.`);
   }
 
   const { data: { user } = {} } = await supabaseClient.auth.getUser();
@@ -1262,7 +1266,8 @@ async function saveSectorTargets() {
     .upsert(rows, { onConflict: 'user_id,sector' });
 
   if (error) { showToast('خطأ: ' + error.message, 'error'); return; }
-  if (secSum >= 99.9) showToast('تم حفظ أهداف القطاعات ✓', 'success');
+  warns.forEach(w => showToast(w, 'warning'));           // بعد الكتابة، لا قبلها
+  if (!warns.length && secSum >= 99.9) showToast('تم حفظ أهداف القطاعات ✓', 'success');
   await loadAll();
 }
 

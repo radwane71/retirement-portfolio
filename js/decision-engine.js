@@ -257,7 +257,12 @@ async function updateCategoryHistory(rows) {
     // ⚠️ لا `engineCfg` عارياً: `categoryOf` تصنّف **بعد** دمج تداول، فلو
     // صنّف التاريخ قبله لاختلف التصنيفان للسهم نفسه في اليوم نفسه —
     // ولثبّت التاريخ فئةً لا تراها الشاشة. المصدر واحد أو لا يكون.
-    const _ti = tadawulInputsFor(r.ticker, +r.current_price || 0);
+    // ⚠️ `r` صفٌّ من `_results` لا من `holdings`: حقل سعره اسمه `price`
+    // (سطر 690). قراءة `current_price` هنا كانت تعطي صفراً **دائماً**، فتخرج
+    // القيمة السوقية `undefined` ويُرجع `classifyStock` «غير مصنَّف» فيقع
+    // `return` قبل أي عدّ — أي أن سجلّ الفئات لم يُكتب قطّ ومنطقة م.26
+    // الميتة لم تُنفَّذ ولا مرة.
+    const _ti = tadawulInputsFor(r.ticker, +r.price || 0);
     const raw = classifyStock(_ti.merged);
     if (!raw.known) return;
     const h = next[r.ticker] || { settled: raw.cat, pending: null, streak: 0, lastCycle: cycle };

@@ -301,14 +301,17 @@ async function saveEntry() {
     // القاعدة الإدراج كلَّه — فتضيع المراجعة **وحقولُها القديمة معها**،
     // والمالك لا يعرف السبب. نُعيد المحاولة بالحقول الأصلية ونقول له
     // بالضبط ما ينقص وما الذي لم يُحفَظ، بدل فشلٍ صامت.
+    let keep72 = false;      // مسار الاستدراك: أبقِ ما لم يُحفَظ في النموذج
     if (eEntry && _isMissingColumn(eEntry)) {
       ({ data: inserted, error: eEntry } = await supabaseClient
         .from('review_log').insert(base).select().single());
       if (!eEntry) {
         const filled = Object.values(a72).some(v => v !== null);
+        keep72 = filled;
         showToast(filled
           ? '⚠️ حُفظت المراجعة بلا حقول م.72 (المادة والمصادر والقرار والتنفيذ) — '
-            + 'شغّل migration 2026-08-26_review_log_article72.sql ثم أعد إدخالها'
+            + 'شغّل migration 2026-08-26_review_log_article72.sql ثم احفظ مرة أخرى. '
+            + 'أبقيتُ ما كتبتَه في النموذج.'
           : '⚠️ أعمدة م.72 غير موجودة — شغّل migration 2026-08-26_review_log_article72.sql',
           'warning');
       }
@@ -331,8 +334,10 @@ async function saveEntry() {
       if (eAtt) throw eAtt;
     }
 
-    showToast('✅ تمت إضافة المراجعة', 'success');
-    resetForm();
+    // ⚠️ لا إشعار نجاح فوق تحذير الاستدراك: ✅ بعد ⚠️ يصير هو الأبرز فيُقرأ
+    // «تمّ كل شيء»، والحقيقة أن أربعة حقول لم تُحفَظ.
+    if (!keep72) showToast('✅ تمت إضافة المراجعة', 'success');
+    resetForm({ keep72 });
     await loadData();
     renderTable();
 
@@ -343,10 +348,14 @@ async function saveEntry() {
   }
 }
 
-function resetForm() {
-  ['rl-ticker','rl-name','rl-sector','rl-notes','rl-article','rl-sources','rl-decision','rl-executed'].forEach(id => {
-    document.getElementById(id).value = '';
-  });
+// `keep72`: بعد مسار الاستدراك تبقى حقول م.72 كما كتبها المالك. التحذير
+// يقول «احفظ مرة أخرى» — ونموذجٌ فُرِّغ للتوّ يجعل ذلك طلباً بإعادة الكتابة
+// من الذاكرة، والقيم لم تُحفَظ في أي مكان آخر.
+function resetForm({ keep72 = false } = {}) {
+  const ids = keep72
+    ? ['rl-ticker','rl-name','rl-sector','rl-notes']
+    : ['rl-ticker','rl-name','rl-sector','rl-notes','rl-article','rl-sources','rl-decision','rl-executed'];
+  ids.forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('rl-date').value  = todayISO();
   document.getElementById('rl-files').value = '';
   pendingFiles = [];
@@ -473,12 +482,16 @@ async function saveEdit() {
       .eq('id', id).eq('user_id', currentUser.id);
 
     // نفس الحارس: بلا أعمدة م.72 يُرفض التعديل كلّه فتضيع تعديلاتك الأصلية
+    let partial72 = false;
     if (eUp && _isMissingColumn(eUp)) {
       ({ error: eUp } = await supabaseClient
         .from('review_log').update(baseU)
         .eq('id', id).eq('user_id', currentUser.id));
-      if (!eUp) showToast('⚠️ حُفظ التعديل بلا حقول م.72 — شغّل '
-        + 'migration 2026-08-26_review_log_article72.sql', 'warning');
+      if (!eUp) {
+        partial72 = true;
+        showToast('⚠️ حُفظ التعديل بلا حقول م.72 — شغّل '
+          + 'migration 2026-08-26_review_log_article72.sql', 'warning');
+      }
     }
     if (eUp) throw eUp;
 
@@ -497,7 +510,7 @@ async function saveEdit() {
       if (eAtt) throw eAtt;
     }
 
-    showToast('✅ تم حفظ التعديلات', 'success');
+    if (!partial72) showToast('✅ تم حفظ التعديلات', 'success');   // ✅ فوق ⚠️ يطمس التحذير
     closeModal();
     await loadData();
     renderTable();
@@ -723,7 +736,10 @@ function getFilteredEntries() {
   return entries.filter(e => {
     if (tk && (e.ticker || '').trim().toUpperCase() !== tk) return false;
     if (!q) return true;
-    return [e.ticker, e.name, e.sector, e.notes]
+    // حقول م.72 داخل البحث: غايتها أن يُراجَع القرار ومادته لاحقاً، وبحثٌ
+    // لا يبلغها يجعل «كل قرارات م.45» أو «ما استندت للمادة 42» غير قابل
+    // للاسترجاع إلا بفتح كل سجلّ على حدة.
+    return [e.ticker, e.name, e.sector, e.notes, e.article, e.sources, e.decision]
       .some(v => String(v || '').toLowerCase().includes(q));
   });
 }
@@ -818,6 +834,7 @@ function renderTable() {
       <td class="rl-nowrap">${esc(e.name||'—')}</td>
       <td><span class="small text-muted">${esc(e.sector||'—')}</span></td>
       <td class="rl-nowrap">${fmtDate(e.review_date)}<div class="rl-agetag">${ageTag}</div></td>
+      <td>${decisionCell(e)}</td>
       <td class="rl-attcell">${attChips || '<span class="small text-muted">لا يوجد</span>'}${dlAllBtn}</td>
       <td>${notesHtml}</td>
       <td class="rl-nowrap">
@@ -831,13 +848,48 @@ function renderTable() {
     <thead><tr>
       <th class="rl-checkcol"></th>
       <th>الرمز</th><th>الشركة</th><th>القطاع</th>
-      <th>تاريخ المراجعة</th><th>المرفقات</th>
+      <th>تاريخ المراجعة</th><th>القرار والمادة</th><th>المرفقات</th>
       <th>الملاحظات</th><th>إجراءات</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
 
   updateSelectedCount();
+}
+
+// ── م.72: القرار ومادته ومصادره وهل نُفِّذ ─────────────────────────────
+// كانت الأربعة تُحفَظ وتُملأ في مودال التعديل ثم **لا تُعرَض إطلاقاً** — فما
+// كان يُقرأ سجلَّ تدقيق إلا بفتح كل مراجعة على حدة. م.72 توجب تسجيلها،
+// وم.71 تبني عليها («تُراجَع بالنسخة السارية وقت المراجعة») — وكلاهما بلا
+// معنى ما دامت غير مرئية.
+const DECISION_AR = {
+  hold: 'احتفظ', accumulate: 'تجميع', trim: 'تخفيف',
+  exit: 'خروج', deferred_exit: 'خروج مؤجَّل', watch: 'مراقبة',
+};
+
+function decisionCell(e) {
+  const bits = [];
+  if (e.decision) {
+    // مفتاح غير معروف يُعرَض كما هو لا يُبتلع — والقيم مقيَّدة في SQL أصلاً
+    bits.push(`<b>${esc(DECISION_AR[e.decision] || e.decision)}</b>`);
+  }
+  if (e.executed != null && e.executed !== '') {
+    // ⚠️ `"false"` نصٌّ صادق. القيمة تأتي منطقيةً من Postgres، لكنها تمرّ
+    // بالنسخ الاحتياطي واستعادته (JSON/CSV) فتعود أحياناً سلسلةً — و`!!"false"`
+    // يقلب «لم يُنفَّذ» إلى «نُفِّذ» بصمت.
+    const on = e.executed === true || e.executed === 1
+            || String(e.executed).trim().toLowerCase() === 'true';
+    bits.push(on
+      ? '<span class="text-success small">✔ نُفِّذ</span>'
+      : '<span class="text-muted small">◻ لم يُنفَّذ</span>');
+  }
+  if (e.article)  bits.push(`<span class="small text-muted">${esc(e.article)}</span>`);
+  if (e.sources)  bits.push(`<span class="small text-muted" title="${esc(e.sources)}">📎 ${
+    esc(String(e.sources).length > 28 ? String(e.sources).slice(0, 28) + '…' : e.sources)}</span>`);
+
+  return bits.length
+    ? `<div style="display:flex;flex-direction:column;gap:2px;line-height:1.6">${bits.join('')}</div>`
+    : '<span class="small text-muted">—</span>';
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────

@@ -934,7 +934,7 @@ function renderTable() {
   // خانة التحديد أول عمود ⇒ تظهر **يمين السنة** في التخطيط العربي
   const _allSel = entries.length > 0 && entries.every(e => selectedIds.has(e.id));
   document.getElementById('salary-thead').innerHTML = `<tr>
-    <th class="sel-cell"><input type="checkbox" ${_allSel ? 'checked' : ''}
+    <th class="sel-cell"><input type="checkbox" id="sel-all-box" ${_allSel ? 'checked' : ''}
       onchange="toggleAllSel(this.checked)" title="تحديد كل الأشهر المعروضة"></th>
     <th>السنة</th><th>الشهر</th><th>الراتب</th>${catCols}<th>المتبقي</th><th>ملاحظات</th>
     <th>النوع</th><th>إجراءات</th>
@@ -975,7 +975,7 @@ function renderTable() {
     const rowCls = [planned ? 'row-planned' : '', sel ? 'row-selected' : ''].filter(Boolean).join(' ');
     return `<tr${rowCls ? ` class="${rowCls}"` : ''}>
       <td class="sel-cell"><input type="checkbox" ${sel ? 'checked' : ''}
-        onchange="toggleRowSel('${e.id}', this.checked)"></td>
+        onchange="toggleRowSel('${e.id}', this.checked, this)"></td>
       <td>${e.year}</td>
       <td>${MONTHS_AR[(+e.month||1)-1]}</td>
       <td class="num">${formatSAR(salary)}</td>
@@ -1020,9 +1020,23 @@ function renderTable() {
 // ══════════════════════════════════════════════════════════════════════
 let selectedIds = new Set();
 
-function toggleRowSel(id, on) {
+// ⚠️ لا `renderTable()` هنا. إعادة بناء الجدول تُدمّر خانة التحديد **أثناء**
+// معالج `change` الخاص بها، فيضيع التركيز وينكسر التحديد بلوحة المفاتيح
+// (Tab + Space) — ويتكرّر ذلك مرةً لكل شهر يُحدَّد. نُبدّل الصفّ وحده.
+function toggleRowSel(id, on, box) {
   if (on) selectedIds.add(id); else selectedIds.delete(id);
-  renderTable();
+
+  const tr = box && box.closest ? box.closest('tr') : null;
+  if (tr) tr.classList.toggle('row-selected', !!on);
+  else { renderTable(); return; }        // نداء برمجي بلا عنصر ⇒ إعادة بناء
+
+  // حالة «تحديد الكل» تتبع الصفوف المعروضة لا التحديد الخام
+  const all = document.getElementById('sel-all-box');
+  if (all) {
+    const boxes = [...document.querySelectorAll('#salary-tbody .sel-cell input[type="checkbox"]')];
+    all.checked = boxes.length > 0 && boxes.every(b => b.checked);
+  }
+  renderBulkBar();
 }
 
 function toggleAllSel(on) {
@@ -1162,11 +1176,27 @@ function saveBulkEdit() {
     .filter(r => r.querySelector('input[type="checkbox"]').checked)
     .map(r => {
       const f = r.querySelector('input[type="number"]');
-      return { catId: f.dataset.cat, amount: parseFloat(f.value) || 0 };
-    });
+      // ⚠️ الفراغ ليس صفراً مكتوباً. «صفر = إزالة التخصيص» دلالة مقصودة،
+      // لكن `parseFloat('') || 0` كان يحوّل خانةً فُعِّلت للنظر ثم تُركت
+      // فارغة إلى أمر حذفٍ للفئة من **كل** الأشهر المحدَّدة بلا سؤال.
+      const raw = String(f.value).trim();
+      if (raw === '') return null;
+      const amount = parseFloat(raw);
+      return Number.isFinite(amount) ? { catId: f.dataset.cat, amount } : null;
+    })
+    .filter(Boolean);
+
+  // خانة فُعِّلت وتُركت فارغة تُتخطّى بصمت أعلاه — والصمت هنا يوهم أن شيئاً
+  // طُبِّق. تُذكَر صراحةً بدل أن يظن المالك أن الفئة صُفِّرت.
+  const nBlankAlloc = [...document.querySelectorAll('#bulk-allocations .bulk-alloc-row')]
+    .filter(r => r.querySelector('input[type="checkbox"]').checked
+              && String(r.querySelector('input[type="number"]').value).trim() === '').length;
 
   if (!doSalary && !doStatus && !doNotes && !allocChanges.length) {
-    showToast('لم تفعّل أي حقل — لا شيء ليُطبَّق', 'error'); return;
+    showToast(nBlankAlloc
+      ? `${nBlankAlloc} فئة مفعَّلة بلا مبلغ — اكتب 0 للإزالة، أو مبلغاً للتخصيص`
+      : 'لم تفعّل أي حقل — لا شيء ليُطبَّق', 'error');
+    return;
   }
   if (doSalary && !(salary >= 0)) {
     showToast('الراتب المُدخَل غير صالح', 'error'); return;
@@ -1374,8 +1404,10 @@ function openAddModal() {
 }
 
 function openEditModal(id) {
-  // والمثل في التعديل: صفٌّ ضمن تحديدٍ متعدّد ⇒ تعديل جماعي للمجموعة كلها
-  if (selectedIds.size > 1 && selectedIds.has(id)) { openBulkEdit(); return; }
+  // والمثل في التعديل: صفٌّ ضمن تحديدٍ متعدّد ⇒ تعديل جماعي للمجموعة كلها.
+  // ⚠️ المقياس `_selEntries()` لا `selectedIds.size`: `openBulkEdit` يقيس
+  // الحيّ، فلو قاس هذا الخام واختلفا استدعى كلٌّ منهما الآخر بلا توقّف.
+  if (_selEntries().length > 1 && selectedIds.has(id)) { openBulkEdit(); return; }
   const entry = store.entries.find(e => e.id === id);
   if (!entry) return;
   editingId = id;
@@ -1568,7 +1600,8 @@ function confirmDelete(id) {
   // طلب المالك: «إذا كبست حذف في أي مكان من المحدَّدين، أقدر أحذف الجروب
   // كامل». الشرط: الصفّ نفسه **ضمن** التحديد وفيه أكثر من واحد — وإلا بقي
   // الحذف فردياً، فلا يمحو المالك عشرة أشهر وهو يقصد شهراً.
-  if (selectedIds.size > 1 && selectedIds.has(id)) { confirmBulkDelete(); return; }
+  // المقياس `_selEntries()` لا `selectedIds.size` — انظر `openEditModal`.
+  if (_selEntries().length > 1 && selectedIds.has(id)) { confirmBulkDelete(); return; }
   const entry = store.entries.find(e => e.id === id);
   if (!entry) return;
   const monthName = MONTHS_AR[(+entry.month||1)-1];
@@ -1586,6 +1619,9 @@ function executeDelete() {
   const gone = store.entries.find(e => e.id === deletingId);
   if (gone) logChange('delete', gone, _auditSnapshot(gone));
   store.entries = store.entries.filter(e => e.id !== deletingId);
+  // القاعدة: أي مسار يزيل سجلاً يزيل معرّفه من التحديد. معرّفٌ باقٍ لسجلٍّ
+  // محذوف يجعل الخام أكبر من الحيّ، وهناك يبدأ التفرّع الخاطئ.
+  selectedIds.delete(deletingId);
   saveStore(store);
   closeDeleteModal();
   buildYearSelects();
@@ -1598,6 +1634,7 @@ function openResetModal()  { document.getElementById('reset-modal').classList.ad
 function closeResetModal() { document.getElementById('reset-modal').classList.remove('open'); }
 function executeReset() {
   store.entries = [];
+  selectedIds.clear();          // لم يبقَ سجلّ حيّ — فلا معرّف محدَّد
   saveStore(store);
   closeResetModal();
   buildYearSelects();
@@ -1854,5 +1891,10 @@ function exportCSV() {
 // esc() و uid() المشتركتان من utils.js (محمَّلة قبل هذا الملف) — أُزيلت النسخ المحلية
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeModal(); closeDeleteModal(); closeResetModal(); }
+  // كل مودال في الصفحة — مودال يُغلَق بالنقر على خلفيته ولا يُغلَق بـEscape
+  // اتساقٌ مكسور، ومَن يعتمد لوحة المفاتيح يبقى محبوساً فيه.
+  if (e.key === 'Escape') {
+    closeModal(); closeDeleteModal(); closeResetModal();
+    closeBulkEdit(); closeBulkDelete(); closePlanBulk();
+  }
 });
