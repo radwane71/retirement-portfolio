@@ -1081,7 +1081,7 @@ function projectScenario(scenario, params) {
   let inflationFactor     = 1;
 
   const snapshots = [{
-    year: 0, value, cumDiv: 0, cumAdded: 0,
+    year: 0, value, cumDiv: 0, cumWithdrawn: 0, cumAdded: 0,
     realValue: value,
     monthlyIncome:     value * monthlyDivRate,
     monthlyIncomeReal: value * monthlyDivRate,
@@ -1836,23 +1836,42 @@ function computeContributionPlan() {
 
   // الهدف الاسمي المستقبلي (نرفع هدف اليوم لقوّته الاسمية عند تفعيل التضخم)
   const inflMul = inp.adjustInflation ? Math.pow(1 + inp.inflationRate, years) : 1;
-  let targetFinalValue;
-  if (inp.goalType === 'monthly_income') {
-    targetFinalValue = monthlyDivRate > 0 ? (inp.goalAmount * inflMul) / monthlyDivRate : Infinity;
-  } else {
-    targetFinalValue = inp.goalAmount * inflMul;
-  }
 
-  // حل خطي: القيمة النهائية = A + الضخ × B  (اسمياً)
-  const A = _projectConstant(0, inp, scenario, false).slice(-1)[0].value;
-  const B = _projectConstant(1, inp, scenario, false).slice(-1)[0].value - A;
+  // ⚠️ هدف الدخل يُحلّ على **الدخل** لا على قيمةٍ مُحوَّلة منه.
+  // `projectScenario` صار ينجرف بالعائد `(1+g)/(1+r)` كل شهر، فالعائد عند
+  // الأفق ليس `scenario.divRate`. القسمة على العائد الابتدائي كانت تعطي
+  // هدفاً أقلّ من الحقيقي بنحو الربع: هدف 6,000 يُبلَغ عنده دخلٌ فعليّ
+  // 4,441 (−26%) — وهي بعينها المبالغة التي وُثِّق إصلاحها في المحرّك
+  // (سطر 1054) ثم بقيت في هذه البطاقة. والدخل خطّي في الضخّ كالقيمة،
+  // فالحلّ الخطي نفسه يصلح عليه بلا أي تحويل.
+  const _isIncomeGoal = inp.goalType === 'monthly_income';
+  const _endOf = pmt => {
+    const s = _projectConstant(pmt, inp, scenario, false).slice(-1)[0];
+    return _isIncomeGoal ? s.monthlyIncome : s.value;
+  };
+  const targetMetric = inp.goalAmount * inflMul;      // دخل أو قيمة، بحسب نوع الهدف
+
+  // حل خطي: المقياس عند الأفق = A + الضخ × B  (اسمياً)
+  const A = _endOf(0);
+  const B = _endOf(1) - A;
   let requiredPMT = 0, alreadyReached = false, impossible = false;
-  if (targetFinalValue <= A + 1e-6) { alreadyReached = true; }
-  else if (B > 1e-9) { requiredPMT = (targetFinalValue - A) / B; }
+  if (targetMetric <= A + 1e-6) { alreadyReached = true; }
+  else if (B > 1e-9) { requiredPMT = (targetMetric - A) / B; }
   else { impossible = true; }
 
   const snaps = _projectConstant(alreadyReached ? 0 : requiredPMT, inp, scenario, inp.adjustInflation);
   const finalSnap = snaps[snaps.length - 1];
+
+  // ⚠️ `targetFinalValue` تبقى **قيمة محفظة** دائماً: شريط التقدّم (سطر 1905)
+  // وخطّ الهدف في الرسم (2440) يقارنانها بـ`s.value`. لهدف الدخل هي القيمة
+  // التي يتحقّق عندها الدخل المطلوب — لا الدخل نفسه.
+  // `value` و`monthlyIncome` اسميّان كلاهما (المُعدَّلان بالتضخم حقلان
+  // منفصلان)، فنسبتهما هي مقلوب العائد الشهري **المنجرف** عند الأفق —
+  // فتتحوّل عندها القيمةُ إلى الدخل بلا افتراض عائدٍ ابتدائي ثابت.
+  const targetFinalValue = !_isIncomeGoal ? targetMetric
+    : (finalSnap.monthlyIncome > 0
+        ? targetMetric * (finalSnap.value / finalSnap.monthlyIncome)
+        : NaN);
 
   _lastComputedPlan = {
     inp,
@@ -3665,6 +3684,9 @@ function renderScenarioDetail(horizonYears) {
   // ── تفكيك القيمة النهائية ────────────────────────────────────────
   const endYourCap    = end?.yourCapital  || 0;
   const endDivCum     = end?.cumDiv       || 0;
+  // ما بقي داخل المحفظة فعلاً مقابل ما خرج منها (م.63/64)
+  const endWithdrawn  = end?.cumWithdrawn || 0;
+  const endReinvested = Math.max(0, endDivCum - endWithdrawn);
   const reinvestOn    = document.getElementById('inp-reinvest')?.checked !== false;
   const endPriceGrow  = end?.priceGrowth  || 0;
   const endVal        = end?.value        || 0;
@@ -3707,12 +3729,20 @@ function renderScenarioDetail(horizonYears) {
     // ⚠️ الوسم يتبع **الإعداد الفعلي**: مع إطفاء إعادة الاستثمار كانت
     // 1,835,089 ر.س تُعرض «معاد استثمارها» وهي خرجت من المحفظة، ومجموع
     // التفكيك يتجاوز القيمة النهائية بـ1.84 مليون (5,419,206 مقابل 3,584,117).
-    { val: end && endDivCum > 0 ? fmt(endDivCum) : '—',
+    // ⚠️ وحتى مع تفعيل المفتاح لم يعد كلّ الموزَّع مُعاداً: م.63 تسحب 50%
+    // (2045–2047) وم.64 تسحب 100% (2048+) بغضّ النظر عن المفتاح. فبقاء
+    // `cumDiv` كلّه تحت وسم «معاد استثمارها» كان يجعل مجموع التفكيك يتجاوز
+    // القيمة النهائية بمقدار `cumWithdrawn` بالضبط (قياس: 4,620,200 ر.س).
+    { val: end && endReinvested > 0 ? fmt(endReinvested) : '—',
       lbl: reinvestOn ? '📈 أرباح معاد استثمارها (مجانية)'
                       : '💵 توزيعات مستلمة نقداً (خارج المحفظة)' },
+    ...(endWithdrawn > 0 ? [{ val: fmt(endWithdrawn),
+      lbl: '💵 توزيعات سُحبت — مرحلتا الانتقال والسحب (م.63/64)' }] : []),
     { val: end  ? fmt(endPriceGrow)            : '—', lbl: '🚀 نمو السعر الصافي (عمل السوق لك)' },
-    ...(!reinvestOn && end ? [{ val: fmt((+end.value || 0) + endDivCum),
-      lbl: 'القيمة + التوزيعات المستلمة (حتى يجمع التفكيك)' }] : []),
+    // حارس التوازن: يظهر متى خرج شيء من المحفظة — بالمفتاح أو بالمرحلة
+    ...(end && (endWithdrawn > 0 || (!reinvestOn && endDivCum > 0))
+      ? [{ val: fmt((+end.value || 0) + (reinvestOn ? endWithdrawn : endDivCum)),
+           lbl: 'القيمة + ما خرج منها (حتى يجمع التفكيك)' }] : []),
     { val: end && multiplier > 0 ? `×${multiplier.toFixed(1)}` : '—', lbl: 'مضاعف رأس مالك (كل ريال أصبح ×N)' },
   ];
 

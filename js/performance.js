@@ -506,7 +506,11 @@ function renderKPIs() {
     }
     _snapMaxDD = maxDD;
     // AUDIT-FIX (2026-08): شارة النضج على عدد اللقطات بعد إزالة التكرارات لا العدد الخام
-    const _mDD = assessMetricMaturity('risk', { snapshots: Math.max(0, Object.keys(twrMap).length - 1) });
+    // ✔️ تحقّق 2026-08-27: العدد الممرَّر **فترات عائد** فعلاً — `twrMap` هي
+    // السلسلة نفسها التي حُسب منها التراجع أعلاه، ومفاتيحها أيام مُزالة
+    // التكرار، فـn تاريخاً ⇒ n−1 فترة. مطابق لعتبات `risk` في utils.js.
+    const _nRetDD = Math.max(0, Object.keys(twrMap).length - 1);
+    const _mDD = assessMetricMaturity('risk', { snapshots: _nRetDD });
     ddEl.innerHTML    = maxDD.toFixed(2) + '%' + maturityBadge(_mDD.level, _mDD.reason);
     ddEl.className    = 'value num ' + (maxDD < -15 ? 'text-danger' : maxDD < -8 ? 'text-warning' : 'text-success');
     ddEl.title        = ddPeakDate ? `من ${formatDate(ddPeakDate)} إلى ${formatDate(ddTroughDate)}` : '';
@@ -528,11 +532,16 @@ function renderKPIs() {
       ? 'سلسلة يومية من أسعار الأسهم — أسهمك وحدها بالعائد الإجمالي (بلا نقد)'
       : 'لقطات صافي الثروة — مكوّن الأسهم فقط',
     points: _riskSeries ? _riskSeries.length : 0,
-    risk: _rm ? {
+    // ⚠️ `{insufficient:true}` كائنٌ **صادق**. الشرط `_rm ?` وحده كان يكتب
+    // `risk` بمفاتيح undefined، فيطبع تقرير المراجعة جدولاً كل خاناته «—»
+    // بلا سبب — وهو نقيض غرض الحدّ نفسه (م.20: يُعلَن ولا يُقدَّر بصمت).
+    risk: (_rm && !_rm.insufficient) ? {
       annReturn: _rm.annReturn, annVol: _rm.annVol, annDownside: _rm.annDownside,
       sharpe: _rm.sharpe, sortino: _rm.sortino,
       nReturns: _rm.nReturns, nSnaps: _rm.nSnaps, shortSpan: _rm.shortSpan,
     } : null,
+    riskInsufficient: (_rm && _rm.insufficient)
+      ? { nReturns: _rm.nReturns, min: RISK_MIN_RETURNS } : null,
     maxDrawdown: (typeof _snapMaxDD === 'number') ? _snapMaxDD : null,
     riskFree: RISK_FREE_RATE,
   });
