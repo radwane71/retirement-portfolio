@@ -1702,6 +1702,9 @@ function buildTargetPlan(valAware) {
       const gZ = deferredVerdict(price, r.avgCost, divsZ, r.shares);
       if (gZ.action === 'defer' || gZ.action === 'unknown') {
         out.deferredExit.push(mk({ sar: r.value, shares: r.shares, breakEven: gZ.breakEven,
+          // علامة أصل القرار: هذا خروج **قرّرتَه أنت**، لا خروجاً استنبطه
+          // المحرّك. تُستعمل لعدّها تحت ① فلا يبدو أن بعض قراراتك سقط.
+          ownExit: true,
           why: `⏸️ ${whyZ} — لكن ${gZ.why} (م.11 تعلو على قرار الخروج في سلّم م.50)` }));
         return;
       }
@@ -2174,14 +2177,20 @@ function renderTargetPlan() {
 
     // ── أثر التنفيذ: تُعرض داخل نفس البطاقة بطلب المالك (لا في صفحة أخرى) ──
     let pnlHtml = '';
-    if (o.pnl && (kind === 'exit' || kind === 'trim')) {
+    // ⚠️ `deferredExit` مشمول عمداً. حَجْبُ الربح/الخسارة عن الخروج المؤجَّل
+    // يقلب غرضه: م.45 تُبقي المركز **لأنه تحت التعادل**، وهذا الرقم بعينه هو
+    // ما يقيس المسافة. عرضه على المنفَّذ وحده يترك المالك يرى اثنين من سبعة.
+    if (o.pnl && (kind === 'exit' || kind === 'trim' || kind === 'deferredExit')) {
       const p = o.pnl;
       const sgn = v => (v >= 0 ? '+' : '−') + formatSAR(Math.abs(v));
       const cls = v => v >= 0 ? 'text-success' : 'text-danger';
       const verb = p.capital >= 0 ? 'كاسب' : 'خاسر';
-      const head = kind === 'exit'
-        ? `تخرج وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`
-        : `تبيع هذا الجزء وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`;
+      // المؤجَّل لم يُنفَّذ — الصيغة شرطية لا خبرية، وإلا قُرئ أمراً واقعاً.
+      const head = kind === 'trim'
+        ? `تبيع هذا الجزء وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`
+        : kind === 'deferredExit'
+        ? `<b>لو خرجت اليوم</b> لخرجت وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`
+        : `تخرج وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`;
       pnlHtml = `<div class="de-pnl" style="margin-top:6px;padding:6px 8px;border-radius:6px;
                    background:var(--bg-2);font-size:.78rem;line-height:1.7">
         ${head}: <b class="num ${cls(p.capital)}">${sgn(p.capital)}</b> ر.س
@@ -2246,7 +2255,11 @@ function renderTargetPlan() {
       </div>
     </div>`;
 
-  const nothing = !p.exits.length && !p.trims.length && !p.adds.length;
+  // قراراتك أنت بالخروج التي أجّلتها م.11 — تُعدّ تحت ① كي لا يبدو أن بعضها سقط
+  const ownDeferred = p.deferredExit.filter(o => o.ownExit);
+
+  // ⚠️ `deferredExit` مشمول: قائمة خروج مؤجَّل غير فارغة ليست «لا أمر مطلوب».
+  const nothing = !p.exits.length && !p.trims.length && !p.adds.length && !p.deferredExit.length;
   el.innerHTML = `
     <p class="small text-muted" style="margin:0 0 12px;line-height:1.7">
       خطة تُحوّل <b>أهدافك</b> + <b>قراراتك المسجّلة في المهام</b> + <b>تقييماتك العادلة</b> إلى أوامر ملموسة.
@@ -2256,10 +2269,18 @@ function renderTargetPlan() {
     ${budget}
     ${nothing ? '<p class="small" style="margin:12px 0 0">✅ <b>لا أمر مطلوب الآن.</b> كل سهم له هدف مسجّل يقع ضمن هدفه، ولا مهمة تصفية مفتوحة.</p>' : ''}
     ${block('① قرارك بالخروج — يسبق كل شيء', p.exits, 'exit')}
+    ${ownDeferred.length ? `<p class="small" style="margin:-2px 0 14px;line-height:1.8">
+      ⏸️ و<b>${ownDeferred.length}</b> من قراراتك بالخروج <b>لم تسقط</b> — نزلت إلى
+      <b>①ب أدناه</b> بأرقامها كاملة، لأن سعرها اليوم <b>تحت التعادل الحقيقي</b>
+      والقاعدة المطلقة (م.11) تمنع تحقيق الخسارة:
+      <b>${ownDeferred.map(o => escapeHtmlSafe(o.ticker)).join(' · ')}</b>.
+      <span class="text-muted">مجموع قراراتك بالخروج ${p.exits.length + ownDeferred.length}
+      — ${p.exits.length} قابلة للتنفيذ الآن و${ownDeferred.length} مؤجَّلة.</span>
+    </p>` : ''}
     ${p.deferredExit.length ? `<h4 class="de-d-h">①ب قائمة الخروج المؤجل — م.45 (${p.deferredExit.length})</h4>
       <div class="note" data-state="warn" style="margin-bottom:8px">
         <span class="ic">🛡️</span>
-        <div>هذه أسهم <b>فشلت بوابة الاستدامة</b> لكن سعرها <b>تحت التعادل الحقيقي</b>.
+        <div>هذه أسهم <b>قرّرتَ الخروج منها</b> أو <b>فشلت بوابة الاستدامة</b>، وسعرها <b>تحت التعادل الحقيقي</b>.
         القاعدة المطلقة (م.11) تمنع البيع بخسارة محققة، فالخروج يُؤجَّل بأمر مفتوح عند سعر
         <b>يُحدَّد عند القيمة لا عند التعادل</b> — «وضعه عند التعادل بالضبط هروب لا قرار»
         (م.45). تُراجَع هذه القائمة <b>ربعياً</b> (م.60) و<b>سعرها كل دورة</b>.</div>
