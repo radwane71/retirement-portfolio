@@ -602,7 +602,11 @@ function sustainabilityOf(h) {
     const _manual  = (engineCfg[h.ticker] || {}).divHistoryYears;
     const depth = depthGate(divByTicker[h.ticker] || [], Math.max(+_manual || 0, _tdYears));
     if (!stopped && !depth.pass) {
-      return { ...base, status: 'watch', gatedBy: 'م.41', depth,
+      // ⚠️ 'م.41-عمق' لا 'م.41' المجرَّدة: بوابتا الفلتر 0 مختلفتان —
+      // عمقُ التاريخ هنا، ونقاطُ الدوري/البنيوي أدناه. توحيدُ الوسم كان
+      // يجعل الشريحة تقول «موقوفة — عمق التاريخ» لسهمٍ **اجتاز** العمق
+      // وأُوقف لأن تراجعه دوري.
+      return { ...base, status: 'watch', gatedBy: 'م.41-عمق', depth,
                reason: `${base.reason} — لكن ${depth.why}` };
     }
 
@@ -632,11 +636,11 @@ function sustainabilityOf(h) {
         && typeof cyclicalScore === 'function') {
       const cyc = cyclicalScore(_marks);
       if (cyc.action === 'hold') {
-        return { ...base, status: 'watch', gatedBy: 'م.41', depth, confirm: conf, cyclical: cyc,
+        return { ...base, status: 'watch', gatedBy: 'م.41-دوري', depth, confirm: conf, cyclical: cyc,
                  reason: `${base.reason} — لكن ${cyc.why} (${cyc.score} من ${cyc.max} علامات: ${cyc.hit.join('، ')})` };
       }
       if (cyc.action === 'demoteQuarter') {
-        return { ...base, status: 'watch', gatedBy: 'م.41', depth, confirm: conf, cyclical: cyc,
+        return { ...base, status: 'watch', gatedBy: 'م.41-دوري', depth, confirm: conf, cyclical: cyc,
                  demoteQuarter: true,
                  reason: `${base.reason} — ${cyc.why} (${cyc.score} من ${cyc.max} علامات)` };
       }
@@ -864,12 +868,26 @@ function evaluateHolding(h, ctx) {
   const pumpOnlyDev = !!(overTargetBand && overTargetBand.action === 'pump');
 
   if (pumpOnlyDev && !overCap && !inTrimBand) {
-    return { ...base, action: 'hold', severity: 'green',
+    // ⚠️ هذا الإرجاع يسبق الفلتر 3 (سقف القيمة). الحكم **الوزني** صحيح —
+    // م.49/58 تمنعان البيع في هذا النطاق — لكن إسقاط الحكم **القيمي** معه
+    // خطأ: سهمٌ فوق هدفك بنقطتين وسعره أعلى من عادلته بـ25% كان يُرشَّح
+    // للتخفيف، فصار «احتفاظ» بلا أي ذكر للتقييم. يُذكر ولا يُصدر أمر بيع.
+    const _fvM = (base.fairValue != null && base.fairValue > 0 && priceOk)
+      ? (base.fairValue - price) / base.fairValue * 100 : null;
+    const _fvNote = (_fvM != null && _fvM <= -15 && !valStale)
+      ? ` | سقف القيمة (الفلتر 3): السعر أعلى من العادلة ${formatNum(base.fairValue)} `
+        + `بـ${formatNum(Math.abs(_fvM))}%`
+        + (base.fvUnreliable
+            ? ' — لكن الحاسبة رفضت اعتماد رقم واحد لهذا السهم (تشتّت النماذج)، فأعِد تقييمه بمرساة.'
+            : ' — راجعه في الدورة القادمة؛ لا بيع في نطاق الضخّ (م.58).')
+      : '';
+    return { ...base, action: 'hold', severity: _fvNote ? 'yellow' : 'green',
       label: `تصحيح بالضخّ — فوق الهدف بـ${devTxt}`,
-      priority: 6,
+      priority: _fvNote ? 5 : 6,
       reason: `الوزن ${formatNum(weight)}% فوق الهدف ${formatNum(targetWeight)}% `
             + `(انحراف ${devTxt}) — ${deviationBandOf(dev).label}. `
             + 'وجّه الضخّ والتوزيعات لغيره حتى يعود الوزن، ولا تبع (م.58).'
+            + _fvNote
             + (watchNote ? ` | ملاحظة استدامة: ${watchNote}` : '') };
   }
 
@@ -1367,13 +1385,17 @@ function renderSummaryStrip(totalValue) {
   const gapsSus = _results.filter(r => r.sustain.status === 'unknown').length;
   const count = holdings.length;
   const sizeOk = count >= PORTFOLIO_SIZE.min && count <= PORTFOLIO_SIZE.max;
-  const needAction = n('exit') + n('trim') + n('add') + _results.filter(r => r.action === 'hold' && r.buyZone).length;
+  // `conflict` يُحتسب: هو تعارضٌ بين قرارك المسجَّل وبوابة الاستدامة — أوضح
+  // ما يحتاج قراراً منك، وكان الشريط وحده يُسقطه (التصدير والبطاقة يعالجانه).
+  const needAction = n('exit') + n('trim') + n('add') + n('conflict')
+                   + _results.filter(r => r.action === 'hold' && r.buyZone).length;
 
   // شريط مبسّط: أرقام الإجراءات فقط + عدد الأسهم. النواقص تُعرض كسطر ملاحظة أسفل الجدول لا كخانة غامضة.
   el.innerHTML = `
     <div class="de-stat de-stat-exit"><div class="de-stat-num">${n('exit')}</div><div class="de-stat-lbl">تصفية</div></div>
     <div class="de-stat de-stat-trim"><div class="de-stat-num">${n('trim')}</div><div class="de-stat-lbl">تخفيف</div></div>
     <div class="de-stat de-stat-monitor"><div class="de-stat-num">${n('monitor')}</div><div class="de-stat-lbl">مراقبة</div></div>
+    ${n('conflict') ? `<div class="de-stat de-stat-exit"><div class="de-stat-num">${n('conflict')}</div><div class="de-stat-lbl">تعارض — الحسم بيدك</div></div>` : ''}
     <div class="de-stat de-stat-add"><div class="de-stat-num">${n('add')}</div><div class="de-stat-lbl">تجميع</div></div>
     <div class="de-stat de-stat-hold"><div class="de-stat-num">${n('hold')}</div><div class="de-stat-lbl">احتفاظ</div></div>
     <div class="de-stat"><div class="de-stat-num">${count} <span style="font-size:.6em;color:${sizeOk?'#10b981':'#f59e0b'}">${sizeOk?'✓':'⚠'}</span></div><div class="de-stat-lbl">عدد الأسهم (الهدف ${PORTFOLIO_SIZE.min}–${PORTFOLIO_SIZE.max})</div></div>
@@ -1765,6 +1787,10 @@ function buildTargetPlan(valAware) {
       if (r.action === 'exit') {
         if (trigBlocked) {
           out.deferredExit.push(mk({ sar: r.value, shares: r.shares, breakEven: gT.breakEven,
+            // المشغّل الثابت **قرارُ المالك** بنصّ الرسالة نفسها («عرّفته أنت»)،
+            // فيُعدّ معها تحت ①. بلا هذا العَلَم يسقط من «مجموع قراراتك بالخروج»
+            // — وهو بعينه الاختفاء الذي كُتب العَلَم لمنعه.
+            ownExit: true,
             why: `⏸️ انطبق مشغّل ثابت عرّفته أنت (بيع كامل) — لكن ${gT.why} `
                + `(م.11 تعلو على م.13). ${r.reason || ''}` }));
           return;
@@ -2193,6 +2219,21 @@ function renderTargetPlan() {
   }
 
   const SAR = v => formatSAR(v);
+
+  // ══════════════════════════════════════════════════════════════════
+  // سطر الأمر — مطويّ بطلب المالك (2026-08-27)
+  // ------------------------------------------------------------------
+  // البلاغ حرفياً: «مضيّعتني كأنه كتاب ومقال». البطاقة كانت تعرض ثلاثة
+  // أحكام متناقضة على السهم نفسه — «خاسر −248.75» بالأحمر، ثم «فوقه
+  // بـ5.86%» بالأخضر، ثم «+704.86 محصّلتك» بالأخضر. كلها صحيحة حسابياً
+  // وتقيس ثلاثة أشياء مختلفة، فيقرؤها المالك كتناقض لا كتفصيل.
+  //
+  // القاعدة الآن: **حكمٌ واحد ظاهر**، وهو الحكم الدستوري — السعر مقابل
+  // التعادل الحقيقي (م.2)، لأنه بعينه ما تقرّر به م.11 أيجوز الخروج أم لا.
+  // والمحصّلة (رأسمالي + توزيعات) هي «كاسب/خاسر» بمعناها عند المالك.
+  // كل ما عداه — متوسط التكلفة، سعر اليوم، عدد الأسهم، تفكيك التوزيعات —
+  // خلف نقرة.
+  // ══════════════════════════════════════════════════════════════════
   const line = (o, kind) => {
     const badge = { exit: '🔻 تصفية كاملة', trim: '✂️ خفّف', add: '➕ جمّع',
                     defer: '⏸️ مؤجَّل', conflict: '⚠️ تعارض',
@@ -2203,57 +2244,82 @@ function renderTargetPlan() {
     const to = (kind === 'trim' || kind === 'add') && o.target != null
       ? ` — من <b>${formatNum(o.weight)}%</b> إلى <b>${formatNum(o.target)}%</b>` : '';
 
-    // ── أثر التنفيذ: تُعرض داخل نفس البطاقة بطلب المالك (لا في صفحة أخرى) ──
-    let pnlHtml = '';
-    // ⚠️ `deferredExit` مشمول عمداً. حَجْبُ الربح/الخسارة عن الخروج المؤجَّل
-    // يقلب غرضه: م.45 تُبقي المركز **لأنه تحت التعادل**، وهذا الرقم بعينه هو
-    // ما يقيس المسافة. عرضه على المنفَّذ وحده يترك المالك يرى اثنين من سبعة.
-    if (o.pnl && (kind === 'exit' || kind === 'trim' || kind === 'deferredExit')) {
-      const p = o.pnl;
-      const sgn = v => (v >= 0 ? '+' : '−') + formatSAR(Math.abs(v));
-      const cls = v => v >= 0 ? 'text-success' : 'text-danger';
-      const verb = p.capital >= 0 ? 'كاسب' : 'خاسر';
-      // المؤجَّل لم يُنفَّذ — الصيغة شرطية لا خبرية، وإلا قُرئ أمراً واقعاً.
-      const head = kind === 'trim'
-        ? `تبيع هذا الجزء وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`
-        : kind === 'deferredExit'
-        ? `<b>لو خرجت اليوم</b> لخرجت وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`
-        : `تخرج وأنت <b class="${cls(p.capital)}">${verb}</b> رأسمالياً`;
-      pnlHtml = `<div class="de-pnl" style="margin-top:6px;padding:6px 8px;border-radius:6px;
-                   background:var(--bg-2);font-size:.78rem;line-height:1.7">
-        ${head}: <b class="num ${cls(p.capital)}">${sgn(p.capital)}</b> ر.س
-        <span class="text-muted">(${formatNum(p.pctOnCost)}% على تكلفتك)</span><br>
-        <span class="text-muted">متوسط تكلفتك ${formatNum(p.avg)} · السعر اليوم ${formatNum(p.px)}
-        · ${formatNum(p.sharesSold, 0)} سهم</span>
-        ${o.be ? `<br><span class="text-muted">سعر التعادل بعد التوزيعات${o.be.feeRate != null ? ' وعمولة البيع' : ''}:
-            <b class="num">${formatNum(o.be.be)}</b> ر.س —
-            ${o.be.above >= 0
-              ? `أنت <b class="text-success">فوقه بـ${formatNum(o.be.abovePct)}%</b>`
-              : `أنت <b class="text-danger">تحته بـ${formatNum(-o.be.abovePct)}%</b>`}</span>` : ''}
-        ${p.net != null
-          ? `<br>وبعد إضافة توزيعات هذا السهم <b class="num">${formatSAR(p.divs)}</b> ر.س:
-             <b class="num ${cls(p.net)}">${sgn(p.net)}</b> ر.س <b>محصّلتك النهائية من المركز</b>.`
-          : (p.divs > 0
-              ? `<br><span class="text-muted">قبضت من هذا السهم ${formatSAR(p.divs)} ر.س توزيعات (على المركز كاملاً — لا تُنسب للجزء المباع).</span>`
-              : '')}
-      </div>`;
-    }
-    return `<div class="de-alert-line" style="align-items:flex-start">
-      <div>
-        <b>${badge}: ${escapeHtmlSafe(o.ticker)}</b> ${escapeHtmlSafe(o.name || '')}${to}<br>
-        <span class="small">${amt}</span>
-        ${pnlHtml}
-        ${o.breakEven != null ? `<div class="small num" style="margin-top:3px">
-          التعادل الحقيقي <b>${formatNum(o.breakEven)}</b> ر.س
-          <span class="text-muted">(متوسط تكلفتك ناقص ما استُرِدّ توزيعاً — م.2)</span></div>` : ''}
-        <div class="small text-muted" style="margin-top:3px;line-height:1.6">${o.why || ''}${
-          o.fairNote ? `<br>${o.fairNote}` : ''}${
-          o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
-          o.capped ? `<br><span style="color:var(--st-warn)">⚠️ هدفك فوق سقف فئتك ${formatNum(o.cap)}% — الخطة تنفّذه كما حدّدتَه (م.31، ساري).</span>`
-          : o.expired ? `<br><span style="color:var(--st-bad)">⛔ هدفك فوق سقف فئتك ${formatNum(o.cap)}% وانقضت دورة التجاوز — الخطة تستعمل السقف. جدِّده بتحديث «حُدِّدت في» في صفحة الأهداف (م.31).</span>` : ''}</div>
-      </div></div>`;
-  };
+    const sgn = v => (v >= 0 ? '+' : '−') + formatSAR(Math.abs(v));
+    const cls = v => v >= 0 ? 'text-success' : 'text-danger';
 
+    // ── الحكم الواحد الظاهر ──────────────────────────────────────
+    let headline = '', verdict = '';
+    const p = o.pnl;
+    const isSell = kind === 'exit' || kind === 'trim' || kind === 'deferredExit';
+
+    if (p && isSell) {
+      // «كاسب/خاسر» = المحصّلة النهائية من المركز (رأسمالي + ما قبضتَه
+      // توزيعاً). هذا ما يعنيه المالك بالكلمة، وهو المتّسق مع التعادل
+      // الحقيقي — فلا يظهر رقمان يقولان عكسين.
+      const net    = (p.net != null) ? p.net : p.capital;
+      const netPct = (p.net != null && o.be && o.be.abovePct != null)
+        ? o.be.abovePct : p.pctOnCost;
+      const verb   = net >= 0 ? 'كاسب' : 'خاسر';
+      headline = `<span class="${cls(net)}"><b>${verb}</b> `
+               + `<b class="num">${sgn(net)}</b> ر.س `
+               + `<b class="num">(${net >= 0 ? '+' : '−'}${formatNum(Math.abs(netPct))}%)</b></span>`;
+    }
+
+    // ── القرار النهائي: صريح، لا يُستنتج ────────────────────────
+    if (kind === 'deferredExit') {
+      verdict = '<span class="text-danger"><b>⛔ لا تخرج الآن</b> — السعر تحت التعادل الحقيقي (م.11)</span>';
+    } else if (kind === 'exit') {
+      verdict = '<span class="text-success"><b>✅ تقدر تخرج</b> — السعر فوق التعادل الحقيقي</span>';
+    } else if (kind === 'trim') {
+      verdict = '<span class="text-success"><b>✅ تقدر تخفّف</b></span>';
+    } else if (kind === 'defer' || kind === 'conflict') {
+      verdict = '<span class="text-warning"><b>⏸️ قف — الحسم بيدك</b></span>';
+    }
+
+    // ── التفصيل (مطويّ) ─────────────────────────────────────────
+    let detail = '';
+    if (p && isSell) {
+      const verbCap = p.capital >= 0 ? 'كاسب' : 'خاسر';
+      detail += `<div style="margin-bottom:4px">رأسمالياً وحده: <b class="num ${cls(p.capital)}">${sgn(p.capital)}</b> ر.س`
+             +  ` <span class="text-muted">(${formatNum(p.pctOnCost)}% على تكلفتك — ${verbCap})</span></div>`;
+      if (p.divs > 0) {
+        detail += `<div style="margin-bottom:4px">توزيعات قبضتها من هذا السهم: <b class="num">${formatSAR(p.divs)}</b> ر.س`
+               +  (p.net == null ? ' <span class="text-muted">(على المركز كاملاً — لا تُنسب للجزء المباع)</span>' : '')
+               +  `</div>`;
+      }
+      detail += `<div class="text-muted" style="margin-bottom:4px">متوسط تكلفتك ${formatNum(p.avg)}`
+             +  ` · السعر اليوم ${formatNum(p.px)} · ${formatNum(p.sharesSold, 0)} سهم</div>`;
+      if (o.be) {
+        detail += `<div class="text-muted" style="margin-bottom:4px">سعر التعادل بعد التوزيعات`
+               +  `${o.be.feeRate != null ? ' وعمولة البيع' : ''}: <b class="num">${formatNum(o.be.be)}</b> ر.س — `
+               +  (o.be.above >= 0
+                    ? `أنت <b class="text-success">فوقه بـ${formatNum(o.be.abovePct)}%</b>`
+                    : `أنت <b class="text-danger">تحته بـ${formatNum(-o.be.abovePct)}%</b>`)
+               +  `</div>`;
+      }
+    }
+    if (o.breakEven != null) {
+      detail += `<div class="text-muted num" style="margin-bottom:4px">التعادل الحقيقي `
+             +  `<b>${formatNum(o.breakEven)}</b> ر.س (متوسط تكلفتك ناقص ما استُرِدّ توزيعاً — م.2)</div>`;
+    }
+    const why = `${o.why || ''}${o.fairNote ? `<br>${o.fairNote}` : ''}${
+      o.fix ? `<br><b>الحسم بيدك:</b> ${o.fix}` : ''}${
+      o.capped ? `<br><span style="color:var(--st-warn)">⚠️ هدفك فوق سقف فئتك ${formatNum(o.cap)}% — الخطة تنفّذه كما حدّدتَه (م.31، ساري).</span>`
+      : o.expired ? `<br><span style="color:var(--st-bad)">⛔ هدفك فوق سقف فئتك ${formatNum(o.cap)}% وانقضت دورة التجاوز — الخطة تستعمل السقف. جدِّده بتحديث «حُدِّدت في» في صفحة الأهداف (م.31).</span>` : ''}`;
+    if (why.trim()) detail += `<div class="text-muted" style="line-height:1.7">${why}</div>`;
+
+    return `<details class="de-order">
+      <summary>
+        <span class="de-o-head"><b>${escapeHtmlSafe(o.ticker)}</b> ${escapeHtmlSafe(o.name || '')}${to}</span>
+        ${headline ? `<span class="de-o-pnl">${headline}</span>` : ''}
+        ${verdict ? `<span class="de-o-verdict">${verdict}</span>` : ''}
+      </summary>
+      <div class="de-o-body">
+        <div class="small" style="margin-bottom:6px"><b>${badge}</b> — ${amt}</div>
+        <div class="small">${detail}</div>
+      </div>
+    </details>`;
+  };
   const block = (title, arr, kind, empty) => arr.length
     ? `<h4 class="de-d-h">${title} (${arr.length})</h4>${arr.map(o => line(o, kind)).join('')}`
     : (empty ? `<h4 class="de-d-h">${title}</h4><p class="small text-muted" style="margin:0 0 10px">${empty}</p>` : '');
@@ -2306,13 +2372,13 @@ function renderTargetPlan() {
       — ${p.exits.length} قابلة للتنفيذ الآن و${ownDeferred.length} مؤجَّلة.</span>
     </p>` : ''}
     ${p.deferredExit.length ? `<h4 class="de-d-h">①ب قائمة الخروج المؤجل — م.45 (${p.deferredExit.length})</h4>
-      <div class="note" data-state="warn" style="margin-bottom:8px">
-        <span class="ic">🛡️</span>
-        <div>هذه أسهم <b>قرّرتَ الخروج منها</b> أو <b>فشلت بوابة الاستدامة</b>، وسعرها <b>تحت التعادل الحقيقي</b>.
+      <details class="de-note-fold"><summary>🛡️ لماذا مؤجَّلة؟</summary>
+        <div class="small text-muted" style="line-height:1.8;padding:8px 12px 10px">
+        هذه أسهم <b>قرّرتَ الخروج منها</b> أو <b>فشلت بوابة الاستدامة</b>، وسعرها <b>تحت التعادل الحقيقي</b>.
         القاعدة المطلقة (م.11) تمنع البيع بخسارة محققة، فالخروج يُؤجَّل بأمر مفتوح عند سعر
         <b>يُحدَّد عند القيمة لا عند التعادل</b> — «وضعه عند التعادل بالضبط هروب لا قرار»
         (م.45). تُراجَع هذه القائمة <b>ربعياً</b> (م.60) و<b>سعرها كل دورة</b>.</div>
-      </div>
+      </details>
       ${p.deferredExit.map(o => line(o, 'deferredExit')).join('')}` : ''}
     ${block('② تخفيف — ممّ تموّل', p.trims, 'trim')}
     ${block('③ تجميع — أين تضع المال', p.adds, 'add')}
@@ -2899,11 +2965,20 @@ function healthChipsHtml(r, fin) {
   let [ss, st] = susMap[r.sustain.status] || ['n', 'غير متوفرة'];
   // م.41 و43 — «تحت المراقبة» بسبب بوابة تختلف عن «تحت المراقبة» لضعف
   // مؤشر. إخفاء السبب يجعل المالك يظنّ أن الإشارة لم تُرصد أصلاً.
-  if (r.sustain.gatedBy === 'م.41') st = 'موقوفة — عمق التاريخ (م.41)';
+  if (r.sustain.gatedBy === 'م.41-عمق') st = 'موقوفة — عمق التاريخ (م.41)';
+  else if (r.sustain.gatedBy === 'م.41-دوري') st = 'موقوفة — تراجع دوري لا بنيوي (م.41)';
   else if (r.sustain.gatedBy === 'م.43' && r.sustain.confirm) {
     st = `تنتظر التأكيد ${r.sustain.confirm.have}/${r.sustain.confirm.need} (م.43)`;
   }
   c.push(_chip('الاستدامة', ss, st));
+
+  // م.41 «مختلط» توجب «خفّض ربع فئة + مراقبة مكثّفة». والدستور **لا يعرّف
+  // ربع الفئة رقمياً**، وم.70 تمنع المحرّك من الاجتهاد خارج المواد. فالعَلَم
+  // كان يُكتب ولا يُقرأ إطلاقاً — أي أن حكم «مختلط» ينتج مخرَج «دوري» نفسه
+  // ولا فرق. يُعلَن هنا صراحةً بدل اختراع صيغة أو الصمت عن بندٍ واجب.
+  if (r.sustain.demoteQuarter) {
+    c.push(_chip('م.41', 'y', 'مختلط — يستوجب خفض ربع فئة (بلا تعريف رقمي: قرارك)'));
+  }
 
   if (r.fairValue != null) {
     const m = (r.fairValue - r.price) / r.fairValue * 100;
@@ -3261,7 +3336,7 @@ function openDetailCard(ticker) {
              + (sus.zoneInfo.reads > 0
                  ? ` — يحتاج <b>${sus.zoneInfo.reads}</b> قراءتين للتأكيد (م.43)` : '');
   }
-  if (sus.gatedBy === 'م.41' && sus.depth) {
+  if (sus.gatedBy === 'م.41-عمق' && sus.depth) {
     susBody += `<br><b>⏸️ الفلتر 0 (م.41):</b> ${E(sus.depth.why)}`;
   }
   if (sus.confirm && sus.confirm.known && sus.confirm.need > 0) {

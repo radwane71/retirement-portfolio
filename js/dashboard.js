@@ -1850,10 +1850,14 @@ function _divRiskRemoved(effN) {
   if (effN < 5)  return { pct: 60, txt: '< ٦٠٪',            state: 'bad'  };
   if (effN < 8)  return { pct: 75, txt: '~٧٥٪',             state: 'warn' };
   if (effN < 11) return { pct: 80, txt: '~٨٠٪',             state: 'warn' };
-  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             state: 'good' };
-  if (effN < 21) return { pct: 95, txt: '~٩٥٪',             state: 'good' };
-  if (effN < 31) return { pct: 97, txt: '~٩٦–٩٧٪',          state: 'good' };
-  return            { pct: 98, txt: '~٩٨٪ (منفعة هامشية)', state: 'good' };
+  // ⚠️ `best` لا `good` من ١١ فأعلى: `evBands` (تلميح العدّاد) تسِم هذه
+  // النطاقات `best` ⇒ 🌟، وهذه الدالة كانت تسِمها `good` ⇒ ✅ — فيظهر
+  // رمزان لمقياس واحد على الشاشة نفسها. اللون واحد في الحالتين، والفرق
+  // في الرمز وحده. المصدر يجب أن يكون واحداً، وقرار المالك 🌟.
+  if (effN < 16) return { pct: 90, txt: '~٩٠٪',             state: 'best' };
+  if (effN < 21) return { pct: 95, txt: '~٩٥٪',             state: 'best' };
+  if (effN < 31) return { pct: 97, txt: '~٩٦–٩٧٪',          state: 'best' };
+  return            { pct: 98, txt: '~٩٨٪ (منفعة هامشية)', state: 'best' };
 }
 
 // ── مقياس التنويع (HHI gauge) ─────────────────────────────────
@@ -1871,6 +1875,10 @@ function renderDiversificationCard() {
     sector: h.sector,
     label:  h.ticker,
   })));
+  // `computeDiversification` تُرجع `null` حين لا مركز موجب القيمة — والحارس
+  // أعلاه يفحص إجمالي المحفظة لا المراكز، فحيازةٌ بسعر صفر تعبره وتصل هنا
+  // فينهار التفكيك بـTypeError ويسقط باقي رسم اللوحة معه.
+  if (!div) { el.style.display = 'none'; return; }
   const {
     n, hhi, effectiveN, effectiveNExact, sectorCount, secHHI,
     top1Pct, top1Name, gaugePos, zoneLabel,
@@ -1880,7 +1888,6 @@ function renderDiversificationCard() {
   // حالة المنطقة من رموز التصميم (لا نستعمل zoneColor الخام من utils.js)
   const zoneState = gaugePos < 40 ? 'bad' : gaugePos < 60 ? 'warn' : 'good';
   const zoneIcon  = gaugePos < 40 ? '🔴' : gaugePos < 60 ? '⚠️' : '✅';
-  const zoneClr   = stateColorOf(zoneState);
 
   // تحديد نص النصيحة حسب المنطقة
   let advice;
@@ -1922,7 +1929,6 @@ function renderDiversificationCard() {
   // ── مقياسا توازن التوزيع — أعلى = أكثر توازناً = أفضل (عكس التركّز) ──
   // توازن = كم هي متقاربة أوزان المراكز؛ 100% = أوزان متساوية تماماً.
   const balState   = v => v >= 70 ? 'good' : v >= 50 ? 'warn' : 'bad';
-  const balIcon    = v => v >= 70 ? '✅' : v >= 50 ? '⚠️' : '🔴';
   const balStocks  = Math.round(effectiveN / n * 100);
   const effSectors = secHHI > 0 ? 1 / secHHI : sectorCount;
   const balSectors = Math.round(Math.min(1, effSectors / sectorCount) * 100);
