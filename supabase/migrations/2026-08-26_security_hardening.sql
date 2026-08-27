@@ -89,9 +89,23 @@ $$;
 -- تقود تنبيهات البريد. التفعيل هنا آمن ومتكرّر (idempotent).
 ALTER TABLE IF EXISTS public.portfolio_tasks ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "users_own_portfolio_tasks" ON public.portfolio_tasks;
-CREATE POLICY "users_own_portfolio_tasks" ON public.portfolio_tasks
-  FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+-- ⚠️ تحقّق 2026-08-26: الجدول **كان محمياً أصلاً** بسياسة `users_own_tasks`
+-- شرطها `auth.uid() = user_id` — والتخوّف من انكشافه لم يتحقق.
+-- ولا تُنشَأ سياسة ثانية هنا: سياستان PERMISSIVE من نوع ALL تُجمعان بـOR،
+-- فتتطابقان اليوم، وإن عُدّلت إحداهما غداً ونُسيت الأخرى **فازت الأوسع
+-- بصمت**. تُنشَأ فقط إن لم توجد أي سياسة — حتى لا يُقفَل جدولٌ جديد
+-- بـRLS مفعَّلة وبلا سياسة (وذلك حجبٌ كامل لا حماية).
+DO $do$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'portfolio_tasks'
+  ) THEN
+    CREATE POLICY "users_own_portfolio_tasks" ON public.portfolio_tasks
+      FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
+  END IF;
+END
+$do$;
 
 
 -- ── تحقّق بعد التشغيل ───────────────────────────────────────────────
