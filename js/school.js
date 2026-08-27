@@ -659,10 +659,28 @@ function renderGrades() {
   if (!year) { wrap.innerHTML = `<div class="empty-state">السنة غير موجودة</div>`; return; }
   if (!c.subjects.length) { wrap.innerHTML = `<div class="empty-state">أضف المواد الدراسية أولاً</div>`; return; }
 
+  let _weightNote = '';
   const terms = year.terms || [];
   const yg    = c.grades[yearId] || {};
-  const tw    = t => (t.weight != null ? +t.weight : 1);   // وزن الفصل (افتراضي متساوٍ)
+  // ══════════════════════════════════════════════════════════════════
+  // وزن الفصل — والفصل بلا وزن يأخذ **حصّته من المتبقّي** لا الرقم 1
+  // ------------------------------------------------------------------
+  // كان الافتراضي `1`: فصلٌ وزنه «30%» وآخر فارغ يصيران 30 مقابل 1، أي
+  // نسبة 30:1 بدل 30:70 المقصودة — انحرافٌ يبلغ ثلاثاً وعشرين نقطة في
+  // المعدّل، والعنوان يكتب فوقه «(موزون)» فيبدو مقصوداً.
+  // القاعدة الطبيعية لحقلٍ اسمه «وزن %»: ما لم يُوزَّع يُقسَّم بالتساوي
+  // على الفصول الفارغة. وإن استُهلكت المئة كاملةً فالفارغ صفر — ويُعلَن.
+  // ══════════════════════════════════════════════════════════════════
   const hasWeights = terms.some(t => t.weight != null);
+  const _given     = terms.filter(t => t.weight != null);
+  const _blank     = terms.filter(t => t.weight == null);
+  const _givenSum  = _given.reduce((a, t) => a + (+t.weight || 0), 0);
+  const _share     = _blank.length ? Math.max(0, 100 - _givenSum) / _blank.length : 0;
+  const _overflow  = hasWeights && _blank.length > 0 && _givenSum >= 100;
+  const tw = t => {
+    if (!hasWeights) return 1;                       // لا أوزان أصلاً ⇒ فصول متساوية
+    return t.weight != null ? +t.weight : _share;    // الفارغ يأخذ حصّته من المتبقّي
+  };
   const gCls = p => p === null ? 'g-empty' : p >= 90 ? 'g-A' : p >= 75 ? 'g-B' : p >= 60 ? 'g-C' : 'g-D';
 
   // Header
@@ -674,6 +692,14 @@ function renderGrades() {
     html += `<th class="term-head">${esc(t.label)}${wlbl}</th>`;
   });
   html += `<th class="avg-head">المعدل${hasWeights ? ' (موزون)' : ''}</th></tr></thead><tbody>`;
+  // إفصاح: ما الذي طُبِّق فعلاً على الفصول الفارغة (م.20 — لا تقدير صامت)
+  if (hasWeights && _blank.length) {
+    _weightNote = _overflow
+      ? `⚠️ الأوزان المُدخَلة تبلغ ${_givenSum}% — فلم يبقَ للفصول بلا وزن `
+        + `(${_blank.length}) شيء، ووزنها صفر في المعدّل.`
+      : `ℹ️ الأوزان المُدخَلة ${_givenSum}%، والمتبقّي ${(100 - _givenSum).toFixed(0)}% `
+        + `قُسّم بالتساوي على ${_blank.length} فصلاً بلا وزن (${_share.toFixed(1)}% لكلٍّ).`;
+  }
 
   // Per subject row — معدل المادة موزون بأوزان الفصول
   c.subjects.forEach(sub => {
@@ -715,6 +741,9 @@ function renderGrades() {
   const overallAvg = ovSum ? ovScore / ovSum : null;
   html += `<td class="${gCls(overallAvg)}" style="font-weight:700">${overallAvg !== null ? overallAvg.toFixed(1)+'%' : '—'}</td></tr>`;
   html += `</tbody></table>`;
+  if (_weightNote) {
+    html += `<div class="small text-muted" style="margin-top:8px;line-height:1.7">${esc(_weightNote)}</div>`;
+  }
   wrap.innerHTML = html;
 
   renderTrend(c);

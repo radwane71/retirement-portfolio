@@ -277,24 +277,42 @@ async function saveEntry() {
 
   try {
     // 1. أدخل المراجعة
-    const { data: inserted, error: eEntry } = await supabaseClient
-      .from('review_log')
-      .insert({
-        user_id:     currentUser.id,
-        ticker,
-        name:        document.getElementById('rl-name').value.trim()   || null,
-        sector:      document.getElementById('rl-sector').value.trim() || null,
-        review_date: date,
-        notes:       document.getElementById('rl-notes').value.trim()  || null,
-        // م.72 — الحقول الأربعة المتبقّية من الستة المنصوص عليها
-        article:     document.getElementById('rl-article').value.trim() || null,
-        sources:     document.getElementById('rl-sources').value.trim() || null,
-        decision:    document.getElementById('rl-decision').value || null,
-        executed:    (v => v === '' ? null : v === 'yes')(document.getElementById('rl-executed').value),
-        updated_at:  new Date().toISOString(),
-      })
-      .select()
-      .single();
+    const base = {
+      user_id:     currentUser.id,
+      ticker,
+      name:        document.getElementById('rl-name').value.trim()   || null,
+      sector:      document.getElementById('rl-sector').value.trim() || null,
+      review_date: date,
+      notes:       document.getElementById('rl-notes').value.trim()  || null,
+      updated_at:  new Date().toISOString(),
+    };
+    // م.72 — الحقول الأربعة المتبقّية من الستة المنصوص عليها
+    const a72 = {
+      article:  document.getElementById('rl-article').value.trim() || null,
+      sources:  document.getElementById('rl-sources').value.trim() || null,
+      decision: document.getElementById('rl-decision').value || null,
+      executed: (v => v === '' ? null : v === 'yes')(document.getElementById('rl-executed').value),
+    };
+
+    let { data: inserted, error: eEntry } = await supabaseClient
+      .from('review_log').insert({ ...base, ...a72 }).select().single();
+
+    // ⚠️ أعمدة م.72 تُضاف بـmigration منفصلة. فإن لم تُشغَّل بعدُ، ترفض
+    // القاعدة الإدراج كلَّه — فتضيع المراجعة **وحقولُها القديمة معها**،
+    // والمالك لا يعرف السبب. نُعيد المحاولة بالحقول الأصلية ونقول له
+    // بالضبط ما ينقص وما الذي لم يُحفَظ، بدل فشلٍ صامت.
+    if (eEntry && _isMissingColumn(eEntry)) {
+      ({ data: inserted, error: eEntry } = await supabaseClient
+        .from('review_log').insert(base).select().single());
+      if (!eEntry) {
+        const filled = Object.values(a72).some(v => v !== null);
+        showToast(filled
+          ? '⚠️ حُفظت المراجعة بلا حقول م.72 (المادة والمصادر والقرار والتنفيذ) — '
+            + 'شغّل migration 2026-08-26_review_log_article72.sql ثم أعد إدخالها'
+          : '⚠️ أعمدة م.72 غير موجودة — شغّل migration 2026-08-26_review_log_article72.sql',
+          'warning');
+      }
+    }
 
     if (eEntry) throw eEntry;
 
@@ -333,6 +351,14 @@ function resetForm() {
   document.getElementById('rl-files').value = '';
   pendingFiles = [];
   renderFilePreviews(pendingFiles, 'attach-preview');
+}
+
+// عمود غير موجود في القاعدة — PostgREST يعيد PGRST204، وPostgres 42703
+function _isMissingColumn(err) {
+  if (!err) return false;
+  const c = String(err.code || '');
+  return c === 'PGRST204' || c === '42703'
+      || /column .* does not exist|could not find the '.*' column/i.test(err.message || '');
 }
 
 // ── Delete entry ───────────────────────────────────────────────────────────
@@ -427,22 +453,33 @@ async function saveEdit() {
 
   try {
     // 1. تحديث المراجعة — نُضيف eq('user_id') للأمان
-    const { error: eUp } = await supabaseClient
-      .from('review_log')
-      .update({
-        ticker,
-        name:        document.getElementById('edit-name').value.trim()   || null,
-        sector:      document.getElementById('edit-sector').value.trim() || null,
-        review_date: date,
-        notes:       document.getElementById('edit-notes').value.trim()  || null,
-        article:     document.getElementById('edit-article').value.trim() || null,
-        sources:     document.getElementById('edit-sources').value.trim() || null,
-        decision:    document.getElementById('edit-decision').value || null,
-        executed:    (v => v === '' ? null : v === 'yes')(document.getElementById('edit-executed').value),
-        updated_at:  new Date().toISOString(),
-      })
-      .eq('id', id)
-      .eq('user_id', currentUser.id);
+    const baseU = {
+      ticker,
+      name:        document.getElementById('edit-name').value.trim()   || null,
+      sector:      document.getElementById('edit-sector').value.trim() || null,
+      review_date: date,
+      notes:       document.getElementById('edit-notes').value.trim()  || null,
+      updated_at:  new Date().toISOString(),
+    };
+    const a72U = {
+      article:  document.getElementById('edit-article').value.trim() || null,
+      sources:  document.getElementById('edit-sources').value.trim() || null,
+      decision: document.getElementById('edit-decision').value || null,
+      executed: (v => v === '' ? null : v === 'yes')(document.getElementById('edit-executed').value),
+    };
+
+    let { error: eUp } = await supabaseClient
+      .from('review_log').update({ ...baseU, ...a72U })
+      .eq('id', id).eq('user_id', currentUser.id);
+
+    // نفس الحارس: بلا أعمدة م.72 يُرفض التعديل كلّه فتضيع تعديلاتك الأصلية
+    if (eUp && _isMissingColumn(eUp)) {
+      ({ error: eUp } = await supabaseClient
+        .from('review_log').update(baseU)
+        .eq('id', id).eq('user_id', currentUser.id));
+      if (!eUp) showToast('⚠️ حُفظ التعديل بلا حقول م.72 — شغّل '
+        + 'migration 2026-08-26_review_log_article72.sql', 'warning');
+    }
     if (eUp) throw eUp;
 
     // 2. إضافة المرفقات الجديدة
