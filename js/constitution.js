@@ -248,6 +248,145 @@ function govExposure(rows) {
   };
 }
 
+// ══════════════════════════════════════════════════════════════════════
+// الكسر الهيكلي — أكتوبر 2016
+// ----------------------------------------------------------------------
+// Abid (2026) — VECM و Bai–Perron على تاسي 2010–2025 — يحدّد كسراً هيكلياً
+// في **أكتوبر 2016** مع بدء رؤية 2030، تنخفض بعده حساسية المؤشر لأسعار
+// النفط بوضوح وترتفع أهمية العوامل النقدية.
+//
+// الأثر العملي: أي **علاقة بنيوية** تُقدَّر من بيانات تسبق هذا التاريخ
+// تصف سوقاً بمعاملات مختلفة. يُعلَن ذلك ولا يُطبَّق صامتاً.
+//
+// ⚠️ ولا يُبتَر تاريخ **العوائد** عند 2016: الكسر في علاقة تاسي بالنفط
+// والمتغيّرات الكلّية، لا في كون العائد عائداً. وقصُّ السلسلة إلى ما بعد
+// 2016 يُسقط انهيارَي 2006 و2008 فيجعل توزيع المخاطر **أكثر تفاؤلاً** —
+// وهو عكس الغرض. القاعدة: أعلِن الكسر، ولا تحذف التاريخ.
+const STRUCTURAL_BREAK_YEAR  = 2016;
+const STRUCTURAL_BREAK_LABEL = 'أكتوبر 2016 — رؤية 2030';
+
+// هل تمتدّ نافذة البيانات إلى ما قبل الكسر؟ (إفصاح لا منع)
+function spansStructuralBreak(fromYear) {
+  const y = parseInt(fromYear, 10);
+  if (!isFinite(y)) return { spans: false, known: false };
+  return {
+    spans: y < STRUCTURAL_BREAK_YEAR, known: true,
+    fromYear: y, breakYear: STRUCTURAL_BREAK_YEAR,
+    why: y < STRUCTURAL_BREAK_YEAR
+      ? `النافذة تبدأ ${y} وتعبر الكسر الهيكلي (${STRUCTURAL_BREAK_LABEL}) — `
+        + 'حساسية تاسي للنفط قبله أعلى منها بعده، فالمعاملات المقدَّرة عبر '
+        + 'الكسر متوسّطٌ لحالتين لا وصفٌ لواحدة (Abid 2026).'
+      : `النافذة كلها بعد الكسر الهيكلي (${STRUCTURAL_BREAK_LABEL}).`,
+  };
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// م.30 — الوجه الثاني للعامل الواحد: التعرّض لدورة النفط
+// ----------------------------------------------------------------------
+// إفصاح م.30 كان يقيس محرّكاً واحداً (الإنفاق الحكومي). والأوراق تُرجّح أن
+// المحرّك الأعمق لتاسي هو **النفط نفسه**:
+//   • Aljifri (2020) — VECM على تاسي 1988Q1–2018Q1، وهي أطول دراسة زمنية
+//     على المؤشر: «تاسي مدفوع جوهرياً بابتكارات أسعار النفط»، والعلاقة مع
+//     عرض النقود M2 سالبة.
+//   • Abid (2026) — VECM و Bai–Perron على 2010–2025: كسرٌ هيكلي في
+//     **أكتوبر 2016** مع رؤية 2030، تنخفض بعده حساسية تاسي للنفط بوضوح
+//     **ولا تختفي**، وترتفع أهمية العوامل النقدية.
+//   • Wasiuzzaman (2022): تسعة قطاعات فقط من واحد وعشرين تأثّر تقلّبها
+//     معنوياً في كوفيد — أي أن القطاعات **لا تتحرّك مستقلّة**، فعدّ
+//     القطاعات وحده لا يصف التنويع.
+//
+// ⚠️ هذه المادة **إفصاح لا تقييد** — نصّها: «لا تولّد إشارة بيع، ولا
+// تُخصم من درجة التقييم، احتراماً للمادة 9». فالرقم يُعرَض ويُشرَح ولا
+// يدخل أي قرار وزن ولا يُنقص أي درجة.
+//
+// والمعاملات **تقديرية معايَرة على ما بعد الكسر**، لا مقيسة انحدارياً على
+// محفظتك — وهذا يُعلَن كما تُلزم م.20، ولا يُقدَّم قياساً.
+// ══════════════════════════════════════════════════════════════════════
+const OIL_BETA_SECTOR = {
+  'الطاقة': 1.00,                          // إيراد مباشر من النفط والغاز
+  'المواد الاساسية': 0.75,                 // لقيم مدعوم بالنفط + إنشاءات
+  'المرافق العامة': 0.60,                  // وقود مدعوم + إنفاق حكومي
+  'السلع الرأسمالية': 0.55,
+  'البنوك': 0.55,                          // ودائع حكومية + تمويل مشاريع
+  'الخدمات المالية': 0.50,
+  'النقل': 0.50,
+  'إدارة وتطوير العقارات': 0.45,
+  'الصناديق العقارية المتداولة': 0.45,
+  'الخدمات التجارية والمهنية': 0.45,
+  'صناديق المؤشرات': 0.45,
+  'أخرى': 0.40,
+  'التطبيقات وخدمات التقنية': 0.35,
+  'تجزئة وتوزيع السلع الكمالية': 0.35,     // الإنفاق التقديري يتبع الدورة
+  'الخدمات الإستهلاكية': 0.35,
+  'السلع طويلة الأجل': 0.35,
+  'الإعلام والترفيه': 0.30,
+  'الإتصالات': 0.25,                       // طلب سكّاني لا دوري
+  'التأمين': 0.25,                         // إلزامي: مركبات وصحّي
+  'الرعاية الصحية': 0.20,
+  'الأدوية': 0.20,
+  'المنتجات المنزلية و الشخصية': 0.20,
+  'إنتاج الأغذية': 0.20,
+  'تجزئة وتوزيع السلع الاستهلاكية': 0.20,
+};
+const OIL_BETA_DEFAULT = 0.40;
+
+// نطاقات الإفصاح — تُوصف ولا تُحكَم
+const OIL_BETA_BANDS = [
+  { max: 0.35,     key: 'low',  state: 'good', label: 'تعرّض منخفض لدورة النفط' },
+  { max: 0.55,     key: 'mid',  state: 'warn', label: 'تعرّض متوسط' },
+  { max: 0.70,     key: 'high', state: 'warn', label: 'تعرّض مرتفع' },
+  { max: Infinity, key: 'conc', state: 'bad',  label: 'تركّز على عامل واحد' },
+];
+
+const _OIL_NORM = (() => {
+  const m = {};
+  Object.keys(OIL_BETA_SECTOR).forEach(k => { m[_govNormSector(k)] = OIL_BETA_SECTOR[k]; });
+  Object.keys(GOV_ALIASES).forEach(k => {
+    const t = OIL_BETA_SECTOR[GOV_ALIASES[k]];
+    if (t != null) m[_govNormSector(k)] = t;
+  });
+  return m;
+})();
+
+// بيتا النفط المرجّحة بالقيمة + تفكيكها بالقطاع (م.30 — إفصاح)
+function oilBeta(rows) {
+  const total = (rows || []).reduce((a, r) => a + (+r.value || 0), 0);
+  if (!(total > 0)) return { beta: null, total: 0, unknown: [], why: 'لا حيازات' };
+
+  const unknown = [];
+  const byBucket = {};
+  let weighted = 0;
+  (rows || []).forEach(r => {
+    const sec = String(r.sector || '').trim();
+    const b = _OIL_NORM[_govNormSector(sec)];
+    if (b == null && sec && !unknown.includes(sec)) unknown.push(sec);
+    const use = (b == null) ? OIL_BETA_DEFAULT : b;
+    const v = +r.value || 0;
+    weighted += v * use;
+    const k = use >= 0.70 ? 'مرتبط بالنفط مباشرةً'
+            : use >= 0.45 ? 'مرتبط بالإنفاق والدورة'
+            : 'مرتبط بالطلب السكّاني';
+    byBucket[k] = (byBucket[k] || 0) + v;
+  });
+
+  const beta = weighted / total;
+  const band = OIL_BETA_BANDS.find(x => beta <= x.max) || OIL_BETA_BANDS[OIL_BETA_BANDS.length - 1];
+  const buckets = Object.keys(byBucket)
+    .map(k => ({ label: k, pct: byBucket[k] / total * 100 }))
+    .sort((a, b) => b.pct - a.pct);
+
+  // تركّز العوامل: مقلوب هيرفندال على الحصص الثلاث — «كم عاملاً فعّالاً»
+  const hhi = buckets.reduce((a, x) => a + Math.pow(x.pct / 100, 2), 0);
+
+  return {
+    beta, band, buckets, unknown, total,
+    effectiveFactors: hhi > 0 ? 1 / hhi : null,
+    breakYear: STRUCTURAL_BREAK_YEAR,
+    why: 'إفصاح فقط (م.30): لا يولّد إشارة بيع ولا يُخصم من درجة التقييم (م.9). '
+       + 'المعاملات تقديرية معايَرة على ما بعد كسر 2016، لا مقيسة على محفظتك (م.20).',
+  };
+}
+
 // ── م.7: المعالم الرقمية ──
 const GOAL_MONTHLY_INCOME = 6000;      // ريال شهرياً بحلول 2045
 const GOAL_PORTFOLIO      = 1310000;   // عند عائد 5.5%
@@ -487,6 +626,8 @@ if (typeof module !== 'undefined' && module.exports) {
     FRESH_DAYS, DATA_TAG, MIN_BUY_SAR, MAX_NAMES_PER_BATCH, CYCLE_DAYS, QUARTER_DAYS,
     OVERRIDE_VALID_DAYS, RATING_DIMS,
     GOV_EXPOSURE, GOV_DEFAULT, govExposure,
+    OIL_BETA_SECTOR, OIL_BETA_DEFAULT, OIL_BETA_BANDS, oilBeta,
+    STRUCTURAL_BREAK_YEAR, STRUCTURAL_BREAK_LABEL, spansStructuralBreak,
     ZONE_ORDER, sustainZoneOf, dividendCutBand,
     classifyStock, applyHysteresis, hysteresisEligible, catRankOf, HYST_MARGIN,
     capOfCategory, sectorBandOf, valueBandOf,

@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260826a">
+  <link rel="stylesheet" href="css/style.css?v=20260826b">
   <style>
     .calc-input-group { margin-bottom: 16px; }
     .calc-input-group label { display: block; color: var(--text-muted); font-size: 0.88rem; margin-bottom: 6px; font-weight: 500; }
@@ -311,15 +311,15 @@
   <!-- AUDIT-FIX (2026-08): تثبيت إصدار Chart.js بدل التعويم على @4 -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.112.3/dist/umd/supabase.min.js"></script>
-  <script src="js/supabase.js?v=20260826a"></script>
-  <script src="js/auth.js?v=20260826a"></script>
-  <script src="js/utils.js?v=20260826a"></script>
-  <script src="js/constitution.js?v=20260826a"></script>
-  <script src="js/constitution-data.js?v=20260826a"></script>
-  <script src="js/tadawul-data.js?v=20260826a"></script>
-  <script src="js/appendix-b.js?v=20260826a"></script>
-  <script src="js/declutter.js?v=20260826a"></script>
-  <script src="js/navtoggle.js?v=20260826a"></script>
+  <script src="js/supabase.js?v=20260826b"></script>
+  <script src="js/auth.js?v=20260826b"></script>
+  <script src="js/utils.js?v=20260826b"></script>
+  <script src="js/constitution.js?v=20260826b"></script>
+  <script src="js/constitution-data.js?v=20260826b"></script>
+  <script src="js/tadawul-data.js?v=20260826b"></script>
+  <script src="js/appendix-b.js?v=20260826b"></script>
+  <script src="js/declutter.js?v=20260826b"></script>
+  <script src="js/navtoggle.js?v=20260826b"></script>
   <script>
     let breakdownChartInst = null;
 
@@ -781,7 +781,13 @@
       const rowsHtml = res.parts.map(p => `
         <tr>
           <td><strong>${esc(p.label)}</strong>
-              <div class="text-muted" style="font-size:.72rem">${esc(p.art)} · وزن ${(p.weight * 100).toFixed(0)}%</div></td>
+              <div class="text-muted" style="font-size:.72rem">${esc(p.art)} · وزن ${(p.weight * 100).toFixed(0)}%${
+                /* م.20 — الوزن الفعلي بعد إعادة التوزيع يُعلَن حين يختلف عن الاسمي.
+                   بُعدٌ اسمُه 15% يصير 20% إذا سقط بُعدٌ آخر، وإخفاء ذلك يجعل
+                   الدرجة تبدو من ستّة أبعاد وهي من أربعة. */
+                p.assessed && p.effWeight != null && Math.abs(p.effWeight - p.weight) > 0.001
+                  ? ` <span style="color:var(--st-warn)">← فعلياً ${(p.effWeight * 100).toFixed(0)}%</span>`
+                  : ''}</div></td>
           <td style="min-width:130px">${esc(p.detail || '—')}
               ${p.coveredPct != null && p.coveredPct < 99
                 ? `<div class="text-muted" style="font-size:.72rem">تغطية ${p.coveredPct.toFixed(0)}% من قيمة المحفظة</div>` : ''}

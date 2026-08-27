@@ -552,6 +552,24 @@ const RISK_FREE_RATE = 0.03;
 //   تذبذب الهبوط    = √(متوسط مربّع العوائد السالبة مقابل MAR=0) × √(فترات/سنة)
 //   شارب            = (العائد السنوي − RF) ÷ التذبذب السنوي
 //   سورتينو         = (العائد السنوي − RF) ÷ تذبذب الهبوط
+// ══════════════════════════════════════════════════════════════════════
+// حدّ العيّنة لمقاييس المخاطرة — P2 · P12
+// ----------------------------------------------------------------------
+// التقلّب في تاسي **عنقودي** (تتجمّع الفترات الهادئة مع بعضها والمضطربة مع
+// بعضها) ولبتوكرتي. ومعنى ذلك عملياً أن عيّنةً قصيرة قد تقع كلها داخل عنقود
+// واحد فتقيس هدوءه أو اضطرابه لا تقلّب المحفظة الحقيقي.
+//   • AL-Besher & AL-Najjar (2026) — تاسي 2000–2022
+//   • Habibou (2015) — تقلّب عنقودي ولبتوكرتي في الأسواق الناشئة
+//
+// وكان الحدّ هنا **ثلاث** فترات عائد: شارب من ثلاث مشاهدات ضجيجٌ لا رقم،
+// والخطأ المعياري النسبي للانحراف المعياري عندها ≈ 50%.
+//   الخطأ النسبي ≈ 1 ÷ √(2(n−1)):   n=3 ⇒ 50%  ·  n=12 ⇒ 21%
+//                                   n=30 ⇒ 13% ·  n=60 ⇒ 9%
+// فدون 12 فترة لا يُعرض الرقم إطلاقاً، و60 هي العتبة التي تُعدّ عندها
+// التقديرات مستقرّة — تُعلَن ولا تُخفى.
+const RISK_MIN_RETURNS    = 12;   // دونها: لا عرض
+const RISK_TARGET_RETURNS = 60;   // عندها: تقدير مستقرّ
+
 function _computeRiskMetrics() {
   // نفس أساس تبويب المقارنة وأقصى التراجع: أسهمك وحدها وتدفقاتها (لا نقد ولا عقار)
   const series = _dailyStocksTRSeries() || _screenStocksSeries(_stocksOnlySeries()).clean;
@@ -576,7 +594,8 @@ function _computeRiskMetrics() {
 
   const rets = [];
   for (let i = 1; i < thinned.length; i++) rets.push(thinned[i].idx / thinned[i - 1].idx - 1);
-  if (rets.length < 3) return null;
+  // دون الحدّ لا يُعرض شيء — الرقم المضلِّل أسوأ من غيابه (م.20)
+  if (rets.length < RISK_MIN_RETURNS) return { insufficient: true, nReturns: rets.length };
 
   const spanDays = (new Date(pts[pts.length - 1].date) - new Date(pts[0].date)) / 86400000;
   const years    = spanDays / 365.25;
@@ -603,10 +622,13 @@ function _computeRiskMetrics() {
   const annDownside = shortSpan ? ddP  * Math.sqrt(rets.length) : ddP  * Math.sqrt(periodsPerYear);
   const excess      = annReturn - (shortSpan ? RISK_FREE_RATE * years : RISK_FREE_RATE);
 
+  // دقّة تقدير التقلّب نفسه — تُعرض بجانبه بدل ادّعاء رقم قاطع
+  const volRelSE = 1 / Math.sqrt(2 * (rets.length - 1));
+
   return {
     nReturns: rets.length,
     nSnaps: sortedSnaps.length,   // بعد إزالة التكرارات — لشارة النضج
-    shortSpan,
+    shortSpan, volRelSE,
     annReturn, annVol, annDownside,
     sharpe:  annVol      > 1e-9 ? excess / annVol      : null,
     sortino: annDownside > 1e-9 ? excess / annDownside : null,
@@ -629,14 +651,25 @@ function renderRiskMetrics() {
   const _daily0 = _dailyPortfolioSeries();
   const _usable = _daily0 ? _daily0.length : _screenStocksSeries(_stocksOnlySeries()).clean.length;
   const _total  = _daily0 ? _daily0.length : (_snapshots || []).length;
-  const setInsufficient = (el, subId) => {
+  const setInsufficient = (el, subId, why) => {
     if (!el) return;
     el.textContent = '— (بيانات غير كافية)';
     el.className   = 'value num text-muted';
     const sub = document.getElementById(subId);
-    if (sub) sub.textContent = `🟡 ${_usable} من ${_total} لقطة تحمل قيمة أسهم — تحتاج 4 على الأقل`;
+    if (sub) sub.textContent = why
+      || `🟡 ${_usable} من ${_total} لقطة تحمل قيمة أسهم — تحتاج 4 على الأقل`;
   };
-  if (!m) { setInsufficient(volEl, 'pk-volatility-sub'); setInsufficient(shEl, 'pk-sharpe-sub'); setInsufficient(soEl, 'pk-sortino-sub'); return; }
+  // عيّنة دون الحدّ البحثي: يُعلَن السبب ولا يُعرض رقم (P2 · P12)
+  const _short = (m && m.insufficient)
+    ? `🟡 ${m.nReturns} فترة عائد — والتقلّب في تاسي عنقودي، فدون `
+      + `${RISK_MIN_RETURNS} فترة يقيس الرقمُ عنقوداً واحداً لا تقلّب محفظتك`
+    : null;
+  if (!m || m.insufficient) {
+    setInsufficient(volEl, 'pk-volatility-sub', _short);
+    setInsufficient(shEl,  'pk-sharpe-sub',    _short);
+    setInsufficient(soEl,  'pk-sortino-sub',   _short);
+    return;
+  }
 
   // شارة نضج موحّدة: مقاييس المخاطر تحتاج لقطات شهرية كافية
   // AUDIT-FIX (2026-08): العدد بعد إزالة التكرارات (m.nSnaps) لا _snapshots.length الخام
@@ -655,10 +688,14 @@ function renderRiskMetrics() {
     volEl.className   = 'value num ' + (m.annVol < 0.15 ? 'text-success' : m.annVol < 0.30 ? 'text-warning' : 'text-danger');
   }
   if (_subEl) {
+    // دقّة التقدير معروضة صراحةً: ±% حول التقلّب، ومدى بلوغ العتبة البحثية
+    const _se = m.volRelSE != null ? ` · دقّة التقدير ±${(m.volRelSE * 100).toFixed(0)}%` : '';
+    const _tg = m.nReturns < RISK_TARGET_RETURNS
+      ? ` · يستقرّ عند ${RISK_TARGET_RETURNS} فترة` : '';
     _subEl.textContent = (_dailyBase
       ? `من ${m.nReturns} فترة عائد · أساس: أسعار يومية`
       : `من ${m.nReturns} فترة عائد · أساس: لقطات صافي الثروة`)
-      + (m.shortSpan ? ' · بلا تسنية' : '');
+      + _se + _tg + (m.shortSpan ? ' · بلا تسنية' : '');
   }
   const ratioClass = v => v == null ? 'text-muted' : v >= 1 ? 'text-success' : v >= 0 ? 'text-warning' : 'text-danger';
   if (shEl) {

@@ -2410,6 +2410,30 @@ function renderLedgers() {
             ? `<br>قطاعات بلا مُعامِل مُدرَج (استُعمل الافتراضي ${Math.round(GOV_DEFAULT * 100)}%): `
               + g.unknown.map(escapeHtmlSafe).join('، ')
             : ''), '');
+
+    // ══════════════════════════════════════════════════════════════
+    // الوجه الثاني للعامل الواحد: التعرّض لدورة النفط (م.30 — إفصاح)
+    // --------------------------------------------------------------
+    // «عدّ القطاعات» لا يصف التنويع في سوق مدفوع بمحرّك واحد: تسعة قطاعات
+    // فقط من واحد وعشرين تأثّر تقلّبها معنوياً في كوفيد (Wasiuzzaman 2022)،
+    // وتاسي مدفوع جوهرياً بابتكارات أسعار النفط (Aljifri 2020)، وحساسيته
+    // انخفضت بعد كسر أكتوبر 2016 **ولم تختفِ** (Abid 2026).
+    // إفصاح فقط: لا إشارة بيع ولا خصم من الدرجة (م.9 و30).
+    // ══════════════════════════════════════════════════════════════
+    const ob = (typeof oilBeta === 'function') ? oilBeta(_results || []) : null;
+    if (ob && ob.beta != null) {
+      const _eff = ob.effectiveFactors;
+      gEl.innerHTML += noteHtml('🛢️',
+          `<strong>وبيتا النفط المرجّحة لمحفظتك: `
+        + `<span class="num">${formatNum(ob.beta, 2)}</span> — ${escapeHtmlSafe(ob.band.label)}.</strong><br>`
+        + ob.buckets.map(b =>
+            `${escapeHtmlSafe(b.label)}: <span class="num">${formatNum(b.pct, 1)}%</span>`).join(' · ')
+        + (_eff != null
+            ? `<br>العوامل الفعّالة: <span class="num">${formatNum(_eff, 2)}</span> من ثلاثة — `
+              + 'وهي رقم التنويع الذي يهمّ في سوق بمحرّك واحد، لا عدد القطاعات.'
+            : '')
+        + `<br>${escapeHtmlSafe(ob.why)}`, ob.band.state);
+    }
   }
 
   if (aEl) {

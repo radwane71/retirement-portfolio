@@ -235,6 +235,12 @@ function computeAppendixB(rows, entryRows) {
       maxPoints: d.weight * 10 };
   });
 
+  // م.20 — الوزن **الفعلي بعد إعادة التوزيع**، لا الوزن الاسمي وحده.
+  // بُعدٌ وزنه الاسمي 15% يصير 20% إذا سقط بُعدٌ آخر من الحساب، والدرجة
+  // تُقنَّن على ما قِيس. إخفاء ذلك يجعل الرقم يبدو محسوباً من ستّة أبعاد
+  // وهو محسوب من أربعة — «أظهر الأوزان المستخدمة فعلاً» لا الاسمية.
+  parts.forEach(p => { p.effWeight = p.assessed && weighed > 0 ? p.weight / weighed : 0; });
+
   const score = weighed > 0 ? (earned / weighed) * 10 : null;
   return {
     parts, score,
