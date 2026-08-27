@@ -1222,6 +1222,33 @@ function computeDiversification(positions) {
 function noteHtml(icon, html, state = '') {
   return `<div class="note"${state ? ` data-state="${state}"` : ''}><span class="ic">${icon}</span><div>${html}</div></div>`;
 }
+// ══════════════════════════════════════════════════════════════════════
+// الطيّ — مكوّن واحد لكل شرح طويل في المنصّة
+// ----------------------------------------------------------------------
+// بلاغ المالك 2026-08-27: «مضيّعتني كأنه كتاب ومقال أجلس أقرأه كل يوم…
+// حطها minimized، أنا إذا بغيت أنا أكبّر». والقاعدة التي طلبها عامّة:
+// **البطاقة تعرض بياناتها، والشرح خلف نقرة.**
+//
+// وهذا **غير** طبقة التنقية (`declutter.js`): تلك مفتاح عام يُخفي كل
+// الشروح أو يُظهرها دفعةً واحدة، وهذا طيٌّ لكل كتلة على حدة يبقى متاحاً
+// دائماً. الاثنان يتعايشان: المطويّ لا يُحسب نصّاً ظاهراً.
+//
+// `openByDefault` للحالات التي يكون فيها الشرح **تحذيراً** لا تعليماً —
+// إخفاء تحذير خلف نقرة قرارٌ لا يخصّ التبسيط.
+function foldHtml(summary, html, opts = {}) {
+  const { icon = 'ℹ️', openByDefault = false, cls = '' } = opts;
+  return `<details class="fold${cls ? ' ' + cls : ''}"${openByDefault ? ' open' : ''}>`
+       + `<summary><span class="fold-ic">${icon}</span><span>${summary}</span></summary>`
+       + `<div class="fold-body">${html}</div></details>`;
+}
+
+// ملاحظة إعلامية مطويّة — نفس محتوى `noteHtml` بلا احتلال الشاشة.
+// الملاحظة **بحالة** (تحذير/خطر) لا تُطوى: تُعاد كما هي.
+function noteFold(summary, icon, html, state = '') {
+  if (state) return noteHtml(icon, html, state);
+  return foldHtml(summary, html, { icon });
+}
+
 function kvsHtml(items) {
   return `<div class="kvs">${(items || []).filter(Boolean)
     .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`).join('')}</div>`;

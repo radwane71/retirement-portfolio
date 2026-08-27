@@ -15,7 +15,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@300;400;500;700;900&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="css/style.css?v=20260826b">
+  <link rel="stylesheet" href="css/style.css?v=20260827a">
   <style>
     /* ── Scenario Cards ── */
     .scenario-grid {
@@ -491,9 +491,12 @@
         <span class="section-title">البيانات التاريخية المستخرجة من محفظتك</span>
         <span class="hist-tag" id="hist-period-badge">جارٍ التحميل…</span>
       </div>
-      <p class="small text-muted mb-4">كل الأرقام محسوبة من معاملاتك وأرباحك الموزعة المسجّلة فعلياً — لا تخمين ولا بيانات خارجية.
+      <details class="fold">
+        <summary><span class="fold-ic">📊</span><span>من أين تأتي هذه الأرقام؟</span></summary>
+        <div class="fold-body">كل الأرقام محسوبة من معاملاتك وأرباحك الموزعة المسجّلة فعلياً — لا تخمين ولا بيانات خارجية.
         العائد التاريخي (XIRR) يشمل <strong>التوزيعات النقدية</strong> + <strong>قيمة أسهم المنحة</strong> (تُحسب كنمو رأس مال لأنها ليست نقداً) + نمو السعر.
-        أما «الدخل الشهري» في الإسقاط فهو <strong>التوزيعات النقدية القابلة للصرف فقط</strong>.</p>
+        أما «الدخل الشهري» في الإسقاط فهو <strong>التوزيعات النقدية القابلة للصرف فقط</strong>.</div>
+      </details>
       <div class="hist-summary" id="hist-summary">
         <div class="hist-item"><div class="h-val">—</div><div class="h-lbl">القيمة الحالية</div></div>
       </div>
@@ -529,13 +532,14 @@
         <!-- filled by JS -->
       </div>
       <div id="scenario-prob-note" style="margin-top:10px"><!-- نسبة «أسوأ من المتحفظ» تُملأ ديناميكياً --></div>
-      <p class="small" style="margin-top:10px;color:var(--text-2);line-height:1.7;border-right:3px solid var(--accent);background:var(--accent-dim);padding:8px 12px;border-radius:0 6px 6px 0">
-        🧭 <strong>كيف تقرأ الأرقام؟</strong> الرقم على كل كرت = <strong>كم نافذة تاريخية من تاسي</strong> نمت بمعدّل مقارب لهذا السيناريو — عدد خام، لا «احتمال» ولا نسبة «من 10». حسبناه من <strong>فترات طويلة متداخلة</strong> (10 و15 و20 سنة) مو من سنة وحدة، لأنك تخطّط للتقاعد. عوائد تاسي في السنة الوحدة «مجنونة» (تطلع +104% أو تنزل −57%)، فما تنفع تقيس عليها نتيجة عشرين سنة.
+      <details class="fold">
+        <summary><span class="fold-ic">🧭</span><span>كيف تقرأ الأرقام؟</span></summary>
+        <div class="fold-body">الرقم على كل كرت = <strong>كم نافذة تاريخية من تاسي</strong> نمت بمعدّل مقارب لهذا السيناريو — عدد خام، لا «احتمال» ولا نسبة «من 10». حسبناه من <strong>فترات طويلة متداخلة</strong> (10 و15 و20 سنة) مو من سنة وحدة، لأنك تخطّط للتقاعد. عوائد تاسي في السنة الوحدة «مجنونة» (تطلع +104% أو تنزل −57%)، فما تنفع تقيس عليها نتيجة عشرين سنة.
         <br><br>
         📐 <strong>«المئين» على كل كرت</strong> يقول لك أين يقع معدّل السيناريو بين كل نوافذ تاسي — «المئين 60» يعني أن 60% من النوافذ نمت أبطأ منه. المئين يتحرك بسلاسة مع تغيّر محفظتك، بخلاف التصنيف بالنطاقات الذي يقفز من رقم لرقم بحركة سوقية صغيرة. وسقف سيناريو «المتفائل» مُعاير على <strong>أعلى نافذة حدثت فعلاً</strong> في تاريخ تاسي (تُحسب من البيانات، لا رقم مكتوب يدوياً).
         <br><br>
-        🫧 <strong>ملاحظة:</strong> شلنا فقاعة 2005–2006 من نوافذ هذه البطاقة (السوق وقتها كان «منفوخ» بشكل غير طبيعي وانهار −52%، والبدء منه يشوّه الإحصاء)، بس خلّينا انهيار 2008 وكل النزولات الطبيعية الثانية محسوبة. مونتي كارلو تعامل 2005 بشكل مختلف عمداً — الشرح داخل بطاقتها.
-      </p>
+        🫧 <strong>ملاحظة:</strong> شلنا فقاعة 2005–2006 من نوافذ هذه البطاقة (السوق وقتها كان «منفوخ» بشكل غير طبيعي وانهار −52%، والبدء منه يشوّه الإحصاء)، بس خلّينا انهيار 2008 وكل النزولات الطبيعية الثانية محسوبة. مونتي كارلو تعامل 2005 بشكل مختلف عمداً — الشرح داخل بطاقتها.</div>
+      </details>
     </div>
 
     <!-- ── User inputs ── -->
@@ -658,11 +662,12 @@
         <span class="section-title">🎯 خطة الضخ للوصول للهدف <span class="eng-label">Contribution Plan</span></span>
         <button class="info-btn" type="button" onclick="showCardInfo('plan')" style="position:static;opacity:.7">ⓘ</button>
       </div>
-      <p class="small text-muted" style="margin:6px 0 12px;line-height:1.75">
-        الوضع العكسي: بدل أن تُدخل الضخ الشهري وترى إن كنت ستصل، حدّد <b>الهدف</b> (من بطاقة الهدف أعلاه)
+      <details class="fold">
+        <summary><span class="fold-ic">🔄</span><span>ما هذه البطاقة؟</span></summary>
+        <div class="fold-body">الوضع العكسي: بدل أن تُدخل الضخ الشهري وترى إن كنت ستصل، حدّد <b>الهدف</b> (من بطاقة الهدف أعلاه)
         و<b>الأفق الزمني</b> و<b>القيمة الحالية</b>، فيحسب لك <b>كم يلزمك ضخّه شهرياً</b> للوصول — مع جدول
-        تقدّم سنوي. احفظ الخطة كسجل دائم يبقى حتى تحذفه بنفسك.
-      </p>
+        تقدّم سنوي. احفظ الخطة كسجل دائم يبقى حتى تحذفه بنفسك.</div>
+      </details>
       <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px">
         <div class="inp-group" style="max-width:220px;margin:0">
           <label>سيناريو العائد المفترض للخطة</label>
@@ -693,11 +698,12 @@
         <input type="text" id="plan-search" placeholder="بحث بالهدف أو الملاحظة…" oninput="renderForecastPlans()"
                style="max-width:220px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg-2);color:var(--text);font-size:.85rem">
       </div>
-      <p class="small text-muted" style="margin:0 0 10px;line-height:1.7">
-        الخطة المحفوظة <b>وثيقة مجمَّدة</b>: تُخزَّن معها مدخلاتها ومعدّلات سيناريوهاتها ومسار إسقاطها السنوي
+      <details class="fold">
+        <summary><span class="fold-ic">🧊</span><span>لماذا الخطة المحفوظة مجمّدة؟</span></summary>
+        <div class="fold-body">الخطة المحفوظة <b>وثيقة مجمَّدة</b>: تُخزَّن معها مدخلاتها ومعدّلات سيناريوهاتها ومسار إسقاطها السنوي
         وسياق بياناتك وقتها — فتُعرض لاحقاً بالأرقام نفسها مهما تغيّرت محفظتك. لمقارنتها بالواقع استخدم
-        «أعد الحساب ببيانات اليوم» داخلها؛ لا يُكتب فوقها إلا بحفظ صريح.
-      </p>
+        «أعد الحساب ببيانات اليوم» داخلها؛ لا يُكتب فوقها إلا بحفظ صريح.</div>
+      </details>
       <div id="saved-plans-list"></div>
     </div>
 
@@ -866,7 +872,7 @@
   <script src="js/constitution.js?v=20260826b"></script>
   <script src="js/constitution-data.js?v=20260826b"></script>
   <script src="js/tadawul-data.js?v=20260826b"></script>
-  <script src="js/declutter.js?v=20260826b"></script>
+  <script src="js/declutter.js?v=20260827a"></script>
   <script src="js/navtoggle.js?v=20260826b"></script>
   <script src="js/forecast.js?v=20260827a"></script>
 </body>

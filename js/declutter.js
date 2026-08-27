@@ -69,8 +69,16 @@
     apply();
   }
 
+  // ⚠️ العلاقة بمكوّن الطيّ (`foldHtml` في utils.js — أُضيف 2026-08-27):
+  // الطبقتان مستقلّتان ولا تتصادمان. التنقية مفتاح **عام** يُخفي الشروح
+  // دفعةً واحدة، والطيّ يخصّ **كل كتلة** ويبقى متاحاً دائماً. و`.fold-body`
+  // ليست في `SELECTORS` عمداً: هي مطويّة أصلاً، فإخفاؤها مرّتين يعني أن
+  // النقر على العنوان لا يُظهر شيئاً. وعنوان الطيّ سطرٌ واحد لا مقال،
+  // فيبقى ظاهراً في الحالتين — وهو الحدّ الأدنى الذي طلبه المالك:
+  // «البطاقة تعرض بياناتها، وأنا إذا بغيت أكبّر».
   function protectedEl(el) {
     if (el.classList.contains('keep-visible')) return true;
+    if (el.closest('.fold-body')) return true;   // داخل طيٍّ ⇒ لا تنقية فوق طيّ
     if (el.closest('.modal, .info-modal, .modal-overlay, dialog')) return true;
     if (el.closest('.empty-state')) return true;
     if (el.querySelector('input, select, textarea, button, a')) return true;
