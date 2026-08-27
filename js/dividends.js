@@ -160,8 +160,14 @@ function _getTickerTxMap() {
     map[t.ticker].push(t);
   });
   // sort each ticker's rows once
+  // ⚠️ ومعه فاصلُ اليوم الواحد: بلا رتبة `TX_ORDER` قد يسبق البيعُ شراءَه في
+  // اليوم نفسه فيُقَصّ العدد إلى صفر، وهذا الرقم مقام DPS — فتسقط التوزيعة
+  // من الدخل ومن بوابة الاستدامة (م.42). اقتناءٌ قبل تصرُّف، كما في walkWAC.
+  const _ord = t => (typeof TX_ORDER === 'object' && TX_ORDER) ? (TX_ORDER[t] ?? 0)
+                  : (t === 'sell' ? 1 : 0);
   Object.values(map).forEach(rows =>
-    rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+    rows.sort((a, b) =>
+      (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || (_ord(a.type) - _ord(b.type)))
   );
   _sharesAtDateCache = map;
   return map;

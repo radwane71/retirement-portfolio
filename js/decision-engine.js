@@ -1064,7 +1064,14 @@ async function loadAll() {
     (txByTicker[tk] = txByTicker[tk] || []).push({ type: t.type, shares: +t.shares || 0, total: +t.total || 0, price: +t.price || 0,
       fees: (+t.commission || 0) + (+t.vat || 0), date: new Date(t.date) });
   });
-  Object.values(txByTicker).forEach(rows => rows.sort((a, b) => a.date - b.date));
+  // ⚠️ فاصلُ اليوم الواحد إلزامي: الفرز بالتاريخ وحده يترك ترتيب معاملتين في
+  // اليوم نفسه غير محدَّد، فقد يُعالَج البيع قبل شرائه ⇒ قصٌّ إلى صفر ثم
+  // إضافة، وهذا الرقم مقام DPS فتسقط التوزيعة من الدخل ومن م.42. نفس رتبة
+  // `TX_ORDER` التي يمشي بها `walkWAC`: اقتناءٌ قبل تصرُّف.
+  const _ord = t => (typeof TX_ORDER === 'object' && TX_ORDER) ? (TX_ORDER[t] ?? 0)
+                  : (t === 'sell' ? 1 : 0);
+  Object.values(txByTicker).forEach(rows =>
+    rows.sort((a, b) => (a.date - b.date) || (_ord(a.type) - _ord(b.type))));
 
   // آخر تقييم لكل رمز من حاسبة القيمة العادلة (السجل مرتّب بالأحدث أولاً) + التقييم السابق مباشرة
   // لتطبيق «قاعدة التثبيت» (الدستور §4 الفلتر 2): القيمة العادلة ترتفع فقط لو الأرباح/FCF/التوزيع ارتفعوا فعلاً.

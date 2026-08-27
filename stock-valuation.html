@@ -1835,7 +1835,14 @@
       // مكانه، فيُرجع `find` تقييماً **أقدم وآخر** لنفس الرمز — فتُكتب عليه
       // المرساة و`results` كاملةً، ولا ينالها السجلّ الذي عدّله المالك،
       // ثم تُعاد الشاشة من أرقام السجلّ الخطأ. نستهدف آخر سجلّ كُتب فعلاً.
-      const entry = (_lastSavedHistId != null && _history.find(e => e.id === _lastSavedHistId))
+      // ⚠️ والمرساة تُقيَّد بالرمز المعروض أيضاً: `_lastSavedHistId` يبقى على
+      // آخر حفظٍ حتى بعد فتح سجلّ سهم آخر أو إلغاء التعديل، فتغييرُ المرساة
+      // بلا إعادة حساب كان يكتب على سجلّ **السهم السابق**.
+      const _anchored = _lastSavedHistId != null
+        ? _history.find(e => e.id === _lastSavedHistId
+                          && (e.inputs?.ticker || '').toUpperCase() === tk)
+        : null;
+      const entry = _anchored
                  || _history.find(e => (e.inputs?.ticker || '').toUpperCase() === tk);
       if (!entry) { showToast('احسب أولاً ثم اختر المرساة', 'info'); return; }
       entry.inputs = { ...entry.inputs, anchorModel: anchor };
@@ -3400,6 +3407,8 @@
 
     function cancelEdit() {
       setEditMode(false);
+      _lastSavedHistId = null;      // لم يعد أي سجلّ هدفاً للمرساة
+
       // مسح الحقول وإعادة الصفحة لوضع الإدخال الجديد
       showToast('تم إلغاء وضع التعديل', 'success');
     }
@@ -3407,6 +3416,8 @@
     function editHistoryItem(id) {
       const entry = _history.find(x => x.id === id);
       if (!entry) return;
+      // فتحُ سجلٍّ للتعديل يُبطل استهداف آخر حفظ — وإلا ظلّت المرساة تكتب عليه
+      _lastSavedHistId = null;
       const inp = entry.inputs || {};
 
       // ملء الحقول الأساسية — يكتب دائماً حتى لو القيمة فارغة، وإلا بقيت قيم السهم السابق عالقة
@@ -3496,6 +3507,7 @@
       const lbl = e?.inputs?.ticker ? ` لـ «${e.inputs.ticker}»` : '';
       if (!await confirmAsync(`هل تريد حذف هذه العملية${lbl}؟ لا يمكن التراجع.`)) return;
       _history = _history.filter(x => x.id !== id);
+      if (_lastSavedHistId === id) _lastSavedHistId = null;   // لا استهداف لمحذوف
       invalidateHistIndex(); _histBuilt.clear();
       renderHistory();
       await persistHistory();
@@ -3504,6 +3516,7 @@
     async function clearAllHistory() {
       if (!await confirmAsync('هل أنت متأكد من حذف جميع العمليات؟ لا يمكن التراجع.')) return;
       _history = [];
+      _lastSavedHistId = null;
       invalidateHistIndex(); _histBuilt.clear();
       renderHistory();
       await persistHistory();
@@ -3855,7 +3868,7 @@
         if (_histSearch) {
           // البحث يشمل الملاحظات وتقييم Perplexity — أثمن ما في السجل تحليلياً
           const hay = [inp.ticker, inp.stockName, inp.notes, inp.perplexityEval]
-            .map(v => (v || '').toString().toLowerCase()).join('   ');
+            .map(v => (v || '').toString().toLowerCase()).join(' | ');
           if (!hay.includes(_histSearch)) return false;
         }
         if (fType && (inp.companyType || 'normal') !== fType) return false;
