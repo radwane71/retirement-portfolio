@@ -1319,6 +1319,22 @@ async function saveEngineSnapshot(totalValue, thresholds) {
     fixedTriggers: FIXED_TRIGGERS.map(t => ({ ...t })),
     assetLabels:   { ...ASSET_LABEL },
     sustainMetric: { ...SUSTAIN_METRIC },
+    // م.30 توجب الإفصاح عن تركيز العامل الواحد **في كل دورة**، والتقرير هو
+    // مستند الدورة. كان يُحسب ويُعرض على هذه الصفحة وحدها ولا يدخل اللقطة،
+    // فلم يكن التقرير **يستطيع** عرضه ولو أراد. إفصاحٌ لا حكم (م.9).
+    factorConcentration: (() => {
+      try {
+        const g  = (typeof govExposure === 'function') ? govExposure(_results || []) : null;
+        const ob = (typeof oilBeta === 'function')     ? oilBeta(_results || [])     : null;
+        if (!g && !ob) return null;
+        return {
+          gov: g ? { pct: g.pct, total: g.total, unknown: g.unknown, why: g.why } : null,
+          oil: ob ? { beta: ob.beta, band: ob.band && ob.band.key,
+                      effectiveFactors: ob.effectiveFactors,
+                      unknown: ob.unknown, why: ob.why } : null,
+        };
+      } catch (_) { return null; }
+    })(),
     results:       _results,   // كائنات بسيطة قابلة للتسلسل (بلا دوال)
   };
   // AUDIT-FIX (2026-08): كان الفشل يُكتم مرتين (هنا وفي runEngine) — الآن يظهر toast

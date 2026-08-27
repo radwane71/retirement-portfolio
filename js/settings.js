@@ -143,7 +143,22 @@ const DEFAULT_BATCH = 500;
 // ══════════════════════════════════════════════════════════════
 // عمود الترتيب لكل جدول — الافتراضي المفتاح الأساسي id، والاستثناء الجداول
 // ذات المفتاح المركّب. يُستخدم لجعل ترقيم الصفحات قطعياً في النسخة الاحتياطية.
-const ORDER_COL = { user_settings: 'key' };
+const ORDER_COL = { user_settings: 'key', notification_prefs: 'user_id' };
+
+// ⚠️ جداول مفتاحها الأساسي **هوية المالك** — لا `id` مستقلاً. لا يجوز فيها
+// إدراج تجريبي إطلاقاً: `delete().eq('id', row.id)` لا يجد ما يحذفه (لا عمود
+// `id`)، فيبقى الصفّ التجريبي **حيّاً**. وفي `notification_prefs` معناه أن
+// بريد التنبيهات في ملفِ نسخةٍ لم يوافق المالك على استعادتها يصير عنوانه
+// الفعلي — والزرّ يَعِد نصّاً بأنه «لا يكتب أي بيانات».
+// ولا حزام حذفٍ بديل بـ`user_id`: ذلك يمحو تفضيلات المالك الحقيقية إن كان
+// له صفٌّ أصلاً. المنع من المصدر هو العلاج الوحيد الذي لا يُتلف شيئاً.
+const IDENTITY_KEYED = new Set(['user_profiles', 'notification_prefs']);
+
+// م.72 — مفردات القرار المسجَّل، مطابقة لقيد `review_log_decision_valid`
+const M72_DECISION_AR = {
+  hold: 'احتفظ', accumulate: 'تجميع', trim: 'تخفيف',
+  exit: 'خروج', deferred_exit: 'خروج مؤجَّل', watch: 'مراقبة',
+};
 
 async function fetchAllRows(table, customize) {
   const PAGE = 1000;
@@ -568,8 +583,10 @@ async function auditBackup(backup, user, { probe = true, onProgress } = {}) {
     // ⑤ إدراج تجريبي فعلي ثم حذف فوري — الإثبات القاطع لتوافق المخطط
     // يُتخطّى للجداول الاختيارية: قد تمنع RLS حذف الصف التجريبي فيبقى صفاً
     // زائداً في بيانات المالك — الفحص لا يجوز أن يترك أثراً.
-    if (!probe || UPSERT_TABLES.has(table) || OPTIONAL_TABLES.has(table)) {
-      entry.schema = UPSERT_TABLES.has(table)
+    if (!probe || UPSERT_TABLES.has(table) || OPTIONAL_TABLES.has(table) || IDENTITY_KEYED.has(table)) {
+      entry.schema = IDENTITY_KEYED.has(table)
+        ? 'مفتاحه هوية الحساب — فُحصت الأعمدة بالقراءة فقط (لا إدراج تجريبي)'
+        : UPSERT_TABLES.has(table)
         ? 'يُستعاد بالدمج (upsert) — لا فحص إدراج تجريبي'
         : (OPTIONAL_TABLES.has(table)
             ? 'جدول اختياري — فُحصت الأعمدة بالقراءة فقط (لا إدراج تجريبي)'
@@ -996,7 +1013,14 @@ async function restoreBackup(input) {
       try {
         const { rows } = await fetchOwnedRows(table, user.id);
         emergencyBackup[table] = rows;
-      } catch { emergencyBackup[table] = []; }
+      } catch (e) {
+        // ⚠️ غائبٌ ≠ فارغ. كتابة `[]` هنا كانت تحوّل **فشل قراءة** إلى إذنٍ
+        // بالحذف النهائي عند الاستعادة الطارئة. يُترك المفتاح غير موجود
+        // فيمنعه حارس «لا يُحذف ما لا يُستبدَل» أدناه.
+        delete emergencyBackup[table];
+        (emergencyBackup._failed || (emergencyBackup._failed = {}))[table] = String((e && e.message) || e);
+        continue;
+      }
       emergencyBackup._fingerprint[table] = fingerprintRows(emergencyBackup[table]);
     }
     let emergencyVerify = 'لم تُحفظ';
@@ -1271,12 +1295,24 @@ async function restoreEmergencyBackup() {
     if (!user) throw new Error('انتهت جلستك — أعد تسجيل الدخول ثم أعد المحاولة');
 
     // نفس مسار الاستعادة العادية: FK children أولاً ثم إدراج بترتيب TABLES و mapRow
+    // ⚠️ وبنفس قاعدته الحاكمة: **لا يُحذف ما لا يُستبدَل**. النسخة الطارئة
+    // تستثني `review_log_attachments` عمداً (سطر 989)، فحلقةُ حذفٍ على
+    // `TABLES` كاملة كانت تمحو كل مرفقات دفتر المراجعة — ملفات تداول
+    // الرسمية التي تجعلها م.15 المرجع النهائي — بلا أي بديل يُدرَج.
+    // والأسوأ أن هذا مسار شبكة الأمان نفسه: يُستدعى بعد استعادة فاشلة، أي
+    // في اللحظة التي فقد فيها المالك بياناته بالفعل.
+    const emergencySkipped = [];
     for (const table of deleteOrder(TABLES)) {
+      if (!Array.isArray(b[table])) { emergencySkipped.push(table); continue; }
       const { error } = await supabaseClient.from(table).delete().eq(ownerColOf(table), user.id);
       if (error && error.code !== '42P01') {
         if (OPTIONAL_TABLES.has(table)) continue;
         throw new Error(`خطأ في حذف ${table}: ${error.message}`);
       }
+    }
+    if (emergencySkipped.length) {
+      showToast(`ℹ️ ${emergencySkipped.length} جدولاً خارج النسخة الطارئة — أُبقيت بياناته كما هي: `
+        + emergencySkipped.join('، '), 'info');
     }
 
     setStatus('emergency-status', 'info', 'يتم إدراج بيانات النسخة الطارئة…');
@@ -2827,6 +2863,19 @@ async function exportMonthlyReviewMD() {
             .sort((a, b) => (b.review_date || '').localeCompare(a.review_date || ''))
             .forEach(r => {
               p(`**📅 ${r.review_date || '—'} | المراجع:** ${r.ticker || '—'} ${r.name || ''}`);
+              // م.72 تنصّ على ستّة حقول: التاريخ | الرمز | **المادة** |
+              // **البيانات ومصادرها** | **القرار** | **ما إذا نُفِّذ**. القسم
+              // كان يعرض اثنين منها، والأربعة الباقية تُنسَخ وتُستعاد ولا
+              // تُقرأ — فيتعذّر تنفيذ م.71 (مراجعة القرار بالنسخة السارية
+              // وقته) لأنها تحتاج `article`. الغائب يُعلَن ولا يُقدَّر (م.20).
+              p(mdTable(['المادة المنطبقة', 'البيانات ومصادرها', 'القرار', 'نُفِّذ؟'], [[
+                r.article  || '❌ غير مسجَّلة',
+                r.sources  || '❌ غير مسجَّلة',
+                r.decision ? (M72_DECISION_AR[r.decision] || r.decision) : '❌ غير مسجَّل',
+                r.executed == null ? '⏳ لم يُحسَم'
+                  : (r.executed === true || String(r.executed).trim().toLowerCase() === 'true'
+                      ? '✅ نُفِّذ' : '🔴 لم يُنفَّذ'),
+              ]]));
               if (r.notes) {
                 // نص المراجعة كاملاً محافظاً على التنسيق
                 p(r.notes.split('\n').map(line => `> ${line}`).join('\n'));
@@ -2838,6 +2887,13 @@ async function exportMonthlyReviewMD() {
         });
 
       p(`**إجمالي المراجعات:** ${reviewLog.length} مراجعة على ${Object.keys(byTicker).length} رمز`);
+      // اكتمال سجلّ التدقيق: قيدٌ بلا مادة ولا مصادر ولا قرار لا يصلح مرجعاً
+      // لمراجعةٍ لاحقة (م.71)، فيُعدّ صراحةً بدل أن يمرّ كأنه مسجَّل.
+      const _m72 = reviewLog.filter(r => r.article && r.sources && r.decision).length;
+      p(`**اكتمال سجلّ التدقيق (م.72):** ${_m72} من ${reviewLog.length} قيداً يحمل المادة والمصادر والقرار معاً`
+        + (_m72 < reviewLog.length
+            ? ` — **${reviewLog.length - _m72}** قيداً ناقصاً لا يصلح مرجعاً للمراجعة (م.71).`
+            : '.'));
     } else {
       p('_لا توجد مراجعات مسجّلة في دفتر المراجعة._');
     }
@@ -3189,8 +3245,14 @@ async function exportMonthlyReviewMD() {
     p('الإعدادات الشخصية المحفوظة محلياً في المتصفح.');
     {
       const get = k => localStorage.getItem(userLsKey(k)) ?? localStorage.getItem(k);
-      const alertGreen  = get('tharwa-alert-green')  ?? '1';
-      const alertYellow = get('tharwa-alert-yellow') ?? '3';
+      // ⚠️ الافتراض من ثابتَي الدستور لا من رقمين مكتوبين. `?? '1'` كان يطبع
+      // «≤ 1%» بينما المحرّك واللوحة يعملان على 1.5% (م.49: ±1.5% ⇒ لا إجراء)
+      // — رقمان متناقضان تحت اسم واحد، والمستند هو ما يُقرَّر عليه، فيتوسّع
+      // نطاق «يحتاج تصحيحاً» بنصف نقطة على كل سهم. العيب نفسه صُحِّح في مسار
+      // الواجهة (سطر 300) وبقي هنا.
+      const alertGreen  = get('tharwa-alert-green')  ?? String(DEV_IGNORE);
+      const alertYellow = get('tharwa-alert-yellow') ?? String(DEV_PUMP);
+      const _threshCustom = get('tharwa-alert-green') != null;
       const theme       = get('tharwa-theme')        ?? 'dark';
       const zoom        = get('tharwa-zoom')         ?? '16';
       p('```');
@@ -3200,6 +3262,9 @@ async function exportMonthlyReviewMD() {
       p(`حد تنبيه أصفر  ≤          : ${alertYellow}%`);
       p(`حد تنبيه أحمر  >          : ${alertYellow}%`);
       p('```');
+      p(_threshCustom
+        ? '_عتبات مخصّصة حفظها المالك — تعلو على الافتراض الدستوري في العرض لا في القاعدة._'
+        : `_لم تُحفَظ عتبات مخصّصة — المعروض أعلاه ثابتا الدستور (م.49: ±${DEV_IGNORE}% لا إجراء · حتى ${DEV_PUMP}% تصحيح بالضخّ)._`);
     }
     hr();
 
@@ -3247,6 +3312,37 @@ async function exportMonthlyReviewMD() {
               `${t.cmp === 'gte' ? '≥' : '≤'} ${t.price} ر.س${t.toWeight ? ` → ${t.toWeight}%` : ''}`,
               cell(t.label),
             ])));
+        }
+
+        // م.30 — «يحسب المحرّك ويُفصح في كل دورة». هذا مستند الدورة، فغيابه
+        // عنه إخلالٌ بالمادة نفسها. **إفصاح لا تقييد**: لا إشارة بيع ولا خصم
+        // من الدرجة (م.9).
+        {
+          const fc = deSnap.factorConcentration;
+          if (fc && (fc.gov || fc.oil)) {
+            h3('تركيز العامل الواحد — إفصاح م.30 (لا يولّد إشارة)');
+            p('```');
+            if (fc.gov && fc.gov.pct != null) {
+              p(`الارتباط بالإنفاق الحكومي  : ${fc.gov.pct.toFixed(1)}%`);
+            }
+            if (fc.oil && fc.oil.beta != null) {
+              p(`بيتا النفط (مرجَّحة بالقيمة): ${fc.oil.beta.toFixed(2)}`);
+              if (fc.oil.effectiveFactors != null) {
+                p(`العوامل الفعّالة            : ${fc.oil.effectiveFactors.toFixed(2)}`);
+              }
+            }
+            p('```');
+            const _unk = [...(fc.gov?.unknown || []), ...(fc.oil?.unknown || [])];
+            if (_unk.length) {
+              p(`⚠️ قطاعات غير معروفة لم تدخل الحساب (تُعلَن ولا تُبتلع — م.20): ${
+                [...new Set(_unk)].join('، ')}`);
+            }
+            p('_م.30 مادة إفصاح فقط: لا تولّد إشارة بيع ولا تُخصم من درجة التقييم (م.9). '
+            + 'المعاملات تقديرية بنصّ الدستور، لا مقيسة._');
+          } else {
+            p('> **تركيز العامل الواحد (م.30):** ❌ غير متوفّر في اللقطة — '
+            + 'افتح صفحة «محرّك القرار» مرة واحدة ثم أعد تصدير التقرير.');
+          }
         }
 
         h3('دليل أعمدة جدول القرار — كيف تُحسب كل قيمة');
@@ -3316,6 +3412,31 @@ async function exportMonthlyReviewMD() {
             .map(([k, v]) => [k, cell(typeof v === 'object' ? JSON.stringify(v) : v)]);
           if (pairs.length) { p(`**${tk}:**`); p(mdTable(['الحقل','القيمة'], pairs)); }
         });
+      }
+
+      // ── م.45 · م.60 — قائمة الخروج المؤجل ──────────────────────────
+      // م.60 تجعلها **البند الأول** في المراجعة الربعية الإلزامية، وكانت
+      // غائبة عن التقرير كلياً رغم أن `deferred_exits_v1` محفوظ ومنسوخ.
+      // مستندُ دورةٍ لا يحمل أول بنود مراجعتها ناقصٌ بنصّ المادة.
+      {
+        const dfx = await syncedGet('deferred_exits_v1', {});
+        const tks = (dfx && typeof dfx === 'object') ? Object.keys(dfx) : [];
+        h3('قائمة الخروج المؤجل — م.45 (تُراجَع ربعياً بنصّ م.60)');
+        if (!tks.length) {
+          p('_لا سهم في قائمة الخروج المؤجل._');
+        } else {
+          // الحقول كما يكتبها المحرّك فعلاً (decision-engine.js:3764)
+          p(mdTable(['الرمز','سعر الخروج','التعادل الحقيقي','مستنَد السعر','حُدِّد في'],
+            tks.map(tk => {
+              const d = dfx[tk] || {};
+              return [tk, cell(d.exitPrice), cell(d.breakEven),
+                      cell(Array.isArray(d.bases) ? d.bases.join('، ') : d.bases),
+                      cell(d.setOn)];
+            })));
+          p(`**${tks.length}** سهماً في القائمة. م.45 توجب **مراجعة سعر الخروج كل دورة** — `
+          + 'يُرفع 10% إن تحسّنت الأساسيات، ويُنزَّل 15% عند 🟠، وإلى التعادل الحقيقي عند 🔴 لقراءتين، '
+          + 'ويُلغى عند انقطاع التوزيع (م.46).');
+        }
       }
     }
     hr();

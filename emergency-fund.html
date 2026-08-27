@@ -244,7 +244,13 @@
       const user = await requireAuth();
       if (!user) return;
       setActiveNav('nav-emergency-fund');
-      updateSecurityLevel();
+      // ⚠️ بعد `requireAuth` لا قبله: `efKey()` تمرّ بـ`userLsKey` التي تقرأ
+      // `window._currentUserId`، وهو لا يُضبط إلا بعد رحلة المصادقة. الربط
+      // بـ`DOMContentLoaded` كان يُشغّلها قبل ذلك، فتُقرأ البيانات من المفتاح
+      // الخام وتُكتب في المؤطَّر — فتظهر الافتراضيات في كل زيارة والبيانات
+      // سليمة في مكانها. والنسخة الاحتياطية تلتقطها والاستعادة تُعيدها، ثم
+      // لا تظهر — أثرٌ مطابق للفقد ومصدره القراءة وحدها.
+      efInit();
       calculateEmergencyFund();
     }
 
@@ -281,10 +287,15 @@
     }
     function efLoad() {
       try {
-        const raw = localStorage.getItem(efKey()) || localStorage.getItem(EF_KEY);
+        // المؤطَّر أولاً، والخام احتياطٌ لما كُتب قبل إصلاح ترتيب النداء.
+        const scoped = localStorage.getItem(efKey());
+        const raw    = scoped ?? localStorage.getItem(EF_KEY);
         if (!raw) return false;
         const o = JSON.parse(raw);
         if (!o || typeof o !== 'object') return false;
+        // ترحيل مرّة واحدة: ما وُجد خاماً يُنسَخ إلى مفتاح المالك فيدخل
+        // النسخة الاحتياطية ولا يُخلط ببيانات مستخدم آخر على الجهاز نفسه.
+        if (!scoped) { try { localStorage.setItem(efKey(), raw); } catch (_) {} }
         EF_FIELDS.forEach(f => {
           const el = document.getElementById(f);
           if (el && o[f] != null && o[f] !== '') el.value = o[f];
@@ -303,7 +314,7 @@
       });
       if (had) calculateEmergencyFund();
     }
-    document.addEventListener('DOMContentLoaded', efInit);
+    // (لا `DOMContentLoaded` هنا — `init()` تناديها بعد ثبوت الهوية)
 
     function calculateEmergencyFund() {
       const expenses = {
