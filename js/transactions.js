@@ -1,4 +1,6 @@
 let transactions = [];
+let dividendsAll = [];      // توزيعات غير مؤرشفة — تدخل تصنيف الصفقات (م.2)
+let _divsLoaded  = false;   // فشل التحميل يُعلَن ولا يُعامَل صفراً (م.21)
 let stagingRows  = [];
 let _stagingId   = 0;
 
@@ -8,13 +10,19 @@ window.CARD_INFO = {
     title: '📊 ملخص المعاملات',
     body: `
       <p>سجل المعاملات هو المصدر الأساسي لكل حسابات محفظتك (المتوسط، الربح، XIRR). دقّته من دقّة هذه الأرقام.</p>
-      <div class="info-formula"><strong>الربح المحقق</strong> = صافي عائد البيع − تكلفة الأسهم المباعة (بمتوسط التكلفة وقت البيع)</div>
+      <div class="info-formula"><strong>الربح المحقق</strong> = (صافي عائد البيع − تكلفة الأسهم المباعة بمتوسط التكلفة وقت البيع) + <strong>التوزيعات المستلمة عن تلك الأسهم</strong></div>
       <div class="info-math">
         تكلفة الشراء (total) = القيمة + العمولة + الضريبة<br>
         صافي البيع (total) = القيمة − العمولة − الضريبة<br>
         العمولة = أقل من (القيمة × 0.15%، 100 ر.س) · الضريبة = العمولة × 15%
       </div>
-      <p class="info-note">💡 «محقق» يعني ربحاً ثبّتّه فعلاً بالبيع (عكس غير المحقق على الورق). أسهم المنحة تُسجَّل بتكلفة صفر فتخفض متوسط تكلفتك الحقيقي.</p>`
+      <p>التوزيعة نقدٌ قبضته من السهم نفسه ولا يُسترد، فهي جزء من عائد الصفقة لا بند منفصل — وهو منطق <strong>التعادل الحقيقي</strong> في م.2 من الدستور، ونفس ما تعرضه صفحة الأداء في «إجمالي العائد» للمراكز المغلقة. ولهذا قد تبيع دون سعر شرائك وتكون الصفقة <strong>رابحة</strong>.</p>
+      <div class="info-math">
+        كل توزيعة تدخل حوض رمزها بتاريخ تدفقها، وعند كل بيع يُنسَب منه بنسبة (الأسهم المُباعة ÷ المملوكة حينها)<br>
+        وما تبقّى في حوض رمزٍ أُغلق مركزه بالكامل يعود لآخر بيع فيه — توزيعةٌ وصلت بعد البيع تخصّ تلك الأسهم لا غيرها
+      </div>
+      <p class="info-note">💡 «محقق» يعني ربحاً ثبّتّه فعلاً بالبيع (عكس غير المحقق على الورق). أسهم المنحة تُسجَّل بتكلفة صفر فتخفض متوسط تكلفتك الحقيقي.</p>
+      <p class="info-note">⚠️ رقم «ر/خ محقق من المبيعات» في لوحة التحكم يقيس <strong>فرق السعر وحده</strong> عمداً، والتوزيعات معروضة هناك في بندها المستقل — فلا يُجمع الرقمان.</p>`
   },
 };
 let sortField    = 'date';
@@ -33,6 +41,7 @@ async function init() {
   setupSingleForm();
   addStagingRow();
   await loadTransactions();
+  await loadDividendsForStats();
   renderTable();
 }
 
@@ -350,6 +359,24 @@ async function loadTransactions() {
   }
 }
 
+// ── التوزيعات — مدخل تصنيف الصفقات لا عرضها ───────────────────
+// تُقرأ هنا لأن ملخص المعاملات يصنّف الصفقة بإجمالي عائدها (م.2)، وسجل
+// التوزيعات هو المصدر الوحيد لنصفها النقدي. فشل الجلب يُعلَن في الملخص
+// ولا يُقدَّر صفراً (م.20 و21) — صفرٌ صامت يقلب صفقةً رابحة خاسرة.
+async function loadDividendsForStats() {
+  const { data, error } = await supabaseClient
+    .from('dividends')
+    .select('ticker, amount, date, year, month')
+    .eq('is_archived', false);
+
+  if (error || !Array.isArray(data)) {
+    console.warn('تعذّر تحميل التوزيعات لملخص المعاملات:', error);
+    dividendsAll = []; _divsLoaded = false;
+    return;
+  }
+  dividendsAll = data; _divsLoaded = true;
+}
+
 // ترتيب المعاملات ومتوسط التكلفة موحّدان في `js/utils.js`
 // (`txSortForWAC` و`walkWAC`) — تعريف واحد لكل الموقع، م.2.
 
@@ -588,8 +615,36 @@ function renderTxStats() {
   // الإحصاءات المحققة تتطلب كامل السجل — نافذة مبتورة تعطي أرقاماً مضللة
   const statsComplete = _txTotalCount <= TX_PAGE_LIMIT;
 
-  let profitSells = 0, profitAmount = 0;
-  let lossSells   = 0, lossAmount   = 0;
+  // ══════════════════════════════════════════════════════════════
+  // التوزيعات جزء من عائد الصفقة — بلاغ المالك 2026-09-15:
+  // «بعت 4348 الخبير وأنا كسبان ٧٠٠ بعد التوزيعات، والملخص يقول خاسرة».
+  // فرق السعر وحده يقيس نصف الصفقة؛ التوزيعة نقدٌ قبضته من السهم نفسه
+  // ولا يُسترد، وم.2 تعرّف «التعادل الحقيقي» بخصمها من متوسط التكلفة.
+  // فالتصنيف هنا بإجمالي العائد: (صافي البيع − تكلفة المُباع) + توزيعاته.
+  //
+  // النسبة الزمنية: كل توزيعة تدخل «حوض» رمزها بتاريخ تدفقها، وعند كل بيع
+  // يُنسَب من الحوض بنسبة (المُباع ÷ المملوك حينها) — فالبيع الجزئي يأخذ
+  // حصته لا كل التوزيعات، والأسهم التي ما زلت تملكها تحتفظ بحصتها.
+  const divQ = {};            // ticker → توزيعات مرتبة تصاعدياً بتاريخ التدفق
+  (dividendsAll || []).forEach(d => {
+    if (!d || !d.ticker) return;
+    const dt = (typeof dividendFlowDate === 'function') ? dividendFlowDate(d) : null;
+    if (!dt || isNaN(dt)) return;   // توزيعة مستقبلية أو بلا تاريخ — لا تُقدَّر (م.20)
+    (divQ[d.ticker] = divQ[d.ticker] || []).push({ ts: dt.getTime(), amount: +d.amount || 0 });
+  });
+  Object.values(divQ).forEach(q => q.sort((a, b) => a.ts - b.ts));
+
+  const divPool = {};   // ticker → نقدٌ دخل الحوض ولم يُنسب بعد
+  const divIdx  = {};   // ticker → أول توزيعة لم تدخل الحوض
+  function drainDivs(tk, ts) {
+    const q = divQ[tk]; if (!q) return;
+    let i = divIdx[tk] || 0;
+    while (i < q.length && q[i].ts <= ts) { divPool[tk] = (divPool[tk] || 0) + q[i].amount; i++; }
+    divIdx[tk] = i;
+  }
+
+  const sellEvents = [];   // { ticker, pnl, div } — التصنيف بعد اكتمال النسبة
+  const lastSellOf = {};   // ticker → آخر حدث بيع (زمنياً) لهذا الرمز
 
   sorted.forEach(t => {
     if (!costMap[t.ticker]) costMap[t.ticker] = { shares: 0, totalCost: 0 };
@@ -615,13 +670,49 @@ function renderTxStats() {
       const netProceeds     = (+t.total) * sellRatio;
       const pnl             = netProceeds - costOfSold;
 
-      if (pnl >= 0) { profitSells++;  profitAmount += pnl; }
-      else          { lossSells++;    lossAmount   += Math.abs(pnl); }
+      // انسب للبيع حصته من توزيعات رمزه حتى تاريخه. تاريخٌ تالف ⇒ Infinity:
+      // تصريف كل التوزيعات أوْلى من إسقاطها صامتةً.
+      const _sd    = (typeof parseDateLocal === 'function') ? parseDateLocal(t.date) : null;
+      const sellTs = (_sd && !isNaN(_sd)) ? _sd.getTime() : Infinity;
+      drainDivs(t.ticker, sellTs);
+      const heldBefore = m.shares;
+      const poolNow    = divPool[t.ticker] || 0;
+      const divShare   = (heldBefore > 0 && poolNow > 0)
+                       ? poolNow * (sellShares / heldBefore) : 0;
+      divPool[t.ticker] = poolNow - divShare;
+
+      const ev = { ticker: t.ticker, pnl, div: divShare };
+      sellEvents.push(ev);
+      lastSellOf[t.ticker] = ev;
 
       // L-2: deduct cost by share count (matches recomputeHoldingFromTx) not percentage
       m.totalCost  = Math.max(0, m.totalCost - avgCostPerShare * sellShares);
       m.shares     = Math.max(0, m.shares - sellShares);
     }
+  });
+
+  // مركزٌ أُغلق بالكامل: ما تبقّى في حوضه — بما فيه توزيعةٌ وصلت **بعد**
+  // البيع — يخصّ أسهمه المُباعة لا غيرها، فيعود لآخر بيع فيه. (التوزيعة
+  // تُصرف بعد تاريخ الاستحقاق بأسابيع، فحرمانها منه يقلب الصفقة خاسرة.)
+  Object.keys(lastSellOf).forEach(tk => {
+    drainDivs(tk, Infinity);
+    const remaining = costMap[tk] ? costMap[tk].shares : 0;
+    if (remaining <= 0.001 && (divPool[tk] || 0) > 0) {
+      lastSellOf[tk].div += divPool[tk];
+      divPool[tk] = 0;
+    }
+  });
+
+  let profitSells = 0, profitAmount = 0;
+  let lossSells   = 0, lossAmount   = 0;
+  let priceProfitSells = 0, priceLossSells = 0, divCounted = 0;
+
+  sellEvents.forEach(ev => {
+    const net = ev.pnl + ev.div;
+    divCounted += ev.div;
+    if (ev.pnl >= 0) priceProfitSells++; else priceLossSells++;
+    if (net >= 0) { profitSells++; profitAmount += net; }
+    else          { lossSells++;   lossAmount   += Math.abs(net); }
   });
 
   const totalBuyAmt  = buys.reduce((s, t)  => s + +t.total, 0);
@@ -662,12 +753,34 @@ function renderTxStats() {
       <div class="tx-stat-val text-danger">↓ ${lossSells}</div>
       <div class="tx-stat-lbl">صفقات خاسرة</div>
       <div class="tx-stat-sub text-danger">−${formatSAR(lossAmount)}</div>
-    </div>` : `
+    </div>
+    ${divCounted > 0 ? `
+    <div class="tx-stat-divider"></div>
+    <div class="tx-stat-item">
+      <div class="tx-stat-val text-success">${formatSAR(divCounted)}</div>
+      <div class="tx-stat-lbl">توزيعات الأسهم المُباعة</div>
+      <div class="tx-stat-sub">مُحتسبة في الأرقام أعلاه</div>
+    </div>` : ''}` : `
     <div class="tx-stat-item">
       <div class="tx-stat-val" style="color:var(--text-muted)">⚠️</div>
       <div class="tx-stat-lbl">الربح/الخسارة المحققة</div>
       <div class="tx-stat-sub">الإحصاءات تتطلب كامل السجل (${_txTotalCount} معاملة تتجاوز المحمّل ${TX_PAGE_LIMIT})</div>
     </div>`}`;
+
+  // ── سطر الإفصاح: ما دخل التصنيف وما كان سيكون بفرق السعر وحده ──
+  // م.19 و20: الرقم يُعلن مصدره، والبيان الغائب يُعلن غيابه.
+  const noteEl = document.getElementById('tx-stats-note');
+  if (noteEl) {
+    if (!statsComplete) {
+      noteEl.textContent = '';
+    } else if (!_divsLoaded) {
+      noteEl.textContent = '⚠️ تعذّر تحميل سجل التوزيعات — التصنيف أعلاه بفرق السعر وحده، ولم تُقدَّر التوزيعات صفراً (م.21). حدّث الصفحة.';
+    } else if (divCounted > 0) {
+      noteEl.textContent = `التصنيف بإجمالي العائد: فرق السعر + ${formatSAR(divCounted)} توزيعات مستلمة عن الأسهم المُباعة (م.2 — التعادل الحقيقي). بفرق السعر وحده: ↑ ${priceProfitSells} رابحة · ↓ ${priceLossSells} خاسرة.`;
+    } else {
+      noteEl.textContent = 'لا توزيعات مستلمة عن أسهم بِعتَها — التصنيف أعلاه بفرق السعر.';
+    }
+  }
 }
 
 // ── Render transaction log ────────────────────────────────────
