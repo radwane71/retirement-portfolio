@@ -315,10 +315,8 @@ async function refreshPrices(silent = false) {
         });
         _savePriceTimestamps();
       }
-      // رسم فوري بالأسعار الجديدة + تحقق مناطق السعر
+      // رسم فوري بالأسعار الجديدة
       renderAllCards();
-      // تحقق تنبيهات مناطق الشراء/البيع بعد كل تحديث أسعار
-      holdings.forEach(h => checkPriceZones(h.ticker, +h.current_price));
       // H-6: warn about tickers Yahoo didn't return (delisted / corporate action)
       if (json.failed?.length) {
         showToast(`⚠️ لم يُحدَّث سعر: ${json.failed.join(', ')}`, 'warning');
@@ -3312,7 +3310,6 @@ async function onHoldingSaved(id, field, val) {
       console.warn('price_manual update failed:', error);
       showToast('⚠️ تعذّر حفظ علامة السعر اليدوي — قد يُستبدل بالتحديث التلقائي', 'warning');
     }
-    checkPriceZones(h.ticker, +val);
   }
   renderAllCards();
 }
@@ -3331,33 +3328,12 @@ async function unmarkManualPrice(id) {
 }
 
 // ── Price Zone Alerts ─────────────────────────────────────────
-function checkPriceZones(ticker, price) {
-  const zone = stockZones[ticker];
-  if (!zone) return;
-  const h = holdings.find(x => x.ticker === ticker);
-  const name = h?.name || '';
-  const alerts = [];
-  // اللون يُستمد من نوع الـtoast (success/error) لا من قيمة مكتوبة هنا
-  if (zone.entry_price != null && price <= zone.entry_price)
-    alerts.push({ ticker, name, type: 'entry', label: 'منطقة شراء', price, zone: zone.entry_price });
-  if (zone.exit_price != null && price >= zone.exit_price)
-    alerts.push({ ticker, name, type: 'exit', label: 'منطقة بيع', price, zone: zone.exit_price });
-  alerts.forEach(a => showPriceZoneAlert(a));
-}
-
-function showPriceZoneAlert({ ticker, label, price, zone, name }) {
-  // منع تكرار نفس الإشعار
-  const dedupKey = 'pz-shown-' + ticker + '-' + label;
-  if (sessionStorage.getItem(dedupKey)) return;
-  sessionStorage.setItem(dedupKey, '1');
-
-  const icon = label === 'منطقة شراء' ? '🟢' : '🔴';
-  const action = label === 'منطقة شراء' ? 'وصل الحد' : 'تجاوز الحد';
-  // AUDIT-FIX 2026-08: showToast يعرض النص خاماً (textContent) — لا وسوم HTML هنا
-  const msg = `${icon} ${ticker}${name ? ` (${name})` : ''} — ${label}! السعر الحالي ${price} ${action} ${zone}`;
-  const type = label === 'منطقة شراء' ? 'success' : 'error';
-  showToast(msg, type);
-}
+// أُلغيت الإشعارات المنبثقة لمناطق الشراء/البيع بطلب المالك 2026-09-15:
+// «أول ما أفتح لوحة التحكم تجيني إشعارات عديدة على اليسار — ألغها».
+// كانت تُطلَق لكل سهم في منطقة سعرية بعد أول تحديث أسعار عند الإقلاع.
+// البديل قائم ولم يُمسّ: بطاقة «مناطق الدخول والخروج» تعرض 🟢/🔴 لكل سهم
+// دائماً، وتنبيهات البريد تُرسَل من دالة الحافة لا من المتصفح.
+// الإلغاء محصور في هذه الصفحة — إشعارات بقية الصفحات كما هي.
 
 // سكة المناطق لسهم واحد — نفس منطق priceRulerHtml في decision-engine.js:
 // نطاق lo/hi يضم كل النقاط + السعر، بهامش 15% من المدى، وتسميات بصفّين متبادلين.
@@ -4161,7 +4137,6 @@ async function saveHolding(e) {
   if (stampISO) {
     _priceTimestamps[payload.ticker] = stampISO;
     _savePriceTimestamps();
-    checkPriceZones(payload.ticker, payload.current_price);
   }
   showToast(editingId ? 'تم التحديث' : 'تمت الإضافة', 'success');
   closeModal();
